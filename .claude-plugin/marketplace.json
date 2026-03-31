@@ -10,7 +10,7 @@
       "description": "이력서 작성 파이프라인 (소스 수집, 작성, 리뷰)",
       "source": "./plugins/resume",
       "skills": [
-        "./plugins/resume/skills/resume-source"
+        "./skills/resume-source"
       ]
     }
   ]
