@@ -1,0 +1,7 @@
+{
+  "name": "resume",
+  "description": "이력서 작성 파이프라인. 소스 수집 → 작성 → 리뷰까지 연계되는 스킬 모음.",
+  "author": {
+    "name": "chenjing"
+  }
+}
