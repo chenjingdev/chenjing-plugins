@@ -1,6 +1,6 @@
 {
   "name": "resume",
-  "description": "이력서 작성 파이프라인. 소스 수집 → 작성 → 리뷰까지 연계되는 스킬 모음.",
+  "description": "전문가 패널 에이전트들이 JD 맞춤 이력서를 만들어주는 플러그인. 소스 수집부터 초안 작성까지.",
   "author": {
     "name": "chenjing"
   }

@@ -7,10 +7,10 @@
   "plugins": [
     {
       "name": "resume",
-      "description": "이력서 작성 파이프라인 (소스 수집, 작성, 리뷰)",
+      "description": "전문가 패널 에이전트 기반 이력서 파이프라인",
       "source": "./plugins/resume",
       "skills": [
-        "./skills/resume-source"
+        "./skills/resume-panel"
       ]
     }
   ]
