@@ -167,6 +167,24 @@ cat <<'EOF' > ./resume-source.json
 EOF
 ```
 
+**6. 상태 디렉토리 초기화**
+
+resume-source.json 첫 생성 직후, `.resume-panel/` 디렉토리를 초기화한다:
+
+```bash
+mkdir -p .resume-panel
+cat <<'EOF' > .resume-panel/meta.json
+{
+  "last_profiler_call": null,
+  "last_profiler_episode_count": 0,
+  "current_company": null,
+  "total_profiler_calls": 0
+}
+EOF
+```
+
+snapshot.json은 episode-watcher hook이 첫 실행 시 자동 생성하므로 수동 초기화 불필요.
+
 ### 라운드 1: 경력 발굴
 
 **주도:** 시니어 개발자 + CTO
