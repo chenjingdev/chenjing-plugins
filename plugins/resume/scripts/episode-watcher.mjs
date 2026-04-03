@@ -119,19 +119,21 @@ if (isResumeSourceChange) {
 
     if (!snapshot) {
       // 첫 실행: 스냅샷만 저장, 트리거 안 함
+      const metaJSON = readJSON(metaPath);
       writeFileSync(
         snapshotPath,
         JSON.stringify({
           episode_count: currentCount,
           project_names: currentProjects,
           meta_hash: currentHash,
+          current_company: metaJSON?.current_company || null,
         })
       );
     } else {
       // delta 계산
       const reasons = [];
       const episodeDelta = currentCount - (snapshot.episode_count || 0);
-      if (episodeDelta >= 3) reasons.push("에피소드 +3");
+      if (episodeDelta >= 3) reasons.push(`에피소드 +${episodeDelta}`);
 
       const snapshotProjects = new Set(snapshot.project_names || []);
       const hasNewProject = currentProjects.some((p) => !snapshotProjects.has(p));
@@ -157,6 +159,7 @@ if (isResumeSourceChange) {
             episode_count: currentCount,
             project_names: currentProjects,
             meta_hash: currentHash,
+            current_company: metaJSON?.current_company || null,
           })
         );
       }
@@ -185,10 +188,10 @@ if (existsSync(inboxPath)) {
     const meta = readJSON(metaPath);
     const snapshot = readJSON(snapshotPath);
 
+    // 프로젝트 전환 감지: 프로파일러가 meta.json에 쓴 current_company vs 스냅샷의 current_company
     const companyChanged =
       meta?.current_company &&
-      snapshot?.current_company &&
-      meta.current_company !== snapshot.current_company;
+      meta.current_company !== (snapshot?.current_company || null);
 
     for (const f of newFindings) {
       f.delivered = false;
@@ -206,6 +209,12 @@ if (existsSync(inboxPath)) {
 
     ensureStateDir();
     writeFileSync(findingsPath, JSON.stringify(existing, null, 2));
+
+    // 스냅샷에 current_company 동기화 (MEDIUM 라우팅 후 다음 비교를 위해)
+    if (companyChanged && snapshot) {
+      const updated = { ...snapshot, current_company: meta.current_company };
+      writeFileSync(snapshotPath, JSON.stringify(updated));
+    }
     try { unlinkSync(processingPath); } catch {}
   }
 }

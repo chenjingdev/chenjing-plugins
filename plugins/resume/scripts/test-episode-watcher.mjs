@@ -404,4 +404,50 @@ console.log("\nAll delta detection tests passed.");
   rmSync(testDir, { recursive: true, force: true });
 }
 
+// Test: MEDIUM finding WITH company change → routed
+{
+  const testDir = "/tmp/test-resume-panel-findings-med-change";
+  rmSync(testDir, { recursive: true, force: true });
+  mkdirSync(join(testDir, ".resume-panel"), { recursive: true });
+
+  // snapshot has current_company: "튜닙"
+  writeFileSync(join(testDir, ".resume-panel", "snapshot.json"), JSON.stringify({
+    episode_count: 5, project_names: ["A"], meta_hash: "abc", current_company: "튜닙",
+  }));
+  // meta.json has current_company: "한섬" → different → companyChanged = true
+  writeFileSync(join(testDir, ".resume-panel", "meta.json"), JSON.stringify({
+    current_company: "한섬", last_profiler_episode_count: 5, total_profiler_calls: 1,
+  }));
+
+  const finding = {
+    id: "f-020", urgency: "MEDIUM", source: "profiler", type: "star_gap",
+    message: "ep-8 Result 수치 보강 필요.",
+    context: {}, created_at: new Date().toISOString(),
+  };
+  writeFileSync(
+    join(testDir, ".resume-panel", "findings-inbox.jsonl"),
+    JSON.stringify(finding) + "\n"
+  );
+
+  const result = execFileSync("node", [script], {
+    input: JSON.stringify({
+      hook_event_name: "PostToolUse", tool_name: "Write",
+      tool_input: { file_path: "/work/something.txt", content: "x" },
+    }),
+    encoding: "utf-8",
+    env: { ...process.env, RESUME_PANEL_BASE: testDir },
+  });
+  const parsed = result.trim() ? JSON.parse(result.trim()) : null;
+  assert.ok(parsed, "MEDIUM with company change should produce output");
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("[resume-panel:MEDIUM]"));
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("수치 보강"));
+
+  // snapshot should be updated with new current_company
+  const updatedSnapshot = JSON.parse(readFileSync(join(testDir, ".resume-panel", "snapshot.json"), "utf-8"));
+  assert.strictEqual(updatedSnapshot.current_company, "한섬", "snapshot should update current_company");
+
+  console.log("PASS: MEDIUM finding with company change routed");
+  rmSync(testDir, { recursive: true, force: true });
+}
+
 console.log("\nAll findings routing tests passed.");
