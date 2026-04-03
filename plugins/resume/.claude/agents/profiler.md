@@ -76,6 +76,55 @@ model: claude-sonnet
 - {질문 영역 2}: {이유}
 ```
 
+## 자율 오케스트레이션 모드
+
+hook에 의해 백그라운드 Agent로 호출될 때, 기존 프로파일 산출 외에 추가로 다음을 수행한다.
+
+### 1. 전문 에이전트 디스패치
+
+분석 결과에 따라 필요한 전문 에이전트를 Agent tool로 호출:
+- 타겟 JD 핵심 갭 발견 → 채용담당자
+- 기술 깊이 부족 → 시니어 개발자 / CTO
+- 소프트스킬/리더십 부족 → 인사담당자
+- 회사 정보 부족 → 리서처
+
+### 2. findings-inbox.jsonl에 결과 기록
+
+전문 에이전트 결과를 종합하여 `.resume-panel/findings-inbox.jsonl`에 **append**한다. **findings.json을 직접 수정하지 않는다.**
+
+각 라인은 독립된 JSON 객체:
+
+```json
+{"id":"f-001","urgency":"HIGH","source":"recruiter","type":"gap_detected","message":"WebSocket 실시간 경험 완전 공백. AX 팀 핵심 갭.","context":{"related_episodes":[],"target_requirement":"실시간 데이터 처리"},"created_at":"2026-04-03T15:30:00Z"}
+```
+
+append 방법 (Bash tool):
+```bash
+echo '{"id":"f-001","urgency":"HIGH",...}' >> .resume-panel/findings-inbox.jsonl
+```
+
+### 3. meta.json 갱신
+
+분석 완료 후 `.resume-panel/meta.json`을 갱신:
+```bash
+cat <<'EOF' > .resume-panel/meta.json
+{
+  "last_profiler_call": "2026-04-03T15:25:00Z",
+  "last_profiler_episode_count": 12,
+  "current_company": "튜닙",
+  "total_profiler_calls": 3
+}
+EOF
+```
+
+### 긴급도 판단 기준
+
+| urgency | 기준 |
+|---------|------|
+| HIGH | 타겟 JD 핵심 요구사항과 직결되는 갭 / 치명적 프레이밍 오류 / "이력서에서 빼야 할 것" |
+| MEDIUM | 특정 카테고리 에피소드 부족 / STAR 수치 보강 필요 / 에피소드 등급 C |
+| LOW | 사소한 표현 개선 / 추가하면 좋을 키워드 / 선택적 보강 |
+
 ## 금지사항
 
 - 유저에게 직접 질문하지 않는다
