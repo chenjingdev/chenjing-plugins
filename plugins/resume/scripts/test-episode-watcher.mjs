@@ -243,3 +243,165 @@ const bashResumeInput = {
 // Cleanup
 rmSync(testBase, { recursive: true, force: true });
 console.log("\nAll delta detection tests passed.");
+
+// ── findings 라우팅 테스트 ──────────────────────────
+
+// Test: HIGH finding → 즉시 라우팅
+{
+  const testDir = "/tmp/test-resume-panel-findings-high";
+  rmSync(testDir, { recursive: true, force: true });
+  mkdirSync(join(testDir, ".resume-panel"), { recursive: true });
+
+  writeFileSync(join(testDir, ".resume-panel", "snapshot.json"), JSON.stringify({
+    episode_count: 5, project_names: ["A"], meta_hash: "abc",
+  }));
+
+  const finding = {
+    id: "f-001", urgency: "HIGH", source: "recruiter", type: "gap_detected",
+    message: "WebSocket 실시간 경험 완전 공백.",
+    context: {}, created_at: new Date().toISOString(),
+  };
+  writeFileSync(
+    join(testDir, ".resume-panel", "findings-inbox.jsonl"),
+    JSON.stringify(finding) + "\n"
+  );
+
+  const result = execFileSync("node", [script], {
+    input: JSON.stringify({
+      hook_event_name: "PostToolUse", tool_name: "Write",
+      tool_input: { file_path: "/work/some-file.txt", content: "x" },
+    }),
+    encoding: "utf-8",
+    env: { ...process.env, RESUME_PANEL_BASE: testDir },
+  });
+  const parsed = result.trim() ? JSON.parse(result.trim()) : null;
+  assert.ok(parsed, "HIGH finding should produce output");
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("[resume-panel:HIGH]"));
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("WebSocket"));
+
+  // findings.json에 delivered: true
+  const findings = JSON.parse(readFileSync(join(testDir, ".resume-panel", "findings.json"), "utf-8"));
+  assert.ok(findings.findings[0].delivered, "should be marked delivered");
+
+  // inbox 삭제됨
+  assert.ok(!existsSync(join(testDir, ".resume-panel", "findings-inbox.jsonl")));
+  assert.ok(!existsSync(join(testDir, ".resume-panel", "findings-inbox.processing.jsonl")));
+
+  console.log("PASS: HIGH finding routed immediately");
+  rmSync(testDir, { recursive: true, force: true });
+}
+
+// Test: LOW finding → skip
+{
+  const testDir = "/tmp/test-resume-panel-findings-low";
+  rmSync(testDir, { recursive: true, force: true });
+  mkdirSync(join(testDir, ".resume-panel"), { recursive: true });
+
+  writeFileSync(join(testDir, ".resume-panel", "snapshot.json"), JSON.stringify({
+    episode_count: 5, project_names: ["A"], meta_hash: "abc",
+  }));
+
+  const finding = {
+    id: "f-002", urgency: "LOW", source: "recruiter", type: "improvement",
+    message: "키워드 추가 권장.",
+    context: {}, created_at: new Date().toISOString(),
+  };
+  writeFileSync(
+    join(testDir, ".resume-panel", "findings-inbox.jsonl"),
+    JSON.stringify(finding) + "\n"
+  );
+
+  const result = execFileSync("node", [script], {
+    input: JSON.stringify({
+      hook_event_name: "PostToolUse", tool_name: "Write",
+      tool_input: { file_path: "/work/something.txt", content: "x" },
+    }),
+    encoding: "utf-8",
+    env: { ...process.env, RESUME_PANEL_BASE: testDir },
+  });
+  const parsed = result.trim() ? JSON.parse(result.trim()) : null;
+  assert.strictEqual(parsed, null, "LOW finding should not produce output");
+
+  // But findings.json should still contain it with delivered: false
+  const findings = JSON.parse(readFileSync(join(testDir, ".resume-panel", "findings.json"), "utf-8"));
+  assert.strictEqual(findings.findings[0].delivered, false, "LOW should be delivered=false");
+
+  console.log("PASS: LOW finding skipped but saved");
+  rmSync(testDir, { recursive: true, force: true });
+}
+
+// Test: MEDIUM finding without company change → skip
+{
+  const testDir = "/tmp/test-resume-panel-findings-med";
+  rmSync(testDir, { recursive: true, force: true });
+  mkdirSync(join(testDir, ".resume-panel"), { recursive: true });
+
+  writeFileSync(join(testDir, ".resume-panel", "snapshot.json"), JSON.stringify({
+    episode_count: 5, project_names: ["A"], meta_hash: "abc",
+  }));
+  // No meta.json → companyChanged will be false
+
+  const finding = {
+    id: "f-003", urgency: "MEDIUM", source: "profiler", type: "star_gap",
+    message: "ep-8 Result 수치 부족.",
+    context: {}, created_at: new Date().toISOString(),
+  };
+  writeFileSync(
+    join(testDir, ".resume-panel", "findings-inbox.jsonl"),
+    JSON.stringify(finding) + "\n"
+  );
+
+  const result = execFileSync("node", [script], {
+    input: JSON.stringify({
+      hook_event_name: "PostToolUse", tool_name: "Write",
+      tool_input: { file_path: "/work/something.txt", content: "x" },
+    }),
+    encoding: "utf-8",
+    env: { ...process.env, RESUME_PANEL_BASE: testDir },
+  });
+  const parsed = result.trim() ? JSON.parse(result.trim()) : null;
+  assert.strictEqual(parsed, null, "MEDIUM without company change should not produce output");
+
+  console.log("PASS: MEDIUM finding without company change skipped");
+  rmSync(testDir, { recursive: true, force: true });
+}
+
+// Test: Multiple findings (HIGH + LOW) → only HIGH routed
+{
+  const testDir = "/tmp/test-resume-panel-findings-multi";
+  rmSync(testDir, { recursive: true, force: true });
+  mkdirSync(join(testDir, ".resume-panel"), { recursive: true });
+
+  writeFileSync(join(testDir, ".resume-panel", "snapshot.json"), JSON.stringify({
+    episode_count: 5, project_names: ["A"], meta_hash: "abc",
+  }));
+
+  const lines = [
+    JSON.stringify({ id: "f-010", urgency: "HIGH", source: "recruiter", message: "핵심 갭 발견", context: {} }),
+    JSON.stringify({ id: "f-011", urgency: "LOW", source: "profiler", message: "사소한 개선", context: {} }),
+  ].join("\n") + "\n";
+  writeFileSync(join(testDir, ".resume-panel", "findings-inbox.jsonl"), lines);
+
+  const result = execFileSync("node", [script], {
+    input: JSON.stringify({
+      hook_event_name: "PostToolUse", tool_name: "Write",
+      tool_input: { file_path: "/work/file.txt", content: "x" },
+    }),
+    encoding: "utf-8",
+    env: { ...process.env, RESUME_PANEL_BASE: testDir },
+  });
+  const parsed = result.trim() ? JSON.parse(result.trim()) : null;
+  assert.ok(parsed, "should have output for HIGH finding");
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("핵심 갭"));
+  assert.ok(!parsed.hookSpecificOutput.additionalContext.includes("사소한"), "LOW should not appear");
+
+  const findings = JSON.parse(readFileSync(join(testDir, ".resume-panel", "findings.json"), "utf-8"));
+  assert.strictEqual(findings.findings.length, 2, "both findings should be saved");
+  assert.ok(findings.findings[0].delivered, "HIGH should be delivered");
+  assert.ok(!findings.findings[1].delivered, "LOW should not be delivered");
+
+  console.log("PASS: multiple findings - only HIGH routed");
+  rmSync(testDir, { recursive: true, force: true });
+}
+
+console.log("\nAll findings routing tests passed.");

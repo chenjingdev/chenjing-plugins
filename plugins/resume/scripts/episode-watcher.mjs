@@ -7,7 +7,7 @@
 // 출력: JSON → hookSpecificOutput.additionalContext로 오케스트레이터에 주입
 // 환경변수: RESUME_PANEL_BASE (테스트용, 없으면 input.cwd 사용)
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -46,6 +46,9 @@ const stateDir = join(base, ".resume-panel");
 const snapshotPath = join(stateDir, "snapshot.json");
 const metaPath = join(stateDir, "meta.json");
 const sourcePath = join(base, "resume-source.json");
+const inboxPath = join(stateDir, "findings-inbox.jsonl");
+const processingPath = join(stateDir, "findings-inbox.processing.jsonl");
+const findingsPath = join(stateDir, "findings.json");
 
 // ── 헬퍼 함수 ────────────────────────────────────────
 function ensureStateDir() {
@@ -161,8 +164,51 @@ if (isResumeSourceChange) {
   }
 }
 
-// 역할 2: findings 라우팅 (매 호출마다)
-// → Task 4에서 구현
+// 역할 2: findings 라우팅
+if (existsSync(inboxPath)) {
+  try {
+    renameSync(inboxPath, processingPath);
+  } catch {
+    // rename 실패 시 skip
+  }
+
+  if (existsSync(processingPath)) {
+    const lines = readFileSync(processingPath, "utf-8")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    const newFindings = lines
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter(Boolean);
+
+    const existing = readJSON(findingsPath) || { findings: [] };
+    const meta = readJSON(metaPath);
+    const snapshot = readJSON(snapshotPath);
+
+    const companyChanged =
+      meta?.current_company &&
+      snapshot?.current_company &&
+      meta.current_company !== snapshot.current_company;
+
+    for (const f of newFindings) {
+      f.delivered = false;
+
+      if (f.urgency === "HIGH") {
+        messages.push(`[resume-panel:HIGH] ${f.message}`);
+        f.delivered = true;
+      } else if (f.urgency === "MEDIUM" && companyChanged) {
+        messages.push(`[resume-panel:MEDIUM] ${f.message}`);
+        f.delivered = true;
+      }
+
+      existing.findings.push(f);
+    }
+
+    ensureStateDir();
+    writeFileSync(findingsPath, JSON.stringify(existing, null, 2));
+    try { unlinkSync(processingPath); } catch {}
+  }
+}
 
 // ── 출력 ────────────────────────────────────────────
 if (messages.length > 0) {
