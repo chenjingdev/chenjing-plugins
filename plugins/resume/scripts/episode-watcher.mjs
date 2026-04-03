@@ -7,7 +7,9 @@
 // 출력: JSON → hookSpecificOutput.additionalContext로 오케스트레이터에 주입
 // 환경변수: RESUME_PANEL_BASE (테스트용, 없으면 input.cwd 사용)
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 // ── stdin ────────────────────────────────────────────
 let input;
@@ -38,11 +40,126 @@ if (targetPath.includes(".resume-panel/") || targetPath.includes(".resume-panel\
 // ── resume-source.json 변경 여부 ────────────────────
 const isResumeSourceChange = targetPath.includes("resume-source.json");
 
+// ── 경로 상수 ────────────────────────────────────────
+const base = process.env.RESUME_PANEL_BASE || input.cwd || process.cwd();
+const stateDir = join(base, ".resume-panel");
+const snapshotPath = join(stateDir, "snapshot.json");
+const metaPath = join(stateDir, "meta.json");
+const sourcePath = join(base, "resume-source.json");
+
+// ── 헬퍼 함수 ────────────────────────────────────────
+function ensureStateDir() {
+  mkdirSync(stateDir, { recursive: true });
+}
+
+function readJSON(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function countEpisodes(source) {
+  let count = 0;
+  for (const company of source.companies || []) {
+    for (const project of company.projects || []) {
+      count += (project.episodes || []).length;
+    }
+  }
+  return count;
+}
+
+function getProjectNames(source) {
+  const names = [];
+  for (const company of source.companies || []) {
+    for (const project of company.projects || []) {
+      if (project.name) names.push(project.name);
+    }
+  }
+  return names.sort();
+}
+
+function hashMeta(source) {
+  const meta = source.meta || {};
+  const str = `${meta.target_company || ""}|${meta.target_position || ""}`;
+  return createHash("md5").update(str).digest("hex").slice(0, 8);
+}
+
+function countStarGaps(source) {
+  let gaps = 0;
+  for (const company of source.companies || []) {
+    for (const project of company.projects || []) {
+      for (const ep of project.episodes || []) {
+        const missing =
+          !ep.situation || !ep.task || !ep.action || !ep.result;
+        if (missing) gaps++;
+      }
+    }
+  }
+  return gaps;
+}
+
 // ── 메시지 수집 ─────────────────────────────────────
 const messages = [];
 
 // 역할 1: delta 감지 (isResumeSourceChange일 때)
-// → Task 3에서 구현
+if (isResumeSourceChange) {
+  const source = readJSON(sourcePath);
+  if (source) {
+    const snapshot = readJSON(snapshotPath);
+    const currentCount = countEpisodes(source);
+    const currentProjects = getProjectNames(source);
+    const currentHash = hashMeta(source);
+
+    ensureStateDir();
+
+    if (!snapshot) {
+      // 첫 실행: 스냅샷만 저장, 트리거 안 함
+      writeFileSync(
+        snapshotPath,
+        JSON.stringify({
+          episode_count: currentCount,
+          project_names: currentProjects,
+          meta_hash: currentHash,
+        })
+      );
+    } else {
+      // delta 계산
+      const reasons = [];
+      const episodeDelta = currentCount - (snapshot.episode_count || 0);
+      if (episodeDelta >= 3) reasons.push("에피소드 +3");
+
+      const snapshotProjects = new Set(snapshot.project_names || []);
+      const hasNewProject = currentProjects.some((p) => !snapshotProjects.has(p));
+      if (hasNewProject) reasons.push("새 프로젝트");
+
+      if (currentHash !== snapshot.meta_hash) reasons.push("meta 변경");
+
+      const metaJSON = readJSON(metaPath);
+      const lastProfilerCount = metaJSON?.last_profiler_episode_count ?? null;
+      if (lastProfilerCount !== null && currentCount - lastProfilerCount >= 5) {
+        reasons.push("쿨다운 초과");
+      }
+
+      if (reasons.length > 0) {
+        const starGaps = countStarGaps(source);
+        messages.push(
+          `[resume-panel] 프로파일러 호출 필요. delta: ${reasons.join(", ")}. 현재 총 에피소드 ${currentCount}개, 빈 STAR ${starGaps}개, 프로젝트 ${currentProjects.length}개.`
+        );
+        // 스냅샷 업데이트
+        writeFileSync(
+          snapshotPath,
+          JSON.stringify({
+            episode_count: currentCount,
+            project_names: currentProjects,
+            meta_hash: currentHash,
+          })
+        );
+      }
+    }
+  }
+}
 
 // 역할 2: findings 라우팅 (매 호출마다)
 // → Task 4에서 구현
