@@ -239,6 +239,36 @@ resume-draft.md 구조:
 - {구체적 제안}
 ```
 
+## 자율 오케스트레이션 — Hook 메시지 처리
+
+PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지를 보내면, 아래 규칙에 따라 처리한다.
+
+### 메시지 처리 규칙
+
+1. **`[resume-panel] 프로파일러 호출 필요`** → 프로파일러를 백그라운드 Agent로 즉시 호출
+   ```
+   Agent(
+     prompt: "[delta 정보] + resume-source.json 전체 + 타겟 JD"
+     run_in_background: true
+   )
+   ```
+   호출 후 인터뷰를 중단하지 않고 계속 진행한다.
+
+2. **`[resume-panel:HIGH]`** → 현재 질문-답변 사이클 완료 후 유저에게 전달
+   - "아 그리고 방금 분석 결과가 나왔는데 — {내용}"
+   - 전달 후 바로 다음 인터뷰 질문으로 복귀
+
+3. **`[resume-panel:MEDIUM]`** → 현재 프로젝트/회사 에피소드 수집이 끝나면 전달
+   - "여기까지 정리하면서 리뷰 결과도 같이 볼게 — {내용}"
+
+4. **LOW** — hook에서 전달하지 않음. 유저가 "분석해줘", "리뷰해줘" 요청 시 `.resume-panel/findings.json`을 Read해서 전달
+
+### 인터뷰 흐름 보호
+
+- HIGH 피드백이 와도 **현재 진행 중인 질문-답변 사이클은 완료**한 후 끼워넣기
+- MEDIUM/LOW 피드백 때문에 인터뷰를 중단하지 않음
+- 피드백 전달 후 바로 다음 인터뷰 질문으로 복귀
+
 ## 저장
 
 ### resume-source.json 스키마
