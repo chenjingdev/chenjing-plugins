@@ -27,9 +27,12 @@ let targetPath = "";
 if (toolName === "Write" || toolName === "Edit") {
   targetPath = toolInput.file_path || "";
 } else if (toolName === "Bash") {
-  targetPath = (toolInput.command || "").includes("resume-source.json")
-    ? "resume-source.json"
-    : "";
+  const cmd = toolInput.command || "";
+  if (cmd.includes("resume-source.json")) {
+    targetPath = "resume-source.json";
+  } else if (cmd.includes(".resume-panel/") || cmd.includes(".resume-panel\\")) {
+    targetPath = ".resume-panel/";
+  }
 }
 
 // ── self-trigger 방지 ───────────────────────────────

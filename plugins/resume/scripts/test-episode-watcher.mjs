@@ -34,6 +34,17 @@ function run(input) {
   console.log("PASS: self-trigger prevention");
 }
 
+// Test 1b: self-trigger — Bash로 .resume-panel/ 쓰기도 무시해야 함
+{
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo '{\"id\":\"f-001\"}' >> .resume-panel/findings-inbox.jsonl" },
+  });
+  assert.strictEqual(result, null, "Bash write to .resume-panel/ should be ignored");
+  console.log("PASS: self-trigger prevention (Bash .resume-panel/)");
+}
+
 // Test 2: 무관한 파일 쓰기는 무시
 {
   const result = run({
