@@ -125,7 +125,7 @@ const bashResumeInput = {
 {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
-    companies: [{ name: "튜닙", projects: [{ name: "프로젝트A", episodes: [{}, {}] }] }],
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [{}, {}] }],
   };
   rmSync(testBase, { recursive: true, force: true });
   mkdirSync(testBase, { recursive: true });
@@ -135,6 +135,8 @@ const bashResumeInput = {
   const result = runWithBase(bashResumeInput);
   assert.strictEqual(result, null, "first run should not trigger");
   assert.ok(existsSync(join(testBase, ".resume-panel", "snapshot.json")), "snapshot should be created");
+  const snap = JSON.parse(readFileSync(join(testBase, ".resume-panel", "snapshot.json"), "utf-8"));
+  assert.strictEqual(snap.episode_count, 2, "snapshot should have correct episode count");
   console.log("PASS: first run creates snapshot without triggering");
 }
 
@@ -144,7 +146,7 @@ const bashResumeInput = {
   const snapshot = { episode_count: 2, project_names: ["프로젝트A"], meta_hash: correctHash };
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
-    companies: [{ name: "튜닙", projects: [{ name: "프로젝트A", episodes: [{}, {}, {}, {}, {}] }] }],
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [{}, {}, {}, {}, {}] }],
   };
   setupTestDir(snapshot, resumeSource);
 
@@ -163,7 +165,7 @@ const bashResumeInput = {
   const snapshot = { episode_count: 4, project_names: ["프로젝트A"], meta_hash: correctHash };
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
-    companies: [{ name: "튜닙", projects: [{ name: "프로젝트A", episodes: [{}, {}, {}, {}, {}] }] }],
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [{}, {}, {}, {}, {}] }],
   };
   setupTestDir(snapshot, resumeSource);
 
@@ -178,13 +180,10 @@ const bashResumeInput = {
   const snapshot = { episode_count: 5, project_names: ["프로젝트A"], meta_hash: correctHash };
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
-    companies: [{
-      name: "튜닙",
-      projects: [
-        { name: "프로젝트A", episodes: [{}, {}, {}, {}, {}] },
-        { name: "프로젝트B", episodes: [{}] },
-      ],
-    }],
+    projects: [
+      { name: "프로젝트A", company: "튜닙", episodes: [{}, {}, {}, {}, {}] },
+      { name: "프로젝트B", company: "튜닙", episodes: [{}] },
+    ],
   };
   setupTestDir(snapshot, resumeSource);
 
@@ -202,7 +201,7 @@ const bashResumeInput = {
   const meta = { last_profiler_call: "2026-04-03T15:00:00Z", last_profiler_episode_count: 5, total_profiler_calls: 1 };
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
-    companies: [{ name: "튜닙", projects: [{ name: "프로젝트A", episodes: [{},{},{},{},{},{},{},{},{},{}] }] }],
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [{},{},{},{},{},{},{},{},{},{}] }],
   };
   setupTestDir(snapshot, resumeSource, meta);
 
@@ -219,16 +218,14 @@ const bashResumeInput = {
   const snapshot = { episode_count: 0, project_names: ["A"], meta_hash: correctHash };
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
-    companies: [{
-      name: "튜닙",
-      projects: [{
-        name: "A",
-        episodes: [
-          { situation: "s", task: "t", action: "a", result: "r" },  // complete
-          { situation: "s", task: "", action: "a", result: "" },     // 2 gaps → counts as 1 incomplete episode
-          {},  // all missing → 1 incomplete episode
-        ],
-      }],
+    projects: [{
+      name: "A",
+      company: "튜닙",
+      episodes: [
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },  // complete
+        { star: { situation: "s", task: "", action: "a", result: "" } },     // incomplete
+        {},  // no star at all → incomplete
+      ],
     }],
   };
   setupTestDir(snapshot, resumeSource);

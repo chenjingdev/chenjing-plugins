@@ -65,20 +65,16 @@ function readJSON(path) {
 
 function countEpisodes(source) {
   let count = 0;
-  for (const company of source.companies || []) {
-    for (const project of company.projects || []) {
-      count += (project.episodes || []).length;
-    }
+  for (const project of source.projects || []) {
+    count += (project.episodes || []).length;
   }
   return count;
 }
 
 function getProjectNames(source) {
   const names = [];
-  for (const company of source.companies || []) {
-    for (const project of company.projects || []) {
-      if (project.name) names.push(project.name);
-    }
+  for (const project of source.projects || []) {
+    if (project.name) names.push(project.name);
   }
   return names.sort();
 }
@@ -91,13 +87,12 @@ function hashMeta(source) {
 
 function countStarGaps(source) {
   let gaps = 0;
-  for (const company of source.companies || []) {
-    for (const project of company.projects || []) {
-      for (const ep of project.episodes || []) {
-        const missing =
-          !ep.situation || !ep.task || !ep.action || !ep.result;
-        if (missing) gaps++;
-      }
+  for (const project of source.projects || []) {
+    for (const ep of project.episodes || []) {
+      const star = ep.star || {};
+      const missing =
+        !star.situation || !star.task || !star.action || !star.result;
+      if (missing) gaps++;
     }
   }
   return gaps;
