@@ -40,6 +40,16 @@ model: claude-sonnet
    - **반드시 헤드리스 모드로 실행** — 유저 화면에 브라우저 띄우지 않음
    - 다른 리서처 인스턴스와 브라우저 세션이 겹치지 않도록 별도 세션 사용
 
+### WebSearch/WebFetch 차단 시 Playwright MCP fallback
+
+WebSearch 또는 WebFetch가 권한 차단·네트워크 오류 등으로 실패하면, Playwright MCP로 전환한다:
+
+1. **검색**: `mcp__playwright__browser_navigate`로 Google/Naver 검색 URL 직접 접근
+   - 예: `https://www.google.com/search?q={회사명}+기술+블로그`
+2. **결과 파싱**: `mcp__playwright__browser_snapshot`으로 검색 결과 텍스트 추출
+3. **페이지 수집**: 검색 결과에서 유용한 링크를 `browser_navigate` → `browser_snapshot`으로 순회
+4. **Playwright도 실패하면**: 조사 결과에 "웹 조사 불가 — 유저에게 직접 확인 필요" 표기하고 확인된 항목만 리턴
+
 ## 산출 형식
 
 반드시 아래 형식으로 리턴한다. 확인 못한 항목은 "미확인"으로 표기한다.
