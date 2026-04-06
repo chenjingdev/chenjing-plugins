@@ -1,109 +1,44 @@
-# chenjing-plugins 작업 히스토리
+# chenjing-plugins 히스토리
 
-## Phase 1: 플러그인 초기 구조 (2026-04-01)
+## 현재 상태 (2026-04-06)
 
-마켓플레이스 + resume 플러그인 초기 세팅.
+resume 플러그인 — 전문가 패널 기반 이력서 빌더. 자율 오케스트레이션까지 구현 완료, 라이브 테스트 통과.
 
-- `53d8e6a` init chenjing-plugins marketplace with resume:resume-source skill
-- `ceeceef` fix: add plugin.json for resume plugin
-- `e2a676e` fix: skills path should be relative to plugin source directory
+### 구조
 
-## Phase 2: resume-source 스킬 (2026-04-01)
+- 에이전트 12개 (리서처, 프로파일러, 시니어개발자, CTO, 채용담당자, HR, 커피챗봇 5종)
+- 오케스트레이터 SKILL.md (라운드 0~3 진행 규칙)
+- PostToolUse hook (episode-watcher.mjs) — delta 감지 + findings 라우팅
 
-첫 버전은 단순 인터뷰 기반 이력서 소스 수집 스킬.
-
-- `8d183ee` overhaul resume-source skill with recognition-based interview
-- `7e3abd7` fix: 인터뷰 질문 방식 개선 — 선택지 제시, 응원 제거, 중복질문 금지
-
-## Phase 3: resume-panel 설계 (2026-04-02)
-
-12개 전문가 에이전트 패널 구조로 전면 재설계.
-
-- `7056703` docs: add resume-panel design spec
-- `273e116` docs: update spec with profiler, project-researcher, question rules
-- `e29ede7` docs: add resume-panel implementation plan
-- `16d8d3f` chore: remove old resume-source, create resume-panel directory structure
-
-## Phase 4: 에이전트 구현 (2026-04-02 ~ 04-03)
-
-백스테이지(리서처, 프로파일러) + 프론트스테이지(시니어개발자, CTO, 채용담당자, HR, 커피챗봇) 에이전트 12개 구현.
-
-- `101d807` add researcher agent (회사/JD 외부 웹 조사)
-- `2908bff` add project-researcher agent (로컬 채팅 이력 Map-Reduce)
-- `c531f8d` add profiler agent (시그널 종합 → 유저 프로파일)
-- `e8ebfe8` add senior-dev agent (기술 깊이 발굴)
-- `ff3990f` add CTO agent (아키텍처/임팩트 발굴)
-- `dfb4dd8` add recruiter agent (JD 매칭/갭 분석)
-- `f5e208e` add HR agent (소프트스킬/리더십 발굴)
-- `a523fea` add 5 coffee chat bot personas (놓친 에피소드 발굴)
-- `de02c7d` add orchestrator SKILL.md (라운드 진행 규칙)
-
-## Phase 5: 자율 오케스트레이션 구현 (2026-04-03)
-
-PostToolUse hook 기반 자율 에이전트 트리거 시스템. 메인 오케스트레이터가 인터뷰에 집중하는 동안 뒷단에서 에이전트들이 자동 조사/분석/피드백.
-
-설계문서: `docs/superpowers/resume-panel-orchestration-design.md`
-구현계획: `docs/superpowers/plans/2026-04-03-resume-panel-orchestration.md`
-
-### 아키텍처
+### 자율 오케스트레이션 흐름
 
 ```
-유저 ↔ 오케스트레이터(메인)
+유저 ↔ 오케스트레이터
         │ resume-source.json 저장
         ▼
-   [PostToolUse hook — episode-watcher.mjs]
-        │
-        ├─ 역할 1: delta 감지 → 프로파일러 호출 메시지
-        │   (에피소드 +3, 새 프로젝트, meta 변경, 쿨다운 초과)
-        │
-        └─ 역할 2: findings-inbox.jsonl → 긴급도별 라우팅
-            HIGH → 즉시 additionalContext로 전달
-            MEDIUM → 프로젝트 전환 시 전달
-            LOW → 보관 (요청 시 전달)
+   [hook: episode-watcher.mjs]
+        ├─ delta 감지 → "프로파일러 호출 필요" → 백그라운드 프로파일러
+        └─ findings-inbox 확인 → HIGH는 즉시, LOW는 보관
 ```
 
-### 커밋 내역
+## 함정 / 제약 (다음 작업 시 주의)
 
-- `edf6a0e` hooks.json 생성 (PostToolUse → Write|Bash|Edit)
-- `67b1f84` episode-watcher.mjs 뼈대 + self-trigger 방지
-- `e75bb73` delta 감지 로직 구현
-- `ef8d8ac` findings 라우팅 로직 구현
-- `bee3133` SKILL.md에 hook 메시지 처리 규칙 추가
-- `4ff89ed` profiler.md에 자율 오케스트레이션 모드 추가
-- `f062427` SKILL.md 라운드 0에 .resume-panel/ 초기화 추가
-- `c8db53c` 코드 리뷰 반영
+1. **resume-source.json 스키마**: flat 구조 `source.projects[].episodes[]` 사용. 설계문서(`resume-panel-orchestration-design.md`)는 `companies[].projects[]`로 되어 있지만 **코드는 flat**. 설계문서가 틀림.
 
-## Phase 6: 실제 데이터 검증 + 버그 수정 (2026-04-06)
+2. **STAR 필드 위치**: `ep.star.situation` (ep 직속이 아님)
 
-실제 resume-source.json 데이터로 E2E 테스트 실행. 설계문서와 실제 데이터의 스키마 불일치 발견 및 수정.
+3. **서브에이전트 hook 전파 안 됨**: 프로파일러(백그라운드 Agent)의 도구 호출에서 hook이 발동해도 additionalContext가 메인에 안 옴. 메인의 다음 도구 호출 시 inbox가 처리되므로 1턴 지연.
 
-### 발견한 버그들
+4. **프로파일러 findings.json 직접 수정 금지**: inbox에만 append. findings.json은 hook이 관리. profiler.md에 명시했지만 LLM이 무시할 수 있음.
 
-1. **스키마 불일치**: episode-watcher가 `source.companies[].projects[].episodes[]` (설계문서)를 기대했으나 실제 데이터는 `source.projects[].episodes[]` (flat). STAR 필드도 `ep.situation` 대신 `ep.star.situation`.
+5. **플러그인 캐시**: GitHub에서 가져옴. 로컬 커밋만으로는 반영 안 됨. push 후 Claude Code 재시작 필요.
 
-2. **서브에이전트 hook self-trigger**: 프로파일러(백그라운드 Agent)가 Bash로 `.resume-panel/findings-inbox.jsonl`에 쓸 때 hook이 발동하여 inbox를 소비 → 메인 오케스트레이터에 전달 안 됨.
+## 경과 요약
 
-3. **프로파일러가 findings.json 직접 수정**: 설계상 inbox에만 append해야 하는데 findings.json을 직접 읽고 수정.
-
-### 수정 커밋
-
-- `10fc5db` fix: episode-watcher를 실제 resume-source.json 스키마에 맞춤
-- `282cdd2` fix: Bash .resume-panel/ self-trigger 방지 + profiler.md 금지 강화
-
-### 라이브 테스트 결과
-
-| 단계 | 결과 |
+| 날짜 | 작업 |
 |------|------|
-| Hook 발동 (PostToolUse) | PASS |
-| Delta 감지 (+3 에피소드) → additionalContext | PASS |
-| 프로파일러 백그라운드 실행 → findings 생성 | PASS |
-| findings-inbox HIGH → additionalContext 라우팅 | PASS |
-| findings-inbox LOW → skip | PASS |
-| self-trigger 방지 | PASS |
-| 유닛 테스트 | 17/17 PASS |
-| E2E 테스트 (실제 24개 에피소드) | 5/5 Phase PASS |
-
-### 알려진 제약
-
-- 플러그인 캐시가 GitHub에서 가져오므로 push 후 Claude Code 재시작 필요
-- 서브에이전트의 hook additionalContext는 메인에 전달 안 됨 → 메인의 다음 도구 호출 시 inbox 처리 (1턴 지연)
+| 04-01 | 마켓플레이스 초기 구조 + resume-source 스킬 (v1) |
+| 04-02 | resume-panel 설계 (12개 에이전트 패널 구조) |
+| 04-02~03 | 에이전트 12개 + 오케스트레이터 SKILL.md 구현 |
+| 04-03 | 자율 오케스트레이션 구현 (hook + episode-watcher) |
+| 04-06 | 실 데이터 E2E 검증, 스키마 불일치/self-trigger 버그 수정 |
