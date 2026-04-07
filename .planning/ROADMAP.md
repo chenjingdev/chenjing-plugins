@@ -80,9 +80,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — TDD: episode-watcher.mjs 타임라인 파싱 + 갭 탐지 + 패턴 적격성 플래그 + 데이터 구조 마이그레이션
-- [ ] 04-02-PLAN.md — profiler.md 크로스 컴퍼니 패턴 분석 프레임워크 + hr.md 갭 프로빙 모드
-- [ ] 04-03-PLAN.md — SKILL.md timeline_gap_found + pattern_detected 핸들러 + intentional_gap 추적
+- [x] 04-01-PLAN.md — TDD: episode-watcher.mjs 타임라인 파싱 + 갭 탐지 + 패턴 적격성 플래그 + 데이터 구조 마이그레이션
+- [x] 04-02-PLAN.md — profiler.md 크로스 컴퍼니 패턴 분석 프레임워크 + hr.md 갭 프로빙 모드
+- [x] 04-03-PLAN.md — SKILL.md timeline_gap_found + pattern_detected 핸들러 + intentional_gap 추적
 
 ### Phase 5: Perspective Shifting
 **Goal**: 리더십/협업 에피소드에서 타인 시점 질문이 전략적으로 생성되어 유저가 축소했던 기여를 재발견한다
