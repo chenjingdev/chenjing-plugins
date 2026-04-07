@@ -399,22 +399,25 @@ Source: [VERIFIED: plugins/resume/skills/resume-panel/SKILL.md line 624]
 
 None -- no new test infrastructure needed. Phase 6 is entirely prompt engineering with no code changes.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Profiler prompt length budget**
    - What we know: profiler.md is already 225 lines with pattern analysis + perspective shift detection. Claim tracking + contradiction detection will add significant content.
    - What's unclear: Exact threshold where "lost in the middle" effect degrades existing capabilities.
    - Recommendation: Keep new sections concise. Claim extraction can be brief instructions since the profiler already reads episode data. Contradiction detection section can be a focused prompt block. Monitor existing pattern/perspective functionality after adding contradiction sections.
+   - **RESOLVED (Plan 06-01):** 45-line cap per section enforced in plan. Total addition ~90 lines, keeping profiler.md under 320 lines.
 
 2. **Contradiction resolution ambiguity**
    - What we know: When user selects "상황이 달랐음", no STAR update is needed. When user selects bigger/smaller role, the other episode's STAR field should be updated.
    - What's unclear: What if the contradiction spans multiple STAR fields (e.g., action says one thing, result says another within the same episode)?
    - Recommendation: The claim's `star_field` metadata identifies which field to update. If contradictions span fields within one episode, update only the field referenced by the claim being corrected.
+   - **RESOLVED (Plan 06-01):** star_field metadata in each claim identifies the specific field to update. Only the referenced field is modified.
 
 3. **Session counter persistence**
    - What we know: meta.json already tracks `perspective_shifts_this_session` and `gap_probes_this_session`.
    - What's unclear: How "session" is defined -- is it reset on each SKILL.md invocation or persists across invocations within the same user conversation?
    - Recommendation: Follow the same session definition as perspective shifts. Add `contradictions_presented_this_session` counter to meta.json following the identical pattern.
+   - **RESOLVED (Plan 06-02):** Follows identical meta.json counter pattern from Phase 5 (perspective_shifts_this_session).
 
 ## Project Constraints (from CLAUDE.md)
 
