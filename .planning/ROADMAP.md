@@ -77,12 +77,12 @@ Plans:
   2. 탐지된 갭에 대해 프로빙 질문이 생성되며, 민감한 공백기에는 "건너뛰기" 옵션이 제공된다
   3. 에피소드 3개 이상 수집 시 크로스 컴퍼니 패턴 분석이 실행되어 반복 행동 패턴이 가설로 제시된다
   4. 패턴 및 타임라인 분석 결과가 findings-inbox.jsonl을 통해 Conversation Briefing에 포함되어 후속 에이전트에 전달된다
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
-- [ ] 04-03: TBD
+- [ ] 04-01-PLAN.md — TDD: episode-watcher.mjs 타임라인 파싱 + 갭 탐지 + 패턴 적격성 플래그 + 데이터 구조 마이그레이션
+- [ ] 04-02-PLAN.md — profiler.md 크로스 컴퍼니 패턴 분석 프레임워크 + hr.md 갭 프로빙 모드
+- [ ] 04-03-PLAN.md — SKILL.md timeline_gap_found + pattern_detected 핸들러 + intentional_gap 추적
 
 ### Phase 5: Perspective Shifting
 **Goal**: 리더십/협업 에피소드에서 타인 시점 질문이 전략적으로 생성되어 유저가 축소했던 기여를 재발견한다
