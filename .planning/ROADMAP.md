@@ -95,8 +95,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — profiler.md 관점 전환 탐지 + HR.md/C-Level.md 관점 전환 모드 추가
-- [ ] 05-02-PLAN.md — SKILL.md perspective_shift 핸들러 + 세션 제한 + 플로우 보호
+- [x] 05-01-PLAN.md — profiler.md 관점 전환 탐지 + HR.md/C-Level.md 관점 전환 모드 추가
+- [x] 05-02-PLAN.md — SKILL.md perspective_shift 핸들러 + 세션 제한 + 플로우 보호
 
 ### Phase 6: Contradiction Detection
 **Goal**: 인터뷰 전체에서 역할/기여도 모순이 탐지되어 축소된 역할이 복원되며, 유저 신뢰가 유지된다
