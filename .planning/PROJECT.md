@@ -12,23 +12,23 @@
 
 ### Validated
 
-- ✓ 9개 에이전트 패널 인터뷰 시스템 (Senior, C-Level, Recruiter, HR, Coffee Chat, Researcher, Profiler, Project Researcher) — existing
-- ✓ 4라운드 인터뷰 프로세스 (Setup → Career Discovery → Impact & Gaps → Final Polish) — existing
-- ✓ 선택지 기반 질문 (모든 질문에 2-3개 옵션 + 직접입력) — existing
-- ✓ 자율 백엔드 처리 (episode-watcher hook → profiler auto-call → findings routing) — existing
-- ✓ STAR 포맷 에피소드 수집 (resume-source.json) — existing
-- ✓ JD 맞춤 이력서 생성 (resume-draft.md) — existing
-- ✓ 멀티 직종 지원 (개발자, UX 디자이너, 마케터, PM 등) — existing
+- ✓ 9개 에이전트 패널 인터뷰 시스템 — existing
+- ✓ 4라운드 인터뷰 프로세스 — existing
+- ✓ STAR 포맷 에피소드 수집 — existing
+- ✓ JD 맞춤 이력서 생성 — existing
+- ✓ 멀티 직종 지원 — existing
 - ✓ Conversation Briefing 시스템 — existing
+- ✓ AskUserQuestion 기반 선택형 UX — v1.0 Phase 1
+- ✓ 이벤트 가중치 프로파일러 트리거 — v1.0 Phase 2
+- ✓ So What 체인 (비즈니스 임팩트 심화) — v1.0 Phase 3
+- ✓ 타임라인 갭 탐지 + 갭 프로빙 — v1.0 Phase 4
+- ✓ 크로스 컴퍼니 패턴 탐지 — v1.0 Phase 4
+- ✓ 관점 전환 질문 (타인 시점) — v1.0 Phase 5
+- ✓ 모순 탐지 + 역할 복원 — v1.0 Phase 6
 
 ### Active
 
-- [ ] So What 체인 — 에피소드 저장 시 비즈니스 임팩트까지 파는 후속 질문 트리거
-- [ ] 패턴 발견 — 크로스 컴퍼니 패턴 탐지로 숨은 에피소드 발굴
-- [ ] 타임라인 갭 탐지 — 경력 빈 구간 자동 찾기 및 프로빙
-- [ ] 관점 전환 질문 — 타인 시점(PM, 주니어, 상사)으로 에피소드 재질문
-- [ ] 모순 탐지 — 앞뒤 안 맞는 답변 캐치로 축소된 역할 복원
-- [ ] AskUserQuestion 기반 선택형 UX — 텍스트 번호 타이핑을 셀렉트 박스 UI로 교체
+(None — v1.0 complete, start `/gsd-new-milestone` for next version)
 
 ### Out of Scope
 
@@ -58,9 +58,11 @@
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| 기존 에이전트에 기능 통합 (새 에이전트 추가 안 함) | 에이전트 수가 이미 9개로 복잡도 충분 | — Pending |
-| AskUserQuestion으로 UX 교체 | 유저가 번호 타이핑 대신 셀렉트 박스 클릭으로 편의성 대폭 개선 | — Pending |
-| 6개 기능 전부 v1 | 유저가 전부 중요하다고 판단, 우선순위 동일 | — Pending |
+| 기존 에이전트에 기능 통합 (새 에이전트 추가 안 함) | 에이전트 수가 이미 9개로 복잡도 충분 | ✓ Good — HR/C-Level/profiler에 모드 추가 방식으로 6개 기능 전부 통합 |
+| AskUserQuestion으로 UX 교체 | 유저가 번호 타이핑 대신 셀렉트 박스 클릭으로 편의성 대폭 개선 | ✓ Good — fallback 포함 안정적 변환 |
+| 6개 기능 전부 v1 | 유저가 전부 중요하다고 판단, 우선순위 동일 | ✓ Good — 6개 phase 전부 완료 |
+| findings-inbox.jsonl 파이프라인 재활용 | Phase 4/5/6 모두 동일 패턴 (profiler→finding→hook→SKILL.md) | ✓ Good — zero new infrastructure |
+| 결정론적 date math (LLM 금지) | CLAUDE.md 명시: 날짜 계산은 JS, LLM은 질문만 생성 | ✓ Good — parsePeriod/detectGaps 구현 |
 
 ## Evolution
 
@@ -80,4 +82,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-07 after initialization*
+*Last updated: 2026-04-08 after v1.0 milestone*
