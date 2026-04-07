@@ -46,11 +46,10 @@ Plans:
   1. 에피소드 저장, 새 회사 추가, result 미비, 역할 축소 신호 등 이벤트마다 각기 다른 가중치가 누적된다
   2. 누적 점수가 임계값(5점)에 도달하면 프로파일러가 자동 호출된다
   3. 프로파일러 호출 후 점수가 리셋되어 다음 사이클이 시작된다
-**Plans**: TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
+- [ ] 02-01-PLAN.md — episode-watcher.mjs 이벤트 가중치 스코어링 시스템 구현 (TDD)
 
 ### Phase 3: So What Chain
 **Goal**: 에피소드 저장 시 비즈니스 임팩트가 부족하면 자동으로 심화 질문이 트리거되어 에피소드 품질이 올라간다
@@ -121,8 +120,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. AskUserQuestion UX | 0/2 | Not started | - |
-| 2. Profiler Frequency Enhancement | 0/2 | Not started | - |
+| 1. AskUserQuestion UX | 2/2 | Complete | 2026-04-07 |
+| 2. Profiler Frequency Enhancement | 0/1 | Not started | - |
 | 3. So What Chain | 0/2 | Not started | - |
 | 4. Profiler Analysis (Timeline + Pattern) | 0/3 | Not started | - |
 | 5. Perspective Shifting | 0/2 | Not started | - |
