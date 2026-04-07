@@ -101,6 +101,26 @@ function countStarGaps(source) {
   return gaps;
 }
 
+function detectMinimization(source, snapshot) {
+  const MINIMIZATION_KEYWORDS = ["도움", "참여", "지원", "보조", "서포트"];
+  const prevCount = snapshot.episode_count || 0;
+  let found = false;
+  let checked = 0;
+  for (const project of source.projects || []) {
+    for (const ep of project.episodes || []) {
+      checked++;
+      if (checked <= prevCount) continue; // skip already-seen episodes
+      const text = `${ep.star?.action || ""} ${ep.star?.result || ""}`;
+      if (MINIMIZATION_KEYWORDS.some(kw => text.includes(kw))) {
+        found = true;
+        break;
+      }
+    }
+    if (found) break;
+  }
+  return found;
+}
+
 // ── 메시지 수집 ─────────────────────────────────────
 const messages = [];
 
@@ -116,51 +136,92 @@ if (isResumeSourceChange) {
     ensureStateDir();
 
     if (!snapshot) {
-      // 첫 실행: 스냅샷만 저장, 트리거 안 함
-      const metaJSON = readJSON(metaPath);
+      // 첫 실행: 스냅샷 저장 + profiler_score 초기화, 트리거 안 함
+      const metaJSON = readJSON(metaPath) || {};
       writeFileSync(
         snapshotPath,
         JSON.stringify({
           episode_count: currentCount,
           project_names: currentProjects,
           meta_hash: currentHash,
+          star_gaps: countStarGaps(source),
           current_company: metaJSON?.current_company || null,
         })
       );
+      if (!metaJSON.profiler_score && metaJSON.profiler_score !== 0) {
+        writeFileSync(metaPath, JSON.stringify({
+          ...metaJSON,
+          profiler_score: 0,
+        }, null, 2));
+      }
     } else {
-      // delta 계산
+      // 이벤트 가중치 점수 계산
+      const metaJSON = readJSON(metaPath) || {};
+      let score = metaJSON.profiler_score || 0;
       const reasons = [];
-      const episodeDelta = currentCount - (snapshot.episode_count || 0);
-      if (episodeDelta >= 3) reasons.push(`에피소드 +${episodeDelta}`);
 
+      // +1: 에피소드 저장
+      const episodeDelta = currentCount - (snapshot.episode_count || 0);
+      if (episodeDelta > 0) {
+        score += episodeDelta;
+        reasons.push(`에피소드 +${episodeDelta}`);
+      }
+
+      // +3: 새 회사/프로젝트 추가
       const snapshotProjects = new Set(snapshot.project_names || []);
       const hasNewProject = currentProjects.some((p) => !snapshotProjects.has(p));
-      if (hasNewProject) reasons.push("새 프로젝트");
-
-      if (currentHash !== snapshot.meta_hash) reasons.push("meta 변경");
-
-      const metaJSON = readJSON(metaPath);
-      const lastProfilerCount = metaJSON?.last_profiler_episode_count ?? null;
-      if (lastProfilerCount !== null && currentCount - lastProfilerCount >= 5) {
-        reasons.push("쿨다운 초과");
+      if (hasNewProject) {
+        score += 3;
+        reasons.push("새 프로젝트 (+3)");
       }
 
-      if (reasons.length > 0) {
+      // +2: 빈 STAR 증가 (result 비어있음)
+      const currentStarGaps = countStarGaps(source);
+      const prevStarGaps = snapshot.star_gaps || 0;
+      if (currentStarGaps > prevStarGaps) {
+        score += 2;
+        reasons.push("빈 STAR 증가 (+2)");
+      }
+
+      // +2: 역할 축소 신호
+      if (detectMinimization(source, snapshot)) {
+        score += 2;
+        reasons.push("역할 축소 신호 (+2)");
+      }
+
+      // +2: 메타 변경
+      if (currentHash !== snapshot.meta_hash) {
+        score += 2;
+        reasons.push("meta 변경 (+2)");
+      }
+
+      // 임계값 체크
+      const THRESHOLD = 5;
+      if (score >= THRESHOLD) {
         const starGaps = countStarGaps(source);
         messages.push(
-          `[resume-panel] 프로파일러 호출 필요. delta: ${reasons.join(", ")}. 현재 총 에피소드 ${currentCount}개, 빈 STAR ${starGaps}개, 프로젝트 ${currentProjects.length}개.`
+          `[resume-panel] 프로파일러 호출 필요. delta: ${reasons.join(", ")}. 현재 총 에피소드 ${currentCount}개, 빈 STAR ${starGaps}개, 프로젝트 ${currentProjects.length}개. (score: ${score})`
         );
-        // 스냅샷 업데이트
-        writeFileSync(
-          snapshotPath,
-          JSON.stringify({
-            episode_count: currentCount,
-            project_names: currentProjects,
-            meta_hash: currentHash,
-            current_company: metaJSON?.current_company || null,
-          })
-        );
+        score = 0; // 트리거 후 리셋
       }
+
+      // 스냅샷 업데이트 (항상)
+      writeFileSync(
+        snapshotPath,
+        JSON.stringify({
+          episode_count: currentCount,
+          project_names: currentProjects,
+          meta_hash: currentHash,
+          star_gaps: countStarGaps(source),
+          current_company: metaJSON?.current_company || null,
+        })
+      );
+
+      // meta.json에 점수 저장 (항상)
+      writeFileSync(metaPath, JSON.stringify({
+        ...metaJSON,
+        profiler_score: score,
+      }, null, 2));
     }
   }
 }
