@@ -167,6 +167,7 @@ AskUserQuestion 호출이 실패하면 (빈 응답, 에러, 타임아웃) 다음
 - 타임라인 갭 프로빙 필요 → 인사담당자 (갭 프로빙 모드)
 - 패턴에서 `target_agent` 지정됨 → 해당 에이전트 우선
 - 관점 전환 finding에서 `target_agent` 지정됨 → 해당 에이전트 관점 전환 모드로 호출
+- 모순 복원 (contradiction_detected) → 오케스트레이터가 직접 AskUserQuestion으로 처리 (별도 에이전트 호출 불필요)
 
 ### 유저 응답 처리
 
@@ -298,7 +299,8 @@ cat <<'EOF' > .resume-panel/meta.json
   "last_profiler_call": null,
   "last_profiler_episode_count": 0,
   "current_company": null,
-  "total_profiler_calls": 0
+  "total_profiler_calls": 0,
+  "contradictions_presented_this_session": 0
 }
 EOF
 ```
@@ -530,6 +532,50 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
      - **업그레이드 역할 선택**: 해당 에피소드의 result 보강을 위한 후속 질문 1개 가능 (일반 모드로 전환), meta.json에 `perspective_shifted_episodes` 배열에 episode_ref 추가
    - meta.json `perspective_shifts_this_session` 카운터 증가
 
+9. **`[resume-panel:HIGH]` (contradiction_detected)** → 모순 복원 질문
+   - HIGH 메시지 내용에 "모순 발견" 또는 "역할 모순"이 포함되어 있으면 contradiction_detected finding으로 판단 (이 키워드가 없는 일반 HIGH는 item 2로 처리)
+   - meta.json의 `contradictions_presented_this_session` 카운터 확인 — 2 이상이면 무시
+   - context에서 claim_a, claim_b, contradiction_type, likely_cause, restoration_question 추출
+   - AskUserQuestion으로 복원 질문 제시:
+     ```
+     AskUserQuestion({
+       questions: [{
+         question: "아까 이야기랑 연결해보면, {에피소드A}에서는 {claim_a.text 요약}라고 했는데 {에피소드B}에서는 {claim_b.text 요약}라고 했거든. 실제로는 어디까지 한 거야?",
+         header: "연결 확인",
+         options: [
+           { label: "{큰 역할 요약}", description: "{claim with bigger role/scale}" },
+           { label: "{작은 역할 요약}", description: "{claim with smaller role/scale}" },
+           { label: "상황이 달랐음", description: "두 에피소드의 맥락이 달라서 역할이 다른 것" }
+         ],
+         multiSelect: false
+       }]
+     })
+     ```
+   - 유저 응답 처리:
+     - **큰 역할 선택**: 작은 claim이 있는 에피소드의 해당 STAR 필드(claim_b.star_field)를 큰 역할 내용으로 업데이트. resume-source.json 전체를 Bash tool로 재저장 (기존 저장 패턴 동일). 해당 필드만 수정하고 나머지 에피소드 내용은 보존
+     - **작은 역할 선택**: 큰 claim이 있는 에피소드의 해당 STAR 필드(claim_a.star_field)를 작은 역할 내용으로 업데이트. 동일하게 해당 필드만 수정
+     - **"상황이 달랐음" 선택**: 양쪽 모두 유효, STAR 업데이트 없음. 인터뷰 즉시 복귀
+   - STAR 필드 업데이트 시: 해당 star_field만 수정하고 나머지 에피소드 내용은 보존. 기존 내용을 정정/보완하며 전체 교체하지 않음. 업데이트 후 resume-source.json 전체를 Bash tool로 재저장:
+     ```bash
+     cat <<'EOF' > ./resume-source.json
+     { ... 전체 JSON (수정된 필드만 변경, 나머지 보존) ... }
+     EOF
+     ```
+   - meta.json `contradictions_presented_this_session` 카운터 증가
+   - MEDIUM urgency contradiction (메시지에 "모순 발견" 포함 + urgency가 MEDIUM):
+     - 대화 브리핑의 별도 섹션으로 포함:
+       ```
+       ## 대화 브리핑
+       - ...기존 항목...
+       - **확인 필요**: {contradiction_type} 관련 — {에피소드A}에서 {claim_a 요약}, {에피소드B}에서 {claim_b 요약}. 다음 관련 질문 시 자연스럽게 확인.
+       ```
+     - 즉시 AskUserQuestion으로 제시하지 않고, 다음 에이전트 호출 시 브리핑에 포함하여 자연스럽게 확인
+
+**메시지 분류 우선순위 참고:**
+- HIGH 메시지에 "모순 발견" 또는 "역할 모순" 키워드 → item 9 (contradiction_detected)
+- HIGH 메시지에 위 키워드 없음 → item 2 (일반 HIGH findings)
+- MEDIUM 메시지 키워드 분류: "공백" + "개월" → item 6 (gap), "패턴 발견" → item 7 (pattern), "관점 전환" → item 8 (perspective), "모순 발견" → item 9 MEDIUM (briefing)
+
 ### 인터뷰 흐름 보호
 
 - HIGH 피드백이 와도 **현재 진행 중인 질문-답변 사이클은 완료**한 후 끼워넣기
@@ -544,6 +590,9 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
 - 관점 전환은 single-turn이므로 인터뷰 흐름을 크게 방해하지 않는다. 유저가 겸손 옵션을 선택하면 즉시 복귀한다
 - 관점 전환과 SO-WHAT이 동시 도착하면 SO-WHAT을 먼저 처리한다 (체인 완료 후 관점 전환)
 - 관점 전환 제한(2개/세션)에 도달하면 나머지 관점 전환 finding은 조용히 무시한다
+- 모순 복원은 single-turn이므로 인터뷰 흐름을 크게 방해하지 않는다. 유저가 "상황이 달랐음"을 선택하면 즉시 복귀한다
+- 모순 복원과 SO-WHAT이 동시 도착하면 SO-WHAT을 먼저 처리한다 (체인 완료 후 모순 복원)
+- 모순 복원 제한(2개/세션)에 도달하면 나머지 모순 finding은 조용히 무시한다
 
 ## 저장
 
