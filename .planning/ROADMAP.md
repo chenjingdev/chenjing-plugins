@@ -107,11 +107,11 @@ Plans:
   2. 모순 제시 톤이 "아까 이야기랑 연결해보면..." 형태의 연결 톤이며, 비난이나 지적 톤이 아니다
   3. 컨텍스트(회사/프로젝트/기간) 기반 스코핑으로 false positive가 최소화되어, 한국 문화적 겸양과 실제 모순이 구별된다
   4. 모순 해결 후 해당 에피소드의 STAR 필드가 정정된 정보로 업데이트된다
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md — profiler.md claim 추적 + NLI 모순 탐지 섹션 추가
+- [ ] 06-02-PLAN.md — SKILL.md contradiction_detected 핸들러 + STAR 필드 업데이트
 
 ## Progress
 
