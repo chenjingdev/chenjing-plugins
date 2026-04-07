@@ -63,7 +63,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — hasQuantifiedImpact() + SO-WHAT 트리거 로직 (TDD)
+- [x] 03-01-PLAN.md — hasQuantifiedImpact() + SO-WHAT 트리거 로직 (TDD)
 - [ ] 03-02-PLAN.md — C-Level So What 체인 모드 + SKILL.md 오케스트레이션 규칙
 
 **UI hint**: yes
