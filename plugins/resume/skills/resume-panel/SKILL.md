@@ -300,6 +300,9 @@ cat <<'EOF' > .resume-panel/meta.json
   "last_profiler_episode_count": 0,
   "current_company": null,
   "total_profiler_calls": 0,
+  "gap_probes_this_session": 0,
+  "perspective_shifts_this_session": 0,
+  "perspective_shifted_episodes": [],
   "contradictions_presented_this_session": 0
 }
 EOF

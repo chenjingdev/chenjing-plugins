@@ -99,9 +99,11 @@ function countStarGaps(source) {
   for (const p of getAllProjects(source)) {
     for (const ep of p.episodes || []) {
       const star = ep.star || {};
-      const missing =
-        !star.situation || !star.task || !star.action || !star.result;
-      if (missing) gaps++;
+      const situation = star.situation || ep.situation;
+      const task = star.task || ep.task;
+      const action = star.action || ep.action;
+      const result = star.result || ep.result;
+      if (!situation || !task || !action || !result) gaps++;
     }
   }
   return gaps;
@@ -116,7 +118,7 @@ function detectMinimization(source, snapshot) {
     for (const ep of p.episodes || []) {
       checked++;
       if (checked <= prevCount) continue; // skip already-seen episodes
-      const text = `${ep.star?.action || ""} ${ep.star?.result || ""}`;
+      const text = `${ep.star?.action || ep.action || ""} ${ep.star?.result || ep.result || ""}`;
       if (MINIMIZATION_KEYWORDS.some(kw => text.includes(kw))) {
         found = true;
         break;
