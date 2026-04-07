@@ -30,11 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. 각 질문에 에이전트가 구성한 2-5개 옵션이 셀렉트 박스로 표시된다
   3. 유저가 옵션 대신 직접 텍스트를 입력하여 자유롭게 답변할 수 있다
   4. AskUserQuestion 실패 시 기존 텍스트 번호 방식으로 폴백이 작동한다
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
+- [ ] 01-01-PLAN.md — SKILL.md 오케스트레이터 AskUserQuestion 변환 + 폴백 + findings 래핑
+- [ ] 01-02-PLAN.md — 5개 프론트스테이지 에이전트 선택지 가이드라인 + 예시 업데이트
 
 **UI hint**: yes
 
