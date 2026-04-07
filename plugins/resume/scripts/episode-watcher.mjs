@@ -66,20 +66,26 @@ function readJSON(path) {
   }
 }
 
+function getAllProjects(source) {
+  const projects = [];
+  for (const company of source.companies || []) {
+    for (const project of company.projects || []) {
+      projects.push({ ...project, companyName: company.name });
+    }
+  }
+  return projects;
+}
+
 function countEpisodes(source) {
   let count = 0;
-  for (const project of source.projects || []) {
-    count += (project.episodes || []).length;
+  for (const p of getAllProjects(source)) {
+    count += (p.episodes || []).length;
   }
   return count;
 }
 
 function getProjectNames(source) {
-  const names = [];
-  for (const project of source.projects || []) {
-    if (project.name) names.push(project.name);
-  }
-  return names.sort();
+  return getAllProjects(source).map(p => p.name).filter(Boolean).sort();
 }
 
 function hashMeta(source) {
@@ -90,8 +96,8 @@ function hashMeta(source) {
 
 function countStarGaps(source) {
   let gaps = 0;
-  for (const project of source.projects || []) {
-    for (const ep of project.episodes || []) {
+  for (const p of getAllProjects(source)) {
+    for (const ep of p.episodes || []) {
       const star = ep.star || {};
       const missing =
         !star.situation || !star.task || !star.action || !star.result;
@@ -106,8 +112,8 @@ function detectMinimization(source, snapshot) {
   const prevCount = snapshot.episode_count || 0;
   let found = false;
   let checked = 0;
-  for (const project of source.projects || []) {
-    for (const ep of project.episodes || []) {
+  for (const p of getAllProjects(source)) {
+    for (const ep of p.episodes || []) {
       checked++;
       if (checked <= prevCount) continue; // skip already-seen episodes
       const text = `${ep.star?.action || ""} ${ep.star?.result || ""}`;
@@ -125,6 +131,55 @@ function hasQuantifiedImpact(resultText) {
   if (!resultText || resultText.trim() === "") return false;
   const IMPACT_PATTERN = /\d+(\.\d+)?\s*(명|건|%|원|만|억|배|시간|분|초|ms|개월|일|주|달|회|번|개|위|등|톤|km|kg|L|대|편|권|통|점|곳|팀)/;
   return IMPACT_PATTERN.test(resultText);
+}
+
+function parsePeriod(periodStr) {
+  if (!periodStr || typeof periodStr !== "string") return null;
+  const currentDate = new Date();
+  const currentStr = `${currentDate.getFullYear()}.${String(currentDate.getMonth() + 1).padStart(2, "0")}`;
+  const normalized = periodStr.replace(/현재|재직중/g, currentStr);
+  const match = normalized.match(/(\d{4})\.(\d{1,2})\s*-\s*(\d{4})\.(\d{1,2})/);
+  if (!match) return null;
+  return {
+    start: { year: parseInt(match[1]), month: parseInt(match[2]) },
+    end: { year: parseInt(match[3]), month: parseInt(match[4]) },
+  };
+}
+
+function toMonths(d) { return d.year * 12 + d.month; }
+
+function detectGaps(source) {
+  const gaps = [];
+  const allProjects = getAllProjects(source);
+  const spans = allProjects
+    .map(p => {
+      const parsed = parsePeriod(p.period);
+      if (!parsed) return null;
+      return { ...parsed, company: p.companyName, project: p.name };
+    })
+    .filter(Boolean)
+    .sort((a, b) => toMonths(a.start) - toMonths(b.start));
+
+  for (let i = 0; i < spans.length - 1; i++) {
+    const curr = spans[i];
+    const next = spans[i + 1];
+    const gapMo = toMonths(next.start) - toMonths(curr.end);
+    const sameCompany = curr.company === next.company;
+    const threshold = sameCompany ? 3 : 6;
+    if (gapMo > threshold) {
+      gaps.push({
+        from: { company: curr.company, project: curr.project, end: curr.end },
+        to: { company: next.company, project: next.project, start: next.start },
+        months: gapMo,
+        type: sameCompany ? "intra_company" : "inter_company",
+      });
+    }
+  }
+  return gaps;
+}
+
+function getCompanyCount(source) {
+  return (source.companies || []).length;
 }
 
 // ── 메시지 수집 ─────────────────────────────────────
@@ -203,11 +258,57 @@ if (isResumeSourceChange) {
 
       // 임계값 체크
       const THRESHOLD = 5;
+      let updatedMetaFields = {};
       if (score >= THRESHOLD) {
         const starGaps = countStarGaps(source);
         messages.push(
           `[resume-panel] 프로파일러 호출 필요. delta: ${reasons.join(", ")}. 현재 총 에피소드 ${currentCount}개, 빈 STAR ${starGaps}개, 프로젝트 ${currentProjects.length}개. (score: ${score})`
         );
+
+        // Timeline gap detection -- deterministic, runs with profiler trigger
+        const metaForTimeline = readJSON(metaPath) || {};
+        const intentionalGaps = metaForTimeline.intentional_gaps || [];
+        const gaps = detectGaps(source);
+        for (const gap of gaps) {
+          // Skip intentional gaps
+          const fromEnd = `${gap.from.end.year}.${String(gap.from.end.month).padStart(2, "0")}`;
+          const toStart = `${gap.to.start.year}.${String(gap.to.start.month).padStart(2, "0")}`;
+          const isIntentional = intentionalGaps.some(ig =>
+            ig.from === fromEnd && ig.to === toStart
+          );
+          if (isIntentional) continue;
+
+          const finding = {
+            id: `tg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            type: "timeline_gap_found",
+            urgency: "MEDIUM",
+            source: "episode-watcher",
+            message: `${fromEnd} ~ ${toStart} (${gap.months}개월) 공백: ${gap.from.project}(${gap.from.company}) 종료 후 ${gap.to.project}(${gap.to.company}) 시작 전`,
+            context: {
+              from_company: gap.from.company,
+              from_project: gap.from.project,
+              to_company: gap.to.company,
+              to_project: gap.to.project,
+              gap_months: gap.months,
+              gap_type: gap.type,
+            },
+            created_at: new Date().toISOString(),
+          };
+          ensureStateDir();
+          const line = JSON.stringify(finding) + "\n";
+          writeFileSync(inboxPath, existsSync(inboxPath) ? readFileSync(inboxPath, "utf-8") + line : line);
+        }
+
+        // Pattern eligibility flag
+        const companyCount = getCompanyCount(source);
+        if (currentCount >= 3 && companyCount >= 2) {
+          // Append pattern eligibility to the profiler message
+          messages[messages.length - 1] += " 패턴 분석 가능.";
+          // Track in meta
+          updatedMetaFields.last_pattern_analysis_episode_count = currentCount;
+          updatedMetaFields.last_timeline_check = new Date().toISOString();
+        }
+
         score = 0; // 트리거 후 리셋
       }
 
@@ -216,7 +317,7 @@ if (isResumeSourceChange) {
       if (!metaForSoWhat.so_what_active?.active) {
         const prevCount = snapshot.episode_count || 0;
         let checked = 0;
-        for (const project of source.projects || []) {
+        for (const project of getAllProjects(source)) {
           for (const ep of project.episodes || []) {
             checked++;
             if (checked <= prevCount) continue;
@@ -246,6 +347,7 @@ if (isResumeSourceChange) {
       // meta.json에 점수 저장 (항상)
       writeFileSync(metaPath, JSON.stringify({
         ...metaJSON,
+        ...updatedMetaFields,
         profiler_score: score,
       }, null, 2));
     }

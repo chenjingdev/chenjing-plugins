@@ -1107,12 +1107,13 @@ const bashGapInput = {
   const result = runGapTest(bashGapInput);
   assert.ok(result, "should trigger profiler (score 4 + 1 = 5)");
 
-  // Check findings-inbox.jsonl for timeline_gap_found
-  const inboxPath = join(gapTestBase, ".resume-panel", "findings-inbox.jsonl");
-  assert.ok(existsSync(inboxPath), "findings-inbox.jsonl should exist with gap finding");
-  const inboxContent = readFileSync(inboxPath, "utf-8").trim();
-  const finding = JSON.parse(inboxContent.split("\n")[0]);
-  assert.strictEqual(finding.type, "timeline_gap_found", "finding type should be timeline_gap_found");
+  // Gap findings are written to inbox then immediately consumed by findings routing
+  // Check findings.json where they end up after routing
+  const findingsJsonPath = join(gapTestBase, ".resume-panel", "findings.json");
+  assert.ok(existsSync(findingsJsonPath), "findings.json should exist with gap finding");
+  const findingsData = JSON.parse(readFileSync(findingsJsonPath, "utf-8"));
+  const finding = findingsData.findings.find(f => f.type === "timeline_gap_found");
+  assert.ok(finding, "should have timeline_gap_found finding");
   assert.strictEqual(finding.urgency, "MEDIUM", "finding urgency should be MEDIUM");
   assert.strictEqual(finding.context.gap_months, 7, "gap should be 7 months");
   assert.strictEqual(finding.context.gap_type, "inter_company", "gap type should be inter_company");
@@ -1146,11 +1147,11 @@ const bashGapInput = {
   const result = runGapTest(bashGapInput);
   assert.ok(result, "should trigger profiler");
 
-  const inboxPath = join(gapTestBase, ".resume-panel", "findings-inbox.jsonl");
-  assert.ok(existsSync(inboxPath), "findings-inbox.jsonl should exist with gap finding");
-  const inboxContent = readFileSync(inboxPath, "utf-8").trim();
-  const finding = JSON.parse(inboxContent.split("\n")[0]);
-  assert.strictEqual(finding.type, "timeline_gap_found");
+  const findingsJsonPath = join(gapTestBase, ".resume-panel", "findings.json");
+  assert.ok(existsSync(findingsJsonPath), "findings.json should exist with gap finding");
+  const findingsData = JSON.parse(readFileSync(findingsJsonPath, "utf-8"));
+  const finding = findingsData.findings.find(f => f.type === "timeline_gap_found");
+  assert.ok(finding, "should have timeline_gap_found finding");
   assert.strictEqual(finding.context.gap_months, 4, "gap should be 4 months");
   assert.strictEqual(finding.context.gap_type, "intra_company", "gap type should be intra_company");
   assert.strictEqual(finding.context.from_company, "튜닙");
@@ -1182,11 +1183,11 @@ const bashGapInput = {
   assert.ok(result, "should trigger profiler");
 
   // No gap finding should be written (5 months inter-company, threshold is > 6)
-  const inboxPath = join(gapTestBase, ".resume-panel", "findings-inbox.jsonl");
-  const hasInbox = existsSync(inboxPath);
-  if (hasInbox) {
-    const content = readFileSync(inboxPath, "utf-8").trim();
-    assert.strictEqual(content, "", "no gap findings should be written for 5-month inter-company gap");
+  const findingsJsonPath = join(gapTestBase, ".resume-panel", "findings.json");
+  if (existsSync(findingsJsonPath)) {
+    const findingsData = JSON.parse(readFileSync(findingsJsonPath, "utf-8"));
+    const gapFindings = (findingsData.findings || []).filter(f => f.type === "timeline_gap_found");
+    assert.strictEqual(gapFindings.length, 0, "no gap findings should be written for 5-month inter-company gap");
   }
   console.log("PASS: detectGaps ignores inter-company gap of 5 months");
 
@@ -1216,11 +1217,11 @@ const bashGapInput = {
   const result = runGapTest(bashGapInput);
   assert.ok(result, "should trigger profiler");
 
-  const inboxPath = join(gapTestBase, ".resume-panel", "findings-inbox.jsonl");
-  const hasInbox = existsSync(inboxPath);
-  if (hasInbox) {
-    const content = readFileSync(inboxPath, "utf-8").trim();
-    assert.strictEqual(content, "", "no gap findings should be written for 2-month intra-company gap");
+  const findingsJsonPath = join(gapTestBase, ".resume-panel", "findings.json");
+  if (existsSync(findingsJsonPath)) {
+    const findingsData = JSON.parse(readFileSync(findingsJsonPath, "utf-8"));
+    const gapFindings = (findingsData.findings || []).filter(f => f.type === "timeline_gap_found");
+    assert.strictEqual(gapFindings.length, 0, "no gap findings should be written for 2-month intra-company gap");
   }
   console.log("PASS: detectGaps ignores intra-company gap of 2 months");
 
@@ -1248,9 +1249,11 @@ const bashGapInput = {
   const result = runGapTest(bashGapInput);
   assert.ok(result, "should trigger profiler");
 
-  const inboxPath = join(gapTestBase, ".resume-panel", "findings-inbox.jsonl");
-  assert.ok(existsSync(inboxPath), "findings-inbox.jsonl should exist");
-  const finding = JSON.parse(readFileSync(inboxPath, "utf-8").trim().split("\n")[0]);
+  const findingsJsonPath = join(gapTestBase, ".resume-panel", "findings.json");
+  assert.ok(existsSync(findingsJsonPath), "findings.json should exist");
+  const findingsData = JSON.parse(readFileSync(findingsJsonPath, "utf-8"));
+  const finding = findingsData.findings.find(f => f.type === "timeline_gap_found");
+  assert.ok(finding, "should have timeline_gap_found finding");
   // Message format: "{from_end} ~ {to_start} ({N}개월) 공백: {from_project}({from_company}) 종료 후 {to_project}({to_company}) 시작 전"
   assert.ok(finding.message.includes("2022.03"), "message should include from_end date");
   assert.ok(finding.message.includes("2022.10"), "message should include to_start date");
@@ -1294,11 +1297,11 @@ const bashGapInput = {
   assert.ok(result, "should trigger profiler");
 
   // The gap should be filtered out by intentional_gaps
-  const inboxPath = join(gapTestBase, ".resume-panel", "findings-inbox.jsonl");
-  const hasInbox = existsSync(inboxPath);
-  if (hasInbox) {
-    const content = readFileSync(inboxPath, "utf-8").trim();
-    assert.strictEqual(content, "", "intentional gap should be filtered out");
+  const findingsJsonPath = join(gapTestBase, ".resume-panel", "findings.json");
+  if (existsSync(findingsJsonPath)) {
+    const findingsData = JSON.parse(readFileSync(findingsJsonPath, "utf-8"));
+    const gapFindings = (findingsData.findings || []).filter(f => f.type === "timeline_gap_found");
+    assert.strictEqual(gapFindings.length, 0, "intentional gap should be filtered out");
   }
   console.log("PASS: intentional_gaps filters out matching gap");
 
