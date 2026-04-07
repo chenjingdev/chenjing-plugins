@@ -14,7 +14,7 @@
 ### Impact Deepening (So What Chain)
 
 - [ ] **IMPACT-01**: 에피소드 저장 시 임팩트 심화 후속 질문이 자동 트리거됨
-- [ ] **IMPACT-02**: 최대 3단계 깊이로 파고들음 (액션 → 직접 결과 → 비즈니스 임팩트)
+- [ ] **IMPACT-02**: 최대 3단계 깊이로 파고들음 (액션 -> 직접 결과 -> 비즈니스 임팩트)
 - [ ] **IMPACT-03**: 이미 충분히 구체적인 에피소드는 So What 체인을 건너뜀
 
 ### Timeline Analysis
@@ -38,13 +38,13 @@
 ### Contradiction Detection
 
 - [ ] **CONTR-01**: 인터뷰 전체에 걸쳐 역할/기여도 관련 클레임 추적
-- [ ] **CONTR-02**: 모순 발견 시 비난이 아닌 연결 톤으로 제시 ("앞뒤가 안 맞는데" ✗ → "아까 이야기랑 연결해보면..." ✓)
+- [ ] **CONTR-02**: 모순 발견 시 비난이 아닌 연결 톤으로 제시 ("앞뒤가 안 맞는데" x -> "아까 이야기랑 연결해보면..." o)
 - [ ] **CONTR-03**: False positive 최소화를 위해 컨텍스트(회사/프로젝트/기간) 기반 스코핑
 
 ### Profiler Frequency
 
 - [ ] **PROF-01**: 이벤트별 가중치 기반 프로파일러 트리거 시스템 (단순 에피소드 갯수 카운트 대체)
-- [ ] **PROF-02**: 가중치 테이블 — 에피소드 저장(+1), 새 회사 추가(+3), result 비어있음(+2), 역할 축소 신호(+2), 메타 변경(+2)
+- [ ] **PROF-02**: 가중치 테이블 -- 에피소드 저장(+1), 새 회사 추가(+3), result 비어있음(+2), 역할 축소 신호(+2), 메타 변경(+2)
 - [ ] **PROF-03**: 임계값 5점 도달 시 프로파일러 호출 후 점수 리셋
 
 ## v2 Requirements
@@ -78,33 +78,33 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| UX-01 | TBD | Pending |
-| UX-02 | TBD | Pending |
-| UX-03 | TBD | Pending |
-| IMPACT-01 | TBD | Pending |
-| IMPACT-02 | TBD | Pending |
-| IMPACT-03 | TBD | Pending |
-| TIME-01 | TBD | Pending |
-| TIME-02 | TBD | Pending |
-| TIME-03 | TBD | Pending |
-| PTRN-01 | TBD | Pending |
-| PTRN-02 | TBD | Pending |
-| PTRN-03 | TBD | Pending |
-| PERSP-01 | TBD | Pending |
-| PERSP-02 | TBD | Pending |
-| PERSP-03 | TBD | Pending |
-| CONTR-01 | TBD | Pending |
-| CONTR-02 | TBD | Pending |
-| CONTR-03 | TBD | Pending |
-| PROF-01 | TBD | Pending |
-| PROF-02 | TBD | Pending |
-| PROF-03 | TBD | Pending |
+| UX-01 | Phase 1 | Pending |
+| UX-02 | Phase 1 | Pending |
+| UX-03 | Phase 1 | Pending |
+| PROF-01 | Phase 2 | Pending |
+| PROF-02 | Phase 2 | Pending |
+| PROF-03 | Phase 2 | Pending |
+| IMPACT-01 | Phase 3 | Pending |
+| IMPACT-02 | Phase 3 | Pending |
+| IMPACT-03 | Phase 3 | Pending |
+| TIME-01 | Phase 4 | Pending |
+| TIME-02 | Phase 4 | Pending |
+| TIME-03 | Phase 4 | Pending |
+| PTRN-01 | Phase 4 | Pending |
+| PTRN-02 | Phase 4 | Pending |
+| PTRN-03 | Phase 4 | Pending |
+| PERSP-01 | Phase 5 | Pending |
+| PERSP-02 | Phase 5 | Pending |
+| PERSP-03 | Phase 5 | Pending |
+| CONTR-01 | Phase 6 | Pending |
+| CONTR-02 | Phase 6 | Pending |
+| CONTR-03 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 21 total
-- Mapped to phases: 0
-- Unmapped: 21 ⚠️
+- Mapped to phases: 21
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-07*
-*Last updated: 2026-04-07 after initial definition*
+*Last updated: 2026-04-07 after roadmap creation*
