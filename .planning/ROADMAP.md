@@ -49,7 +49,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 02-01-PLAN.md — episode-watcher.mjs 이벤트 가중치 스코어링 시스템 구현 (TDD)
+- [x] 02-01-PLAN.md — episode-watcher.mjs 이벤트 가중치 스코어링 시스템 구현 (TDD)
 
 ### Phase 3: So What Chain
 **Goal**: 에피소드 저장 시 비즈니스 임팩트가 부족하면 자동으로 심화 질문이 트리거되어 에피소드 품질이 올라간다

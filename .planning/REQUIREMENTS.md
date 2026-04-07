@@ -43,9 +43,9 @@
 
 ### Profiler Frequency
 
-- [ ] **PROF-01**: 이벤트별 가중치 기반 프로파일러 트리거 시스템 (단순 에피소드 갯수 카운트 대체)
-- [ ] **PROF-02**: 가중치 테이블 -- 에피소드 저장(+1), 새 회사 추가(+3), result 비어있음(+2), 역할 축소 신호(+2), 메타 변경(+2)
-- [ ] **PROF-03**: 임계값 5점 도달 시 프로파일러 호출 후 점수 리셋
+- [x] **PROF-01**: 이벤트별 가중치 기반 프로파일러 트리거 시스템 (단순 에피소드 갯수 카운트 대체)
+- [x] **PROF-02**: 가중치 테이블 -- 에피소드 저장(+1), 새 회사 추가(+3), result 비어있음(+2), 역할 축소 신호(+2), 메타 변경(+2)
+- [x] **PROF-03**: 임계값 5점 도달 시 프로파일러 호출 후 점수 리셋
 
 ## v2 Requirements
 
@@ -81,9 +81,9 @@
 | UX-01 | Phase 1 | Complete |
 | UX-02 | Phase 1 | Complete |
 | UX-03 | Phase 1 | Complete |
-| PROF-01 | Phase 2 | Pending |
-| PROF-02 | Phase 2 | Pending |
-| PROF-03 | Phase 2 | Pending |
+| PROF-01 | Phase 2 | Complete |
+| PROF-02 | Phase 2 | Complete |
+| PROF-03 | Phase 2 | Complete |
 | IMPACT-01 | Phase 3 | Pending |
 | IMPACT-02 | Phase 3 | Pending |
 | IMPACT-03 | Phase 3 | Pending |
