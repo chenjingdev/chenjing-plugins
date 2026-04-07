@@ -7,9 +7,9 @@
 
 ### UX Foundation
 
-- [ ] **UX-01**: 모든 에이전트 질문이 AskUserQuestion 셀렉트 박스로 렌더링됨
-- [ ] **UX-02**: 에이전트가 질문당 최대 5개 옵션을 재량껏 구성함
-- [ ] **UX-03**: 모든 질문에 직접입력 가능한 빈 셀렉트 옵션이 포함됨
+- [x] **UX-01**: 모든 에이전트 질문이 AskUserQuestion 셀렉트 박스로 렌더링됨
+- [x] **UX-02**: 에이전트가 질문당 최대 5개 옵션을 재량껏 구성함
+- [x] **UX-03**: 모든 질문에 직접입력 가능한 빈 셀렉트 옵션이 포함됨
 
 ### Impact Deepening (So What Chain)
 
@@ -78,9 +78,9 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| UX-01 | Phase 1 | Pending |
-| UX-02 | Phase 1 | Pending |
-| UX-03 | Phase 1 | Pending |
+| UX-01 | Phase 1 | Complete |
+| UX-02 | Phase 1 | Complete |
+| UX-03 | Phase 1 | Complete |
 | PROF-01 | Phase 2 | Pending |
 | PROF-02 | Phase 2 | Pending |
 | PROF-03 | Phase 2 | Pending |
