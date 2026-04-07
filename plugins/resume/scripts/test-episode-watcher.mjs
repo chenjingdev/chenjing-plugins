@@ -169,9 +169,9 @@ function readMeta() {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
     ] }],
   };
   setupTestDir(snapshot, resumeSource, meta);
@@ -193,9 +193,9 @@ function readMeta() {
   const resumeSource1 = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
     ] }],
   };
   setupTestDir(snapshot1, resumeSource1, meta1);
@@ -210,10 +210,10 @@ function readMeta() {
   const resumeSource2 = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
     ] }],
   };
   setupTestDir(snapshot2, resumeSource2, meta2);
@@ -237,14 +237,14 @@ function readMeta() {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [
       { name: "프로젝트A", company: "튜닙", episodes: [
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       ] },
       { name: "프로젝트B", company: "튜닙", episodes: [
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       ] },
     ],
   };
@@ -267,13 +267,14 @@ function readMeta() {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
 
   // First call: score=1, +1 episode + +2 star gap = +3, total = 4, no trigger
+  // so_what_active suppresses SO-WHAT to isolate star gap scoring test
   const snapshot1 = { episode_count: 2, project_names: ["A"], meta_hash: correctHash, star_gaps: 0 };
-  const meta1 = { profiler_score: 1 };
+  const meta1 = { profiler_score: 1, so_what_active: { active: true, episode_title: "test", current_level: 1, accumulated_result: "" } };
   const resumeSource1 = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       { star: { situation: "s", task: "", action: "a", result: "" } },  // incomplete = new star gap
     ] }],
   };
@@ -289,8 +290,8 @@ function readMeta() {
   const resumeSource2 = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       { star: { situation: "s", task: "", action: "a", result: "" } },  // incomplete = star gap
     ] }],
   };
@@ -314,8 +315,8 @@ function readMeta() {
   const resumeSource1 = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "기존 코드 분석", result: "r" } },
-      { star: { situation: "s", task: "t", action: "팀원에게 도움을 줬습니다", result: "r" } },
+      { star: { situation: "s", task: "t", action: "기존 코드 분석", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "팀원에게 도움을 줬습니다", result: "매출 30% 증가" } },
     ] }],
   };
   setupTestDir(snapshot1, resumeSource1, meta1);
@@ -330,8 +331,8 @@ function readMeta() {
   const resumeSource2 = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "기존 코드 분석", result: "r" } },
-      { star: { situation: "s", task: "t", action: "프로젝트에 참여했습니다", result: "r" } },
+      { star: { situation: "s", task: "t", action: "기존 코드 분석", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "프로젝트에 참여했습니다", result: "매출 30% 증가" } },
     ] }],
   };
   setupTestDir(snapshot2, resumeSource2, meta2);
@@ -353,11 +354,11 @@ function readMeta() {
   const resumeSource = {
     meta: { target_company: "한섬", target_position: "PM" },  // changed from 코인원|FE
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
     ] }],
   };
   setupTestDir(snapshot, resumeSource, meta);
@@ -381,14 +382,14 @@ function readMeta() {
     meta: { target_company: "한섬", target_position: "PM" },  // meta changed
     projects: [
       { name: "프로젝트A", company: "튜닙", episodes: [
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       ] },
       { name: "프로젝트B", company: "한섬", episodes: [
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       ] },
     ],
   };
@@ -417,11 +418,11 @@ function readMeta() {
   const resumeSource1 = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
     ] }],
   };
   setupTestDir(snapshot1, resumeSource1, meta1);
@@ -435,12 +436,12 @@ function readMeta() {
   const resumeSource2 = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
     ] }],
   };
   writeFileSync(join(testBase, "resume-source.json"), JSON.stringify(resumeSource2));
@@ -462,7 +463,7 @@ function readMeta() {
       name: "A",
       company: "튜닙",
       episodes: [
-        { star: { situation: "s", task: "t", action: "a", result: "r" } },  // complete
+        { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },  // complete
         { star: { situation: "s", task: "", action: "a", result: "" } },     // incomplete
         {},  // no star at all → incomplete
       ],
@@ -774,8 +775,8 @@ const bashSoWhatInput = {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       { star: { situation: "s", task: "t", action: "a", result: "개선했다" } },
     ] }],
   };
@@ -797,8 +798,8 @@ const bashSoWhatInput = {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
     ] }],
   };
@@ -829,8 +830,8 @@ const bashSoWhatInput = {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       { star: { situation: "s", task: "t", action: "a", result: "개선했다" } },
     ] }],
   };
@@ -853,8 +854,8 @@ const bashSoWhatInput = {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       { title: "검색 성능 최적화", star: { situation: "s", task: "t", action: "a", result: "개선했다" } },
     ] }],
   };
@@ -877,8 +878,8 @@ const bashSoWhatInput = {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       { title: "성능 개선", star: { situation: "s", task: "t", action: "a", result: "빨라졌다" } },
     ] }],
   };
@@ -900,8 +901,8 @@ const bashSoWhatInput = {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
-      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
+      { star: { situation: "s", task: "t", action: "a", result: "매출 30% 증가" } },
       { star: { situation: "s", task: "t", action: "a", result: "개선했다" } },
     ] }],
   };

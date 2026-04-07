@@ -121,6 +121,12 @@ function detectMinimization(source, snapshot) {
   return found;
 }
 
+function hasQuantifiedImpact(resultText) {
+  if (!resultText || resultText.trim() === "") return false;
+  const IMPACT_PATTERN = /\d+(\.\d+)?\s*(명|건|%|원|만|억|배|시간|분|초|ms|개월|일|주|달|회|번|개|위|등|톤|km|kg|L|대|편|권|통|점|곳|팀)/;
+  return IMPACT_PATTERN.test(resultText);
+}
+
 // ── 메시지 수집 ─────────────────────────────────────
 const messages = [];
 
@@ -203,6 +209,26 @@ if (isResumeSourceChange) {
           `[resume-panel] 프로파일러 호출 필요. delta: ${reasons.join(", ")}. 현재 총 에피소드 ${currentCount}개, 빈 STAR ${starGaps}개, 프로젝트 ${currentProjects.length}개. (score: ${score})`
         );
         score = 0; // 트리거 후 리셋
+      }
+
+      // So What chain trigger — check for impact-shallow episodes
+      const metaForSoWhat = readJSON(metaPath) || {};
+      if (!metaForSoWhat.so_what_active?.active) {
+        const prevCount = snapshot.episode_count || 0;
+        let checked = 0;
+        for (const project of source.projects || []) {
+          for (const ep of project.episodes || []) {
+            checked++;
+            if (checked <= prevCount) continue;
+            if (!hasQuantifiedImpact(ep.star?.result || ep.result || "")) {
+              messages.push(
+                `[resume-panel:SO-WHAT] 에피소드 "${ep.title || "(제목 없음)"}" 임팩트 부족`
+              );
+              break;
+            }
+          }
+          if (messages.some(m => m.includes("[resume-panel:SO-WHAT]"))) break;
+        }
       }
 
       // 스냅샷 업데이트 (항상)
