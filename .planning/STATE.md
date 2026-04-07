@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-04-07T06:58:39.884Z"
+status: verifying
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-04-07T07:08:43.861Z"
 last_activity: 2026-04-07
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
-  percent: 50
+  completed_plans: 2
+  percent: 100
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-07)
 
 Phase: 01 (AskUserQuestion UX) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-07
 
 Progress: [░░░░░░░░░░] 0%
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 3min | 2 tasks | 1 files |
+| Phase 01 P02 | 8min | 1 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Recent decisions affecting current work:
 - 프로파일러가 분석 허브 역할, findings-inbox.jsonl이 통신 버스
 - [Phase 01]: AskUserQuestion NOT added to allowed-tools (bug #29547 prevention)
 - [Phase 01]: multiSelect always false; narrative questions pass through as plain text
+- [Phase 01]: Agent examples keep existing substantive options; only 직접입력 line removed
+- [Phase 01]: Output format templates show optional 4th slot placeholder instead of 직접입력
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-07T06:58:39.881Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-04-07T07:08:43.858Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None

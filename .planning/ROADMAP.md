@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md — SKILL.md 오케스트레이터 AskUserQuestion 변환 + 폴백 + findings 래핑
-- [ ] 01-02-PLAN.md — 5개 프론트스테이지 에이전트 선택지 가이드라인 + 예시 업데이트
+- [x] 01-02-PLAN.md — 5개 프론트스테이지 에이전트 선택지 가이드라인 + 예시 업데이트
 
 **UI hint**: yes
 
