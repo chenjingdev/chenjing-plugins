@@ -164,6 +164,8 @@ AskUserQuestion 호출이 실패하면 (빈 응답, 에러, 타임아웃) 다음
 - 리더십/협업 에피소드 부족 → 인사담당자
 - 라운드 3 → 커피챗봇
 - So What 체인 모드 활성화 → C-Level (자동, 에이전트 선택 불필요)
+- 타임라인 갭 프로빙 필요 → 인사담당자 (갭 프로빙 모드)
+- 패턴에서 `target_agent` 지정됨 → 해당 에이전트 우선
 
 ### 유저 응답 처리
 
@@ -466,6 +468,51 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
    - **결과 저장**: resume-source.json의 해당 에피소드 result 필드를 직접 업데이트 (Bash tool로 전체 JSON 재저장)
    - **원본 보존**: accumulated_result의 초기값은 기존 result 텍스트. 심화 답변은 기존 result에 추가/통합되며, 기존 내용을 덮어쓰지 않는다
 
+6. **`[resume-panel:MEDIUM]` (timeline_gap_found)** → 갭 프로빙
+   - MEDIUM 메시지 내용에 "공백" + "개월"이 포함되어 있으면 타임라인 갭 finding으로 판단
+   - meta.json의 `intentional_gaps` 배열 확인 — 이미 스킵한 갭이면 무시하고 다음 메시지로
+   - HR 에이전트를 갭 프로빙 모드로 호출:
+     ```
+     Agent(
+       prompt: "갭 프로빙 모드. 공백: {from_company} {from_project} 종료({from_end}) ~ {to_company} {to_project} 시작({to_start}). {gap_months}개월 공백. 갭 유형: {gap_type}. 유저 프로파일: {프로파일 요약}. 리서처 조사: {관련 회사 조사 결과}."
+     )
+     ```
+   - HR 리턴을 AskUserQuestion으로 변환 (기존 변환 규칙 동일 적용)
+   - 유저 응답 처리:
+     - **"건너뛰기" 선택 시**:
+       - meta.json의 `intentional_gaps` 배열에 추가:
+         ```bash
+         # meta.json 읽기 → intentional_gaps에 추가 → 다시 쓰기
+         # { "from": "{from_end}", "to": "{to_start}", "marked_at": "{ISO timestamp}" }
+         ```
+       - 해당 갭에 대해 다시 질문하지 않음 — hook에서도 intentional_gaps를 확인하여 finding 재생성 방지
+       - 인터뷰 즉시 복귀
+     - **실질적 답변 시**:
+       - 답변에서 에피소드 추출하여 resume-source.json에 저장 (기존 저장 규칙 동일)
+       - HR 에이전트가 후속 질문 1-2개 더 할 수 있음 (일반 HR 모드로 전환)
+       - 후속 질문 완료 후 인터뷰 복귀
+   - **갭 프로빙 제한**: 한 세션에 최대 3개 갭까지만 프로빙. meta.json에 `gap_probes_this_session` 카운터로 추적. 초과 시 나머지 갭 finding은 무시.
+
+7. **`[resume-panel:MEDIUM]` (pattern_detected)** → 패턴 기반 에피소드 발굴
+   - MEDIUM 메시지 내용에 "패턴 발견"이 포함되어 있으면 패턴 finding으로 판단
+   - 대화 브리핑의 별도 섹션으로 포함:
+     ```
+     ## 대화 브리핑
+     - 유저가 지금까지 강조한 키워드/주제: [...]
+     - 이미 다룬 영역: [...]
+     - 아직 안 다룬 영역: [...]
+     - 유저의 직전 답변 요약: [...]
+     - **발견된 패턴**: {패턴 이름} — {근거 에피소드 요약}. {미탐색 회사 추정 또는 심화 방향}.
+     ```
+   - 패턴의 `target_agent` 필드에 지정된 에이전트를 다음 에이전트 선택 시 우선 고려
+   - `suggested_question`이 있으면 해당 에이전트 호출 시 컨텍스트에 포함:
+     ```
+     Agent(
+       prompt: "{기존 컨텍스트}. 패턴 분석에서 제안된 질문: '{suggested_question}'. 이 질문을 기반으로 에피소드를 발굴해줘."
+     )
+     ```
+   - 패턴 finding은 즉시 전달하지 않고 다음 에이전트 호출 시 자연스럽게 결합 (MEDIUM urgency 규칙 따름)
+
 ### 인터뷰 흐름 보호
 
 - HIGH 피드백이 와도 **현재 진행 중인 질문-답변 사이클은 완료**한 후 끼워넣기
@@ -474,6 +521,9 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
 - SO-WHAT 체인은 multi-turn이므로, 체인 완료까지 일반 인터뷰 플로우를 일시 중단한다. 체인 완료(거기까지였음 또는 Level 3 완료) 후 인터뷰를 재개한다
 - SO-WHAT과 프로파일러 메시지가 동시 도착하면 SO-WHAT을 먼저 처리한다 (체인 완료 후 프로파일러 백그라운드 실행)
 - so_what_active가 active인 동안 추가 SO-WHAT 메시지는 무시한다 (hook에서 이미 필터링하지만, 오케스트레이터에서도 이중 확인)
+- 갭 프로빙은 single-turn이므로 인터뷰 흐름을 크게 방해하지 않는다. 유저가 건너뛰기를 선택하면 즉시 복귀한다
+- 갭 프로빙과 SO-WHAT이 동시 도착하면 SO-WHAT을 먼저 처리한다 (체인 완료 후 갭 프로빙)
+- 갭 프로빙 제한(3개/세션)에 도달하면 나머지 갭 finding은 조용히 무시한다
 
 ## 저장
 
