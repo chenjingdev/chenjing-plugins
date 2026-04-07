@@ -397,7 +397,7 @@ Level 2 답변을 참조하여 비즈니스 임팩트 수치를 묻는 질문을
 
 **Recommendation:** During implementation, verify the actual resume-source.json structure and align the hook code accordingly. The existing `countEpisodes()` function in episode-watcher.mjs uses `source.projects` -- if this is correct (i.e., the actual data uses flat projects), then So What detection should follow the same pattern. If SKILL.md's `companies[]` nesting is the truth, then the existing `countEpisodes()` may also be wrong.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Episode identification across hook calls**
    - What we know: The hook receives the full resume-source.json and a snapshot of the previous state. It can compute episode count deltas.
