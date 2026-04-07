@@ -60,11 +60,11 @@ Plans:
   2. 심화 질문이 최대 3단계(액션 -> 직접 결과 -> 비즈니스 임팩트)로 점진적으로 깊어진다
   3. 이미 수치나 비즈니스 임팩트가 포함된 에피소드는 So What 체인이 자동으로 건너뛰어진다
   4. 심화된 결과가 resume-source.json의 해당 에피소드 result 필드에 반영된다
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 03-01: TBD
-- [ ] 03-02: TBD
+- [ ] 03-01-PLAN.md — hasQuantifiedImpact() + SO-WHAT 트리거 로직 (TDD)
+- [ ] 03-02-PLAN.md — C-Level So What 체인 모드 + SKILL.md 오케스트레이션 규칙
 
 **UI hint**: yes
 
