@@ -1,0 +1,110 @@
+# Requirements: Resume Panel Interview Enhancement
+
+**Defined:** 2026-04-07
+**Core Value:** 인터뷰를 통해 유저 본인도 몰랐던 숨은 에피소드와 비즈니스 임팩트를 발굴하여, 이력서 품질을 근본적으로 높인다.
+
+## v1 Requirements
+
+### UX Foundation
+
+- [ ] **UX-01**: 모든 에이전트 질문이 AskUserQuestion 셀렉트 박스로 렌더링됨
+- [ ] **UX-02**: 에이전트가 질문당 최대 5개 옵션을 재량껏 구성함
+- [ ] **UX-03**: 모든 질문에 직접입력 가능한 빈 셀렉트 옵션이 포함됨
+
+### Impact Deepening (So What Chain)
+
+- [ ] **IMPACT-01**: 에피소드 저장 시 임팩트 심화 후속 질문이 자동 트리거됨
+- [ ] **IMPACT-02**: 최대 3단계 깊이로 파고들음 (액션 → 직접 결과 → 비즈니스 임팩트)
+- [ ] **IMPACT-03**: 이미 충분히 구체적인 에피소드는 So What 체인을 건너뜀
+
+### Timeline Analysis
+
+- [ ] **TIME-01**: resume-source.json의 회사/프로젝트 기간 데이터로 타임라인 구성
+- [ ] **TIME-02**: 3개월 이상 빈 구간 자동 탐지 및 프로빙 질문 생성
+- [ ] **TIME-03**: 민감한 공백기에 대해 "건너뛰기" 옵션 제공
+
+### Pattern Detection
+
+- [ ] **PTRN-01**: 에피소드 3개 이상 수집 시 크로스 컴퍼니 패턴 분석 실행
+- [ ] **PTRN-02**: 탐지된 패턴을 가설로 제시하여 숨은 에피소드 발굴 유도
+- [ ] **PTRN-03**: 패턴 결과가 Conversation Briefing에 포함되어 후속 에이전트에 전달
+
+### Perspective Shifting
+
+- [ ] **PERSP-01**: 리더십/협업 에피소드에서 타인 시점(PM, 주니어, 상사, 외부) 질문 자동 생성
+- [ ] **PERSP-02**: 관점 전환 질문이 구체적 장면 묘사를 포함 (추상적 질문 금지)
+- [ ] **PERSP-03**: 프로파일러 패턴 데이터와 연동하여 전략적으로 트리거
+
+### Contradiction Detection
+
+- [ ] **CONTR-01**: 인터뷰 전체에 걸쳐 역할/기여도 관련 클레임 추적
+- [ ] **CONTR-02**: 모순 발견 시 비난이 아닌 연결 톤으로 제시 ("앞뒤가 안 맞는데" ✗ → "아까 이야기랑 연결해보면..." ✓)
+- [ ] **CONTR-03**: False positive 최소화를 위해 컨텍스트(회사/프로젝트/기간) 기반 스코핑
+
+### Profiler Frequency
+
+- [ ] **PROF-01**: 이벤트별 가중치 기반 프로파일러 트리거 시스템 (단순 에피소드 갯수 카운트 대체)
+- [ ] **PROF-02**: 가중치 테이블 — 에피소드 저장(+1), 새 회사 추가(+3), result 비어있음(+2), 역할 축소 신호(+2), 메타 변경(+2)
+- [ ] **PROF-03**: 임계값 5점 도달 시 프로파일러 호출 후 점수 리셋
+
+## v2 Requirements
+
+### Multi-JD Generation
+
+- **MULTI-01**: 한 번 인터뷰로 수집된 에피소드 뱅크에서 여러 JD 맞춤 이력서 생성
+- **MULTI-02**: JD별 에피소드 필터링 및 우선순위 정렬
+
+### Mock Interview
+
+- **MOCK-01**: 수집된 에피소드 기반 모의 면접 모드
+- **MOCK-02**: 면접 예상 질문 생성 및 답변 피드백
+
+### Career Narrative
+
+- **NAR-01**: 패턴 발견 기반 이력서 상단 커리어 내러티브 자동 생성
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| 실시간 면접 코파일럿 | Final Round AI 등 기존 도구가 우위, 아키텍처가 완전히 다름 |
+| STAR 답변 점수/등급 매기기 | Score My Interview가 이미 13차원 루브릭 보유, 우리 목적은 추출 |
+| 범용 AI 커리어 상담 | JD 타겟 이력서라는 포커스 유지 |
+| 영상/음성 모의 면접 | CLI 기반 텍스트 인터뷰가 더 깊은 추출에 적합 |
+| 감정 검증/칭찬 (cheerleading) | SKILL.md에서 명시적으로 금지됨, 유저 피드백에서 역효과 확인 |
+| 새로운 에이전트 추가 | 기존 9개 에이전트에 기능 통합 방식으로 진행 |
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| UX-01 | TBD | Pending |
+| UX-02 | TBD | Pending |
+| UX-03 | TBD | Pending |
+| IMPACT-01 | TBD | Pending |
+| IMPACT-02 | TBD | Pending |
+| IMPACT-03 | TBD | Pending |
+| TIME-01 | TBD | Pending |
+| TIME-02 | TBD | Pending |
+| TIME-03 | TBD | Pending |
+| PTRN-01 | TBD | Pending |
+| PTRN-02 | TBD | Pending |
+| PTRN-03 | TBD | Pending |
+| PERSP-01 | TBD | Pending |
+| PERSP-02 | TBD | Pending |
+| PERSP-03 | TBD | Pending |
+| CONTR-01 | TBD | Pending |
+| CONTR-02 | TBD | Pending |
+| CONTR-03 | TBD | Pending |
+| PROF-01 | TBD | Pending |
+| PROF-02 | TBD | Pending |
+| PROF-03 | TBD | Pending |
+
+**Coverage:**
+- v1 requirements: 21 total
+- Mapped to phases: 0
+- Unmapped: 21 ⚠️
+
+---
+*Requirements defined: 2026-04-07*
+*Last updated: 2026-04-07 after initial definition*
