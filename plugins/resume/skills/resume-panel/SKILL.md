@@ -166,6 +166,7 @@ AskUserQuestion 호출이 실패하면 (빈 응답, 에러, 타임아웃) 다음
 - So What 체인 모드 활성화 → C-Level (자동, 에이전트 선택 불필요)
 - 타임라인 갭 프로빙 필요 → 인사담당자 (갭 프로빙 모드)
 - 패턴에서 `target_agent` 지정됨 → 해당 에이전트 우선
+- 관점 전환 finding에서 `target_agent` 지정됨 → 해당 에이전트 관점 전환 모드로 호출
 
 ### 유저 응답 처리
 
@@ -513,6 +514,22 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
      ```
    - 패턴 finding은 즉시 전달하지 않고 다음 에이전트 호출 시 자연스럽게 결합 (MEDIUM urgency 규칙 따름)
 
+8. **`[resume-panel:MEDIUM]` (perspective_shift)** → 관점 전환 질문
+   - MEDIUM 메시지 내용에 "관점 전환"이 포함되어 있으면 perspective_shift finding으로 판단
+   - meta.json의 `perspective_shifts_this_session` 카운터 확인 — 2 이상이면 무시
+   - meta.json의 `perspective_shifted_episodes` 배열 확인 — 해당 episode_ref가 이미 있으면 무시
+   - context에서 target_agent 확인 — 해당 에이전트를 관점 전환 모드로 호출:
+     ```
+     Agent(
+       prompt: "관점 전환 모드. 대상 에피소드: {episode_ref}({company} {project}). 관점: {target_perspective}. 장면 힌트: {scene_hint}. 유저 프로파일: {프로파일 요약}. 리서처 조사: {관련 회사 조사 결과}."
+     )
+     ```
+   - 에이전트 리턴을 AskUserQuestion으로 변환 (기존 변환 규칙 동일 적용)
+   - 유저 응답 처리:
+     - **겸손 옵션 선택** ("특별히 없었을 듯", "딱히 그런 인상은 없었을 듯" 등): meta.json에 `perspective_shifted_episodes` 배열에 episode_ref 추가, 인터뷰 복귀
+     - **업그레이드 역할 선택**: 해당 에피소드의 result 보강을 위한 후속 질문 1개 가능 (일반 모드로 전환), meta.json에 `perspective_shifted_episodes` 배열에 episode_ref 추가
+   - meta.json `perspective_shifts_this_session` 카운터 증가
+
 ### 인터뷰 흐름 보호
 
 - HIGH 피드백이 와도 **현재 진행 중인 질문-답변 사이클은 완료**한 후 끼워넣기
@@ -524,6 +541,9 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
 - 갭 프로빙은 single-turn이므로 인터뷰 흐름을 크게 방해하지 않는다. 유저가 건너뛰기를 선택하면 즉시 복귀한다
 - 갭 프로빙과 SO-WHAT이 동시 도착하면 SO-WHAT을 먼저 처리한다 (체인 완료 후 갭 프로빙)
 - 갭 프로빙 제한(3개/세션)에 도달하면 나머지 갭 finding은 조용히 무시한다
+- 관점 전환은 single-turn이므로 인터뷰 흐름을 크게 방해하지 않는다. 유저가 겸손 옵션을 선택하면 즉시 복귀한다
+- 관점 전환과 SO-WHAT이 동시 도착하면 SO-WHAT을 먼저 처리한다 (체인 완료 후 관점 전환)
+- 관점 전환 제한(2개/세션)에 도달하면 나머지 관점 전환 finding은 조용히 무시한다
 
 ## 저장
 
