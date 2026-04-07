@@ -1,8 +1,8 @@
 ---
 phase: 4
 slug: profiler-analysis-timeline-pattern
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-04-08
 ---
@@ -17,20 +17,20 @@ created: 2026-04-08
 
 | Property | Value |
 |----------|-------|
-| **Framework** | Manual verification via Claude Code plugin system |
-| **Config file** | none — Claude Code plugin (prompt-based, no test runner) |
-| **Quick run command** | `node -e "require('./episode-watcher.mjs')"` (syntax check) |
-| **Full suite command** | Manual: run resume-panel interview and verify profiler triggers |
-| **Estimated runtime** | ~30 seconds (syntax), ~5 min (manual) |
+| **Framework** | Node.js built-in assert (no external test runner) |
+| **Config file** | none — test file is self-contained |
+| **Quick run command** | `node plugins/resume/scripts/test-episode-watcher.mjs` |
+| **Full suite command** | `node plugins/resume/scripts/test-episode-watcher.mjs` |
+| **Estimated runtime** | ~5 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run syntax check on modified files
-- **After every plan wave:** Verify SKILL.md prompt parsing and agent prompt structure
-- **Before `/gsd-verify-work`:** Full manual interview flow test
-- **Max feedback latency:** 30 seconds
+- **After every task commit:** `node plugins/resume/scripts/test-episode-watcher.mjs`
+- **After every plan wave:** `node plugins/resume/scripts/test-episode-watcher.mjs`
+- **Before `/gsd-verify-work`:** Full suite green
+- **Max feedback latency:** 5 seconds
 
 ---
 
@@ -38,12 +38,11 @@ created: 2026-04-08
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 04-01-01 | 01 | 1 | TIME-01 | — | N/A | manual | Verify timeline construction from resume-source.json | ⬜ | ⬜ pending |
-| 04-01-02 | 01 | 1 | TIME-02 | — | N/A | manual | Verify gap detection for >3mo gaps | ⬜ | ⬜ pending |
-| 04-01-03 | 01 | 1 | TIME-03 | — | N/A | manual | Verify probing question with skip option | ⬜ | ⬜ pending |
-| 04-02-01 | 02 | 1 | PTRN-01 | — | N/A | manual | Verify cross-company pattern analysis | ⬜ | ⬜ pending |
-| 04-02-02 | 02 | 1 | PTRN-02 | — | N/A | manual | Verify pattern hypothesis presentation | ⬜ | ⬜ pending |
-| 04-02-03 | 02 | 1 | PTRN-03 | — | N/A | manual | Verify findings-inbox.jsonl output | ⬜ | ⬜ pending |
+| 01-T1 (RED) | 01 | 1 | TIME-01, TIME-02, PTRN-01 | — | N/A | unit | `node plugins/resume/scripts/test-episode-watcher.mjs 2>&1 \| tail -20` | Wave 0 | ⬜ pending |
+| 01-T2 (GREEN) | 01 | 1 | TIME-01, TIME-02, PTRN-01 | — | N/A | unit+integration | `node plugins/resume/scripts/test-episode-watcher.mjs` | Wave 0 | ⬜ pending |
+| 02-T1 (profiler.md) | 02 | 1 | PTRN-01, PTRN-02 | — | N/A | content | `grep -c "크로스 컴퍼니 패턴 분석" plugins/resume/.claude/agents/profiler.md` | ✅ | ⬜ pending |
+| 02-T2 (hr.md) | 02 | 1 | TIME-03 | — | N/A | content | `grep -c "갭 프로빙 모드" plugins/resume/.claude/agents/hr.md` | ✅ | ⬜ pending |
+| 03-T1 (SKILL.md) | 03 | 2 | TIME-02, TIME-03, PTRN-02, PTRN-03 | — | N/A | content | `grep -c "timeline_gap_found\|pattern_detected\|intentional_gap" plugins/resume/skills/resume-panel/SKILL.md` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -51,7 +50,13 @@ created: 2026-04-08
 
 ## Wave 0 Requirements
 
-Existing infrastructure covers all phase requirements. This is a prompt engineering phase — no test framework installation needed.
+- [ ] Timeline parsing unit tests (parsePeriod, toMonths, detectGaps) — covers TIME-01, TIME-02
+- [ ] Timeline integration test (gap finding triggers finding write) — covers TIME-02
+- [ ] Intentional gap prevention test — covers TIME-03
+- [ ] Pattern eligibility guard tests (episode count, company count) — covers PTRN-01
+- [ ] Update all existing tests to use `companies[].projects[]` schema — prerequisite for all new tests
+
+*Framework install: none needed (built-in Node.js assert)*
 
 ---
 
@@ -59,20 +64,18 @@ Existing infrastructure covers all phase requirements. This is a prompt engineer
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Timeline gap detection | TIME-01, TIME-02 | Requires resume-source.json with real period data | Create test data with known gaps, run profiler, verify gaps detected |
-| Probing question generation | TIME-03 | LLM output quality check | Verify questions are specific and include skip option |
-| Cross-company pattern detection | PTRN-01, PTRN-02 | Requires multiple company episodes | Load 3+ episodes across companies, verify pattern output |
-| Findings inbox integration | PTRN-03 | End-to-end flow | Verify findings appear in conversation briefing |
+| Profiler pattern output quality | PTRN-02 | LLM output quality check | Run profiler with 3+ episodes across 2+ companies, verify pattern names and suggested questions are meaningful |
+| Gap probing conversation flow | TIME-03 | End-to-end UX flow | Trigger gap probing via HR agent, verify skip option works and intentional_gap is recorded |
 
 ---
 
 ## Validation Sign-Off
 
-- [ ] All tasks have automated verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 30s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify commands
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 5s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-04-08
