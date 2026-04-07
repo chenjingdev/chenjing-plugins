@@ -163,6 +163,7 @@ AskUserQuestion 호출이 실패하면 (빈 응답, 에러, 타임아웃) 다음
 - JD 갭이 보이거나 에피소드 평가 필요 → 채용담당자
 - 리더십/협업 에피소드 부족 → 인사담당자
 - 라운드 3 → 커피챗봇
+- So What 체인 모드 활성화 → C-Level (자동, 에이전트 선택 불필요)
 
 ### 유저 응답 처리
 
@@ -438,11 +439,41 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
 
 4. **LOW** — hook에서 전달하지 않음. 유저가 "분석해줘", "리뷰해줘" 요청 시 `.resume-panel/findings.json`을 Read해서 전달
 
+5. **`[resume-panel:SO-WHAT]`** -> 현재 질문-답변 사이클 완료 후 So What 체인 시작
+   - meta.json에 `so_what_active` 설정:
+     ```json
+     {
+       "so_what_active": {
+         "active": true,
+         "episode_title": "{메시지에서 추출한 에피소드 제목}",
+         "current_level": 1,
+         "accumulated_result": "{해당 에피소드의 기존 result 텍스트}"
+       }
+     }
+     ```
+   - C-Level을 So What 체인 모드로 호출 (level=1, 대상 에피소드 데이터 전달):
+     ```
+     Agent(
+       prompt: "So What 체인 모드. Level 1. 대상 에피소드: {title, situation, task, action, result}. 리서처 조사: {해당 회사}."
+     )
+     ```
+   - C-Level 리턴을 AskUserQuestion으로 변환 (기존 변환 규칙 동일 적용)
+   - 유저 응답 처리:
+     - **"거기까지였음" 선택**: accumulated_result를 에피소드 result에 저장, so_what_active를 null로, 인터뷰 복귀
+     - **실질적 답변**: accumulated_result에 추가, current_level 증가
+       - level < 3: C-Level 재호출 (다음 레벨, 이전 답변 포함)
+       - level = 3: C-Level에게 최종 결과 통합 요청 (accumulated_result + Level 3 답변을 하나의 coherent result로 합성), 합성된 결과를 에피소드 result에 저장, so_what_active를 null로, 인터뷰 복귀
+   - **결과 저장**: resume-source.json의 해당 에피소드 result 필드를 직접 업데이트 (Bash tool로 전체 JSON 재저장)
+   - **원본 보존**: accumulated_result의 초기값은 기존 result 텍스트. 심화 답변은 기존 result에 추가/통합되며, 기존 내용을 덮어쓰지 않는다
+
 ### 인터뷰 흐름 보호
 
 - HIGH 피드백이 와도 **현재 진행 중인 질문-답변 사이클은 완료**한 후 끼워넣기
 - MEDIUM/LOW 피드백 때문에 인터뷰를 중단하지 않음
 - 피드백 전달 후 바로 다음 인터뷰 질문으로 복귀
+- SO-WHAT 체인은 multi-turn이므로, 체인 완료까지 일반 인터뷰 플로우를 일시 중단한다. 체인 완료(거기까지였음 또는 Level 3 완료) 후 인터뷰를 재개한다
+- SO-WHAT과 프로파일러 메시지가 동시 도착하면 SO-WHAT을 먼저 처리한다 (체인 완료 후 프로파일러 백그라운드 실행)
+- so_what_active가 active인 동안 추가 SO-WHAT 메시지는 무시한다 (hook에서 이미 필터링하지만, 오케스트레이터에서도 이중 확인)
 
 ## 저장
 
