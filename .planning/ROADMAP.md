@@ -110,8 +110,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — profiler.md claim 추적 + NLI 모순 탐지 섹션 추가
-- [ ] 06-02-PLAN.md — SKILL.md contradiction_detected 핸들러 + STAR 필드 업데이트
+- [x] 06-01-PLAN.md — profiler.md claim 추적 + NLI 모순 탐지 섹션 추가
+- [x] 06-02-PLAN.md — SKILL.md contradiction_detected 핸들러 + STAR 필드 업데이트
 
 ## Progress
 
