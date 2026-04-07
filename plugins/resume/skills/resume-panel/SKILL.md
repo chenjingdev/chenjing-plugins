@@ -136,6 +136,24 @@ questions: [{
 
 **주의: AskUserQuestion을 SKILL.md frontmatter의 `allowed-tools`에 절대 추가하지 않는다** (bug #29547 -- allowed-tools에 넣으면 빈 응답이 자동 완성됨).
 
+#### AskUserQuestion 폴백
+
+AskUserQuestion 호출이 실패하면 (빈 응답, 에러, 타임아웃) 다음 절차를 따른다:
+
+1. "셀렉트 박스 로딩에 문제가 생겼어요. 다시 시도할게요." 메시지 표시
+2. 동일 파라미터로 AskUserQuestion 재시도 (1회)
+3. 두 번째 시도도 실패하면:
+   - "텍스트로 답변해주세요." 메시지 표시
+   - 에이전트 원문 텍스트를 번호 선택지 포함하여 그대로 표시:
+     ```
+     [시니어] 질문 텍스트
+       1) 선택지1
+       2) 선택지2
+       3) 선택지3
+     번호를 입력하거나 자유롭게 답변해주세요.
+     ```
+   - 유저의 텍스트 입력을 번호 또는 자유 답변으로 처리 (기존 방식)
+
 ### 에이전트 선택 기준
 
 한 턴에 에이전트 1~2명만 호출한다. 관련 있는 에이전트만 선택:
@@ -383,12 +401,40 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
    ```
    호출 후 인터뷰를 중단하지 않고 계속 진행한다.
 
-2. **`[resume-panel:HIGH]`** → 현재 질문-답변 사이클 완료 후 유저에게 전달
-   - "아 그리고 방금 분석 결과가 나왔는데 — {내용}"
+2. **`[resume-panel:HIGH]`** → 현재 질문-답변 사이클 완료 후 AskUserQuestion으로 전달
+   - findings 내용을 메타 질문으로 감싸서 AskUserQuestion 호출:
+     ```
+     AskUserQuestion({
+       questions: [{
+         question: "프로파일러 분석 결과: {findings 내용 요약}. 어떻게 할래요?",
+         header: "분석 결과",
+         options: [
+           { label: "관련 경험 있음", description: "관련 경험이 있는데 아직 얘기 안 한 것" },
+           { label: "진짜 없음", description: "해당 경험이 정말 없음, 갭으로 기록" },
+           { label: "넘어가기", description: "이 피드백은 나중에 보기" }
+         ],
+         multiSelect: false
+       }]
+     })
+     ```
+   - findings의 구체적 내용에 맞게 options를 적절히 조정한다
    - 전달 후 바로 다음 인터뷰 질문으로 복귀
 
-3. **`[resume-panel:MEDIUM]`** → 현재 프로젝트/회사 에피소드 수집이 끝나면 전달
-   - "여기까지 정리하면서 리뷰 결과도 같이 볼게 — {내용}"
+3. **`[resume-panel:MEDIUM]`** → 현재 프로젝트/회사 에피소드 수집이 끝나면 AskUserQuestion으로 전달
+   - findings 내용을 다음 질문에 자연스럽게 결합:
+     ```
+     AskUserQuestion({
+       questions: [{
+         question: "여기까지 정리하면서 리뷰 결과도 같이 볼게 — {findings 요약}. 어떻게 할까?",
+         header: "리뷰 결과",
+         options: [
+           { label: "더 자세히", description: "이 부분에 대해 더 자세히 듣기" },
+           { label: "다음으로", description: "다음 주제로 넘어가기" }
+         ],
+         multiSelect: false
+       }]
+     })
+     ```
 
 4. **LOW** — hook에서 전달하지 않음. 유저가 "분석해줘", "리뷰해줘" 요청 시 `.resume-panel/findings.json`을 Read해서 전달
 
