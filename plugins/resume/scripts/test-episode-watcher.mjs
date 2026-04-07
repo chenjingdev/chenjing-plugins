@@ -132,7 +132,7 @@ const bashResumeInput = {
   tool_input: { command: "cat <<'EOF' > resume-source.json\n...\nEOF" },
 };
 
-// Test: 첫 실행 (스냅샷 없음) → 스냅샷만 저장, 트리거 안 함
+// Test: 첫 실행 (스냅샷 없음) → 스냅샷만 저장, profiler_score 초기화, 트리거 안 함
 {
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
@@ -148,85 +148,314 @@ const bashResumeInput = {
   assert.ok(existsSync(join(testBase, ".resume-panel", "snapshot.json")), "snapshot should be created");
   const snap = JSON.parse(readFileSync(join(testBase, ".resume-panel", "snapshot.json"), "utf-8"));
   assert.strictEqual(snap.episode_count, 2, "snapshot should have correct episode count");
-  console.log("PASS: first run creates snapshot without triggering");
+  // first run initializes profiler_score in meta.json
+  assert.ok(existsSync(join(testBase, ".resume-panel", "meta.json")), "meta.json should be created on first run");
+  const metaAfterFirst = JSON.parse(readFileSync(join(testBase, ".resume-panel", "meta.json"), "utf-8"));
+  assert.strictEqual(metaAfterFirst.profiler_score, 0, "first run should initialize profiler_score to 0");
+  console.log("PASS: first run creates snapshot and initializes profiler_score = 0");
 }
 
-// Test: 에피소드 +3 → 프로파일러 호출 필요
-{
-  const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
-  const snapshot = { episode_count: 2, project_names: ["프로젝트A"], meta_hash: correctHash };
-  const resumeSource = {
-    meta: { target_company: "코인원", target_position: "FE" },
-    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [{}, {}, {}, {}, {}] }],
-  };
-  setupTestDir(snapshot, resumeSource);
+// ── Scoring system tests ─────────────────────────────
 
-  const result = runWithBase(bashResumeInput);
-  assert.ok(result, "should produce output when delta >= 3");
-  const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("[resume-panel]"), "should have resume-panel tag");
-  assert.ok(ctx.includes("프로파일러"), "should mention profiler");
-  assert.ok(ctx.includes("에피소드 +3"), "should mention episode delta");
-  console.log("PASS: episode +3 triggers profiler");
+function readMeta() {
+  return JSON.parse(readFileSync(join(testBase, ".resume-panel", "meta.json"), "utf-8"));
 }
 
-// Test: 에피소드 +1 → 임계치 미달 → skip
+// Test: episode save +1 below threshold -> no trigger
 {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
-  const snapshot = { episode_count: 4, project_names: ["프로젝트A"], meta_hash: correctHash };
+  const snapshot = { episode_count: 2, project_names: ["프로젝트A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta = { profiler_score: 0 };
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
-    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [{}, {}, {}, {}, {}] }],
-  };
-  setupTestDir(snapshot, resumeSource);
-
-  const result = runWithBase(bashResumeInput);
-  assert.strictEqual(result, null, "episode +1 should not trigger");
-  console.log("PASS: episode +1 does not trigger");
-}
-
-// Test: 새 프로젝트 등장 → 트리거
-{
-  const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
-  const snapshot = { episode_count: 5, project_names: ["프로젝트A"], meta_hash: correctHash };
-  const resumeSource = {
-    meta: { target_company: "코인원", target_position: "FE" },
-    projects: [
-      { name: "프로젝트A", company: "튜닙", episodes: [{}, {}, {}, {}, {}] },
-      { name: "프로젝트B", company: "튜닙", episodes: [{}] },
-    ],
-  };
-  setupTestDir(snapshot, resumeSource);
-
-  const result = runWithBase(bashResumeInput);
-  assert.ok(result, "new project should trigger");
-  const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
-  console.log("PASS: new project triggers profiler");
-}
-
-// Test: 쿨다운 초과 (meta.json의 last_profiler_episode_count 대비 +5)
-{
-  const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
-  const snapshot = { episode_count: 9, project_names: ["프로젝트A"], meta_hash: correctHash };
-  const meta = { last_profiler_call: "2026-04-03T15:00:00Z", last_profiler_episode_count: 5, total_profiler_calls: 1 };
-  const resumeSource = {
-    meta: { target_company: "코인원", target_position: "FE" },
-    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [{},{},{},{},{},{},{},{},{},{}] }],
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+    ] }],
   };
   setupTestDir(snapshot, resumeSource, meta);
 
   const result = runWithBase(bashResumeInput);
-  assert.ok(result, "cooldown exceeded should trigger");
-  const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("쿨다운"), "should mention cooldown");
-  console.log("PASS: cooldown exceeded triggers profiler");
+  assert.strictEqual(result, null, "episode +1 with score=0 should not trigger (total=1, threshold=5)");
+  const metaAfter = readMeta();
+  assert.strictEqual(metaAfter.profiler_score, 1, "profiler_score should be 1 after +1 episode");
+  console.log("PASS: episode save +1 below threshold -> no trigger");
 }
 
-// Test: STAR 갭 카운팅
+// Test: score accumulates across calls
 {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
-  const snapshot = { episode_count: 0, project_names: ["A"], meta_hash: correctHash };
+
+  // Call 1: score=3, +1 episode -> total=4, no trigger
+  const snapshot1 = { episode_count: 2, project_names: ["프로젝트A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta1 = { profiler_score: 3 };
+  const resumeSource1 = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+    ] }],
+  };
+  setupTestDir(snapshot1, resumeSource1, meta1);
+  const result1 = runWithBase(bashResumeInput);
+  assert.strictEqual(result1, null, "score 3 + 1 = 4, should not trigger");
+  const metaAfter1 = readMeta();
+  assert.strictEqual(metaAfter1.profiler_score, 4, "profiler_score should accumulate to 4");
+
+  // Call 2: score=4, +1 episode -> total=5, TRIGGERS
+  const snapshot2 = { episode_count: 3, project_names: ["프로젝트A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta2 = { profiler_score: 4 };
+  const resumeSource2 = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+    ] }],
+  };
+  setupTestDir(snapshot2, resumeSource2, meta2);
+  const result2 = runWithBase(bashResumeInput);
+  assert.ok(result2, "score 4 + 1 = 5, should trigger");
+  const ctx2 = result2.hookSpecificOutput.additionalContext;
+  assert.ok(ctx2.includes("[resume-panel]"), "should have resume-panel tag");
+  assert.ok(ctx2.includes("프로파일러"), "should mention profiler");
+  assert.ok(ctx2.includes("score:"), "should include score in output");
+  const metaAfter2 = readMeta();
+  assert.strictEqual(metaAfter2.profiler_score, 0, "profiler_score should reset to 0 after trigger");
+  console.log("PASS: score accumulates across calls");
+}
+
+// Test: new company +3 score
+{
+  const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
+  const snapshot = { episode_count: 5, project_names: ["프로젝트A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta = { profiler_score: 2 };
+  const resumeSource = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [
+      { name: "프로젝트A", company: "튜닙", episodes: [
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      ] },
+      { name: "프로젝트B", company: "튜닙", episodes: [
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      ] },
+    ],
+  };
+  setupTestDir(snapshot, resumeSource, meta);
+
+  const result = runWithBase(bashResumeInput);
+  // score: 2 (existing) + 1 (episode delta) + 3 (new project) = 6 >= 5 -> trigger
+  assert.ok(result, "new company +3 should trigger when combined score >= 5");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes("[resume-panel]"), "should have resume-panel tag");
+  assert.ok(ctx.includes("프로파일러"), "should mention profiler");
+  assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
+  const metaAfter = readMeta();
+  assert.strictEqual(metaAfter.profiler_score, 0, "profiler_score should reset to 0 after trigger");
+  console.log("PASS: new company +3 score");
+}
+
+// Test: empty result +2 score (new star gaps)
+{
+  const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
+
+  // First call: score=1, +1 episode + +2 star gap = +3, total = 4, no trigger
+  const snapshot1 = { episode_count: 2, project_names: ["A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta1 = { profiler_score: 1 };
+  const resumeSource1 = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [{ name: "A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "", action: "a", result: "" } },  // incomplete = new star gap
+    ] }],
+  };
+  setupTestDir(snapshot1, resumeSource1, meta1);
+  const result1 = runWithBase(bashResumeInput);
+  assert.strictEqual(result1, null, "score 1 + 1(ep) + 2(gap) = 4, should not trigger");
+  const metaAfter1 = readMeta();
+  assert.strictEqual(metaAfter1.profiler_score, 4, "profiler_score should be 4");
+
+  // Second call: score=3, +1 episode + +2 star gap = +3, total = 6 >= 5, triggers
+  const snapshot2 = { episode_count: 2, project_names: ["A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta2 = { profiler_score: 3 };
+  const resumeSource2 = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [{ name: "A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "", action: "a", result: "" } },  // incomplete = star gap
+    ] }],
+  };
+  setupTestDir(snapshot2, resumeSource2, meta2);
+  const result2 = runWithBase(bashResumeInput);
+  assert.ok(result2, "score 3 + 1(ep) + 2(gap) = 6, should trigger");
+  const ctx2 = result2.hookSpecificOutput.additionalContext;
+  assert.ok(ctx2.includes("빈 STAR"), "should mention star gaps");
+  const metaAfter2 = readMeta();
+  assert.strictEqual(metaAfter2.profiler_score, 0, "profiler_score should reset to 0");
+  console.log("PASS: empty result +2 score");
+}
+
+// Test: role minimization signal +2 score (역할 축소 신호)
+{
+  const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
+
+  // Call 1: score=1, +1 episode + +2 minimization = 3, total=4, no trigger
+  const snapshot1 = { episode_count: 1, project_names: ["A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta1 = { profiler_score: 1 };
+  const resumeSource1 = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [{ name: "A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "기존 코드 분석", result: "r" } },
+      { star: { situation: "s", task: "t", action: "팀원에게 도움을 줬습니다", result: "r" } },
+    ] }],
+  };
+  setupTestDir(snapshot1, resumeSource1, meta1);
+  const result1 = runWithBase(bashResumeInput);
+  assert.strictEqual(result1, null, "score 1 + 1(ep) + 2(minimization) = 4, should not trigger");
+  const metaAfter1 = readMeta();
+  assert.strictEqual(metaAfter1.profiler_score, 4, "profiler_score should be 4");
+
+  // Call 2: score=3, +1 episode + +2 minimization = 3, total=6 >= 5, triggers
+  const snapshot2 = { episode_count: 1, project_names: ["A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta2 = { profiler_score: 3 };
+  const resumeSource2 = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [{ name: "A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "기존 코드 분석", result: "r" } },
+      { star: { situation: "s", task: "t", action: "프로젝트에 참여했습니다", result: "r" } },
+    ] }],
+  };
+  setupTestDir(snapshot2, resumeSource2, meta2);
+  const result2 = runWithBase(bashResumeInput);
+  assert.ok(result2, "score 3 + 1(ep) + 2(minimization) = 6, should trigger");
+  const ctx2 = result2.hookSpecificOutput.additionalContext;
+  assert.ok(ctx2.includes("역할 축소"), "should mention role minimization signal");
+  const metaAfter2 = readMeta();
+  assert.strictEqual(metaAfter2.profiler_score, 0, "profiler_score should reset to 0");
+  console.log("PASS: role minimization signal +2 score (도움, 참여, 지원, 보조, 서포트)");
+}
+
+// Test: meta change +2 score
+{
+  const oldHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
+  // new meta has different target -> different hash
+  const snapshot = { episode_count: 5, project_names: ["프로젝트A"], meta_hash: oldHash, star_gaps: 0 };
+  const meta = { profiler_score: 3 };
+  const resumeSource = {
+    meta: { target_company: "한섬", target_position: "PM" },  // changed from 코인원|FE
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+    ] }],
+  };
+  setupTestDir(snapshot, resumeSource, meta);
+
+  const result = runWithBase(bashResumeInput);
+  // score: 3 (existing) + 0 (no new episodes) + 2 (meta change) = 5, triggers
+  assert.ok(result, "meta change +2 should trigger when combined score >= 5");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes("meta 변경"), "should mention meta change");
+  const metaAfter = readMeta();
+  assert.strictEqual(metaAfter.profiler_score, 0, "profiler_score should reset to 0 after trigger");
+  console.log("PASS: meta change +2 score");
+}
+
+// Test: combined events: new company + meta change = immediate trigger
+{
+  const oldHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
+  const snapshot = { episode_count: 5, project_names: ["프로젝트A"], meta_hash: oldHash, star_gaps: 0 };
+  const meta = { profiler_score: 0 };
+  const resumeSource = {
+    meta: { target_company: "한섬", target_position: "PM" },  // meta changed
+    projects: [
+      { name: "프로젝트A", company: "튜닙", episodes: [
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      ] },
+      { name: "프로젝트B", company: "한섬", episodes: [
+        { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      ] },
+    ],
+  };
+  setupTestDir(snapshot, resumeSource, meta);
+
+  const result = runWithBase(bashResumeInput);
+  // score: 0 + 1 (episode) + 3 (new project) + 2 (meta change) = 6 >= 5, immediate trigger
+  assert.ok(result, "combined events should trigger immediately");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes("[resume-panel]"), "should have resume-panel tag");
+  assert.ok(ctx.includes("프로파일러"), "should mention profiler");
+  assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
+  assert.ok(ctx.includes("meta 변경"), "should mention meta change");
+  const metaAfter = readMeta();
+  assert.strictEqual(metaAfter.profiler_score, 0, "profiler_score should reset to 0");
+  console.log("PASS: combined events: new company + meta change = immediate trigger");
+}
+
+// Test: score resets to 0 after trigger, next call starts fresh
+{
+  const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
+
+  // First: trigger (score reaches 5)
+  const snapshot1 = { episode_count: 4, project_names: ["프로젝트A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta1 = { profiler_score: 4 };
+  const resumeSource1 = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+    ] }],
+  };
+  setupTestDir(snapshot1, resumeSource1, meta1);
+  const result1 = runWithBase(bashResumeInput);
+  assert.ok(result1, "should trigger (score 4 + 1 = 5)");
+  const metaAfterTrigger = readMeta();
+  assert.strictEqual(metaAfterTrigger.profiler_score, 0, "profiler_score should be 0 after trigger");
+
+  // Second: +1 episode from fresh, should NOT trigger
+  const snapAfterTrigger = JSON.parse(readFileSync(join(testBase, ".resume-panel", "snapshot.json"), "utf-8"));
+  const resumeSource2 = {
+    meta: { target_company: "코인원", target_position: "FE" },
+    projects: [{ name: "프로젝트A", company: "튜닙", episodes: [
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+      { star: { situation: "s", task: "t", action: "a", result: "r" } },
+    ] }],
+  };
+  writeFileSync(join(testBase, "resume-source.json"), JSON.stringify(resumeSource2));
+  const result2 = runWithBase(bashResumeInput);
+  assert.strictEqual(result2, null, "after reset, +1 episode should NOT trigger");
+  const metaAfterFresh = readMeta();
+  assert.strictEqual(metaAfterFresh.profiler_score, 1, "profiler_score should be 1 after fresh +1");
+  console.log("PASS: score resets to 0 after trigger, next call starts fresh");
+}
+
+// Test: STAR 갭 카운팅 (in scoring context)
+{
+  const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
+  const snapshot = { episode_count: 0, project_names: ["A"], meta_hash: correctHash, star_gaps: 0 };
+  const meta = { profiler_score: 0 };
   const resumeSource = {
     meta: { target_company: "코인원", target_position: "FE" },
     projects: [{
@@ -239,18 +468,19 @@ const bashResumeInput = {
       ],
     }],
   };
-  setupTestDir(snapshot, resumeSource);
+  setupTestDir(snapshot, resumeSource, meta);
 
   const result = runWithBase(bashResumeInput);
-  assert.ok(result, "should trigger (episode +3)");
+  // score: 0 + 3(episodes) + 2(star gap increase) = 5 >= 5, triggers
+  assert.ok(result, "should trigger with episode delta + star gaps");
   const ctx = result.hookSpecificOutput.additionalContext;
   assert.ok(ctx.includes("빈 STAR 2개"), "should count 2 episodes with incomplete STAR");
-  console.log("PASS: STAR gap counting works");
+  console.log("PASS: STAR gap counting in scoring context");
 }
 
 // Cleanup
 rmSync(testBase, { recursive: true, force: true });
-console.log("\nAll delta detection tests passed.");
+console.log("\nAll scoring system tests passed.");
 
 // ── findings 라우팅 테스트 ──────────────────────────
 
