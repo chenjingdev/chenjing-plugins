@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-04-08T00:34:10.050Z"
+last_updated: "2026-04-08T00:49:02.854Z"
 last_activity: 2026-04-08
 progress:
   total_phases: 6
@@ -80,7 +80,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Resume Panel UX 버그/흐름 개선
+- Resume Panel UX 흐름 개선
   File: `.planning/todos/pending/2026-04-08-resume-panel-ux.md`
 
 ### Blockers/Concerns
