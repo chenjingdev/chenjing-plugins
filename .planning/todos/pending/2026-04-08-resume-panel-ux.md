@@ -1,18 +1,19 @@
 ---
 created: 2026-04-08T00:34:10.050Z
-title: Resume Panel 실사용 UX 피드백 반영
+title: Resume Panel UX 버그/흐름 개선
 area: general
 files:
   - plugins/resume/skills/resume-panel/SKILL.md:72
-  - plugins/resume/skills/resume-panel/SKILL.md:224
-  - plugins/resume/.claude/agents/researcher.md:16
+  - plugins/resume/skills/resume-panel/SKILL.md:322
+  - plugins/resume/.claude/agents/researcher.md:8
   - plugins/resume/.claude/agents/senior.md:45
+  - plugins/resume/scripts/episode-watcher.mjs:360
   - docs/HISTORY.md:11
 ---
 
 ## Problem
 
-실사용 테스트 중 다음 이슈가 반복적으로 드러났다.
+실사용 테스트 중 다음 이슈가 반복적으로 드러났다. 공통적으로 인터뷰 흐름이 끊기거나, 리서치 비용이 과도하거나, 질문 UI가 실제 사용 패턴을 따라가지 못하는 문제가 있다.
 
 1. 이력서 자료를 "없음"으로 시작했을 때 직군 질문이 개발 직군 위주로 수렴한다. 채팅 이력 기반 개인화라기보다 프롬프트/예시 편향 가능성이 크며, 비개발 직군 사용자를 배제하는 인상을 준다.
 2. 회사명/기간 입력 후 리서처 결과를 기다리는 동안 약 2분 가까이 멈춘 것처럼 보이는 구간이 있다. 사용자는 입력 반영 여부와 남은 시간을 알 수 없고, 대기 중에도 수집 가능한 정보가 놀고 있다.

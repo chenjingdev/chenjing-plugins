@@ -80,7 +80,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- Resume Panel 실사용 UX 피드백 반영
+- Resume Panel UX 버그/흐름 개선
   File: `.planning/todos/pending/2026-04-08-resume-panel-ux.md`
 
 ### Blockers/Concerns
