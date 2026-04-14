@@ -855,7 +855,8 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
               "situation": "",
               "task": "",
               "action": "",
-              "result": ""
+              "result": "",
+              "context_notes": ""
             }
           ]
         }
@@ -887,10 +888,83 @@ PostToolUse hook(episode-watcher.mjs)이 `additionalContext`를 통해 메시지
 
 ### 저장 방법
 
-Bash tool로 cat heredoc을 사용한다 (Write tool 대신 토큰 절약):
+**원칙: 부분 업데이트 우선 (5.1)**
+
+resume-source.json이 커질수록 (에피소드 10개 이상) 전체 재저장은 토큰 낭비가 심하다. 다음 우선순위로 저장한다:
+
+**1순위 — 부분 업데이트 (jq)**: 에피소드 1개 추가/수정, STAR 필드 수정, context_notes 수정 같은 작은 변경은 `jq`로 in-place 수정:
+
+```bash
+# 에피소드 추가
+jq --argjson ep '{"type":"성과","title":"...","situation":"...","task":"...","action":"...","result":"...","context_notes":""}' \
+  '(.companies[] | select(.name=="{회사명}") | .projects[] | select(.name=="{프로젝트명}") | .episodes) += [$ep]' \
+  ./resume-source.json > ./resume-source.json.tmp && mv ./resume-source.json.tmp ./resume-source.json
+
+# 특정 에피소드의 result 필드만 수정
+jq '(.companies[] | select(.name=="{회사명}") | .projects[] | select(.name=="{프로젝트명}") | .episodes[] | select(.title=="{에피소드 제목}") | .result) = "{새 내용}"' \
+  ./resume-source.json > ./resume-source.json.tmp && mv ./resume-source.json.tmp ./resume-source.json
+
+# context_notes 추가/수정 (5.3)
+jq '(.companies[] | select(.name=="{회사명}") | .projects[] | select(.name=="{프로젝트명}") | .episodes[] | select(.title=="{에피소드 제목}") | .context_notes) = "{메타 정보}"' \
+  ./resume-source.json > ./resume-source.json.tmp && mv ./resume-source.json.tmp ./resume-source.json
+
+# gap_analysis 섹션 교체
+jq --argjson ga '{"met":[...],"gaps":[...]}' '.gap_analysis = $ga' \
+  ./resume-source.json > ./resume-source.json.tmp && mv ./resume-source.json.tmp ./resume-source.json
+```
+
+**jq 사용 시 주의:**
+- 항상 `.tmp` → `mv` 패턴 사용 (in-place redirect는 빈 파일 만들 수 있음)
+- 업데이트 후 파일 크기를 간단히 검증 (`wc -c`)하여 비정상 축소 감지
+- 에러 시 즉시 heredoc 전체 재저장으로 폴백
+
+**2순위 — heredoc 전체 재저장**: 스키마 변경, 여러 필드 동시 수정, 초기 생성 시에만 사용:
 
 ```bash
 cat <<'EOF' > ./resume-source.json
 { ... 전체 JSON ... }
 EOF
 ```
+
+**금지:**
+- 에피소드 10개 초과 상태에서 에피소드 1개 추가에 heredoc 전체 재저장 사용 금지 — 토큰 낭비
+- Write tool 사용 금지 (Bash가 항상 우선)
+
+### context_notes 활용 (5.3)
+
+`context_notes` 필드는 에피소드의 STAR 외적 메타 정보를 저장한다. 다음 턴이나 다음 세션에서 컨텍스트 복원에 사용.
+
+**저장 대상:**
+- 유저가 처음 답변했을 때의 자기평가 (예: "처음엔 '고객 관점 부족'이라고 했으나, 재프로빙 후 정기 모니터링 수행 확인")
+- 관점 전환/모순 복원의 배경 (예: "인사담당자 재질문 후 주니어 온보딩 담당 확인")
+- 유저가 이 에피소드에 대해 특별히 강조한 주제나 뉘앙스
+- 재프로빙이 있었던 경우 원답변과 보정된 답변의 차이
+
+**금지:**
+- STAR 필드를 context_notes에 중복 저장 금지 — 메타 정보만
+- 빈 context_notes로 쓰지 않음 (값이 없으면 jq 업데이트 생략)
+
+### resume-draft.md 변경 diff 자동 표시 (5.2)
+
+resume-draft.md 또는 resume-draft-jobkorea.md를 업데이트할 때, **기존 파일이 있으면 덮어쓰기 전에** 변경 내역 요약을 자동 표시한다.
+
+**절차:**
+
+1. 기존 파일 존재 확인 (`test -f ./resume-draft.md`)
+2. 존재하면 임시 파일에 새 버전 쓰기 (`./resume-draft.md.new`)
+3. `diff` 또는 `git diff --no-index` 로 변경 추출:
+   ```bash
+   diff -u ./resume-draft.md ./resume-draft.md.new | head -100
+   ```
+4. 변경 요약을 유저에게 평문으로 표시 (섹션별 변경 라인 수):
+   ```
+   📝 resume-draft.md 업데이트:
+   - 간략소개: +2 / -1 줄
+   - 경력/튜닙: +3 bullet 추가
+   - 갭 분석: 변경 없음
+   ```
+5. `mv ./resume-draft.md.new ./resume-draft.md`로 교체
+6. 기존 파일이 없으면 diff 없이 신규 생성 알림만
+
+**git 저장소가 있으면 추가로:**
+- 변경 후 `git add ./resume-draft.md && git status --short` 정도만 실행하여 working tree 상태 알림 (자동 커밋은 안 함 — 유저 명시적 요청 시에만)
