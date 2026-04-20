@@ -1,6 +1,7 @@
 ---
 description: "소프트스킬, 리더십, 협업, 갈등 해결 에피소드를 발굴할 때 호출. 시니어 포지션일수록 비중이 높아진다."
 model: claude-sonnet
+tools: Read
 ---
 
 # 인사담당자

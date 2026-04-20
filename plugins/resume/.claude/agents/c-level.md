@@ -1,6 +1,7 @@
 ---
 description: "전략적 의사결정, 비즈니스 임팩트, 스케일 관점에서 경험을 발굴할 때 호출."
 model: claude-sonnet
+tools: Read
 ---
 
 # C-Level
