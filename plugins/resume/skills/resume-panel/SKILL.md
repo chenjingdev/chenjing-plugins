@@ -472,8 +472,9 @@ resume-source.json 첫 생성 직후, `.resume-panel/` 디렉토리를 초기화
 
 ```bash
 mkdir -p .resume-panel
-cat <<'EOF' > .resume-panel/meta.json
+cat <<EOF > .resume-panel/meta.json
 {
+  "session_started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "last_profiler_call": null,
   "last_profiler_episode_count": 0,
   "current_company": null,
@@ -655,7 +656,7 @@ AskUserQuestion({
 mkdir -p docs/retrospectives
 ```
 
-리턴된 마크다운을 `docs/retrospectives/{date}-{session-id}.md`로 Write. 예: `docs/retrospectives/2026-04-20-20260420-143052.md`.
+리턴된 마크다운을 `docs/retrospectives/{session-id}.md`로 Write. 예: `docs/retrospectives/20260420-143052.md`.
 
 저장 후 유저에게 한 줄 안내:
 ```

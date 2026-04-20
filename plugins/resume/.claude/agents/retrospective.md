@@ -13,9 +13,10 @@ tools: Read, Glob
 오케스트레이터가 다음을 전달한다:
 
 - **세션 대화 요약**: 라운드별 주요 turn (오케스트레이터가 정리한 텍스트). 어떤 에이전트가 어떤 질문을 했고, 유저가 어떻게 답했는지 포함.
-- **`.resume-panel/findings.json` 내용**: 미해결 finding 목록 + urgency
+- **`.resume-panel/findings.json`**: 파일 경로만 전달받고 에이전트가 직접 Read한다 (전체 finding 목록 + urgency)
+- **`.resume-panel/meta.json`**: 파일 경로 전달받고 직접 Read (세션 메타데이터용)
 - **`resume-source.json`의 episodes 요약**: 회사/프로젝트별 에피소드 개수, STAR 충실도
-- **세션 메타데이터**: 시작 시각, 종료 시각, 라운드별 소요 turn 수
+- **세션 메타데이터 (오케스트레이터 직접 전달)**: 종료 시각(현재 시각), 라운드별 turn 수. 시작 시각은 meta.json의 `session_started_at` 필드에서 에이전트가 직접 읽는다.
 
 ## 분석 항목 (5개 모두 출력)
 
@@ -34,7 +35,8 @@ tools: Read, Glob
 
 ### 3. 미해결 findings (HIGH/MEDIUM)
 
-- `findings.json`에서 status가 `pending` 또는 `presented` 상태에서 해결 안 된 항목
+- `findings.json`에서 `delivered: false` 상태로 유저에게 전달되지 않고 남은 항목 (최우선 미해결)
+- 또는 `delivered: true`로 제시됐지만 세션 중 해결되지 않은 항목 (대화 요약에서 해결 여부 판단)
 - 각 finding의 type (pattern_detected / contradiction_detected / timeline_gap_found / impact_shallow), 발견 시각, 마지막 액션
 - 다음 세션에서 우선 처리할 항목 추천
 
