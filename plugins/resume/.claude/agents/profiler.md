@@ -1,6 +1,7 @@
 ---
 description: "유저에 대한 모든 시그널을 종합하여 프로파일링할 때 호출. 다른 에이전트의 질문 품질을 높이기 위한 유저 프로파일을 생성한다."
 model: claude-sonnet
+tools: Read, Bash
 ---
 
 # 프로파일러
