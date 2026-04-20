@@ -633,6 +633,35 @@ AskUserQuestion({
 - 잡코리아형만: `resume-draft-jobkorea.md`
 - 둘 다: 두 파일 모두 생성
 
+**9. 회고 분석 호출**
+
+`retrospective` 에이전트를 호출한다. 다음 컨텍스트를 함께 전달:
+
+- 세션 대화 요약 (오케스트레이터가 라운드별 주요 turn을 정리한 텍스트)
+- `.resume-panel/findings.json` 전체 내용
+- `resume-source.json`의 episodes 요약 (회사별 개수, STAR 충실도)
+- 세션 메타데이터:
+  - 시작 시각: `.resume-panel/meta.json` 또는 첫 turn 시각
+  - 종료 시각: 현재 시각
+  - 라운드별 turn 수: 오케스트레이터가 카운트
+
+리턴값은 마크다운 텍스트.
+
+**10. 회고 파일 저장 + 안내**
+
+세션 ID 생성: `YYYYMMDD-HHMMSS` 형식 (예: `20260420-143052`).
+
+```bash
+mkdir -p docs/retrospectives
+```
+
+리턴된 마크다운을 `docs/retrospectives/{date}-{session-id}.md`로 Write. 예: `docs/retrospectives/2026-04-20-20260420-143052.md`.
+
+저장 후 유저에게 한 줄 안내:
+```
+세션 회고를 docs/retrospectives/{filename}.md에 저장했어. 다음 세션 시작 전에 한 번 훑어봐.
+```
+
 ### 포맷 템플릿
 
 **자유양식** (`resume-draft.md`):
