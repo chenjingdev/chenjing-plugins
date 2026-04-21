@@ -22,27 +22,6 @@ try {
 const toolName = input.tool_name;
 const toolInput = input.tool_input || {};
 
-// ── 파일 경로 추출 ──────────────────────────────────
-let targetPath = "";
-if (toolName === "Write" || toolName === "Edit") {
-  targetPath = toolInput.file_path || "";
-} else if (toolName === "Bash") {
-  const cmd = toolInput.command || "";
-  if (cmd.includes("resume-source.json")) {
-    targetPath = "resume-source.json";
-  } else if (cmd.includes(".resume-panel/") || cmd.includes(".resume-panel\\")) {
-    targetPath = ".resume-panel/";
-  }
-}
-
-// ── self-trigger 방지 ───────────────────────────────
-if (targetPath.includes(".resume-panel/") || targetPath.includes(".resume-panel\\")) {
-  process.exit(0);
-}
-
-// ── resume-source.json 변경 여부 ────────────────────
-const isResumeSourceChange = targetPath.includes("resume-source.json");
-
 // ── 경로 상수 ────────────────────────────────────────
 const base = process.env.RESUME_PANEL_BASE || input.cwd || process.cwd();
 const stateDir = join(base, ".resume-panel");
@@ -52,6 +31,106 @@ const sourcePath = join(base, "resume-source.json");
 const inboxPath = join(stateDir, "findings-inbox.jsonl");
 const processingPath = join(stateDir, "findings-inbox.processing.jsonl");
 const findingsPath = join(stateDir, "findings.json");
+
+// ── 파일 경로 추출 ──────────────────────────────────
+let targetPath = "";
+if (toolName === "Write" || toolName === "Edit") {
+  targetPath = toolInput.file_path || "";
+} else if (toolName === "Bash") {
+  const cmd = toolInput.command || "";
+  if (cmd.includes("resume-source.json")) {
+    targetPath = "resume-source.json";
+  } else if (cmd.includes("round-transition.json")) {
+    targetPath = "round-transition";
+  } else if (cmd.includes("session-end.json")) {
+    targetPath = "session-end";
+  } else if (cmd.includes(".resume-panel/") || cmd.includes(".resume-panel\\")) {
+    targetPath = ".resume-panel/";
+  }
+}
+
+// ── self-trigger 방지 (round-transition/session-end 시그널은 예외) ─
+if ((targetPath.includes(".resume-panel/") || targetPath.includes(".resume-panel\\")) &&
+    targetPath !== "round-transition" && targetPath !== "session-end") {
+  process.exit(0);
+}
+
+// ── resume-source.json 변경 여부 ────────────────────
+const isResumeSourceChange = targetPath.includes("resume-source.json");
+
+// ── Task tool 호출 감지 (Agent 호출) ─────────────────
+if (toolName === "Task") {
+  const subagent = toolInput.subagent_type || "";
+  const knownAgents = ["senior", "c-level", "recruiter", "hr", "coffee-chat"];
+  ensureStateDir();
+  const meta = migrateMeta(readJSON(metaPath) || {});
+  meta.gate_state = meta.gate_state || defaultGateState();
+
+  if (knownAgents.includes(subagent)) {
+    meta.gate_state.agent_calls_in_current_round[subagent] =
+      (meta.gate_state.agent_calls_in_current_round[subagent] || 0) + 1;
+    meta.gate_state.direct_askuserquestion_streak = 0;
+  } else if (subagent === "retrospective") {
+    meta.gate_state.retrospective_invoked = true;
+  }
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  process.exit(0);
+}
+
+// ── AskUserQuestion 호출 감지 (G1 r1_entry + G2 direct_question_burst) ──
+if (toolName === "AskUserQuestion") {
+  ensureStateDir();
+  const meta = migrateMeta(readJSON(metaPath) || {});
+  meta.gate_state = meta.gate_state || defaultGateState();
+
+  const source = meta.gate_state.last_askuserquestion_source;
+  const isWhitelist = source && source.source === "whitelist";
+  const isAgent = source && source.source === "agent";
+
+  if (isWhitelist || isAgent) {
+    meta.gate_state.direct_askuserquestion_streak = 0;
+  } else {
+    meta.gate_state.direct_askuserquestion_streak++;
+  }
+  meta.gate_state.last_askuserquestion_source = null;
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+  // Collect violations
+  const violations = [];
+
+  // G1: r1_entry
+  if (meta.current_round === 1 &&
+      (meta.gate_state.agent_calls_in_current_round.senior || 0) === 0 &&
+      (meta.gate_state.agent_calls_in_current_round["c-level"] || 0) === 0 &&
+      !isWhitelist && !isAgent) {
+    violations.push({
+      type: "gate_violation",
+      gate: "r1_entry",
+      company: meta.current_company || null,
+    });
+  }
+
+  // G2: direct_question_burst
+  if (meta.gate_state.direct_askuserquestion_streak >= 3) {
+    violations.push({
+      type: "gate_violation",
+      gate: "direct_question_burst",
+      count: meta.gate_state.direct_askuserquestion_streak,
+    });
+  }
+
+  if (violations.length > 0) {
+    const outputLines = violations.map(v => `[resume-panel]${JSON.stringify(v)}`).join("\n\n");
+    process.stdout.write(JSON.stringify({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: outputLines,
+      },
+    }));
+  }
+  process.exit(0);
+}
 
 // ── 헬퍼 함수 ────────────────────────────────────────
 function ensureStateDir() {
@@ -430,6 +509,51 @@ if (isResumeSourceChange) {
       }, null, 2));
     }
   }
+}
+
+// ── Round 전환 시그널 처리 (G3 r2_exit) ─────────────
+if (targetPath === "round-transition") {
+  const transitionPath = join(stateDir, "round-transition.json");
+  const transition = readJSON(transitionPath);
+  if (transition && transition.to === 3) {
+    ensureStateDir();
+    const meta = migrateMeta(readJSON(metaPath) || {});
+    const gs = meta.gate_state || defaultGateState();
+    const missing = [];
+    if ((gs.agent_calls_in_current_round.recruiter || 0) === 0) missing.push("recruiter");
+    if ((gs.agent_calls_in_current_round.hr || 0) === 0) missing.push("hr");
+    if ((gs.round_turn_counts["2"] || 0) < 15) missing.push("turn_min");
+
+    const source = readJSON(sourcePath);
+    const ga = source?.gap_analysis;
+    if (!ga || !Array.isArray(ga.met) || !Array.isArray(ga.gaps)) {
+      missing.push("gap_analysis");
+    }
+
+    if (missing.length > 0) {
+      messages.push(emit({
+        type: "gate_violation",
+        gate: "r2_exit",
+        missing,
+      }));
+    }
+    try { unlinkSync(transitionPath); } catch {}
+  }
+}
+
+// ── Session-end 시그널 처리 (G4 retrospective_skipped) ──
+if (targetPath === "session-end") {
+  const sessionEndPath = join(stateDir, "session-end.json");
+  ensureStateDir();
+  const meta = migrateMeta(readJSON(metaPath) || {});
+  const gs = meta.gate_state || defaultGateState();
+  if (!gs.retrospective_invoked) {
+    messages.push(emit({
+      type: "gate_violation",
+      gate: "retrospective_skipped",
+    }));
+  }
+  try { unlinkSync(sessionEndPath); } catch {}
 }
 
 // 역할 2: findings 라우팅

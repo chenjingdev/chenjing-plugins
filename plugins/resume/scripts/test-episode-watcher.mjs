@@ -1612,4 +1612,274 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 3.2 — meta.json 마이그레이션");
 }
 
+// Test Phase 3.3: Task tool 호출이 agent_calls_in_current_round 증가시킴
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 2,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 5, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Task",
+    tool_input: { subagent_type: "senior", prompt: "..." },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.agent_calls_in_current_round.senior, 1, "senior count should increment");
+  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0, "direct streak should reset on Task call");
+  console.log("PASS: Phase 3.3 — Task 호출 감지");
+}
+
+// Test Phase 3.4a: 화이트리스트 선언된 AskUserQuestion은 streak 증가 안 함
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 5, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: { source: "whitelist", case: "round0_basic_info" },
+    },
+    current_round: 0,
+    profiler_score: 0,
+  }));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "?" }] },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0, "whitelist declared → streak should stay 0");
+  assert.strictEqual(meta.gate_state.last_askuserquestion_source, null, "source should reset to null");
+  console.log("PASS: Phase 3.4a — whitelist 선언 시 streak 비증가");
+}
+
+// Test Phase 3.4b: 미선언 AskUserQuestion 3연속 → gate_violation 발행
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 2,
+      agent_calls_in_current_round: { senior: 1, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 5, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "?" }] },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 3, "streak should hit 3");
+  assert.ok(result, "should emit output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const violationLine = ctx.split("\n\n").find(l => l.includes('"gate":"direct_question_burst"'));
+  assert.ok(violationLine, `gate_violation direct_question_burst missing: ${ctx}`);
+  const payload = JSON.parse(violationLine.slice("[resume-panel]".length));
+  assert.strictEqual(payload.type, "gate_violation");
+  assert.strictEqual(payload.gate, "direct_question_burst");
+  assert.strictEqual(payload.count, 3);
+  console.log("PASS: Phase 3.4b — direct_question_burst 감지");
+}
+
+// Test Phase 3.5: Round 1 첫 AskUserQuestion 시 senior/c-level 호출 없으면 r1_entry 위반
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: { source: "orchestrator_direct" },
+    },
+    current_round: 1,
+    current_company: "KB국민카드",
+    profiler_score: 0,
+  }));
+
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "?" }] },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  assert.ok(result, "should emit output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const r1Line = ctx.split("\n\n").find(l => l.includes('"gate":"r1_entry"'));
+  assert.ok(r1Line, `r1_entry gate_violation missing: ${ctx}`);
+  const payload = JSON.parse(r1Line.slice("[resume-panel]".length));
+  assert.strictEqual(payload.gate, "r1_entry");
+  assert.strictEqual(payload.company, "KB국민카드");
+  console.log("PASS: Phase 3.5 — G1 r1_entry");
+}
+
+// Test Phase 3.6: round-transition 2→3 시 recruiter/hr 0회면 r2_exit 위반
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 2, "c-level": 1, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 30, "1": 40, "2": 10, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 2,
+    profiler_score: 0,
+  }));
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: {}, companies: [], gap_analysis: null
+  }));
+
+  // 시그널: round-transition to 3 — Bash로 파일 쓰기
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/round-transition.json", JSON.stringify({ to: 3 }));
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo '{\"to\":3}' > .resume-panel/round-transition.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  assert.ok(result, "should emit output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const r2Line = ctx.split("\n\n").find(l => l.includes('"gate":"r2_exit"'));
+  assert.ok(r2Line, `r2_exit gate_violation missing: ${ctx}`);
+  const payload = JSON.parse(r2Line.slice("[resume-panel]".length));
+  assert.strictEqual(payload.gate, "r2_exit");
+  assert.ok(payload.missing.includes("recruiter"), "missing should include recruiter");
+  assert.ok(payload.missing.includes("hr"), "missing should include hr");
+  assert.ok(payload.missing.includes("turn_min"), "missing should include turn_min");
+  assert.ok(payload.missing.includes("gap_analysis"), "missing should include gap_analysis");
+  console.log("PASS: Phase 3.6 — G3 r2_exit");
+}
+
+// Test Phase 3.7: session-end 시그널 시 retrospective 미호출이면 G4 위반
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 10 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 3,
+    profiler_score: 0,
+  }));
+
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/session-end.json", JSON.stringify({}));
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo '{}' > .resume-panel/session-end.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  assert.ok(result, "should emit output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const g4Line = ctx.split("\n\n").find(l => l.includes('"gate":"retrospective_skipped"'));
+  assert.ok(g4Line, `retrospective_skipped missing: ${ctx}`);
+  console.log("PASS: Phase 3.7 — G4 retrospective_skipped");
+}
+
+// Test Phase 3.8: retrospective Task 호출이 retrospective_invoked=true
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 10 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 3,
+    profiler_score: 0,
+  }));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Task",
+    tool_input: { subagent_type: "retrospective", prompt: "..." },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.retrospective_invoked, true, "retrospective_invoked should be true");
+  console.log("PASS: Phase 3.8 — retrospective Task 감지");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
