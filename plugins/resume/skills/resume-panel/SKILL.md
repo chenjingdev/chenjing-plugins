@@ -248,6 +248,34 @@ retrospective 호출 → 파일 저장 순서 엄수. 게이트 G4 참조.
 
 `episode-watcher.mjs` hook이 PostToolUse마다 실행되며 `additionalContext`로 메시지를 보낸다. 메시지 타입과 처리는 `references/hook-protocol.md` 참조.
 
+**AskUserQuestion 호출 전 선언 의무** — 오케스트레이터는 AskUserQuestion 호출 직전 meta.json을 다음과 같이 업데이트한다 (hook의 화이트리스트 판정용):
+
+```bash
+# 화이트리스트 케이스
+jq '.gate_state.last_askuserquestion_source = {"source":"whitelist","case":"round0_basic_info"}' \
+  .resume-panel/meta.json > .resume-panel/meta.json.tmp && mv .resume-panel/meta.json.tmp .resume-panel/meta.json
+
+# 에이전트 응답 전달 케이스
+jq '.gate_state.last_askuserquestion_source = {"source":"agent","agent_name":"senior"}' \
+  .resume-panel/meta.json > .resume-panel/meta.json.tmp && mv .resume-panel/meta.json.tmp .resume-panel/meta.json
+```
+
+선언 없이 AskUserQuestion을 3회 호출하면 G2 direct_question_burst 위반.
+
+**라운드 전환 시그널** — Round 2→3 직전:
+```bash
+echo '{"to":3,"at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > .resume-panel/round-transition.json
+```
+`gate_violation r2_exit`가 오면 `missing` 배열을 보고 복귀. 없으면 Round 3 진행.
+
+**세션 종료 시그널** — 회고 파일 저장 완료 후:
+```bash
+echo '{"at":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > .resume-panel/session-end.json
+```
+`gate_violation retrospective_skipped`가 오면 Step 9가 누락된 것. 즉시 retrospective 에이전트 호출로 복귀.
+
+**게이트 위반 수신** — `gate_violation` 메시지를 받으면 `references/gates.md` §gate_violation 수신 시 절차에 따라 즉시 복귀.
+
 인터뷰 흐름 보호:
 - HIGH finding은 현재 질문-답변 사이클 완료 후 끼워넣기
 - MEDIUM/LOW는 인터뷰 중단 금지
