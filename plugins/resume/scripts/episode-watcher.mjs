@@ -188,6 +188,68 @@ function emit(payload) {
   return `[resume-panel]${JSON.stringify(payload)}`;
 }
 
+function defaultSessionLimits() {
+  return {
+    gaps:           { used: 0, max: 3, intentional: [] },
+    perspectives:   { used: 0, max: 2, episode_refs: [] },
+    contradictions: { used: 0, max: 2 },
+    reprobes:       { used: 0, log: [] },
+  };
+}
+
+function defaultGateState() {
+  return {
+    direct_askuserquestion_streak: 0,
+    agent_calls_in_current_round: {
+      senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0,
+    },
+    round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+    retrospective_invoked: false,
+    last_askuserquestion_source: null,
+  };
+}
+
+function migrateMeta(meta) {
+  if (!meta) meta = {};
+  // Already migrated?
+  if (meta.session_limits && meta.gate_state) return meta;
+
+  const migrated = { ...meta };
+
+  // session_limits
+  migrated.session_limits = defaultSessionLimits();
+  if (typeof meta.gap_probes_this_session === "number") {
+    migrated.session_limits.gaps.used = meta.gap_probes_this_session;
+    delete migrated.gap_probes_this_session;
+  }
+  if (typeof meta.perspective_shifts_this_session === "number") {
+    migrated.session_limits.perspectives.used = meta.perspective_shifts_this_session;
+    delete migrated.perspective_shifts_this_session;
+  }
+  if (Array.isArray(meta.perspective_shifted_episodes)) {
+    migrated.session_limits.perspectives.episode_refs = meta.perspective_shifted_episodes;
+    delete migrated.perspective_shifted_episodes;
+  }
+  if (typeof meta.contradictions_presented_this_session === "number") {
+    migrated.session_limits.contradictions.used = meta.contradictions_presented_this_session;
+    delete migrated.contradictions_presented_this_session;
+  }
+  if (Array.isArray(meta.reprobe_log)) {
+    migrated.session_limits.reprobes.log = meta.reprobe_log;
+    migrated.session_limits.reprobes.used = meta.reprobe_log.length;
+    delete migrated.reprobe_log;
+  }
+  if (Array.isArray(meta.intentional_gaps)) {
+    migrated.session_limits.gaps.intentional = meta.intentional_gaps;
+    delete migrated.intentional_gaps;
+  }
+
+  // gate_state
+  migrated.gate_state = defaultGateState();
+
+  return migrated;
+}
+
 // ── 메시지 수집 ─────────────────────────────────────
 const messages = [];
 
@@ -215,12 +277,9 @@ if (isResumeSourceChange) {
           current_company: metaJSON?.current_company || null,
         })
       );
-      if (!metaJSON.profiler_score && metaJSON.profiler_score !== 0) {
-        writeFileSync(metaPath, JSON.stringify({
-          ...metaJSON,
-          profiler_score: 0,
-        }, null, 2));
-      }
+      const metaMigrated = migrateMeta(metaJSON);
+      if (metaMigrated.profiler_score === undefined) metaMigrated.profiler_score = 0;
+      writeFileSync(metaPath, JSON.stringify(metaMigrated, null, 2));
     } else {
       // 이벤트 가중치 점수 계산
       const metaJSON = readJSON(metaPath) || {};
@@ -363,8 +422,9 @@ if (isResumeSourceChange) {
       );
 
       // meta.json에 점수 저장 (항상)
+      const metaMigrated = migrateMeta(metaJSON);
       writeFileSync(metaPath, JSON.stringify({
-        ...metaJSON,
+        ...metaMigrated,
         ...updatedMetaFields,
         profiler_score: score,
       }, null, 2));

@@ -1537,4 +1537,79 @@ console.log("\nAll pattern eligibility tests passed.");
   }
 }
 
+// ── Phase 3 meta.json 스키마 테스트 ──────────────────────
+// Test Phase 3.1: meta.json 초기화 시 session_limits와 gate_state 포함
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // no snapshot → first run will initialize
+  const source = {
+    meta: { target_company: "T", target_position: "P" },
+    companies: [{ name: "C1", projects: [{ name: "P1", episodes: [] }] }]
+  };
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify(source));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.ok(meta.session_limits, "session_limits missing");
+  assert.ok(meta.session_limits.gaps, "session_limits.gaps missing");
+  assert.strictEqual(meta.session_limits.gaps.max, 3);
+  assert.strictEqual(meta.session_limits.gaps.used, 0);
+  assert.ok(Array.isArray(meta.session_limits.gaps.intentional), "gaps.intentional should be array");
+  assert.strictEqual(meta.session_limits.perspectives.max, 2);
+  assert.strictEqual(meta.session_limits.contradictions.max, 2);
+  assert.ok(meta.gate_state, "gate_state missing");
+  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0);
+  assert.deepStrictEqual(meta.gate_state.agent_calls_in_current_round, {
+    senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0
+  });
+  console.log("PASS: Phase 3.1 — meta.json 초기 스키마");
+}
+
+// Test Phase 3.2: 기존 meta.json (구 스키마)의 마이그레이션
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // 구 스키마
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    gap_probes_this_session: 1,
+    perspective_shifts_this_session: 0,
+    perspective_shifted_episodes: ["epA"],
+    contradictions_presented_this_session: 2,
+    reprobe_log: [{ area: "KB카드", timestamp: "2026-04-20T08:00:00Z" }],
+    intentional_gaps: [{ from: "2018.09", to: "2019.05" }],
+    profiler_score: 3,
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 0, project_names: [], meta_hash: "x", star_gaps: 0, current_company: null
+  }));
+  const source = { meta: {}, companies: [] };
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify(source));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.session_limits.gaps.used, 1, "gaps.used migrated");
+  assert.strictEqual(meta.session_limits.perspectives.used, 0, "perspectives.used migrated");
+  assert.deepStrictEqual(meta.session_limits.perspectives.episode_refs, ["epA"]);
+  assert.strictEqual(meta.session_limits.contradictions.used, 2, "contradictions.used migrated");
+  assert.strictEqual(meta.session_limits.reprobes.log.length, 1, "reprobes.log migrated");
+  assert.deepStrictEqual(meta.session_limits.gaps.intentional, [{ from: "2018.09", to: "2019.05" }]);
+  // 구 필드 삭제 확인
+  assert.strictEqual(meta.gap_probes_this_session, undefined, "old field should be removed");
+  assert.strictEqual(meta.contradictions_presented_this_session, undefined, "old field should be removed");
+  console.log("PASS: Phase 3.2 — meta.json 마이그레이션");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
