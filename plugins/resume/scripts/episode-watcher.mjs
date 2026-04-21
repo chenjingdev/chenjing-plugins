@@ -70,10 +70,27 @@ if (toolName === "Task") {
     meta.gate_state.agent_calls_in_current_round[subagent] =
       (meta.gate_state.agent_calls_in_current_round[subagent] || 0) + 1;
     meta.gate_state.direct_askuserquestion_streak = 0;
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+    const stats = readStats(base);
+    stats.agent_invocations[subagent] = (stats.agent_invocations[subagent] || 0) + 1;
+    writeStats(base, stats);
   } else if (subagent === "retrospective") {
     meta.gate_state.retrospective_invoked = true;
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+    const stats = readStats(base);
+    stats.agent_invocations.retrospective = (stats.agent_invocations.retrospective || 0) + 1;
+    writeStats(base, stats);
+  } else if (subagent === "researcher" || subagent === "project-researcher") {
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+    const stats = readStats(base);
+    stats.agent_invocations.researcher = (stats.agent_invocations.researcher || 0) + 1;
+    writeStats(base, stats);
+  } else {
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   }
-  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   process.exit(0);
 }
 
@@ -94,6 +111,16 @@ if (toolName === "AskUserQuestion") {
   }
   meta.gate_state.last_askuserquestion_source = null;
   writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+  // session-stats 집계
+  {
+    const stats = readStats(base);
+    stats.askuserquestion.total++;
+    const sourceKind = isWhitelist ? "whitelist" : (isAgent ? "agent" : "orchestrator_direct");
+    stats.askuserquestion.by_source[sourceKind] =
+      (stats.askuserquestion.by_source[sourceKind] || 0) + 1;
+    writeStats(base, stats);
+  }
 
   // Collect violations
   const violations = [];
@@ -120,6 +147,15 @@ if (toolName === "AskUserQuestion") {
   }
 
   if (violations.length > 0) {
+    const statsForViolation = readStats(base);
+    for (const v of violations) {
+      statsForViolation.gate_violations.push({
+        gate: v.gate,
+        at: new Date().toISOString(),
+        detail: { company: v.company, count: v.count, missing: v.missing },
+      });
+    }
+    writeStats(base, statsForViolation);
     const outputLines = violations.map(v => `[resume-panel]${JSON.stringify(v)}`).join("\n\n");
     process.stdout.write(JSON.stringify({
       continue: true,
@@ -274,6 +310,28 @@ function defaultSessionLimits() {
     contradictions: { used: 0, max: 2 },
     reprobes:       { used: 0, log: [] },
   };
+}
+
+function defaultSessionStats() {
+  return {
+    agent_invocations: {
+      senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0,
+      researcher: 0, retrospective: 0,
+    },
+    askuserquestion: {
+      total: 0,
+      by_source: { whitelist: 0, agent: 0, orchestrator_direct: 0 },
+    },
+    gate_violations: [],
+  };
+}
+
+function readStats(base) {
+  return readJSON(join(base, ".resume-panel", "session-stats.json")) || defaultSessionStats();
+}
+
+function writeStats(base, stats) {
+  writeFileSync(join(base, ".resume-panel", "session-stats.json"), JSON.stringify(stats, null, 2));
 }
 
 function defaultGateState() {
@@ -536,6 +594,13 @@ if (targetPath === "round-transition") {
         gate: "r2_exit",
         missing,
       }));
+      const stats = readStats(base);
+      stats.gate_violations.push({
+        gate: "r2_exit",
+        at: new Date().toISOString(),
+        detail: { missing },
+      });
+      writeStats(base, stats);
     }
     try { unlinkSync(transitionPath); } catch {}
   }
@@ -552,6 +617,13 @@ if (targetPath === "session-end") {
       type: "gate_violation",
       gate: "retrospective_skipped",
     }));
+    const stats = readStats(base);
+    stats.gate_violations.push({
+      gate: "retrospective_skipped",
+      at: new Date().toISOString(),
+      detail: {},
+    });
+    writeStats(base, stats);
   }
   try { unlinkSync(sessionEndPath); } catch {}
 }

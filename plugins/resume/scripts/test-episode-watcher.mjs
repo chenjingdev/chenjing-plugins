@@ -1882,4 +1882,55 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 3.8 — retrospective Task 감지");
 }
 
+// Test Phase 4.1: Task/AskUserQuestion 호출이 session-stats.json에 집계됨
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  // senior Task 2회 호출
+  run({ hook_event_name: "PostToolUse", tool_name: "Task", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
+  run({ hook_event_name: "PostToolUse", tool_name: "Task", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
+
+  // AskUserQuestion (agent 소스) 3회 — 각각 호출 전에 소스 선언
+  for (let i = 0; i < 3; i++) {
+    const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+    meta.gate_state.last_askuserquestion_source = { source: "agent", agent_name: "senior" };
+    writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+    run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
+  }
+
+  // AskUserQuestion (whitelist) 1회
+  {
+    const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+    meta.gate_state.last_askuserquestion_source = { source: "whitelist", case: "round0_basic_info" };
+    writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+    run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
+  }
+
+  const stats = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
+  assert.strictEqual(stats.agent_invocations.senior, 2);
+  assert.strictEqual(stats.askuserquestion.total, 4);
+  assert.strictEqual(stats.askuserquestion.by_source.agent, 3);
+  assert.strictEqual(stats.askuserquestion.by_source.whitelist, 1);
+  assert.strictEqual(stats.askuserquestion.by_source.orchestrator_direct, 0);
+  console.log("PASS: Phase 4.1 — session-stats.json 집계");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
