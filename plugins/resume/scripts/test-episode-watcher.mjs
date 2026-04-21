@@ -221,8 +221,8 @@ function readMeta() {
   assert.ok(result2, "score 4 + 1 = 5, should trigger");
   const ctx2 = result2.hookSpecificOutput.additionalContext;
   assert.ok(ctx2.includes("[resume-panel]"), "should have resume-panel tag");
-  assert.ok(ctx2.includes("프로파일러"), "should mention profiler");
-  assert.ok(ctx2.includes("score:"), "should include score in output");
+  assert.ok(ctx2.includes('"type":"profiler_trigger"'), "should mention profiler");
+  assert.ok(ctx2.includes('"score":'), "should include score in output");
   const metaAfter2 = readMeta();
   assert.strictEqual(metaAfter2.profiler_score, 0, "profiler_score should reset to 0 after trigger");
   console.log("PASS: score accumulates across calls");
@@ -255,7 +255,7 @@ function readMeta() {
   assert.ok(result, "new company +3 should trigger when combined score >= 5");
   const ctx = result.hookSpecificOutput.additionalContext;
   assert.ok(ctx.includes("[resume-panel]"), "should have resume-panel tag");
-  assert.ok(ctx.includes("프로파일러"), "should mention profiler");
+  assert.ok(ctx.includes('"type":"profiler_trigger"'), "should mention profiler");
   assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
   const metaAfter = readMeta();
   assert.strictEqual(metaAfter.profiler_score, 0, "profiler_score should reset to 0 after trigger");
@@ -400,7 +400,7 @@ function readMeta() {
   assert.ok(result, "combined events should trigger immediately");
   const ctx = result.hookSpecificOutput.additionalContext;
   assert.ok(ctx.includes("[resume-panel]"), "should have resume-panel tag");
-  assert.ok(ctx.includes("프로파일러"), "should mention profiler");
+  assert.ok(ctx.includes('"type":"profiler_trigger"'), "should mention profiler");
   assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
   assert.ok(ctx.includes("meta 변경"), "should mention meta change");
   const metaAfter = readMeta();
@@ -474,7 +474,7 @@ function readMeta() {
   // score: 0 + 3(episodes) + 2(star gap increase) = 5 >= 5, triggers
   assert.ok(result, "should trigger with episode delta + star gaps");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("빈 STAR 2개"), "should count 2 episodes with incomplete STAR");
+  assert.ok(ctx.includes('"star_gaps":2'), "should count 2 episodes with incomplete STAR");
   console.log("PASS: STAR gap counting in scoring context");
 }
 
@@ -514,7 +514,7 @@ console.log("\nAll scoring system tests passed.");
   });
   const parsed = result.trim() ? JSON.parse(result.trim()) : null;
   assert.ok(parsed, "HIGH finding should produce output");
-  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("[resume-panel:HIGH]"));
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes('"urgency":"HIGH"'));
   assert.ok(parsed.hookSpecificOutput.additionalContext.includes("WebSocket"));
 
   // findings.json에 delivered: true
@@ -677,7 +677,7 @@ console.log("\nAll scoring system tests passed.");
   });
   const parsed = result.trim() ? JSON.parse(result.trim()) : null;
   assert.ok(parsed, "MEDIUM with company change should produce output");
-  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("[resume-panel:MEDIUM]"));
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes('"urgency":"MEDIUM"'));
   assert.ok(parsed.hookSpecificOutput.additionalContext.includes("수치 보강"));
 
   // snapshot should be updated with new current_company
@@ -782,10 +782,10 @@ const bashSoWhatInput = {
   setupSoWhatTestDir(snapshot, resumeSource, meta);
 
   const result = runSoWhat(bashSoWhatInput);
-  // Should have output containing [resume-panel:SO-WHAT]
+  // Should have output containing so_what JSON payload
   assert.ok(result, "weak result episode should produce output with SO-WHAT");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("[resume-panel:SO-WHAT]"), "should contain SO-WHAT tag");
+  assert.ok(ctx.includes('"type":"so_what"'), "should contain SO-WHAT tag");
   console.log("PASS: SO-WHAT trigger on weak result episode");
 }
 
@@ -808,7 +808,7 @@ const bashSoWhatInput = {
   // Should NOT have SO-WHAT message (score is only 1, below threshold 5 for profiler)
   if (result) {
     const ctx = result.hookSpecificOutput.additionalContext;
-    assert.ok(!ctx.includes("[resume-panel:SO-WHAT]"), "quantified result should NOT trigger SO-WHAT");
+    assert.ok(!ctx.includes('"type":"so_what"'), "quantified result should NOT trigger SO-WHAT");
   }
   console.log("PASS: SO-WHAT skip on quantified result episode");
 }
@@ -840,7 +840,7 @@ const bashSoWhatInput = {
   // SO-WHAT should be suppressed even though result is weak
   if (result) {
     const ctx = result.hookSpecificOutput.additionalContext;
-    assert.ok(!ctx.includes("[resume-panel:SO-WHAT]"), "so_what_active should suppress SO-WHAT trigger");
+    assert.ok(!ctx.includes('"type":"so_what"'), "so_what_active should suppress SO-WHAT trigger");
   }
   console.log("PASS: SO-WHAT suppression when so_what_active.active === true");
 }
@@ -887,8 +887,8 @@ const bashSoWhatInput = {
   const result = runSoWhat(bashSoWhatInput);
   assert.ok(result, "should produce output");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("[resume-panel]"), "should contain profiler tag");
-  assert.ok(ctx.includes("[resume-panel:SO-WHAT]"), "should also contain SO-WHAT tag");
+  assert.ok(ctx.includes('"type":"profiler_trigger"'), "should contain profiler tag");
+  assert.ok(ctx.includes('"type":"so_what"'), "should also contain SO-WHAT tag");
   console.log("PASS: SO-WHAT and profiler messages coexist");
 }
 
@@ -1352,7 +1352,7 @@ const bashPatternInput = {
   tool_input: { command: "cat <<'EOF' > resume-source.json\n...\nEOF" },
 };
 
-// Test pattern-1: 3+ episodes across 2+ companies -> message includes "패턴 분석 가능"
+// Test pattern-1: 3+ episodes across 2+ companies -> payload has pattern_eligible=true
 {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
   // score=4, +1 episode = 5 -> triggers profiler
@@ -1375,7 +1375,7 @@ const bashPatternInput = {
   const result = runPatternTest(bashPatternInput);
   assert.ok(result, "should trigger profiler");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("패턴 분석 가능"), "should include pattern eligibility flag when 3+ episodes across 2+ companies");
+  assert.ok(ctx.includes('"pattern_eligible":true'), "should include pattern eligibility flag when 3+ episodes across 2+ companies");
 
   // meta.json should have last_pattern_analysis_episode_count
   const metaAfter = readPatternMeta();
@@ -1385,7 +1385,7 @@ const bashPatternInput = {
   rmSync(patternTestBase, { recursive: true, force: true });
 }
 
-// Test pattern-2: 2 episodes (< 3) -> message does NOT include "패턴 분석 가능"
+// Test pattern-2: 2 episodes (< 3) -> payload has pattern_eligible=false
 {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
   const snapshot = { episode_count: 1, project_names: ["프로젝트A", "프로젝트B"], meta_hash: correctHash, star_gaps: 0 };
@@ -1406,13 +1406,13 @@ const bashPatternInput = {
   const result = runPatternTest(bashPatternInput);
   assert.ok(result, "should trigger profiler");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(!ctx.includes("패턴 분석 가능"), "should NOT include pattern eligibility flag when < 3 episodes");
+  assert.ok(ctx.includes('"pattern_eligible":false'), "should mark pattern_eligible=false when < 3 episodes");
   console.log("PASS: no pattern eligibility with < 3 episodes");
 
   rmSync(patternTestBase, { recursive: true, force: true });
 }
 
-// Test pattern-3: 3+ episodes but only 1 company -> message does NOT include "패턴 분석 가능"
+// Test pattern-3: 3+ episodes but only 1 company -> payload has pattern_eligible=false
 {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
   const snapshot = { episode_count: 2, project_names: ["프로젝트A"], meta_hash: correctHash, star_gaps: 0 };
@@ -1432,11 +1432,109 @@ const bashPatternInput = {
   const result = runPatternTest(bashPatternInput);
   assert.ok(result, "should trigger profiler");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(!ctx.includes("패턴 분석 가능"), "should NOT include pattern eligibility flag when only 1 company");
+  assert.ok(ctx.includes('"pattern_eligible":false'), "should mark pattern_eligible=false when only 1 company");
   console.log("PASS: no pattern eligibility with only 1 company");
 
   rmSync(patternTestBase, { recursive: true, force: true });
 }
 
 console.log("\nAll pattern eligibility tests passed.");
+
+// ── Phase 2 JSON 프로토콜 테스트 ──────────────────────
+// Test Phase 2.1: profiler_trigger 메시지가 [resume-panel]{"type":"profiler_trigger"}... 형태인지 확인
+{
+  // setup: snapshot + resume-source.json with episodes
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 0, project_names: [], meta_hash: "initial", star_gaps: 0, current_company: null
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({ profiler_score: 4 }));
+  const source = {
+    meta: { target_company: "T", target_position: "P" },
+    companies: [{
+      name: "C1", projects: [{
+        name: "P1", episodes: [
+          { title: "e1", action: "a1", result: "완료", situation: "s", task: "t" },
+          { title: "e2", action: "a2", result: "10% 개선", situation: "s", task: "t" }
+        ]
+      }]
+    }]
+  };
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify(source));
+
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  assert.ok(result, "should produce output when score crosses threshold");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const lines = ctx.split("\n\n").filter(Boolean);
+  const profilerLine = lines.find(l => l.includes('"type":"profiler_trigger"'));
+  assert.ok(profilerLine, `profiler_trigger JSON line missing. got: ${ctx}`);
+  assert.ok(profilerLine.startsWith("[resume-panel]"), "prefix missing");
+  const payload = JSON.parse(profilerLine.slice("[resume-panel]".length));
+  assert.strictEqual(payload.type, "profiler_trigger");
+  assert.ok(typeof payload.score === "number", "score should be number");
+  assert.ok(typeof payload.episode_count === "number", "episode_count should be number");
+  console.log("PASS: Phase 2.1 — profiler_trigger JSON format");
+}
+
+// Test Phase 2.2: finding도 JSON 형태로 발행되는지 (해당 조건일 때)
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 0, project_names: [], meta_hash: "initial", star_gaps: 0, current_company: null
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({ profiler_score: 4 }));
+  // Two projects with 8-month gap
+  const source = {
+    meta: { target_company: "T", target_position: "P" },
+    companies: [
+      { name: "C1", projects: [{ name: "P1", period: "2018.01-2018.08",
+        episodes: [{ title: "e1", action: "a", result: "10개 개선", situation: "s", task: "t" }] }] },
+      { name: "C2", projects: [{ name: "P2", period: "2019.05-2019.12",
+        episodes: [{ title: "e2", action: "a", result: "20% 개선", situation: "s", task: "t" }] }] }
+    ]
+  };
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify(source));
+
+  // First run: triggers profiler threshold + gap detection (writes to inbox)
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  // Second run: inbox routing → finding emitted
+  const result2 = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  // Note: MEDIUM findings require companyChanged signal — we don't test delivery here.
+  if (result2 && result2.hookSpecificOutput) {
+    const ctx = result2.hookSpecificOutput.additionalContext;
+    const findingLine = ctx.split("\n\n").find(l => l.includes('"type":"finding"'));
+    if (findingLine) {
+      const payload = JSON.parse(findingLine.slice("[resume-panel]".length));
+      assert.strictEqual(payload.type, "finding");
+      assert.ok(payload.finding_type, "finding_type required");
+      assert.ok(["HIGH", "MEDIUM", "LOW"].includes(payload.urgency), "urgency valid");
+      console.log("PASS: Phase 2.2 — finding JSON format");
+    } else {
+      console.log("SKIP: Phase 2.2 — finding not delivered this run (expected)");
+    }
+  } else {
+    console.log("SKIP: Phase 2.2 — no output this run");
+  }
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");

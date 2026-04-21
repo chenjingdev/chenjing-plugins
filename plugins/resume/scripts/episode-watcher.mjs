@@ -184,6 +184,10 @@ function getCompanyCount(source) {
   return (source.companies || []).length;
 }
 
+function emit(payload) {
+  return `[resume-panel]${JSON.stringify(payload)}`;
+}
+
 // ── 메시지 수집 ─────────────────────────────────────
 const messages = [];
 
@@ -263,8 +267,18 @@ if (isResumeSourceChange) {
       let updatedMetaFields = {};
       if (score >= THRESHOLD) {
         const starGaps = countStarGaps(source);
+        const companyCount = getCompanyCount(source);
+        const patternEligible = currentCount >= 3 && companyCount >= 2;
         messages.push(
-          `[resume-panel] 프로파일러 호출 필요. delta: ${reasons.join(", ")}. 현재 총 에피소드 ${currentCount}개, 빈 STAR ${starGaps}개, 프로젝트 ${currentProjects.length}개. (score: ${score})`
+          emit({
+            type: "profiler_trigger",
+            delta: reasons.join(", "),
+            score,
+            episode_count: currentCount,
+            star_gaps: starGaps,
+            project_count: currentProjects.length,
+            pattern_eligible: patternEligible,
+          })
         );
 
         // Timeline gap detection -- deterministic, runs with profiler trigger
@@ -301,12 +315,9 @@ if (isResumeSourceChange) {
           writeFileSync(inboxPath, existsSync(inboxPath) ? readFileSync(inboxPath, "utf-8") + line : line);
         }
 
-        // Pattern eligibility flag
-        const companyCount = getCompanyCount(source);
-        if (currentCount >= 3 && companyCount >= 2) {
-          // Append pattern eligibility to the profiler message
-          messages[messages.length - 1] += " 패턴 분석 가능.";
-          // Track in meta
+        // Pattern eligibility tracking (flag already in JSON payload above)
+        const companyCountForMeta = getCompanyCount(source);
+        if (currentCount >= 3 && companyCountForMeta >= 2) {
           updatedMetaFields.last_pattern_analysis_episode_count = currentCount;
           updatedMetaFields.last_timeline_check = new Date().toISOString();
         }
@@ -325,12 +336,17 @@ if (isResumeSourceChange) {
             if (checked <= prevCount) continue;
             if (!hasQuantifiedImpact(ep.star?.result || ep.result || "")) {
               messages.push(
-                `[resume-panel:SO-WHAT] 에피소드 "${ep.title || "(제목 없음)"}" 임팩트 부족`
+                emit({
+                  type: "so_what",
+                  episode_title: ep.title || "(제목 없음)",
+                  level: 1,
+                  episode_ref: { company: project.companyName, project: project.name },
+                })
               );
               break;
             }
           }
-          if (messages.some(m => m.includes("[resume-panel:SO-WHAT]"))) break;
+          if (messages.some(m => m.includes('"type":"so_what"'))) break;
         }
       }
 
@@ -386,10 +402,28 @@ if (existsSync(inboxPath)) {
       f.delivered = false;
 
       if (f.urgency === "HIGH") {
-        messages.push(`[resume-panel:HIGH] ${f.message}`);
+        messages.push(
+          emit({
+            type: "finding",
+            urgency: "HIGH",
+            finding_type: f.type,
+            id: f.id,
+            message: f.message,
+            context: f.context || {},
+          })
+        );
         f.delivered = true;
       } else if (f.urgency === "MEDIUM" && companyChanged) {
-        messages.push(`[resume-panel:MEDIUM] ${f.message}`);
+        messages.push(
+          emit({
+            type: "finding",
+            urgency: "MEDIUM",
+            finding_type: f.type,
+            id: f.id,
+            message: f.message,
+            context: f.context || {},
+          })
+        );
         f.delivered = true;
       }
 
