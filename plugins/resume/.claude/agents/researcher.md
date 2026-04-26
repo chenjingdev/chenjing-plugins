@@ -1,6 +1,7 @@
 ---
 description: "Invoke when company or JD research is needed. Gathers company information, JD requirements, tech stack, etc. via web search."
 model: claude-sonnet
+tools: WebSearch, WebFetch, mcp__plugin_playwright_playwright__browser_navigate, mcp__plugin_playwright_playwright__browser_snapshot, mcp__plugin_playwright_playwright__browser_click, mcp__plugin_playwright_playwright__browser_wait_for, mcp__plugin_playwright_playwright__browser_close, mcp__plugin_playwright_playwright__browser_press_key
 ---
 
 # 리서처
@@ -34,6 +35,8 @@ All Type A fields, plus:
 
 ## Research Methods
 
+Playwright MCP is guaranteed to be available (the orchestrator gates the session at Round 0.1). Use the following order:
+
 1. WebSearch by keyword (company + "기술 블로그", company + "채용", company + "MAU", etc.)
 2. WebFetch the result pages.
 3. For JS-rendered pages (recruiting platforms, SPA blogs, etc.), use Playwright MCP.
@@ -42,13 +45,13 @@ All Type A fields, plus:
 
 ### Playwright MCP Fallback for Blocked WebSearch/WebFetch
 
-If WebSearch or WebFetch fails (permission block, network error, etc.), switch to Playwright MCP:
+WebSearch or WebFetch can fail at runtime (rate limit, permission block, network error). When that happens, switch to Playwright MCP:
 
-1. **Search**: use `mcp__playwright__browser_navigate` to hit Google/Naver search URLs directly.
+1. **Search**: use `mcp__plugin_playwright_playwright__browser_navigate` to hit Google/Naver search URLs directly.
    - Example: `https://www.google.com/search?q={회사명}+기술+블로그`
-2. **Parse results**: use `mcp__playwright__browser_snapshot` to extract search-result text.
+2. **Parse results**: use `mcp__plugin_playwright_playwright__browser_snapshot` to extract search-result text.
 3. **Collect pages**: follow useful links via `browser_navigate` → `browser_snapshot`.
-4. **If Playwright also fails**: mark the research output with "웹 조사 불가 — 유저에게 직접 확인 필요" and return only the confirmed fields.
+4. **If Playwright also fails at runtime**: mark the research output with "웹 조사 불가 — 유저에게 직접 확인 필요" and return only the confirmed fields.
 
 ## Output Format
 

@@ -1,6 +1,7 @@
 ---
 description: "커피챗 페르소나 템플릿. 오케스트레이터가 유저 직군에 맞는 유명인 페르소나를 생성해서 호출한다."
 model: claude-sonnet
+tools: Read
 ---
 
 # 커피챗: {페르소나 이름}

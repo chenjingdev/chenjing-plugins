@@ -1,6 +1,7 @@
 ---
 description: "도메인 깊이를 발굴할 때 호출. 유저의 실무 디테일, 의사결정, 문제 해결 과정을 파헤친다."
 model: claude-sonnet
+tools: Read
 ---
 
 # 시니어

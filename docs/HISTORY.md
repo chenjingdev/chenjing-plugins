@@ -14,6 +14,24 @@ resume 플러그인의 주요 변경사항을 기록한다.
 
 ## [Unreleased]
 
+## [2026-04-20]
+
+### Added
+- **에이전트 툴 화이트리스트** — 9개 에이전트 frontmatter에 `tools:` 필드 추가로 부모 컨텍스트의 모든 툴 schema 상속 방지. researcher(WebSearch/WebFetch/playwright MCP 6종), project-researcher(Read/Glob/Grep), profiler(Read/Bash), retrospective(Read/Glob), 프론트스테이지 5개(Read).
+- **Playwright MCP 하드 게이트** — Round 0.1에서 `claude mcp list | grep -iE 'playwright'` 체크. 미설치 시 `/plugin` 설치 안내 + 재시작 요청 후 스킬 종료. degraded 모드 없음.
+- **retrospective 에이전트** — 세션 메타피드백 분석 백스테이지 에이전트. 5개 분석 항목(질문 품질, 직접입력 빈도, 미해결 findings, 라운드 turn 배분, 다음 세션 개선 제안).
+- **Round 3 회고 자동 출력** — 마무리 9·10단계로 retrospective 호출 + `docs/retrospectives/{session-id}.md` 저장 + 유저 안내.
+- **meta.json `session_started_at`** — Round 0 초기화 시 `$(date -u)` 타임스탬프 기록.
+
+### Changed
+- **researcher.md framing** — "MCP 미설치 시 디그레이드" 가정 제거, "Round 0.1 게이트로 MCP 보장됨" 전제로 재작성. 런타임 일시 장애 폴백 체인은 유지.
+- **MCP 툴명 prefix 정정** — researcher.md 본문의 `mcp__playwright__*` → `mcp__plugin_playwright_playwright__*`로 환경 prefix 맞춤.
+
+### Notes
+- `tools: []` 와 MCP 글롭 패턴은 Claude Code 공식 문서에 없어, 프론트스테이지 최소치는 `tools: Read` 1개로, MCP는 명시적 툴명 나열로 처리.
+- 스펙: `docs/superpowers/specs/2026-04-20-agent-scope-and-retrospective-design.md`
+- 플랜: `docs/superpowers/plans/2026-04-20-agent-scope-and-retrospective.md`
+
 ## [2026-04-06]
 
 ### Fixed

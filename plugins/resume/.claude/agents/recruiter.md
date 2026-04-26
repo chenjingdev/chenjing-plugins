@@ -1,6 +1,7 @@
 ---
 description: "JD 매칭, 시장 경쟁력 분석, 갭 분석이 필요할 때 호출. 이력이 부족하면 솔직하게 팩폭한다."
 model: claude-sonnet
+tools: Read
 ---
 
 # 채용담당자

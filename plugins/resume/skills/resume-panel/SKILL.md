@@ -283,7 +283,30 @@ AskUserQuestion의 응답을 처리한다:
 
 에이전트 호출 없이 오케스트레이터가 직접 진행한다. 빠르게 끝낸다.
 
-**0. 대화 컨텍스트 자동 스캔** (신규)
+**0.1 환경 체크 (하드 게이트)**
+
+리서치 품질이 Playwright MCP에 의존하므로, 미설치 환경에서는 진행하지 않는다.
+
+```bash
+claude mcp list 2>&1 | grep -iE 'playwright'
+```
+
+- 종료 코드 0 (매칭 있음) → 다음 단계 진행
+- 종료 코드 ≠ 0 → 아래 안내 메시지를 출력하고 스킬 종료 (Round 0.2 이후 절대 진행 금지):
+
+```
+⚠️ Playwright MCP이 필요합니다
+
+회사/JD 조사 품질을 위해 필수입니다.
+WebSearch만으로는 기업 정보 수집이 부족합니다.
+
+설치 방법:
+  1) `/plugin` 명령으로 playwright 플러그인 설치
+  2) Claude Code 재시작 (또는 `/reload`)
+  3) 다시 `resume` 시작
+```
+
+**0.2 대화 컨텍스트 자동 스캔**
 
 스킬 호출 전 대화를 먼저 훑는다. 다음이 이미 컨텍스트에 있으면 해당 수집 단계를 스킵한다:
 
@@ -449,8 +472,9 @@ resume-source.json 첫 생성 직후, `.resume-panel/` 디렉토리를 초기화
 
 ```bash
 mkdir -p .resume-panel
-cat <<'EOF' > .resume-panel/meta.json
+cat <<EOF > .resume-panel/meta.json
 {
+  "session_started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "last_profiler_call": null,
   "last_profiler_episode_count": 0,
   "current_company": null,
@@ -609,6 +633,35 @@ AskUserQuestion({
 - 자유양식만: `resume-draft.md`
 - 잡코리아형만: `resume-draft-jobkorea.md`
 - 둘 다: 두 파일 모두 생성
+
+**9. 회고 분석 호출**
+
+`retrospective` 에이전트를 호출한다. 다음 컨텍스트를 함께 전달:
+
+- 세션 대화 요약 (오케스트레이터가 라운드별 주요 turn을 정리한 텍스트)
+- `.resume-panel/findings.json` 전체 내용
+- `resume-source.json`의 episodes 요약 (회사별 개수, STAR 충실도)
+- 세션 메타데이터:
+  - 시작 시각: `.resume-panel/meta.json` 또는 첫 turn 시각
+  - 종료 시각: 현재 시각
+  - 라운드별 turn 수: 오케스트레이터가 카운트
+
+리턴값은 마크다운 텍스트.
+
+**10. 회고 파일 저장 + 안내**
+
+세션 ID 생성: `YYYYMMDD-HHMMSS` 형식 (예: `20260420-143052`).
+
+```bash
+mkdir -p docs/retrospectives
+```
+
+리턴된 마크다운을 `docs/retrospectives/{session-id}.md`로 Write. 예: `docs/retrospectives/20260420-143052.md`.
+
+저장 후 유저에게 한 줄 안내:
+```
+세션 회고를 docs/retrospectives/{filename}.md에 저장했어. 다음 세션 시작 전에 한 번 훑어봐.
+```
 
 ### 포맷 템플릿
 

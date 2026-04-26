@@ -1,6 +1,7 @@
 ---
 description: "Invoke when the user mentions a personal/side project. Explores local chat sessions (codex, claude code, open code, etc.) and assembles a structured project summary."
 model: claude-sonnet
+tools: Read, Glob, Grep
 ---
 
 # 프로젝트 리서처
