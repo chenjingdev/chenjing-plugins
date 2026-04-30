@@ -22,27 +22,6 @@ try {
 const toolName = input.tool_name;
 const toolInput = input.tool_input || {};
 
-// ── 파일 경로 추출 ──────────────────────────────────
-let targetPath = "";
-if (toolName === "Write" || toolName === "Edit") {
-  targetPath = toolInput.file_path || "";
-} else if (toolName === "Bash") {
-  const cmd = toolInput.command || "";
-  if (cmd.includes("resume-source.json")) {
-    targetPath = "resume-source.json";
-  } else if (cmd.includes(".resume-panel/") || cmd.includes(".resume-panel\\")) {
-    targetPath = ".resume-panel/";
-  }
-}
-
-// ── self-trigger 방지 ───────────────────────────────
-if (targetPath.includes(".resume-panel/") || targetPath.includes(".resume-panel\\")) {
-  process.exit(0);
-}
-
-// ── resume-source.json 변경 여부 ────────────────────
-const isResumeSourceChange = targetPath.includes("resume-source.json");
-
 // ── 경로 상수 ────────────────────────────────────────
 const base = process.env.RESUME_PANEL_BASE || input.cwd || process.cwd();
 const stateDir = join(base, ".resume-panel");
@@ -52,6 +31,142 @@ const sourcePath = join(base, "resume-source.json");
 const inboxPath = join(stateDir, "findings-inbox.jsonl");
 const processingPath = join(stateDir, "findings-inbox.processing.jsonl");
 const findingsPath = join(stateDir, "findings.json");
+
+// ── 파일 경로 추출 ──────────────────────────────────
+let targetPath = "";
+if (toolName === "Write" || toolName === "Edit") {
+  targetPath = toolInput.file_path || "";
+} else if (toolName === "Bash") {
+  const cmd = toolInput.command || "";
+  if (cmd.includes("resume-source.json")) {
+    targetPath = "resume-source.json";
+  } else if (cmd.includes("round-transition.json")) {
+    targetPath = "round-transition";
+  } else if (cmd.includes("session-end.json")) {
+    targetPath = "session-end";
+  } else if (cmd.includes(".resume-panel/") || cmd.includes(".resume-panel\\")) {
+    targetPath = ".resume-panel/";
+  }
+}
+
+// ── self-trigger 방지 (round-transition/session-end 시그널은 예외) ─
+if ((targetPath.includes(".resume-panel/") || targetPath.includes(".resume-panel\\")) &&
+    targetPath !== "round-transition" && targetPath !== "session-end") {
+  process.exit(0);
+}
+
+// ── resume-source.json 변경 여부 ────────────────────
+const isResumeSourceChange = targetPath.includes("resume-source.json");
+
+// ── Task tool 호출 감지 (Agent 호출) ─────────────────
+if (toolName === "Task") {
+  const subagent = toolInput.subagent_type || "";
+  const knownAgents = ["senior", "c-level", "recruiter", "hr", "coffee-chat"];
+  ensureStateDir();
+  const meta = migrateMeta(readJSON(metaPath) || {});
+  meta.gate_state = meta.gate_state || defaultGateState();
+
+  if (knownAgents.includes(subagent)) {
+    meta.gate_state.agent_calls_in_current_round[subagent] =
+      (meta.gate_state.agent_calls_in_current_round[subagent] || 0) + 1;
+    meta.gate_state.direct_askuserquestion_streak = 0;
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+    const stats = readStats(base);
+    stats.agent_invocations[subagent] = (stats.agent_invocations[subagent] || 0) + 1;
+    writeStats(base, stats);
+  } else if (subagent === "retrospective") {
+    meta.gate_state.retrospective_invoked = true;
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+    const stats = readStats(base);
+    stats.agent_invocations.retrospective = (stats.agent_invocations.retrospective || 0) + 1;
+    writeStats(base, stats);
+  } else if (subagent === "researcher" || subagent === "project-researcher") {
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+    const stats = readStats(base);
+    stats.agent_invocations.researcher = (stats.agent_invocations.researcher || 0) + 1;
+    writeStats(base, stats);
+  } else {
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  }
+  process.exit(0);
+}
+
+// ── AskUserQuestion 호출 감지 (G1 r1_entry + G2 direct_question_burst) ──
+if (toolName === "AskUserQuestion") {
+  ensureStateDir();
+  const meta = migrateMeta(readJSON(metaPath) || {});
+  meta.gate_state = meta.gate_state || defaultGateState();
+
+  const source = meta.gate_state.last_askuserquestion_source;
+  const isWhitelist = source && source.source === "whitelist";
+  const isAgent = source && source.source === "agent";
+
+  if (isWhitelist || isAgent) {
+    meta.gate_state.direct_askuserquestion_streak = 0;
+  } else {
+    meta.gate_state.direct_askuserquestion_streak++;
+  }
+  meta.gate_state.last_askuserquestion_source = null;
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
+  // session-stats 집계
+  {
+    const stats = readStats(base);
+    stats.askuserquestion.total++;
+    const sourceKind = isWhitelist ? "whitelist" : (isAgent ? "agent" : "orchestrator_direct");
+    stats.askuserquestion.by_source[sourceKind] =
+      (stats.askuserquestion.by_source[sourceKind] || 0) + 1;
+    writeStats(base, stats);
+  }
+
+  // Collect violations
+  const violations = [];
+
+  // G1: r1_entry
+  if (meta.current_round === 1 &&
+      (meta.gate_state.agent_calls_in_current_round.senior || 0) === 0 &&
+      (meta.gate_state.agent_calls_in_current_round["c-level"] || 0) === 0 &&
+      !isWhitelist && !isAgent) {
+    violations.push({
+      type: "gate_violation",
+      gate: "r1_entry",
+      company: meta.current_company || null,
+    });
+  }
+
+  // G2: direct_question_burst
+  if (meta.gate_state.direct_askuserquestion_streak >= 3) {
+    violations.push({
+      type: "gate_violation",
+      gate: "direct_question_burst",
+      count: meta.gate_state.direct_askuserquestion_streak,
+    });
+  }
+
+  if (violations.length > 0) {
+    const statsForViolation = readStats(base);
+    for (const v of violations) {
+      statsForViolation.gate_violations.push({
+        gate: v.gate,
+        at: new Date().toISOString(),
+        detail: { company: v.company, count: v.count, missing: v.missing },
+      });
+    }
+    writeStats(base, statsForViolation);
+    const outputLines = violations.map(v => `[resume-panel]${JSON.stringify(v)}`).join("\n\n");
+    process.stdout.write(JSON.stringify({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: outputLines,
+      },
+    }));
+  }
+  process.exit(0);
+}
 
 // ── 헬퍼 함수 ────────────────────────────────────────
 function ensureStateDir() {
@@ -184,6 +299,94 @@ function getCompanyCount(source) {
   return (source.companies || []).length;
 }
 
+function emit(payload) {
+  return `[resume-panel]${JSON.stringify(payload)}`;
+}
+
+function defaultSessionLimits() {
+  return {
+    gaps:           { used: 0, max: 3, intentional: [] },
+    perspectives:   { used: 0, max: 2, episode_refs: [] },
+    contradictions: { used: 0, max: 2 },
+    reprobes:       { used: 0, log: [] },
+  };
+}
+
+function defaultSessionStats() {
+  return {
+    agent_invocations: {
+      senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0,
+      researcher: 0, retrospective: 0,
+    },
+    askuserquestion: {
+      total: 0,
+      by_source: { whitelist: 0, agent: 0, orchestrator_direct: 0 },
+    },
+    gate_violations: [],
+  };
+}
+
+function readStats(base) {
+  return readJSON(join(base, ".resume-panel", "session-stats.json")) || defaultSessionStats();
+}
+
+function writeStats(base, stats) {
+  writeFileSync(join(base, ".resume-panel", "session-stats.json"), JSON.stringify(stats, null, 2));
+}
+
+function defaultGateState() {
+  return {
+    direct_askuserquestion_streak: 0,
+    agent_calls_in_current_round: {
+      senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0,
+    },
+    round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+    retrospective_invoked: false,
+    last_askuserquestion_source: null,
+  };
+}
+
+function migrateMeta(meta) {
+  if (!meta) meta = {};
+  // Already migrated?
+  if (meta.session_limits && meta.gate_state) return meta;
+
+  const migrated = { ...meta };
+
+  // session_limits
+  migrated.session_limits = defaultSessionLimits();
+  if (typeof meta.gap_probes_this_session === "number") {
+    migrated.session_limits.gaps.used = meta.gap_probes_this_session;
+    delete migrated.gap_probes_this_session;
+  }
+  if (typeof meta.perspective_shifts_this_session === "number") {
+    migrated.session_limits.perspectives.used = meta.perspective_shifts_this_session;
+    delete migrated.perspective_shifts_this_session;
+  }
+  if (Array.isArray(meta.perspective_shifted_episodes)) {
+    migrated.session_limits.perspectives.episode_refs = meta.perspective_shifted_episodes;
+    delete migrated.perspective_shifted_episodes;
+  }
+  if (typeof meta.contradictions_presented_this_session === "number") {
+    migrated.session_limits.contradictions.used = meta.contradictions_presented_this_session;
+    delete migrated.contradictions_presented_this_session;
+  }
+  if (Array.isArray(meta.reprobe_log)) {
+    migrated.session_limits.reprobes.log = meta.reprobe_log;
+    migrated.session_limits.reprobes.used = meta.reprobe_log.length;
+    delete migrated.reprobe_log;
+  }
+  if (Array.isArray(meta.intentional_gaps)) {
+    migrated.session_limits.gaps.intentional = meta.intentional_gaps;
+    delete migrated.intentional_gaps;
+  }
+
+  // gate_state
+  migrated.gate_state = defaultGateState();
+
+  return migrated;
+}
+
 // ── 메시지 수집 ─────────────────────────────────────
 const messages = [];
 
@@ -211,12 +414,9 @@ if (isResumeSourceChange) {
           current_company: metaJSON?.current_company || null,
         })
       );
-      if (!metaJSON.profiler_score && metaJSON.profiler_score !== 0) {
-        writeFileSync(metaPath, JSON.stringify({
-          ...metaJSON,
-          profiler_score: 0,
-        }, null, 2));
-      }
+      const metaMigrated = migrateMeta(metaJSON);
+      if (metaMigrated.profiler_score === undefined) metaMigrated.profiler_score = 0;
+      writeFileSync(metaPath, JSON.stringify(metaMigrated, null, 2));
     } else {
       // 이벤트 가중치 점수 계산
       const metaJSON = readJSON(metaPath) || {};
@@ -263,8 +463,18 @@ if (isResumeSourceChange) {
       let updatedMetaFields = {};
       if (score >= THRESHOLD) {
         const starGaps = countStarGaps(source);
+        const companyCount = getCompanyCount(source);
+        const patternEligible = currentCount >= 3 && companyCount >= 2;
         messages.push(
-          `[resume-panel] 프로파일러 호출 필요. delta: ${reasons.join(", ")}. 현재 총 에피소드 ${currentCount}개, 빈 STAR ${starGaps}개, 프로젝트 ${currentProjects.length}개. (score: ${score})`
+          emit({
+            type: "profiler_trigger",
+            delta: reasons.join(", "),
+            score,
+            episode_count: currentCount,
+            star_gaps: starGaps,
+            project_count: currentProjects.length,
+            pattern_eligible: patternEligible,
+          })
         );
 
         // Timeline gap detection -- deterministic, runs with profiler trigger
@@ -301,12 +511,9 @@ if (isResumeSourceChange) {
           writeFileSync(inboxPath, existsSync(inboxPath) ? readFileSync(inboxPath, "utf-8") + line : line);
         }
 
-        // Pattern eligibility flag
-        const companyCount = getCompanyCount(source);
-        if (currentCount >= 3 && companyCount >= 2) {
-          // Append pattern eligibility to the profiler message
-          messages[messages.length - 1] += " 패턴 분석 가능.";
-          // Track in meta
+        // Pattern eligibility tracking (flag already in JSON payload above)
+        const companyCountForMeta = getCompanyCount(source);
+        if (currentCount >= 3 && companyCountForMeta >= 2) {
           updatedMetaFields.last_pattern_analysis_episode_count = currentCount;
           updatedMetaFields.last_timeline_check = new Date().toISOString();
         }
@@ -325,12 +532,17 @@ if (isResumeSourceChange) {
             if (checked <= prevCount) continue;
             if (!hasQuantifiedImpact(ep.star?.result || ep.result || "")) {
               messages.push(
-                `[resume-panel:SO-WHAT] 에피소드 "${ep.title || "(제목 없음)"}" 임팩트 부족`
+                emit({
+                  type: "so_what",
+                  episode_title: ep.title || "(제목 없음)",
+                  level: 1,
+                  episode_ref: { company: project.companyName, project: project.name },
+                })
               );
               break;
             }
           }
-          if (messages.some(m => m.includes("[resume-panel:SO-WHAT]"))) break;
+          if (messages.some(m => m.includes('"type":"so_what"'))) break;
         }
       }
 
@@ -347,13 +559,73 @@ if (isResumeSourceChange) {
       );
 
       // meta.json에 점수 저장 (항상)
+      const metaMigrated = migrateMeta(metaJSON);
       writeFileSync(metaPath, JSON.stringify({
-        ...metaJSON,
+        ...metaMigrated,
         ...updatedMetaFields,
         profiler_score: score,
       }, null, 2));
     }
   }
+}
+
+// ── Round 전환 시그널 처리 (G3 r2_exit) ─────────────
+if (targetPath === "round-transition") {
+  const transitionPath = join(stateDir, "round-transition.json");
+  const transition = readJSON(transitionPath);
+  if (transition && transition.to === 3) {
+    ensureStateDir();
+    const meta = migrateMeta(readJSON(metaPath) || {});
+    const gs = meta.gate_state || defaultGateState();
+    const missing = [];
+    if ((gs.agent_calls_in_current_round.recruiter || 0) === 0) missing.push("recruiter");
+    if ((gs.agent_calls_in_current_round.hr || 0) === 0) missing.push("hr");
+    if ((gs.round_turn_counts["2"] || 0) < 15) missing.push("turn_min");
+
+    const source = readJSON(sourcePath);
+    const ga = source?.gap_analysis;
+    if (!ga || !Array.isArray(ga.met) || !Array.isArray(ga.gaps)) {
+      missing.push("gap_analysis");
+    }
+
+    if (missing.length > 0) {
+      messages.push(emit({
+        type: "gate_violation",
+        gate: "r2_exit",
+        missing,
+      }));
+      const stats = readStats(base);
+      stats.gate_violations.push({
+        gate: "r2_exit",
+        at: new Date().toISOString(),
+        detail: { missing },
+      });
+      writeStats(base, stats);
+    }
+    try { unlinkSync(transitionPath); } catch {}
+  }
+}
+
+// ── Session-end 시그널 처리 (G4 retrospective_skipped) ──
+if (targetPath === "session-end") {
+  const sessionEndPath = join(stateDir, "session-end.json");
+  ensureStateDir();
+  const meta = migrateMeta(readJSON(metaPath) || {});
+  const gs = meta.gate_state || defaultGateState();
+  if (!gs.retrospective_invoked) {
+    messages.push(emit({
+      type: "gate_violation",
+      gate: "retrospective_skipped",
+    }));
+    const stats = readStats(base);
+    stats.gate_violations.push({
+      gate: "retrospective_skipped",
+      at: new Date().toISOString(),
+      detail: {},
+    });
+    writeStats(base, stats);
+  }
+  try { unlinkSync(sessionEndPath); } catch {}
 }
 
 // 역할 2: findings 라우팅
@@ -386,10 +658,28 @@ if (existsSync(inboxPath)) {
       f.delivered = false;
 
       if (f.urgency === "HIGH") {
-        messages.push(`[resume-panel:HIGH] ${f.message}`);
+        messages.push(
+          emit({
+            type: "finding",
+            urgency: "HIGH",
+            finding_type: f.type,
+            id: f.id,
+            message: f.message,
+            context: f.context || {},
+          })
+        );
         f.delivered = true;
       } else if (f.urgency === "MEDIUM" && companyChanged) {
-        messages.push(`[resume-panel:MEDIUM] ${f.message}`);
+        messages.push(
+          emit({
+            type: "finding",
+            urgency: "MEDIUM",
+            finding_type: f.type,
+            id: f.id,
+            message: f.message,
+            context: f.context || {},
+          })
+        );
         f.delivered = true;
       }
 

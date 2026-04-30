@@ -1,74 +1,54 @@
-# AskUserQuestion — Conversion Rules and Fallback
+# AskUserQuestion — JSON 변환, 폴백
 
-Read this file before the first AskUserQuestion call of the session, or whenever the conversion/fallback behavior is unclear.
+## 변환 절차
 
-## Conversion Rules
+에이전트 응답 = JSON 문자열 (`agent-contract.md §2` 참조). 오케스트레이터는:
 
-Parse the agent's returned text and call AskUserQuestion:
+1. **파싱**: `JSON.parse(response)`
+2. **에러 응답 처리**: `{ "error": "cannot_generate", ... }` 인 경우 오케스트레이터가 컨텍스트 보강 후 에이전트 재호출. 유저에게 전달 안 함.
+3. **`questions` 배열 순회**:
+   - 각 원소가 `free_form: true`면 → AskUserQuestion 생략, `question` 필드를 평문으로 출력.
+   - `free_form: false`면 → AskUserQuestion question 배열에 그대로 변환.
+4. **AskUserQuestion 호출 파라미터**:
+   - `questions`: `free_form: false` 원소들의 `{ question, header, options, multiSelect: false }` 배열 (최대 3개)
+5. **답변 처리**:
+   - 유저가 선택지 클릭 → 해당 옵션의 `description` 텍스트를 에이전트 답변으로 사용
+   - 유저가 "Other" 선택 + 자유 입력 → 입력 텍스트를 에이전트 답변으로 사용
+   - `free_form: true` 평문 응답 → 유저 입력 전체를 답변으로 사용
 
-1. **Extract question text**: everything from `[에이전트명]` up to (but not including) the first `\n  1)` or `\n1)` becomes the `question`.
-2. **Extract options**: each `N) text` line becomes an option, in order.
-3. **Drop 직접입력**: if the last option is "직접입력", drop it (AskUserQuestion auto-adds "Other").
-4. **Header mapping**: extract the name from the `[에이전트명]` tag.
-   - `[시니어]` → "시니어"
-   - `[C-Level]` → "C-Level"
-   - `[채용담당자]` → "채용담당자"
-   - `[인사담당자]` → "인사담당자"
-   - `[커피챗: {이름}]` → "{이름}" (truncate to 12 chars)
-5. **Label generation**: shorten each option's text to 1–5 words for `label`; put the full original text in `description`.
-6. **Free-form detection**: if there is no `N)` pattern, skip AskUserQuestion and pass the agent's text through as plain text.
-7. **multiSelect**: always `false`.
+## multiSelect
 
-## Conversion Example
+항상 `false`. 인터뷰 질문은 단일 선택.
 
-```
-# 에이전트 리턴:
-[시니어] Kafka 도입한 거 봤는데, 이거 직접 밀었어 아니면 이미 있던 거야?
-  1) 내가 제안해서 도입
-  2) 기존에 있었고 활용만
-  3) 마이그레이션 작업
-  4) 직접입력
+## allowed-tools 금지
 
-# AskUserQuestion 호출:
-questions: [{
-  question: "Kafka 도입한 거 봤는데, 이거 직접 밀었어 아니면 이미 있던 거야?",
-  header: "시니어",
-  options: [
-    { label: "제안 도입", description: "내가 제안해서 도입" },
-    { label: "기존 활용", description: "기존에 있었고 활용만" },
-    { label: "마이그레이션", description: "마이그레이션 작업" }
-  ],
-  multiSelect: false
-}]
-// "직접입력" 드롭 — "Other"가 자동 추가됨
-```
+**AskUserQuestion을 SKILL.md frontmatter의 `allowed-tools`에 절대 추가하지 않는다** (bug #29547 — 빈 응답 자동 완성).
 
-## Known Bug: allowed-tools
+## 폴백
 
-**Never add AskUserQuestion to `allowed-tools` in the SKILL.md frontmatter** (bug #29547 — placing it in allowed-tools causes auto-completed empty responses).
+AskUserQuestion 호출이 실패하는 경우 (빈 응답, 에러, 타임아웃, **유저가 reject/dismiss/취소**):
 
-## Fallback Procedure
-
-If the AskUserQuestion call fails (empty response, error, timeout):
-
-1. Show the message "셀렉트 박스 로딩에 문제가 생겼어요. 다시 시도할게요."
-2. Retry AskUserQuestion with the same parameters (1 retry).
-3. If the second attempt also fails:
-   - Show "텍스트로 답변해주세요."
-   - Display the agent's original text, including the numbered options, as-is:
+1. **reject 감지**: "취소", "아니 다시", "잘못 눌렀어", "다시 띄워줘" 또는 빈 문자열/null/"interrupted" 응답 → reject로 간주
+2. 즉시 "셀렉트 박스 로딩에 문제가 생겼어요. 다시 시도할게요." 메시지 표시
+3. 동일 파라미터로 1회 자동 재시도
+4. 재시도도 실패하면 텍스트 모드 폴백:
+   - "텍스트로 답변해주세요." 메시지
+   - 원래 JSON의 `questions[i].question` 및 `options[j].description`을 번호 리스트로 렌더:
      ```
-     [시니어] 질문 텍스트
-       1) 선택지1
-       2) 선택지2
-       3) 선택지3
+     [{header}] {question}
+       1) {option 1 description}
+       2) {option 2 description}
+       3) {option 3 description}
      번호를 입력하거나 자유롭게 답변해주세요.
      ```
-   - Handle the user's text as either a number selection or a free-form answer (the legacy flow).
+   - 유저가 번호 입력 → 해당 옵션 선택
+   - 자유 텍스트 → `free_form` 답변으로 처리
 
-## User Response Handling
+**재시도 상한**: 자동 재시도는 1회. 2번 연속 실패하면 텍스트 폴백. 3회 이상 반복 호출하지 않는다 (무한 재시도 방지).
 
-- User clicks an option → use that option's `description` text as the agent's answer.
-- User picks "Other" and types free text → use the entered text as the agent's answer.
-- Fallback mode (numbered text) → if the user types a number, treat it as the matching option; otherwise treat as free text.
+## JSON 파싱 실패 시
 
-If an episode can be extracted from the user's answer, save it to `resume-source.json` immediately.
+에이전트 응답이 유효 JSON이 아니면 (Phase 2 초기 드문 케이스):
+
+1. 오케스트레이터는 "JSON 응답 포맷이 아니야. 다시 생성해줘" 메시지와 함께 에이전트 재호출 (1회)
+2. 재호출도 실패하면 해당 에이전트 응답을 평문으로 유저에게 표시 (레거시 우회). 회고에 `json_parse_failure` 이벤트 기록.

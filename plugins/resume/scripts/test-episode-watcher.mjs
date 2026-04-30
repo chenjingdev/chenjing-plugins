@@ -221,8 +221,8 @@ function readMeta() {
   assert.ok(result2, "score 4 + 1 = 5, should trigger");
   const ctx2 = result2.hookSpecificOutput.additionalContext;
   assert.ok(ctx2.includes("[resume-panel]"), "should have resume-panel tag");
-  assert.ok(ctx2.includes("프로파일러"), "should mention profiler");
-  assert.ok(ctx2.includes("score:"), "should include score in output");
+  assert.ok(ctx2.includes('"type":"profiler_trigger"'), "should mention profiler");
+  assert.ok(ctx2.includes('"score":'), "should include score in output");
   const metaAfter2 = readMeta();
   assert.strictEqual(metaAfter2.profiler_score, 0, "profiler_score should reset to 0 after trigger");
   console.log("PASS: score accumulates across calls");
@@ -255,7 +255,7 @@ function readMeta() {
   assert.ok(result, "new company +3 should trigger when combined score >= 5");
   const ctx = result.hookSpecificOutput.additionalContext;
   assert.ok(ctx.includes("[resume-panel]"), "should have resume-panel tag");
-  assert.ok(ctx.includes("프로파일러"), "should mention profiler");
+  assert.ok(ctx.includes('"type":"profiler_trigger"'), "should mention profiler");
   assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
   const metaAfter = readMeta();
   assert.strictEqual(metaAfter.profiler_score, 0, "profiler_score should reset to 0 after trigger");
@@ -400,7 +400,7 @@ function readMeta() {
   assert.ok(result, "combined events should trigger immediately");
   const ctx = result.hookSpecificOutput.additionalContext;
   assert.ok(ctx.includes("[resume-panel]"), "should have resume-panel tag");
-  assert.ok(ctx.includes("프로파일러"), "should mention profiler");
+  assert.ok(ctx.includes('"type":"profiler_trigger"'), "should mention profiler");
   assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
   assert.ok(ctx.includes("meta 변경"), "should mention meta change");
   const metaAfter = readMeta();
@@ -474,7 +474,7 @@ function readMeta() {
   // score: 0 + 3(episodes) + 2(star gap increase) = 5 >= 5, triggers
   assert.ok(result, "should trigger with episode delta + star gaps");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("빈 STAR 2개"), "should count 2 episodes with incomplete STAR");
+  assert.ok(ctx.includes('"star_gaps":2'), "should count 2 episodes with incomplete STAR");
   console.log("PASS: STAR gap counting in scoring context");
 }
 
@@ -514,7 +514,7 @@ console.log("\nAll scoring system tests passed.");
   });
   const parsed = result.trim() ? JSON.parse(result.trim()) : null;
   assert.ok(parsed, "HIGH finding should produce output");
-  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("[resume-panel:HIGH]"));
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes('"urgency":"HIGH"'));
   assert.ok(parsed.hookSpecificOutput.additionalContext.includes("WebSocket"));
 
   // findings.json에 delivered: true
@@ -677,7 +677,7 @@ console.log("\nAll scoring system tests passed.");
   });
   const parsed = result.trim() ? JSON.parse(result.trim()) : null;
   assert.ok(parsed, "MEDIUM with company change should produce output");
-  assert.ok(parsed.hookSpecificOutput.additionalContext.includes("[resume-panel:MEDIUM]"));
+  assert.ok(parsed.hookSpecificOutput.additionalContext.includes('"urgency":"MEDIUM"'));
   assert.ok(parsed.hookSpecificOutput.additionalContext.includes("수치 보강"));
 
   // snapshot should be updated with new current_company
@@ -782,10 +782,10 @@ const bashSoWhatInput = {
   setupSoWhatTestDir(snapshot, resumeSource, meta);
 
   const result = runSoWhat(bashSoWhatInput);
-  // Should have output containing [resume-panel:SO-WHAT]
+  // Should have output containing so_what JSON payload
   assert.ok(result, "weak result episode should produce output with SO-WHAT");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("[resume-panel:SO-WHAT]"), "should contain SO-WHAT tag");
+  assert.ok(ctx.includes('"type":"so_what"'), "should contain SO-WHAT tag");
   console.log("PASS: SO-WHAT trigger on weak result episode");
 }
 
@@ -808,7 +808,7 @@ const bashSoWhatInput = {
   // Should NOT have SO-WHAT message (score is only 1, below threshold 5 for profiler)
   if (result) {
     const ctx = result.hookSpecificOutput.additionalContext;
-    assert.ok(!ctx.includes("[resume-panel:SO-WHAT]"), "quantified result should NOT trigger SO-WHAT");
+    assert.ok(!ctx.includes('"type":"so_what"'), "quantified result should NOT trigger SO-WHAT");
   }
   console.log("PASS: SO-WHAT skip on quantified result episode");
 }
@@ -840,7 +840,7 @@ const bashSoWhatInput = {
   // SO-WHAT should be suppressed even though result is weak
   if (result) {
     const ctx = result.hookSpecificOutput.additionalContext;
-    assert.ok(!ctx.includes("[resume-panel:SO-WHAT]"), "so_what_active should suppress SO-WHAT trigger");
+    assert.ok(!ctx.includes('"type":"so_what"'), "so_what_active should suppress SO-WHAT trigger");
   }
   console.log("PASS: SO-WHAT suppression when so_what_active.active === true");
 }
@@ -887,8 +887,8 @@ const bashSoWhatInput = {
   const result = runSoWhat(bashSoWhatInput);
   assert.ok(result, "should produce output");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("[resume-panel]"), "should contain profiler tag");
-  assert.ok(ctx.includes("[resume-panel:SO-WHAT]"), "should also contain SO-WHAT tag");
+  assert.ok(ctx.includes('"type":"profiler_trigger"'), "should contain profiler tag");
+  assert.ok(ctx.includes('"type":"so_what"'), "should also contain SO-WHAT tag");
   console.log("PASS: SO-WHAT and profiler messages coexist");
 }
 
@@ -1352,7 +1352,7 @@ const bashPatternInput = {
   tool_input: { command: "cat <<'EOF' > resume-source.json\n...\nEOF" },
 };
 
-// Test pattern-1: 3+ episodes across 2+ companies -> message includes "패턴 분석 가능"
+// Test pattern-1: 3+ episodes across 2+ companies -> payload has pattern_eligible=true
 {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
   // score=4, +1 episode = 5 -> triggers profiler
@@ -1375,7 +1375,7 @@ const bashPatternInput = {
   const result = runPatternTest(bashPatternInput);
   assert.ok(result, "should trigger profiler");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(ctx.includes("패턴 분석 가능"), "should include pattern eligibility flag when 3+ episodes across 2+ companies");
+  assert.ok(ctx.includes('"pattern_eligible":true'), "should include pattern eligibility flag when 3+ episodes across 2+ companies");
 
   // meta.json should have last_pattern_analysis_episode_count
   const metaAfter = readPatternMeta();
@@ -1385,7 +1385,7 @@ const bashPatternInput = {
   rmSync(patternTestBase, { recursive: true, force: true });
 }
 
-// Test pattern-2: 2 episodes (< 3) -> message does NOT include "패턴 분석 가능"
+// Test pattern-2: 2 episodes (< 3) -> payload has pattern_eligible=false
 {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
   const snapshot = { episode_count: 1, project_names: ["프로젝트A", "프로젝트B"], meta_hash: correctHash, star_gaps: 0 };
@@ -1406,13 +1406,13 @@ const bashPatternInput = {
   const result = runPatternTest(bashPatternInput);
   assert.ok(result, "should trigger profiler");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(!ctx.includes("패턴 분석 가능"), "should NOT include pattern eligibility flag when < 3 episodes");
+  assert.ok(ctx.includes('"pattern_eligible":false'), "should mark pattern_eligible=false when < 3 episodes");
   console.log("PASS: no pattern eligibility with < 3 episodes");
 
   rmSync(patternTestBase, { recursive: true, force: true });
 }
 
-// Test pattern-3: 3+ episodes but only 1 company -> message does NOT include "패턴 분석 가능"
+// Test pattern-3: 3+ episodes but only 1 company -> payload has pattern_eligible=false
 {
   const correctHash = createHash("md5").update("코인원|FE").digest("hex").slice(0, 8);
   const snapshot = { episode_count: 2, project_names: ["프로젝트A"], meta_hash: correctHash, star_gaps: 0 };
@@ -1432,11 +1432,505 @@ const bashPatternInput = {
   const result = runPatternTest(bashPatternInput);
   assert.ok(result, "should trigger profiler");
   const ctx = result.hookSpecificOutput.additionalContext;
-  assert.ok(!ctx.includes("패턴 분석 가능"), "should NOT include pattern eligibility flag when only 1 company");
+  assert.ok(ctx.includes('"pattern_eligible":false'), "should mark pattern_eligible=false when only 1 company");
   console.log("PASS: no pattern eligibility with only 1 company");
 
   rmSync(patternTestBase, { recursive: true, force: true });
 }
 
 console.log("\nAll pattern eligibility tests passed.");
+
+// ── Phase 2 JSON 프로토콜 테스트 ──────────────────────
+// Test Phase 2.1: profiler_trigger 메시지가 [resume-panel]{"type":"profiler_trigger"}... 형태인지 확인
+{
+  // setup: snapshot + resume-source.json with episodes
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 0, project_names: [], meta_hash: "initial", star_gaps: 0, current_company: null
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({ profiler_score: 4 }));
+  const source = {
+    meta: { target_company: "T", target_position: "P" },
+    companies: [{
+      name: "C1", projects: [{
+        name: "P1", episodes: [
+          { title: "e1", action: "a1", result: "완료", situation: "s", task: "t" },
+          { title: "e2", action: "a2", result: "10% 개선", situation: "s", task: "t" }
+        ]
+      }]
+    }]
+  };
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify(source));
+
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  assert.ok(result, "should produce output when score crosses threshold");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const lines = ctx.split("\n\n").filter(Boolean);
+  const profilerLine = lines.find(l => l.includes('"type":"profiler_trigger"'));
+  assert.ok(profilerLine, `profiler_trigger JSON line missing. got: ${ctx}`);
+  assert.ok(profilerLine.startsWith("[resume-panel]"), "prefix missing");
+  const payload = JSON.parse(profilerLine.slice("[resume-panel]".length));
+  assert.strictEqual(payload.type, "profiler_trigger");
+  assert.ok(typeof payload.score === "number", "score should be number");
+  assert.ok(typeof payload.episode_count === "number", "episode_count should be number");
+  console.log("PASS: Phase 2.1 — profiler_trigger JSON format");
+}
+
+// Test Phase 2.2: finding도 JSON 형태로 발행되는지 (해당 조건일 때)
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 0, project_names: [], meta_hash: "initial", star_gaps: 0, current_company: null
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({ profiler_score: 4 }));
+  // Two projects with 8-month gap
+  const source = {
+    meta: { target_company: "T", target_position: "P" },
+    companies: [
+      { name: "C1", projects: [{ name: "P1", period: "2018.01-2018.08",
+        episodes: [{ title: "e1", action: "a", result: "10개 개선", situation: "s", task: "t" }] }] },
+      { name: "C2", projects: [{ name: "P2", period: "2019.05-2019.12",
+        episodes: [{ title: "e2", action: "a", result: "20% 개선", situation: "s", task: "t" }] }] }
+    ]
+  };
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify(source));
+
+  // First run: triggers profiler threshold + gap detection (writes to inbox)
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  // Second run: inbox routing → finding emitted
+  const result2 = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  // Note: MEDIUM findings require companyChanged signal — we don't test delivery here.
+  if (result2 && result2.hookSpecificOutput) {
+    const ctx = result2.hookSpecificOutput.additionalContext;
+    const findingLine = ctx.split("\n\n").find(l => l.includes('"type":"finding"'));
+    if (findingLine) {
+      const payload = JSON.parse(findingLine.slice("[resume-panel]".length));
+      assert.strictEqual(payload.type, "finding");
+      assert.ok(payload.finding_type, "finding_type required");
+      assert.ok(["HIGH", "MEDIUM", "LOW"].includes(payload.urgency), "urgency valid");
+      console.log("PASS: Phase 2.2 — finding JSON format");
+    } else {
+      console.log("SKIP: Phase 2.2 — finding not delivered this run (expected)");
+    }
+  } else {
+    console.log("SKIP: Phase 2.2 — no output this run");
+  }
+}
+
+// ── Phase 3 meta.json 스키마 테스트 ──────────────────────
+// Test Phase 3.1: meta.json 초기화 시 session_limits와 gate_state 포함
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // no snapshot → first run will initialize
+  const source = {
+    meta: { target_company: "T", target_position: "P" },
+    companies: [{ name: "C1", projects: [{ name: "P1", episodes: [] }] }]
+  };
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify(source));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.ok(meta.session_limits, "session_limits missing");
+  assert.ok(meta.session_limits.gaps, "session_limits.gaps missing");
+  assert.strictEqual(meta.session_limits.gaps.max, 3);
+  assert.strictEqual(meta.session_limits.gaps.used, 0);
+  assert.ok(Array.isArray(meta.session_limits.gaps.intentional), "gaps.intentional should be array");
+  assert.strictEqual(meta.session_limits.perspectives.max, 2);
+  assert.strictEqual(meta.session_limits.contradictions.max, 2);
+  assert.ok(meta.gate_state, "gate_state missing");
+  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0);
+  assert.deepStrictEqual(meta.gate_state.agent_calls_in_current_round, {
+    senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0
+  });
+  console.log("PASS: Phase 3.1 — meta.json 초기 스키마");
+}
+
+// Test Phase 3.2: 기존 meta.json (구 스키마)의 마이그레이션
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // 구 스키마
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    gap_probes_this_session: 1,
+    perspective_shifts_this_session: 0,
+    perspective_shifted_episodes: ["epA"],
+    contradictions_presented_this_session: 2,
+    reprobe_log: [{ area: "KB카드", timestamp: "2026-04-20T08:00:00Z" }],
+    intentional_gaps: [{ from: "2018.09", to: "2019.05" }],
+    profiler_score: 3,
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 0, project_names: [], meta_hash: "x", star_gaps: 0, current_company: null
+  }));
+  const source = { meta: {}, companies: [] };
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify(source));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Write",
+    tool_input: { file_path: "/tmp/test-resume-panel/resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.session_limits.gaps.used, 1, "gaps.used migrated");
+  assert.strictEqual(meta.session_limits.perspectives.used, 0, "perspectives.used migrated");
+  assert.deepStrictEqual(meta.session_limits.perspectives.episode_refs, ["epA"]);
+  assert.strictEqual(meta.session_limits.contradictions.used, 2, "contradictions.used migrated");
+  assert.strictEqual(meta.session_limits.reprobes.log.length, 1, "reprobes.log migrated");
+  assert.deepStrictEqual(meta.session_limits.gaps.intentional, [{ from: "2018.09", to: "2019.05" }]);
+  // 구 필드 삭제 확인
+  assert.strictEqual(meta.gap_probes_this_session, undefined, "old field should be removed");
+  assert.strictEqual(meta.contradictions_presented_this_session, undefined, "old field should be removed");
+  console.log("PASS: Phase 3.2 — meta.json 마이그레이션");
+}
+
+// Test Phase 3.3: Task tool 호출이 agent_calls_in_current_round 증가시킴
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 2,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 5, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Task",
+    tool_input: { subagent_type: "senior", prompt: "..." },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.agent_calls_in_current_round.senior, 1, "senior count should increment");
+  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0, "direct streak should reset on Task call");
+  console.log("PASS: Phase 3.3 — Task 호출 감지");
+}
+
+// Test Phase 3.4a: 화이트리스트 선언된 AskUserQuestion은 streak 증가 안 함
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 5, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: { source: "whitelist", case: "round0_basic_info" },
+    },
+    current_round: 0,
+    profiler_score: 0,
+  }));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "?" }] },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0, "whitelist declared → streak should stay 0");
+  assert.strictEqual(meta.gate_state.last_askuserquestion_source, null, "source should reset to null");
+  console.log("PASS: Phase 3.4a — whitelist 선언 시 streak 비증가");
+}
+
+// Test Phase 3.4b: 미선언 AskUserQuestion 3연속 → gate_violation 발행
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 2,
+      agent_calls_in_current_round: { senior: 1, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 5, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "?" }] },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 3, "streak should hit 3");
+  assert.ok(result, "should emit output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const violationLine = ctx.split("\n\n").find(l => l.includes('"gate":"direct_question_burst"'));
+  assert.ok(violationLine, `gate_violation direct_question_burst missing: ${ctx}`);
+  const payload = JSON.parse(violationLine.slice("[resume-panel]".length));
+  assert.strictEqual(payload.type, "gate_violation");
+  assert.strictEqual(payload.gate, "direct_question_burst");
+  assert.strictEqual(payload.count, 3);
+  console.log("PASS: Phase 3.4b — direct_question_burst 감지");
+}
+
+// Test Phase 3.5: Round 1 첫 AskUserQuestion 시 senior/c-level 호출 없으면 r1_entry 위반
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: { source: "orchestrator_direct" },
+    },
+    current_round: 1,
+    current_company: "KB국민카드",
+    profiler_score: 0,
+  }));
+
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "?" }] },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  assert.ok(result, "should emit output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const r1Line = ctx.split("\n\n").find(l => l.includes('"gate":"r1_entry"'));
+  assert.ok(r1Line, `r1_entry gate_violation missing: ${ctx}`);
+  const payload = JSON.parse(r1Line.slice("[resume-panel]".length));
+  assert.strictEqual(payload.gate, "r1_entry");
+  assert.strictEqual(payload.company, "KB국민카드");
+  console.log("PASS: Phase 3.5 — G1 r1_entry");
+}
+
+// Test Phase 3.6: round-transition 2→3 시 recruiter/hr 0회면 r2_exit 위반
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 2, "c-level": 1, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 30, "1": 40, "2": 10, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 2,
+    profiler_score: 0,
+  }));
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: {}, companies: [], gap_analysis: null
+  }));
+
+  // 시그널: round-transition to 3 — Bash로 파일 쓰기
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/round-transition.json", JSON.stringify({ to: 3 }));
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo '{\"to\":3}' > .resume-panel/round-transition.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  assert.ok(result, "should emit output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const r2Line = ctx.split("\n\n").find(l => l.includes('"gate":"r2_exit"'));
+  assert.ok(r2Line, `r2_exit gate_violation missing: ${ctx}`);
+  const payload = JSON.parse(r2Line.slice("[resume-panel]".length));
+  assert.strictEqual(payload.gate, "r2_exit");
+  assert.ok(payload.missing.includes("recruiter"), "missing should include recruiter");
+  assert.ok(payload.missing.includes("hr"), "missing should include hr");
+  assert.ok(payload.missing.includes("turn_min"), "missing should include turn_min");
+  assert.ok(payload.missing.includes("gap_analysis"), "missing should include gap_analysis");
+  console.log("PASS: Phase 3.6 — G3 r2_exit");
+}
+
+// Test Phase 3.7: session-end 시그널 시 retrospective 미호출이면 G4 위반
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 10 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 3,
+    profiler_score: 0,
+  }));
+
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/session-end.json", JSON.stringify({}));
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo '{}' > .resume-panel/session-end.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  assert.ok(result, "should emit output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  const g4Line = ctx.split("\n\n").find(l => l.includes('"gate":"retrospective_skipped"'));
+  assert.ok(g4Line, `retrospective_skipped missing: ${ctx}`);
+  console.log("PASS: Phase 3.7 — G4 retrospective_skipped");
+}
+
+// Test Phase 3.8: retrospective Task 호출이 retrospective_invoked=true
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 10 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 3,
+    profiler_score: 0,
+  }));
+
+  run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Task",
+    tool_input: { subagent_type: "retrospective", prompt: "..." },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.retrospective_invoked, true, "retrospective_invoked should be true");
+  console.log("PASS: Phase 3.8 — retrospective Task 감지");
+}
+
+// Test Phase 4.1: Task/AskUserQuestion 호출이 session-stats.json에 집계됨
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  // senior Task 2회 호출
+  run({ hook_event_name: "PostToolUse", tool_name: "Task", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
+  run({ hook_event_name: "PostToolUse", tool_name: "Task", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
+
+  // AskUserQuestion (agent 소스) 3회 — 각각 호출 전에 소스 선언
+  for (let i = 0; i < 3; i++) {
+    const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+    meta.gate_state.last_askuserquestion_source = { source: "agent", agent_name: "senior" };
+    writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+    run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
+  }
+
+  // AskUserQuestion (whitelist) 1회
+  {
+    const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+    meta.gate_state.last_askuserquestion_source = { source: "whitelist", case: "round0_basic_info" };
+    writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+    run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
+  }
+
+  const stats = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
+  assert.strictEqual(stats.agent_invocations.senior, 2);
+  assert.strictEqual(stats.askuserquestion.total, 4);
+  assert.strictEqual(stats.askuserquestion.by_source.agent, 3);
+  assert.strictEqual(stats.askuserquestion.by_source.whitelist, 1);
+  assert.strictEqual(stats.askuserquestion.by_source.orchestrator_direct, 0);
+  console.log("PASS: Phase 4.1 — session-stats.json 집계");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
