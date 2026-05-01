@@ -60,6 +60,33 @@ description: "흐릿한 앱 아이디어를 사용자 경험의 서사로 풀어
 - 큰 신호 detected인데 `big_signals_log`에 push만 하고 명시 turn-back을 생략 — 로그는 turn-back의 *결과*이지 *대체*가 아니다.
 - 사일런트 신호 변동을 다음 응답 톤에 반영하지 않음 — silent_state 갱신만 하고 응답이 그대로면 점검의 의미가 없다.
 
+### 응답 형식 강제 (자가 점검 forcing function)
+
+위 매 턴 자가 점검은 *룰만 적혀 있어도 LLM이 자연스러운 흐름으로 흘려보내기 쉽다*. 이를 막기 위해, 매 사용자 발화에 대한 AI 응답은 반드시 다음 HTML 주석 블록으로 시작해야 한다. 이 블록은 마크다운 렌더에서 사용자에게 보이지 않지만, *자가 점검의 증거*로 남는다.
+
+```
+<!-- session_tick
+detected_big: []           # stuck | word_unagreed | meta_isomorphism | prototype_absent 중 이번 턴 detected (빈 배열 가능)
+detected_silent: []        # tone | depth | vocab 중 이번 턴 변동 (빈 배열 가능)
+vocab_new: []              # 사용자가 이번 턴에 새로 발화한 단어 (term 문자열 배열)
+vocab_reused_unagreed: []  # AI가 응답에 재사용하려다 막힌 unagreed 단어
+manifest_patch: {}         # 이번 턴 manifest.yml에 갱신할 필드 (yaml dict)
+-->
+
+[그 다음에 사용자에게 보일 응답 본문]
+```
+
+#### 형식 룰
+
+- **생략은 위반.** 비어 있어도 빈 채로 emit한다. *"detected_big: none"* 같은 placeholder 대신 *빈 배열*이 정직하다. 블록 자체가 빠지면 자가 점검 미실행으로 간주.
+- **detected_big에 항목이 있으면 응답 본문에 명시 turn-back을 포함**해야 한다. 큰 신호 로그만 남기고 본문은 보통 응답으로 흘리는 것은 검증 안티패턴(`### 매 턴 자가 점검` 안티패턴 #2).
+- **vocab_new에 항목이 있으면 manifest_patch에 그 단어를 `session_state.vocabulary`에 push하는 내용이 포함**되어야 한다. detected만 적고 manifest_patch가 비면 갱신 누락.
+- **인터뷰 도중이 아닌 응답에서도 emit한다** — init 분기 첫 메시지·승인 직후 다음 가지 제안·writing-plans 인계 메시지·기타 모든 응답에 일관 적용. 예외 없음.
+
+#### 왜 이 forcing function이 필요한가
+
+이 블록을 *채우는 행위 자체*가 LLM에게 7개 신호를 의식하도록 강제한다. 룰만 SKILL.md에 적혀 있으면 LLM은 본분(인터뷰)에 집중하면서 자가 점검을 흘려보내지만, *응답 시작 양식이 비면 위반*으로 정의되면 매 턴 양식을 채우는 동안 7개 차원을 훑게 된다. 이는 SKILL 설계에서 가장 잘 작동하는 *구조적 출력 강제* 패턴이다.
+
 ### Layer 1 메타 자세 (전 단계 상시 적용, 사용자에게 선택 노출 없음)
 
 다음 5개는 항상 적용된다. 사용자에게 옵션으로 묻지 않는다.

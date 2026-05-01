@@ -93,6 +93,20 @@ session_state:
 
 ---
 
+### B'. 응답 형식 강제 (forcing function)
+
+**대상**: `plugins/story-spec/skills/story-spec/SKILL.md`
+
+**위치**: `### 매 턴 자가 점검` 섹션 직후, `### Layer 1 메타 자세` 직전.
+
+**배경**: Phase 1 첫 커밋(f00756f) 후 *룰만 적고 강제 없음*이 메타 패턴 그대로 재발할 위험이 드러남 — 47줄을 추가해도 LLM이 매 턴 7개 신호를 실제로 점검할 강제 메커니즘은 없었다. 이를 막기 위해 *구조적 출력 강제* 패턴을 도입.
+
+**내용**: 매 AI 응답이 `<!-- session_tick ... -->` HTML 주석 블록으로 시작해야 한다. 5개 필드(`detected_big` / `detected_silent` / `vocab_new` / `vocab_reused_unagreed` / `manifest_patch`)를 채우는 양식. 빠지면 위반. 사용자에게는 안 보이지만 자가 점검의 *증거*로 남는다.
+
+**왜 forcing function인가**: 양식을 채우는 행위 자체가 LLM에게 7개 신호를 의식하도록 강제한다. 룰만 적혀 있으면 본분(인터뷰)에 집중하며 자가 점검을 흘려보내지만, *응답 시작 양식이 비면 위반*으로 정의되면 매 턴 7개 차원을 훑게 된다.
+
+---
+
 ### B. SKILL.md "매 턴 자가 점검" 섹션 신설
 
 **대상**: `plugins/story-spec/skills/story-spec/SKILL.md`
