@@ -9,6 +9,16 @@ import assert from "node:assert";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const script = join(__dirname, "episode-watcher.mjs");
 
+function defaultGateStateForTest() {
+  return {
+    direct_askuserquestion_streak: 0,
+    agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+    round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+    retrospective_invoked: false,
+    last_askuserquestion_source: null,
+  };
+}
+
 function run(input) {
   try {
     const stdout = execFileSync("node", [script], {
@@ -2089,6 +2099,64 @@ console.log("\nAll pattern eligibility tests passed.");
   const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
   assert.strictEqual(meta.gate_state.round_turn_counts["5"], 1, "non-standard round 5 should accept");
   console.log("PASS: Phase 5.3c — UserPromptSubmit non-standard round");
+}
+
+// Test Phase 5.4: storage 가중치가 _score_reasons에 사유 기록
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // 첫 실행 — snapshot 생성만
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: { target_company: "X", target_position: "Y" },
+    companies: [{ name: "C1", projects: [{ name: "P1", episodes: [{ title: "E1", star: { situation: "s", task: "t", action: "a", result: "r 30%" } }] }] }],
+  }));
+  run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/resume-source.json", content: "{}" }, cwd: "/tmp/test-resume-panel" });
+
+  // 두 번째 실행 — 새 회사 + 새 에피소드 추가 → score +4 (에피소드 +1, 새 프로젝트 +3)
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: { target_company: "X", target_position: "Y" },
+    companies: [
+      { name: "C1", projects: [{ name: "P1", episodes: [{ title: "E1", star: { situation: "s", task: "t", action: "a", result: "r 30%" } }] }] },
+      { name: "C2", projects: [{ name: "P2", episodes: [{ title: "E2", star: { situation: "s", task: "t", action: "a", result: "r 50%" } }] }] },
+    ],
+  }));
+  run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/resume-source.json", content: "{}" }, cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.ok(Array.isArray(meta._score_reasons), "_score_reasons should be an array");
+  assert.ok(meta._score_reasons.length >= 2, `_score_reasons should have ≥2 entries, got ${meta._score_reasons.length}`);
+  const reasons = meta._score_reasons.map(r => r.reason);
+  assert.ok(reasons.some(r => r.includes("에피소드")), "에피소드 reason missing");
+  assert.ok(reasons.some(r => r.includes("새 프로젝트")), "새 프로젝트 reason missing");
+  console.log("PASS: Phase 5.4 — _score_reasons 누적");
+}
+
+// Test Phase 5.4b: _score_reasons rolling 10 (slice -9 + push = max 10)
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // 미리 _score_reasons에 10개 채워둠
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: defaultGateStateForTest(),
+    profiler_score: 0,
+    _score_reasons: Array.from({ length: 10 }, (_, i) => ({ delta: 1, reason: `seed-${i}`, at: new Date(2025, 0, 1, 0, 0, i).toISOString() })),
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 0, project_names: [], meta_hash: "init", star_gaps: 0, current_company: null,
+  }));
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: { target_company: "X", target_position: "Y" },
+    companies: [{ name: "C1", projects: [{ name: "P1", episodes: [{ title: "E1", star: { situation: "s", task: "t", action: "a", result: "r 30%" } }] }] }],
+  }));
+  run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/resume-source.json", content: "{}" }, cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.ok(meta._score_reasons.length <= 10, `_score_reasons should be ≤10, got ${meta._score_reasons.length}`);
+  // 가장 오래된 seed-0가 잘려나갔는지 확인
+  const reasons = meta._score_reasons.map(r => r.reason);
+  assert.ok(!reasons.includes("seed-0"), "seed-0 (oldest) should be evicted");
+  console.log("PASS: Phase 5.4b — _score_reasons rolling 10");
 }
 
 console.log("\n=== ALL TESTS COMPLETE ===");

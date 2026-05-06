@@ -367,6 +367,17 @@ function ensureDebug(stats) {
   return stats._debug;
 }
 
+function addProfilerScore(meta, delta, reason) {
+  meta.profiler_score = (meta.profiler_score || 0) + delta;
+  meta._score_reasons = (meta._score_reasons || []).slice(-9);
+  meta._score_reasons.push({
+    delta,
+    reason,
+    at: new Date().toISOString(),
+  });
+  return meta.profiler_score;
+}
+
 function readStats(base) {
   return readJSON(join(base, ".resume-panel", "session-stats.json")) || defaultSessionStats();
 }
@@ -460,14 +471,13 @@ if (isResumeSourceChange) {
       writeFileSync(metaPath, JSON.stringify(metaMigrated, null, 2));
     } else {
       // 이벤트 가중치 점수 계산
-      const metaJSON = readJSON(metaPath) || {};
-      let score = metaJSON.profiler_score || 0;
+      const metaJSON = migrateMeta(readJSON(metaPath) || {});
       const reasons = [];
 
       // +1: 에피소드 저장
       const episodeDelta = currentCount - (snapshot.episode_count || 0);
       if (episodeDelta > 0) {
-        score += episodeDelta;
+        addProfilerScore(metaJSON, episodeDelta, `에피소드 +${episodeDelta}`);
         reasons.push(`에피소드 +${episodeDelta}`);
       }
 
@@ -475,7 +485,7 @@ if (isResumeSourceChange) {
       const snapshotProjects = new Set(snapshot.project_names || []);
       const hasNewProject = currentProjects.some((p) => !snapshotProjects.has(p));
       if (hasNewProject) {
-        score += 3;
+        addProfilerScore(metaJSON, 3, "새 프로젝트 (+3)");
         reasons.push("새 프로젝트 (+3)");
       }
 
@@ -483,26 +493,28 @@ if (isResumeSourceChange) {
       const currentStarGaps = countStarGaps(source);
       const prevStarGaps = snapshot.star_gaps || 0;
       if (currentStarGaps > prevStarGaps) {
-        score += 2;
+        addProfilerScore(metaJSON, 2, "빈 STAR 증가 (+2)");
         reasons.push("빈 STAR 증가 (+2)");
       }
 
       // +2: 역할 축소 신호
       if (detectMinimization(source, snapshot)) {
-        score += 2;
+        addProfilerScore(metaJSON, 2, "역할 축소 신호 (+2)");
         reasons.push("역할 축소 신호 (+2)");
       }
 
       // +2: 메타 변경
       if (currentHash !== snapshot.meta_hash) {
-        score += 2;
+        addProfilerScore(metaJSON, 2, "meta 변경 (+2)");
         reasons.push("meta 변경 (+2)");
       }
+
+      let score = metaJSON.profiler_score;
 
       // 임계값 체크
       const THRESHOLD = 5;
       let updatedMetaFields = {};
-      if (score >= THRESHOLD) {
+      if (metaJSON.profiler_score >= THRESHOLD) {
         const starGaps = countStarGaps(source);
         const companyCount = getCompanyCount(source);
         const patternEligible = currentCount >= 3 && companyCount >= 2;
@@ -510,7 +522,7 @@ if (isResumeSourceChange) {
           emit({
             type: "profiler_trigger",
             delta: reasons.join(", "),
-            score,
+            score: metaJSON.profiler_score,
             episode_count: currentCount,
             star_gaps: starGaps,
             project_count: currentProjects.length,
@@ -519,8 +531,7 @@ if (isResumeSourceChange) {
         );
 
         // Timeline gap detection -- deterministic, runs with profiler trigger
-        const metaForTimeline = readJSON(metaPath) || {};
-        const intentionalGaps = metaForTimeline.intentional_gaps || [];
+        const intentionalGaps = metaJSON.intentional_gaps || metaJSON.session_limits?.gaps?.intentional || [];
         const gaps = detectGaps(source);
         for (const gap of gaps) {
           // Skip intentional gaps
@@ -559,12 +570,11 @@ if (isResumeSourceChange) {
           updatedMetaFields.last_timeline_check = new Date().toISOString();
         }
 
-        score = 0; // 트리거 후 리셋
+        metaJSON.profiler_score = 0; // 트리거 후 리셋
       }
 
       // So What chain trigger — check for impact-shallow episodes
-      const metaForSoWhat = readJSON(metaPath) || {};
-      if (!metaForSoWhat.so_what_active?.active) {
+      if (!metaJSON.so_what_active?.active) {
         const prevCount = snapshot.episode_count || 0;
         let checked = 0;
         for (const project of getAllProjects(source)) {
@@ -600,11 +610,9 @@ if (isResumeSourceChange) {
       );
 
       // meta.json에 점수 저장 (항상)
-      const metaMigrated = migrateMeta(metaJSON);
       writeFileSync(metaPath, JSON.stringify({
-        ...metaMigrated,
+        ...metaJSON,
         ...updatedMetaFields,
-        profiler_score: score,
       }, null, 2));
     }
   }
