@@ -58,8 +58,9 @@ if ((targetPath.includes(".resume-panel/") || targetPath.includes(".resume-panel
 // ── resume-source.json 변경 여부 ────────────────────
 const isResumeSourceChange = targetPath.includes("resume-source.json");
 
-// ── Task tool 호출 감지 (Agent 호출) ─────────────────
-if (toolName === "Task") {
+// ── Agent/Task tool 호출 감지 (에이전트 디스패치) ─────
+// Claude Code 버전에 따라 toolName이 "Task" 또는 "Agent". 양쪽 수용.
+if (toolName === "Task" || toolName === "Agent") {
   const subagent = toolInput.subagent_type || "";
   const knownAgents = ["senior", "c-level", "recruiter", "hr", "coffee-chat"];
   ensureStateDir();

@@ -1933,4 +1933,36 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 4.1 — session-stats.json 집계");
 }
 
+// Test Phase 5.1: tool_name="Agent" + subagent_type=senior → agent_invocations.senior 증가
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  run({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
+  run({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
+
+  const stats = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(stats.agent_invocations.senior, 2, "stats.agent_invocations.senior should be 2");
+  assert.strictEqual(meta.gate_state.agent_calls_in_current_round.senior, 2, "meta gate_state senior should be 2");
+  console.log("PASS: Phase 5.1 — Agent toolName 수용");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
