@@ -29,6 +29,8 @@ Phase 1~2 동안은 오케스트레이터가 자체적으로 이 명세에 따�
 - Round 2 turn 수 ≥ 15
 - gap_analysis.met 또는 gap_analysis.gaps 미설정(빈 배열이라도 배열로 기록)
 
+**turn 정의**: `UserPromptSubmit` hook 이벤트 1회 = 1 turn. 즉 유저가 메시지를 보낼 때마다 `meta.gate_state.round_turn_counts[current_round]`가 +1. AUQ 호출 횟수 기준이 아님(멀티-에이전트 턴에서 과집계되므로).
+
 **위반 메시지**: `{ "type": "gate_violation", "gate": "r2_exit", "missing": ["hr", "turn_min"] }`
 
 **복귀 액션**: "⚠️ Round 2 Exit Gate 미충족 — {missing} 보강 필요" 평문 출력 후 부족한 에이전트 호출.

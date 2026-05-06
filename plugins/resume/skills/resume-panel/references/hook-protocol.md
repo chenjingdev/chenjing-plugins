@@ -109,6 +109,27 @@ hook에서 전달하지 않음. 유저가 "분석해줘/리뷰해줘" 요청 시
 
 초과 시 hook에서는 발행을 억제하지 않지만 오케스트레이터가 무시. (Phase 3 목표: hook에서도 발행 억제)
 
+## 프로파일러 트리거 가중치 모델 (Model B, 2026-05-06~)
+
+`episode-watcher.mjs`의 `addProfilerScore(meta, delta, reason)` 헬퍼가 다음 이벤트에 따라 `meta.profiler_score`에 가산. 임계 `THRESHOLD = 5` 도달 시 `profiler_trigger` 메시지 emit + score 0 리셋.
+
+| 이벤트 | 점수 | 트리거 위치 |
+|---|---|---|
+| `resume-source.json` 에피소드 +N | +N | storage 분기 (기존) |
+| 새 회사/프로젝트 추가 | +3 | storage 분기 (기존) |
+| 빈 STAR result 증가 | +2 | storage 분기 (기존) |
+| 역할 축소 키워드(도움/참여 등) | +2 | storage 분기 (기존) |
+| meta(target_company/position) 변경 | +2 | storage 분기 (기존) |
+| AskUserQuestion 호출 | +1 | AUQ 핸들러 (신규) |
+| AUQ + 직전 60초 이내 HIGH finding delivered | +2 추가 (총 +3) | AUQ 핸들러, `meta._last_high_finding_at` 비교 (신규) |
+| `so_what` 메시지 발행 | +3 | so_what 발행 분기 (신규) |
+| `perspective_shift` finding 라우팅 | +3 | finding 라우팅 분기 (신규) |
+| `contradiction_detected` finding 라우팅 | +3 | finding 라우팅 분기 (신규) |
+
+`meta._score_reasons` 배열에 가산 사유 누적(rolling 10). 디버깅·회고 보조용.
+
+`meta._last_high_finding_at` — HIGH finding 라우팅 직후 ISO timestamp 갱신. AUQ 핸들러가 60초 이내 여부를 비교해 importance 보너스 결정.
+
 ## 모순 복원 (HIGH contradiction_detected) 처리 패턴
 
 오케스트레이터가 화이트리스트 case 3으로 AskUserQuestion 호출:
