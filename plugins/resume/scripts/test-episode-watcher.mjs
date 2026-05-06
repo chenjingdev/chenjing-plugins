@@ -2375,4 +2375,78 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 5.7c — contradiction_detected 가중치 +3");
 }
 
+// Test Phase 5.8a: round_turn_counts["2"] = 15 + recruiter/hr 호출 + gap_analysis → 위반 없음
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 1, hr: 1, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 10, "2": 15, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 2,
+    profiler_score: 0,
+  }));
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: { target_company: "X" },
+    companies: [],
+    gap_analysis: { met: ["a"], gaps: ["b"] },
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/round-transition.json",
+    JSON.stringify({ to: 3, at: new Date().toISOString() }));
+
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo updated > .resume-panel/round-transition.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  // 위반 메시지 없어야 함
+  const ctxStr = result?.hookSpecificOutput?.additionalContext || "";
+  assert.ok(!ctxStr.includes("r2_exit"), `r2_exit violation should NOT fire when all met. Got: ${ctxStr}`);
+  console.log("PASS: Phase 5.8a — r2_exit 위반 없음 (turn_min=15 충족)");
+}
+
+// Test Phase 5.8b: round_turn_counts["2"] = 14 → missing: ["turn_min"] 발행
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 1, hr: 1, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 10, "2": 14, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 2,
+    profiler_score: 0,
+  }));
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: { target_company: "X" },
+    companies: [],
+    gap_analysis: { met: ["a"], gaps: ["b"] },
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/round-transition.json",
+    JSON.stringify({ to: 3, at: new Date().toISOString() }));
+
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo updated > .resume-panel/round-transition.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  const ctxStr = result?.hookSpecificOutput?.additionalContext || "";
+  assert.ok(ctxStr.includes('"gate":"r2_exit"'), `r2_exit violation expected. Got: ${ctxStr}`);
+  assert.ok(ctxStr.includes('"turn_min"'), `missing turn_min expected. Got: ${ctxStr}`);
+  console.log("PASS: Phase 5.8b — r2_exit turn_min<15 위반 발행");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
