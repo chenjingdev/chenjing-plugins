@@ -152,6 +152,25 @@ if (toolName === "AskUserQuestion") {
     writeStats(base, stats);
   }
 
+  // 프로파일러 가중치 — AUQ 1회 +1 (모든 source)
+  addProfilerScore(meta, 1, "AUQ");
+
+  // 임계 도달 시 profiler_trigger emit + score 리셋
+  // (기존 storage 블록과 같은 임계값. THRESHOLD=5)
+  const profilerMessages = [];
+  if (meta.profiler_score >= 5) {
+    profilerMessages.push(emit({
+      type: "profiler_trigger",
+      delta: (meta._score_reasons || []).slice(-5).map(r => r.reason).join(", "),
+      score: meta.profiler_score,
+      source: "AUQ",
+    }));
+    meta.profiler_score = 0;
+  }
+
+  // meta 재저장 (위에서 이미 한 번 썼지만 score 변경분 반영)
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+
   // Collect violations
   const violations = [];
 
@@ -176,22 +195,25 @@ if (toolName === "AskUserQuestion") {
     });
   }
 
-  if (violations.length > 0) {
-    const statsForViolation = readStats(base);
-    for (const v of violations) {
-      statsForViolation.gate_violations.push({
-        gate: v.gate,
-        at: new Date().toISOString(),
-        detail: { company: v.company, count: v.count, missing: v.missing },
-      });
+  if (violations.length > 0 || profilerMessages.length > 0) {
+    if (violations.length > 0) {
+      const statsForViolation = readStats(base);
+      for (const v of violations) {
+        statsForViolation.gate_violations.push({
+          gate: v.gate,
+          at: new Date().toISOString(),
+          detail: { company: v.company, count: v.count, missing: v.missing },
+        });
+      }
+      writeStats(base, statsForViolation);
     }
-    writeStats(base, statsForViolation);
-    const outputLines = violations.map(v => `[resume-panel]${JSON.stringify(v)}`).join("\n\n");
+    const violationLines = violations.map(v => `[resume-panel]${JSON.stringify(v)}`);
+    const allMessages = [...violationLines, ...profilerMessages];
     process.stdout.write(JSON.stringify({
       continue: true,
       hookSpecificOutput: {
         hookEventName: "PostToolUse",
-        additionalContext: outputLines,
+        additionalContext: allMessages.join("\n\n"),
       },
     }));
   }

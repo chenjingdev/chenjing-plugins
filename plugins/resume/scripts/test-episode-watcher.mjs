@@ -2159,4 +2159,60 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 5.4b — _score_reasons rolling 10");
 }
 
+// Test Phase 5.5: AUQ 호출 1회 → profiler_score +1 + _score_reasons 기록
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      ...defaultGateStateForTest(),
+      last_askuserquestion_source: { source: "agent", agent_name: "senior" },
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.profiler_score, 1, "AUQ should add +1 to profiler_score");
+  const reasons = (meta._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons.some(r => r.includes("AUQ")), `AUQ reason missing in ${JSON.stringify(reasons)}`);
+  console.log("PASS: Phase 5.5 — AUQ 가중치 +1");
+}
+
+// Test Phase 5.5b: AUQ 5회 누적 → 임계 도달 → trigger 발행 + score 0 리셋
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      ...defaultGateStateForTest(),
+      last_askuserquestion_source: { source: "agent", agent_name: "senior" },
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  let lastResult = null;
+  for (let i = 0; i < 5; i++) {
+    // AUQ 호출 직전 source 재선언 (기존 hook이 처리 후 null로 만듦)
+    const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+    meta.gate_state.last_askuserquestion_source = { source: "agent", agent_name: "senior" };
+    writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+    lastResult = run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
+  }
+
+  // 5번째 호출에서 score=5 → 임계 도달 → profiler_trigger emit + score 0 리셋
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.profiler_score, 0, "score should reset to 0 after threshold");
+  // additionalContext에 profiler_trigger 메시지가 있어야 함
+  assert.ok(lastResult, "5th AUQ should emit output");
+  assert.ok(lastResult.hookSpecificOutput.additionalContext.includes('"type":"profiler_trigger"'),
+    `expected profiler_trigger in: ${lastResult.hookSpecificOutput.additionalContext}`);
+  console.log("PASS: Phase 5.5b — AUQ 5회 → 임계 도달 + 트리거 + 리셋");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
