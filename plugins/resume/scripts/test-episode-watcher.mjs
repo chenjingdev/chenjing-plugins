@@ -1999,4 +1999,96 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 5.2 — _debug.observed_tool_names 누적");
 }
 
+// Test Phase 5.3a: UserPromptSubmit이 round_turn_counts[current_round] 증가
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  run({ hook_event_name: "UserPromptSubmit", prompt: "테스트 메시지 1", cwd: "/tmp/test-resume-panel" });
+  run({ hook_event_name: "UserPromptSubmit", prompt: "테스트 메시지 2", cwd: "/tmp/test-resume-panel" });
+  run({ hook_event_name: "UserPromptSubmit", prompt: "테스트 메시지 3", cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.round_turn_counts["1"], 3, "round 1 should have 3 turns");
+  assert.strictEqual(meta.gate_state.round_turn_counts["2"], 0, "round 2 should still be 0");
+
+  // 라운드 전환
+  meta.current_round = 2;
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+  run({ hook_event_name: "UserPromptSubmit", prompt: "라운드 2 메시지", cwd: "/tmp/test-resume-panel" });
+  run({ hook_event_name: "UserPromptSubmit", prompt: "라운드 2 메시지 2", cwd: "/tmp/test-resume-panel" });
+
+  const meta2 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta2.gate_state.round_turn_counts["1"], 3, "round 1 should still be 3");
+  assert.strictEqual(meta2.gate_state.round_turn_counts["2"], 2, "round 2 should be 2");
+
+  const stats = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
+  assert.strictEqual(stats._debug.observed_hook_events.UserPromptSubmit, 5, "5 UserPromptSubmit events");
+  console.log("PASS: Phase 5.3a — UserPromptSubmit round_turn_counts");
+}
+
+// Test Phase 5.3b: current_round 미설정 → round "0"에 누적
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    profiler_score: 0,
+  }));
+
+  run({ hook_event_name: "UserPromptSubmit", prompt: "라운드 미설정 메시지", cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.round_turn_counts["0"], 1, "fallback to round 0");
+  console.log("PASS: Phase 5.3b — UserPromptSubmit fallback to round 0");
+}
+
+// Test Phase 5.3c: 비표준 round 키 안전 (NaN/crash 없음)
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 5,
+    profiler_score: 0,
+  }));
+
+  run({ hook_event_name: "UserPromptSubmit", prompt: "비표준 라운드", cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.gate_state.round_turn_counts["5"], 1, "non-standard round 5 should accept");
+  console.log("PASS: Phase 5.3c — UserPromptSubmit non-standard round");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");

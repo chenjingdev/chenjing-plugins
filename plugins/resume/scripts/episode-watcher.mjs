@@ -19,10 +19,7 @@ try {
   process.exit(0);
 }
 
-const toolName = input.tool_name;
-const toolInput = input.tool_input || {};
-
-// ── 경로 상수 ────────────────────────────────────────
+// ── 경로 상수 (UserPromptSubmit 분기에서도 base 필요) ─
 const base = process.env.RESUME_PANEL_BASE || input.cwd || process.cwd();
 const stateDir = join(base, ".resume-panel");
 const snapshotPath = join(stateDir, "snapshot.json");
@@ -31,6 +28,28 @@ const sourcePath = join(base, "resume-source.json");
 const inboxPath = join(stateDir, "findings-inbox.jsonl");
 const processingPath = join(stateDir, "findings-inbox.processing.jsonl");
 const findingsPath = join(stateDir, "findings.json");
+
+// ── UserPromptSubmit 분기 — round_turn_counts 증가 ──
+if (input.hook_event_name === "UserPromptSubmit") {
+  ensureStateDir();
+  const meta = migrateMeta(readJSON(metaPath) || {});
+  meta.gate_state = meta.gate_state || defaultGateState();
+  meta.gate_state.round_turn_counts = meta.gate_state.round_turn_counts || { "0": 0, "1": 0, "2": 0, "3": 0 };
+  const round = String(meta.current_round ?? 0);
+  meta.gate_state.round_turn_counts[round] = (meta.gate_state.round_turn_counts[round] || 0) + 1;
+
+  const stats = readStats(base);
+  ensureDebug(stats);
+  stats._debug.observed_hook_events.UserPromptSubmit =
+    (stats._debug.observed_hook_events.UserPromptSubmit || 0) + 1;
+
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  writeStats(base, stats);
+  process.exit(0);
+}
+
+const toolName = input.tool_name;
+const toolInput = input.tool_input || {};
 
 // ── 파일 경로 추출 ──────────────────────────────────
 let targetPath = "";
