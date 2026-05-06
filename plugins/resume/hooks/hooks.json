@@ -2,7 +2,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Write|Bash|Edit|Task|AskUserQuestion",
+        "matcher": "Write|Bash|Edit|Task|Agent|AskUserQuestion",
         "hooks": [
           {
             "type": "command",
