@@ -1965,4 +1965,38 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 5.1 — Agent toolName 수용");
 }
 
+// Test Phase 5.2: _debug.observed_tool_names가 Agent/Task 호출마다 누적
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: {
+      gaps: { used: 0, max: 3, intentional: [] },
+      perspectives: { used: 0, max: 2, episode_refs: [] },
+      contradictions: { used: 0, max: 2 },
+      reprobes: { used: 0, log: [] }
+    },
+    gate_state: {
+      direct_askuserquestion_streak: 0,
+      agent_calls_in_current_round: { senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    current_round: 1,
+    profiler_score: 0,
+  }));
+
+  run({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
+  run({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { subagent_type: "c-level" }, cwd: "/tmp/test-resume-panel" });
+  run({ hook_event_name: "PostToolUse", tool_name: "Task", tool_input: { subagent_type: "hr" }, cwd: "/tmp/test-resume-panel" });
+
+  const stats = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
+  assert.ok(stats._debug, "stats._debug should exist");
+  assert.strictEqual(stats._debug.observed_tool_names.Agent, 2, "Agent count should be 2");
+  assert.strictEqual(stats._debug.observed_tool_names.Task, 1, "Task count should be 1");
+  assert.ok(stats._debug.first_seen_at, "first_seen_at should be set");
+  console.log("PASS: Phase 5.2 — _debug.observed_tool_names 누적");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");

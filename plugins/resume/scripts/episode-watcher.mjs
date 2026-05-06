@@ -74,6 +74,8 @@ if (toolName === "Task" || toolName === "Agent") {
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 
     const stats = readStats(base);
+    ensureDebug(stats);
+    stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
     stats.agent_invocations[subagent] = (stats.agent_invocations[subagent] || 0) + 1;
     writeStats(base, stats);
   } else if (subagent === "retrospective") {
@@ -81,15 +83,23 @@ if (toolName === "Task" || toolName === "Agent") {
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 
     const stats = readStats(base);
+    ensureDebug(stats);
+    stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
     stats.agent_invocations.retrospective = (stats.agent_invocations.retrospective || 0) + 1;
     writeStats(base, stats);
   } else if (subagent === "researcher" || subagent === "project-researcher") {
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 
     const stats = readStats(base);
+    ensureDebug(stats);
+    stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
     stats.agent_invocations.researcher = (stats.agent_invocations.researcher || 0) + 1;
     writeStats(base, stats);
   } else {
+    const stats = readStats(base);
+    ensureDebug(stats);
+    stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
+    writeStats(base, stats);
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   }
   process.exit(0);
@@ -325,6 +335,17 @@ function defaultSessionStats() {
     },
     gate_violations: [],
   };
+}
+
+function ensureDebug(stats) {
+  if (!stats._debug) {
+    stats._debug = {
+      observed_tool_names: {},
+      observed_hook_events: {},
+      first_seen_at: new Date().toISOString(),
+    };
+  }
+  return stats._debug;
 }
 
 function readStats(base) {
