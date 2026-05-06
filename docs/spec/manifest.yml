@@ -1,0 +1,15 @@
+framework: pixar-pitch+story-circle
+category: tool-productivity
+updated_at: 2026-05-01
+
+arc:
+  pixar_pitch:
+    status: in_progress
+    methodology_l1: jtbd-switch
+  story_circle:
+    status: in_progress
+    methodology_l2: mice-quotient
+
+chapters: []
+
+implementation_log: []
