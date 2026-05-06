@@ -51,3 +51,20 @@
 - 표현 정정 11건 일괄 적용 검증
 
 `/resume:resume-panel explore` 또는 일반 진입으로 다음 세션에서 처리 예정.
+
+---
+
+## 다음 라이브 세션 검증 체크리스트 (2026-05-06 spec 후속)
+
+`docs/superpowers/specs/2026-05-06-resume-plugin-counter-reliability-design.md` 시행 효과를 다음 실제 resume 세션의 회고에서 확인:
+
+- [ ] `session-stats.json._debug.observed_tool_names` — Agent/Task 둘 중 어느 쪽이 실제 도착했는지 확인 (가설: Agent 우세).
+- [ ] `session-stats.json._debug.observed_hook_events.UserPromptSubmit` — 0이 아닌 값. UserPromptSubmit hook 정상 발화 확인.
+- [ ] `meta.json.gate_state.round_turn_counts` — 라운드별 분포가 0이 아닌 값으로 기록.
+- [ ] `meta.json.gate_state.agent_calls_in_current_round` — senior/c-level 등 실제 호출 수 반영(수동 동기화 없이).
+- [ ] `session-stats.json.agent_invocations` — 위와 동일 일관성.
+- [ ] `meta.json.total_profiler_calls` — 직전 세션 3회 대비 5회 이상 증가 (가중치 모델 B 효과).
+- [ ] `meta.json._score_reasons` — 최근 점수 가산 사유 10개 보존, 다양한 reason("AUQ", "에피소드 +N", "so_what (+3)" 등) 존재.
+- [ ] `gate_violations` 배열 — `r2_exit / turn_min` 위반이 부적절하게 발행되지 않는지 (round 2 정상 진행 시).
+
+위 항목 중 하나라도 비정상이면 후속 라운드 spec(이슈 4·5 + 추가 발견)에 포함.
