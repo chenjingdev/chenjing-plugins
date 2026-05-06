@@ -620,6 +620,7 @@ if (isResumeSourceChange) {
                   episode_ref: { company: project.companyName, project: project.name },
                 })
               );
+              addProfilerScore(metaJSON, 3, "so_what (+3)");
               break;
             }
           }
@@ -734,6 +735,7 @@ if (existsSync(inboxPath)) {
       meta.current_company !== (snapshot?.current_company || null);
 
     let highFindingDelivered = false;
+    let scoreDeltas = [];
     for (const f of newFindings) {
       f.delivered = false;
 
@@ -764,6 +766,11 @@ if (existsSync(inboxPath)) {
         f.delivered = true;
       }
 
+      // 프로파일러 가중치 — 중요 finding 종류별 +3
+      if (f.delivered && (f.type === "perspective_shift" || f.type === "contradiction_detected")) {
+        scoreDeltas.push({ delta: 3, reason: `${f.type} (+3)` });
+      }
+
       existing.findings.push(f);
     }
 
@@ -776,11 +783,16 @@ if (existsSync(inboxPath)) {
       writeFileSync(snapshotPath, JSON.stringify(updated));
     }
 
-    // HIGH finding 발행 시점 타임스탬프 (다음 AUQ가 60초 이내면 importance 보너스)
-    if (highFindingDelivered) {
-      const metaForTimestamp = migrateMeta(readJSON(metaPath) || {});
-      metaForTimestamp._last_high_finding_at = new Date().toISOString();
-      writeFileSync(metaPath, JSON.stringify(metaForTimestamp, null, 2));
+    // HIGH finding 타임스탬프 + scoreDeltas 일괄 처리 (한 번의 read-write)
+    if (highFindingDelivered || scoreDeltas.length > 0) {
+      const metaForUpdate = migrateMeta(readJSON(metaPath) || {});
+      if (highFindingDelivered) {
+        metaForUpdate._last_high_finding_at = new Date().toISOString();
+      }
+      for (const d of scoreDeltas) {
+        addProfilerScore(metaForUpdate, d.delta, d.reason);
+      }
+      writeFileSync(metaPath, JSON.stringify(metaForUpdate, null, 2));
     }
 
     try { unlinkSync(processingPath); } catch {}

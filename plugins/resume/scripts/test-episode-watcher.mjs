@@ -311,7 +311,9 @@ function readMeta() {
   const ctx2 = result2.hookSpecificOutput.additionalContext;
   assert.ok(ctx2.includes("빈 STAR"), "should mention star gaps");
   const metaAfter2 = readMeta();
-  assert.strictEqual(metaAfter2.profiler_score, 0, "profiler_score should reset to 0");
+  // After trigger (reset to 0), new ep has result="" (no quantified impact) → so_what fires → +3
+  // So final score = 0 (reset) + 3 (so_what) = 3
+  assert.strictEqual(metaAfter2.profiler_score, 3, "profiler_score should be 3 after trigger reset + so_what +3");
   console.log("PASS: empty result +2 score");
 }
 
@@ -2287,6 +2289,90 @@ console.log("\nAll pattern eligibility tests passed.");
   const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
   assert.strictEqual(meta.profiler_score, 1, `expected 1 (no bonus), got ${meta.profiler_score}`);
   console.log("PASS: Phase 5.6c — AUQ outside 60s window → +1 only");
+}
+
+// Test Phase 5.7a: so_what 발행 시 profiler_score +3
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // 첫 실행 — snapshot 생성
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: { target_company: "X", target_position: "Y" },
+    companies: [{ name: "C1", projects: [{ name: "P1", episodes: [{ title: "E1", star: { situation: "s", task: "t", action: "a", result: "수치없음" } }] }] }],
+  }));
+  run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/resume-source.json", content: "{}" }, cwd: "/tmp/test-resume-panel" });
+
+  // 두 번째 실행 — 임팩트 약한 에피소드 추가 → so_what 트리거
+  writeFileSync("/tmp/test-resume-panel/resume-source.json", JSON.stringify({
+    meta: { target_company: "X", target_position: "Y" },
+    companies: [{ name: "C1", projects: [{ name: "P1", episodes: [
+      { title: "E1", star: { situation: "s", task: "t", action: "a", result: "수치없음" } },
+      { title: "E2-weak", star: { situation: "s", task: "t", action: "a", result: "임팩트 정성적" } },
+    ] }] }],
+  }));
+  run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/resume-source.json", content: "{}" }, cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  // 두 번째 실행에서 +1 (에피소드) + +3 (so_what) = +4 누적 (첫 실행은 snapshot init이라 점수 0)
+  // 단 임계 5에 못 미치면 그대로 4로 남고, 도달하면 0 리셋. 두 번째 fire에서 4면 리셋 안 함.
+  const reasons = (meta._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons.some(r => r.includes("so_what")), `so_what reason missing in ${JSON.stringify(reasons)}`);
+  console.log("PASS: Phase 5.7a — so_what 가중치 +3");
+}
+
+// Test Phase 5.7b: perspective_shift finding 라우팅 시 +3
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 5, project_names: ["A"], meta_hash: "abc", current_company: "C1",
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: defaultGateStateForTest(),
+    profiler_score: 0,
+    current_company: "C1-changed",  // companyChanged 트리거 — MEDIUM finding 라우팅
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/findings-inbox.jsonl",
+    JSON.stringify({
+      id: "ps-001", urgency: "MEDIUM", source: "profiler", type: "perspective_shift",
+      message: "관점 전환 필요.", context: {}, created_at: new Date().toISOString(),
+    }) + "\n"
+  );
+
+  run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/some.txt", content: "x" }, cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const reasons = (meta._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons.some(r => r.includes("perspective_shift")), `perspective_shift reason missing in ${JSON.stringify(reasons)}`);
+  console.log("PASS: Phase 5.7b — perspective_shift 가중치 +3");
+}
+
+// Test Phase 5.7c: contradiction_detected finding 라우팅 시 +3
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 5, project_names: ["A"], meta_hash: "abc",
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: defaultGateStateForTest(),
+    profiler_score: 0,
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/findings-inbox.jsonl",
+    JSON.stringify({
+      id: "cd-001", urgency: "HIGH", source: "profiler", type: "contradiction_detected",
+      message: "역할 모순.", context: {}, created_at: new Date().toISOString(),
+    }) + "\n"
+  );
+
+  run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/some.txt", content: "x" }, cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const reasons = (meta._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons.some(r => r.includes("contradiction_detected")), `contradiction_detected reason missing in ${JSON.stringify(reasons)}`);
+  console.log("PASS: Phase 5.7c — contradiction_detected 가중치 +3");
 }
 
 console.log("\n=== ALL TESTS COMPLETE ===");
