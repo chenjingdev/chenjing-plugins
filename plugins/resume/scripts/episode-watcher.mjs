@@ -155,6 +155,14 @@ if (toolName === "AskUserQuestion") {
   // 프로파일러 가중치 — AUQ 1회 +1 (모든 source)
   addProfilerScore(meta, 1, "AUQ");
 
+  // 중요도 보너스: 직전 60초 이내에 HIGH finding이 발행됐으면 +2
+  if (meta._last_high_finding_at) {
+    const elapsed = Date.now() - new Date(meta._last_high_finding_at).getTime();
+    if (elapsed >= 0 && elapsed < 60_000) {
+      addProfilerScore(meta, 2, "HIGH finding 60초 이내 (+2)");
+    }
+  }
+
   // 임계 도달 시 profiler_trigger emit + score 리셋
   // (기존 storage 블록과 같은 임계값. THRESHOLD=5)
   const profilerMessages = [];
@@ -725,6 +733,7 @@ if (existsSync(inboxPath)) {
       meta?.current_company &&
       meta.current_company !== (snapshot?.current_company || null);
 
+    let highFindingDelivered = false;
     for (const f of newFindings) {
       f.delivered = false;
 
@@ -740,6 +749,7 @@ if (existsSync(inboxPath)) {
           })
         );
         f.delivered = true;
+        highFindingDelivered = true;
       } else if (f.urgency === "MEDIUM" && companyChanged) {
         messages.push(
           emit({
@@ -765,6 +775,14 @@ if (existsSync(inboxPath)) {
       const updated = { ...snapshot, current_company: meta.current_company };
       writeFileSync(snapshotPath, JSON.stringify(updated));
     }
+
+    // HIGH finding 발행 시점 타임스탬프 (다음 AUQ가 60초 이내면 importance 보너스)
+    if (highFindingDelivered) {
+      const metaForTimestamp = migrateMeta(readJSON(metaPath) || {});
+      metaForTimestamp._last_high_finding_at = new Date().toISOString();
+      writeFileSync(metaPath, JSON.stringify(metaForTimestamp, null, 2));
+    }
+
     try { unlinkSync(processingPath); } catch {}
   }
 }

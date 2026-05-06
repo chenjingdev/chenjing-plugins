@@ -2215,4 +2215,78 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 5.5b — AUQ 5회 → 임계 도달 + 트리거 + 리셋");
 }
 
+// Test Phase 5.6a: HIGH finding 라우팅 직후 _last_high_finding_at 설정
+{
+  rmSync("/tmp/test-resume-panel-high-bonus", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel-high-bonus/.resume-panel", { recursive: true });
+  writeFileSync(join("/tmp/test-resume-panel-high-bonus/.resume-panel", "snapshot.json"), JSON.stringify({
+    episode_count: 5, project_names: ["A"], meta_hash: "abc",
+  }));
+  writeFileSync(join("/tmp/test-resume-panel-high-bonus/.resume-panel", "findings-inbox.jsonl"),
+    JSON.stringify({
+      id: "f-001", urgency: "HIGH", source: "recruiter", type: "gap_detected",
+      message: "WebSocket 공백.", context: {}, created_at: new Date().toISOString(),
+    }) + "\n"
+  );
+
+  execFileSync("node", [script], {
+    input: JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/some.txt", content: "x" } }),
+    encoding: "utf-8",
+    env: { ...process.env, RESUME_PANEL_BASE: "/tmp/test-resume-panel-high-bonus" },
+  });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel-high-bonus/.resume-panel/meta.json", "utf-8"));
+  assert.ok(meta._last_high_finding_at, "_last_high_finding_at should be set");
+  assert.ok(new Date(meta._last_high_finding_at).getTime() > Date.now() - 60_000, "should be recent");
+  console.log("PASS: Phase 5.6a — HIGH finding sets _last_high_finding_at");
+  rmSync("/tmp/test-resume-panel-high-bonus", { recursive: true, force: true });
+}
+
+// Test Phase 5.6b: HIGH finding 60초 이내 AUQ → score +3 (1 + 2 보너스)
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      ...defaultGateStateForTest(),
+      last_askuserquestion_source: { source: "agent", agent_name: "senior" },
+    },
+    current_round: 1,
+    profiler_score: 0,
+    _last_high_finding_at: new Date().toISOString(),  // 방금 막 HIGH finding이 있었던 셈
+  }));
+
+  run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.profiler_score, 3, `expected 3 (1 base + 2 bonus), got ${meta.profiler_score}`);
+  const reasons = (meta._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons.some(r => r.includes("HIGH finding")), `HIGH finding bonus reason missing in ${JSON.stringify(reasons)}`);
+  console.log("PASS: Phase 5.6b — AUQ within 60s of HIGH finding → +3");
+}
+
+// Test Phase 5.6c: HIGH finding 60초 초과 AUQ → 보너스 없음 (+1만)
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  const oldTimestamp = new Date(Date.now() - 120_000).toISOString();  // 2분 전
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      ...defaultGateStateForTest(),
+      last_askuserquestion_source: { source: "agent", agent_name: "senior" },
+    },
+    current_round: 1,
+    profiler_score: 0,
+    _last_high_finding_at: oldTimestamp,
+  }));
+
+  run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  assert.strictEqual(meta.profiler_score, 1, `expected 1 (no bonus), got ${meta.profiler_score}`);
+  console.log("PASS: Phase 5.6c — AUQ outside 60s window → +1 only");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
