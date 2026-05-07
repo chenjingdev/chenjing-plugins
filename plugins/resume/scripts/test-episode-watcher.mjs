@@ -2717,4 +2717,66 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 6.6 — profiler 통째 덮어쓰기 격리");
 }
 
+// Test Phase 6.7: pattern_detected (MEDIUM) routing — company 변경 시 라우팅
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+
+  // snapshot에 이전 company "A"
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", JSON.stringify({
+    episode_count: 0, project_names: [], meta_hash: "x",
+    star_gaps: 0, current_company: "A",
+  }));
+  // meta에 새 company "B" — profiler가 반영했다고 가정
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    current_company: "B",
+  }));
+  // profiler가 inbox에 pt-... append (echo >> 패턴 시뮬레이션)
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/findings-inbox.jsonl",
+    JSON.stringify({
+      id: "pt-test-001",
+      type: "pattern_detected",
+      urgency: "MEDIUM",
+      source: "profiler",
+      message: "패턴 발견: '레거시 시스템 현대화' — A(p1), B(p2)에서 반복",
+      context: {
+        pattern_name: "레거시 시스템 현대화",
+        category: "역할반복",
+        evidence_episodes: [
+          { company: "A", project: "p1", episode: "ep1" },
+          { company: "B", project: "p2", episode: "ep2" },
+        ],
+        unexplored_company: null,
+        suggested_question: "C에서도 비슷한 경험?",
+        target_agent: "시니어",
+      },
+      created_at: "2026-04-01T00:00:00Z",
+    }) + "\n"
+  );
+
+  // hook 호출 (resume-source.json 변경 트리거 — 라우팅 path 진입)
+  const result = run({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo done > resume-source.json" },
+    cwd: "/tmp/test-resume-panel",
+  });
+
+  // findings.json에 delivered=true로 적재됨
+  const findings = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/findings.json", "utf-8"));
+  const target = findings.findings.find(f => f.id === "pt-test-001");
+  assert.ok(target, "pattern_detected finding이 findings.json에 적재됨");
+  assert.strictEqual(target.delivered, true, "MEDIUM company 변경 → delivered true");
+
+  // additionalContext에 finding 메시지 포함
+  const ctx = result?.hookSpecificOutput?.additionalContext || "";
+  assert.ok(ctx.includes('"finding_type":"pattern_detected"'), "라우팅 메시지에 pattern_detected 포함");
+  assert.ok(ctx.includes('"id":"pt-test-001"'), "라우팅 메시지에 finding id 포함");
+
+  // snapshot의 current_company도 "B"로 동기화됨
+  const snapAfter = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/snapshot.json", "utf-8"));
+  assert.strictEqual(snapAfter.current_company, "B", "snapshot.current_company 동기화");
+  console.log("PASS: Phase 6.7 — pattern_detected MEDIUM 라우팅");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
