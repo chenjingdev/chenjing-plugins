@@ -161,9 +161,9 @@ hook에 의해 백그라운드 Agent로 호출될 때, 기존 프로파일 산�
 
 #### 금지
 
-- 세션당 2개 초과 관점 전환 finding 생성 금지 (meta.json의 perspective_shifts_this_session 확인)
+- 세션당 2개 초과 관점 전환 finding 생성 금지 (hook-state.json의 session_limits.perspectives.used 확인)
 - 유저가 재구성할 수 없는 관점 사용 금지 (인턴 에피소드에 CEO 관점 등)
-- 이미 관점 전환한 에피소드 재탐지 금지 (meta.json의 perspective_shifted_episodes 확인)
+- 이미 관점 전환한 에피소드 재탐지 금지 (hook-state.json의 session_limits.perspectives.episode_refs 확인)
 
 ### 4. 클레임 추적
 
@@ -233,7 +233,7 @@ findings-inbox.jsonl에 기록:
 
 - raw conversation text로 모순을 탐지하지 않는다 — 반드시 ### 4.에서 추출한 구조화된 claim 사용
 - accusatory framing 사용 금지
-- meta.json의 `contradictions_presented_this_session`이 2 이상이면 새 모순 finding을 생성하지 않는다 (세션당 최대 2개)
+- hook-state.json의 `session_limits.contradictions.used`가 2 이상이면 새 모순 finding을 생성하지 않는다 (세션당 최대 2개)
 
 ### 6. findings-inbox.jsonl에 결과 기록
 
@@ -254,32 +254,25 @@ echo '{"id":"f-001","urgency":"HIGH",...}' >> .resume-panel/findings-inbox.jsonl
 
 ### 7. meta.json 갱신
 
-분석 완료 후 `.resume-panel/meta.json`을 갱신:
+분석 완료 후 `.resume-panel/meta.json`을 갱신한다. **반드시 read-modify-write 패턴**으로 자기 필드만 갱신한다 (기존 필드 보존):
+
 ```bash
-cat <<'EOF' > .resume-panel/meta.json
-{
-  "last_profiler_call": "2026-04-03T15:25:00Z",
-  "last_profiler_episode_count": 12,
-  "current_company": "튜닙",
-  "total_profiler_calls": 3
-}
-EOF
+node -e '
+  const fs=require("fs"), p=".resume-panel/meta.json";
+  const m=fs.existsSync(p) ? JSON.parse(fs.readFileSync(p,"utf-8")) : {};
+  m.last_profiler_call=new Date().toISOString();
+  m.last_profiler_episode_count=12;
+  m.current_company="튜닙";
+  m.total_profiler_calls=(m.total_profiler_calls||0)+1;
+  fs.writeFileSync(p, JSON.stringify(m,null,2));
+'
 ```
 
-패턴 분석 실행 시 추가 필드:
-```bash
-cat <<'EOF' > .resume-panel/meta.json
-{
-  "last_profiler_call": "2026-04-08T10:00:00Z",
-  "last_profiler_episode_count": 12,
-  "current_company": "튜닙",
-  "total_profiler_calls": 3,
-  "last_pattern_analysis_episode_count": 12,
-  "last_pattern_analysis_company_count": 3,
-  "last_timeline_check": "2026-04-08T10:00:00Z"
-}
-EOF
-```
+패턴 분석 실행 시: `last_pattern_analysis_episode_count`, `last_pattern_analysis_company_count`, `last_timeline_check`는 **hook-state.json**에 hook이 자동 기록한다. profiler가 직접 쓸 필요 없음.
+
+**절대 금지**:
+- `cat <<EOF > .resume-panel/meta.json` 같은 통째 덮어쓰기. 다른 필드(`current_round`, `so_what_active` 등)가 손실된다.
+- `.resume-panel/hook-state.json` write. 이 파일은 episode-watcher hook이 단독 관리하며 profiler는 read-only로만 참조 가능.
 
 ### 긴급도 판단 기준
 
