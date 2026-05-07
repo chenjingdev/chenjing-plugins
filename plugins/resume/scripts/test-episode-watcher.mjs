@@ -2015,6 +2015,7 @@ console.log("\nAll pattern eligibility tests passed.");
 {
   rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
   mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // gate_state/session_limits는 meta.json에 넣어도 loadState가 hook-state.json으로 이전함
   writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
     session_limits: {
       gaps: { used: 0, max: 3, intentional: [] },
@@ -2037,19 +2038,21 @@ console.log("\nAll pattern eligibility tests passed.");
   run({ hook_event_name: "UserPromptSubmit", prompt: "테스트 메시지 2", cwd: "/tmp/test-resume-panel" });
   run({ hook_event_name: "UserPromptSubmit", prompt: "테스트 메시지 3", cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.gate_state.round_turn_counts["1"], 3, "round 1 should have 3 turns");
-  assert.strictEqual(meta.gate_state.round_turn_counts["2"], 0, "round 2 should still be 0");
+  // UserPromptSubmit은 이제 hook-state.json에 gate_state를 저장함
+  const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs.gate_state.round_turn_counts["1"], 3, "round 1 should have 3 turns");
+  assert.strictEqual(hs.gate_state.round_turn_counts["2"], 0, "round 2 should still be 0");
 
-  // 라운드 전환
-  meta.current_round = 2;
-  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+  // 라운드 전환: meta.json의 current_round를 2로 변경
+  const metaForRound = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  metaForRound.current_round = 2;
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(metaForRound));
   run({ hook_event_name: "UserPromptSubmit", prompt: "라운드 2 메시지", cwd: "/tmp/test-resume-panel" });
   run({ hook_event_name: "UserPromptSubmit", prompt: "라운드 2 메시지 2", cwd: "/tmp/test-resume-panel" });
 
-  const meta2 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta2.gate_state.round_turn_counts["1"], 3, "round 1 should still be 3");
-  assert.strictEqual(meta2.gate_state.round_turn_counts["2"], 2, "round 2 should be 2");
+  const hs2 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs2.gate_state.round_turn_counts["1"], 3, "round 1 should still be 3");
+  assert.strictEqual(hs2.gate_state.round_turn_counts["2"], 2, "round 2 should be 2");
 
   const stats = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
   assert.strictEqual(stats._debug.observed_hook_events.UserPromptSubmit, 5, "5 UserPromptSubmit events");
@@ -2074,8 +2077,9 @@ console.log("\nAll pattern eligibility tests passed.");
 
   run({ hook_event_name: "UserPromptSubmit", prompt: "라운드 미설정 메시지", cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.gate_state.round_turn_counts["0"], 1, "fallback to round 0");
+  // UserPromptSubmit은 이제 hook-state.json에 gate_state를 저장함
+  const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs.gate_state.round_turn_counts["0"], 1, "fallback to round 0");
   console.log("PASS: Phase 5.3b — UserPromptSubmit fallback to round 0");
 }
 
@@ -2098,8 +2102,9 @@ console.log("\nAll pattern eligibility tests passed.");
 
   run({ hook_event_name: "UserPromptSubmit", prompt: "비표준 라운드", cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.gate_state.round_turn_counts["5"], 1, "non-standard round 5 should accept");
+  // UserPromptSubmit은 이제 hook-state.json에 gate_state를 저장함
+  const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs.gate_state.round_turn_counts["5"], 1, "non-standard round 5 should accept");
   console.log("PASS: Phase 5.3c — UserPromptSubmit non-standard round");
 }
 
@@ -2491,20 +2496,73 @@ console.log("\nAll pattern eligibility tests passed.");
   // meta.json도 hook-state.json도 없는 상태에서 UserPromptSubmit 호출
   run({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/test-resume-panel" });
 
-  // Phase 6.1 Task 2까지 보류 (loadState 미구현 상태에서는 hook-state.json 생성 안됨)
-  if (existsSync("/tmp/test-resume-panel/.resume-panel/hook-state.json")) {
-    const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
-    assert.ok(hs.session_limits, "session_limits exists");
-    assert.deepStrictEqual(hs.session_limits.gaps, { used: 0, max: 3, intentional: [] }, "default gaps");
-    assert.ok(hs.gate_state, "gate_state exists");
-    assert.strictEqual(hs.gate_state.direct_askuserquestion_streak, 0, "default streak 0");
-    assert.deepStrictEqual(hs.gate_state.round_turn_counts, { "0": 1, "1": 0, "2": 0, "3": 0 }, "round 0 incremented by this UserPromptSubmit");
-    assert.strictEqual(hs.profiler_score, 0, "default score 0");
-    assert.deepStrictEqual(hs._score_reasons, [], "default reasons empty");
-    console.log("PASS: Phase 6.1 — defaultHookState 스키마");
-  } else {
-    console.log("SKIP: Phase 6.1 — defaultHookState (loadState 미구현)");
-  }
+  const hs61 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.ok(hs61.session_limits, "session_limits exists");
+  assert.deepStrictEqual(hs61.session_limits.gaps, { used: 0, max: 3, intentional: [] }, "default gaps");
+  assert.ok(hs61.gate_state, "gate_state exists");
+  assert.strictEqual(hs61.gate_state.direct_askuserquestion_streak, 0, "default streak 0");
+  assert.deepStrictEqual(hs61.gate_state.round_turn_counts, { "0": 1, "1": 0, "2": 0, "3": 0 }, "round 0 incremented by this UserPromptSubmit");
+  assert.strictEqual(hs61.profiler_score, 0, "default score 0");
+  assert.deepStrictEqual(hs61._score_reasons, [], "default reasons empty");
+  console.log("PASS: Phase 6.1 — defaultHookState 스키마");
+}
+
+// Test Phase 6.2: loadState moves hook fields from meta.json to hook-state.json on first run
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // 구 스키마 시뮬레이션: meta.json에 hook 필드와 콘텐츠 필드가 섞여 있음
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    current_company: "튜닙",
+    current_round: 1,
+    last_profiler_call: "2026-04-01T00:00:00Z",
+    session_limits: { gaps: { used: 1, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
+    gate_state: {
+      direct_askuserquestion_streak: 2,
+      agent_calls_in_current_round: { senior: 1, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0 },
+      round_turn_counts: { "0": 0, "1": 5, "2": 0, "3": 0 },
+      retrospective_invoked: false,
+      last_askuserquestion_source: null,
+    },
+    profiler_score: 3,
+    _score_reasons: [{ delta: 1, reason: "AUQ", at: "2026-04-01T00:00:00Z" }],
+    _last_high_finding_at: "2026-04-01T00:00:00Z",
+    last_timeline_check: "2026-04-01T00:00:00Z",
+    last_pattern_analysis_episode_count: 5,
+    last_pattern_analysis_company_count: 2,
+  }));
+
+  // hook 호출 (UserPromptSubmit) — loadState가 분리해야 함
+  run({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+
+  // meta.json: 콘텐츠 필드만 남음
+  assert.strictEqual(meta.current_company, "튜닙", "meta.current_company 보존");
+  assert.strictEqual(meta.current_round, 1, "meta.current_round 보존");
+  assert.strictEqual(meta.last_profiler_call, "2026-04-01T00:00:00Z", "meta.last_profiler_call 보존");
+  assert.strictEqual(meta.session_limits, undefined, "meta.session_limits 제거");
+  assert.strictEqual(meta.gate_state, undefined, "meta.gate_state 제거");
+  assert.strictEqual(meta.profiler_score, undefined, "meta.profiler_score 제거");
+  assert.strictEqual(meta._score_reasons, undefined, "meta._score_reasons 제거");
+  assert.strictEqual(meta._last_high_finding_at, undefined, "meta._last_high_finding_at 제거");
+  assert.strictEqual(meta.last_timeline_check, undefined, "meta.last_timeline_check 제거");
+  assert.strictEqual(meta.last_pattern_analysis_episode_count, undefined, "meta.last_pattern_analysis_episode_count 제거");
+  assert.strictEqual(meta.last_pattern_analysis_company_count, undefined, "meta.last_pattern_analysis_company_count 제거");
+
+  // hook-state.json: hook 필드 이전됨
+  assert.strictEqual(hs.session_limits.gaps.used, 1, "hs.session_limits.gaps.used 이전");
+  assert.strictEqual(hs.gate_state.direct_askuserquestion_streak, 2, "hs.gate_state.streak 이전");
+  assert.strictEqual(hs.gate_state.agent_calls_in_current_round.senior, 1, "hs.gate_state.agent_calls 이전");
+  assert.strictEqual(hs.gate_state.round_turn_counts["1"], 6, "hs.gate_state.round_turn_counts[1] 이전 + UserPromptSubmit +1");
+  assert.strictEqual(hs.profiler_score, 3, "hs.profiler_score 이전");
+  assert.strictEqual(hs._score_reasons.length, 1, "hs._score_reasons 이전");
+  assert.strictEqual(hs._last_high_finding_at, "2026-04-01T00:00:00Z", "hs._last_high_finding_at 이전");
+  assert.strictEqual(hs.last_timeline_check, "2026-04-01T00:00:00Z", "hs.last_timeline_check 이전");
+  assert.strictEqual(hs.last_pattern_analysis_episode_count, 5, "hs.last_pattern_analysis_episode_count 이전");
+  assert.strictEqual(hs.last_pattern_analysis_company_count, 2, "hs.last_pattern_analysis_company_count 이전");
+  console.log("PASS: Phase 6.2 — loadState 첫 실행 분리");
 }
 
 console.log("\n=== ALL TESTS COMPLETE ===");

@@ -30,21 +30,29 @@ const processingPath = join(stateDir, "findings-inbox.processing.jsonl");
 const findingsPath = join(stateDir, "findings.json");
 const hookStatePath = join(stateDir, "hook-state.json");
 
+// ── hook 필드 목록 (loadState에서 사용) ─────────────
+const HOOK_FIELDS = [
+  "session_limits", "gate_state", "profiler_score",
+  "_score_reasons", "_last_high_finding_at",
+  "last_timeline_check", "last_pattern_analysis_episode_count",
+  "last_pattern_analysis_company_count",
+];
+
 // ── UserPromptSubmit 분기 — round_turn_counts 증가 ──
 if (input.hook_event_name === "UserPromptSubmit") {
   ensureStateDir();
-  const meta = migrateMeta(readJSON(metaPath) || {});
-  meta.gate_state = meta.gate_state || defaultGateState();
-  meta.gate_state.round_turn_counts = meta.gate_state.round_turn_counts || { "0": 0, "1": 0, "2": 0, "3": 0 };
+  const { meta, hookState, metaChanged } = loadState(base);
+  hookState.gate_state.round_turn_counts = hookState.gate_state.round_turn_counts || { "0": 0, "1": 0, "2": 0, "3": 0 };
   const round = String(meta.current_round ?? 0);
-  meta.gate_state.round_turn_counts[round] = (meta.gate_state.round_turn_counts[round] || 0) + 1;
+  hookState.gate_state.round_turn_counts[round] = (hookState.gate_state.round_turn_counts[round] || 0) + 1;
 
   const stats = readStats(base);
   ensureDebug(stats);
   stats._debug.observed_hook_events.UserPromptSubmit =
     (stats._debug.observed_hook_events.UserPromptSubmit || 0) + 1;
 
-  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  saveHookState(base, hookState);
+  if (metaChanged) saveMeta(base, meta);
   writeStats(base, stats);
   process.exit(0);
 }
@@ -420,6 +428,67 @@ function defaultHookState() {
     profiler_score: 0,
     _score_reasons: [],
   };
+}
+
+function loadState(base) {
+  const meta = readJSON(metaPath) || {};
+  let hookState = readJSON(hookStatePath);
+  if (!hookState) hookState = defaultHookState();
+
+  let metaChanged = false;
+  for (const f of HOOK_FIELDS) {
+    if (meta[f] !== undefined) {
+      hookState[f] = meta[f];
+      delete meta[f];
+      metaChanged = true;
+    }
+  }
+
+  // 옛 스키마 흡수: meta.json에 perspective_shifts_this_session 등 잔존 시 hookState로 옮김
+  hookState = absorbLegacyFields(hookState, meta);
+
+  return { meta, hookState, metaChanged };
+}
+
+function saveMeta(base, meta) {
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+}
+
+function saveHookState(base, hs) {
+  writeFileSync(hookStatePath, JSON.stringify(hs, null, 2));
+}
+
+function absorbLegacyFields(hookState, meta) {
+  // session_limits 보장
+  if (!hookState.session_limits) hookState.session_limits = defaultSessionLimits();
+  if (typeof meta.gap_probes_this_session === "number") {
+    hookState.session_limits.gaps.used = meta.gap_probes_this_session;
+    delete meta.gap_probes_this_session;
+  }
+  if (typeof meta.perspective_shifts_this_session === "number") {
+    hookState.session_limits.perspectives.used = meta.perspective_shifts_this_session;
+    delete meta.perspective_shifts_this_session;
+  }
+  if (Array.isArray(meta.perspective_shifted_episodes)) {
+    hookState.session_limits.perspectives.episode_refs = meta.perspective_shifted_episodes;
+    delete meta.perspective_shifted_episodes;
+  }
+  if (typeof meta.contradictions_presented_this_session === "number") {
+    hookState.session_limits.contradictions.used = meta.contradictions_presented_this_session;
+    delete meta.contradictions_presented_this_session;
+  }
+  if (Array.isArray(meta.reprobe_log)) {
+    hookState.session_limits.reprobes.log = meta.reprobe_log;
+    hookState.session_limits.reprobes.used = meta.reprobe_log.length;
+    delete meta.reprobe_log;
+  }
+  if (Array.isArray(meta.intentional_gaps)) {
+    hookState.session_limits.gaps.intentional = meta.intentional_gaps;
+    delete meta.intentional_gaps;
+  }
+  // gate_state 보장
+  if (!hookState.gate_state) hookState.gate_state = defaultGateState();
+  return hookState;
 }
 
 function migrateMeta(meta) {
