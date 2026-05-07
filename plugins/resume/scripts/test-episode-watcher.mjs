@@ -19,6 +19,15 @@ function defaultGateStateForTest() {
   };
 }
 
+function defaultSessionLimits_forTest() {
+  return {
+    gaps: { used: 0, max: 3, intentional: [] },
+    perspectives: { used: 0, max: 2, episode_refs: [] },
+    contradictions: { used: 0, max: 2 },
+    reprobes: { used: 0, log: [] },
+  };
+}
+
 function run(input) {
   try {
     const stdout = execFileSync("node", [script], {
@@ -2661,6 +2670,51 @@ console.log("\nAll pattern eligibility tests passed.");
     .filter(f => f.startsWith("hook-state.json.bak."));
   assert.strictEqual(bakFiles.length, 1, "백업 파일 1개 생성");
   console.log("PASS: Phase 6.5 — malformed hook-state.json 백업 + 복구");
+}
+
+// Test Phase 6.6: profiler가 meta.json을 통째 덮어써도 hook-state.json 무영향
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+
+  // 초기: hook이 hook-state.json에 점수 누적
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    current_company: "튜닙",
+    current_round: 1,
+  }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", JSON.stringify({
+    session_limits: defaultSessionLimits_forTest(),
+    gate_state: defaultGateStateForTest(),
+    profiler_score: 4,
+    _score_reasons: [{ delta: 2, reason: "AUQ", at: "2026-04-01T00:00:00Z" }],
+    _last_high_finding_at: "2026-04-01T00:00:00Z",
+  }));
+
+  // profiler 시뮬레이션: meta.json 통째 덮어쓰기 (heredoc 패턴)
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    last_profiler_call: "2026-04-02T00:00:00Z",
+    last_profiler_episode_count: 12,
+    current_company: "튜닙",
+    current_round: 1,
+    total_profiler_calls: 1,
+  }));
+
+  // 다음 hook 호출 (UserPromptSubmit)
+  run({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+
+  // hook-state.json: profiler 덮어쓰기와 무관하게 보존
+  assert.strictEqual(hs.profiler_score, 4, "profiler_score 보존");
+  assert.strictEqual(hs._score_reasons.length, 1, "_score_reasons 보존");
+  assert.strictEqual(hs._last_high_finding_at, "2026-04-01T00:00:00Z", "_last_high_finding_at 보존");
+
+  // meta.json: profiler가 쓴 콘텐츠 필드 그대로 + UserPromptSubmit이 round_turn_counts만 hookState에 +1
+  assert.strictEqual(meta.last_profiler_call, "2026-04-02T00:00:00Z", "profiler 필드 보존");
+  assert.strictEqual(meta.total_profiler_calls, 1, "total_profiler_calls 보존");
+  assert.strictEqual(hs.gate_state.round_turn_counts["1"], 1, "round_turn_counts 정상 +1");
+  console.log("PASS: Phase 6.6 — profiler 통째 덮어쓰기 격리");
 }
 
 console.log("\n=== ALL TESTS COMPLETE ===");
