@@ -2565,4 +2565,30 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 6.2 — loadState 첫 실행 분리");
 }
 
+// Test Phase 6.3: loadState idempotent — 두 번째 호출은 meta.json에 이미 hook 필드 없음
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    current_company: "튜닙",
+    profiler_score: 7,
+  }));
+
+  // 1차 호출 — migration 발생
+  run({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/test-resume-panel" });
+  const meta1 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const hs1 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(meta1.profiler_score, undefined, "1차: meta.profiler_score 제거");
+  assert.strictEqual(hs1.profiler_score, 7, "1차: hs.profiler_score = 7");
+
+  // 2차 호출 — meta.json에 이미 hook 필드 없음, hookState만 갱신
+  run({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/test-resume-panel" });
+  const meta2 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const hs2 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.deepStrictEqual(meta2, meta1, "2차: meta 동일");
+  assert.strictEqual(hs2.profiler_score, 7, "2차: hs.profiler_score 보존 (migration 재발 안 됨)");
+  assert.strictEqual(hs2.gate_state.round_turn_counts["0"], 2, "2차: round_turn_counts 정상 누적 (1+1)");
+  console.log("PASS: Phase 6.3 — loadState idempotent");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
