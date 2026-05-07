@@ -445,7 +445,7 @@ function loadState(base) {
   }
 
   // 옛 스키마 흡수: meta.json에 perspective_shifts_this_session 등 잔존 시 hookState로 옮김
-  hookState = absorbLegacyFields(hookState, meta);
+  if (absorbLegacyFields(hookState, meta)) metaChanged = true;
 
   return { meta, hookState, metaChanged };
 }
@@ -461,34 +461,41 @@ function saveHookState(base, hs) {
 function absorbLegacyFields(hookState, meta) {
   // session_limits 보장
   if (!hookState.session_limits) hookState.session_limits = defaultSessionLimits();
+  let absorbed = false;
   if (typeof meta.gap_probes_this_session === "number") {
     hookState.session_limits.gaps.used = meta.gap_probes_this_session;
     delete meta.gap_probes_this_session;
+    absorbed = true;
   }
   if (typeof meta.perspective_shifts_this_session === "number") {
     hookState.session_limits.perspectives.used = meta.perspective_shifts_this_session;
     delete meta.perspective_shifts_this_session;
+    absorbed = true;
   }
   if (Array.isArray(meta.perspective_shifted_episodes)) {
     hookState.session_limits.perspectives.episode_refs = meta.perspective_shifted_episodes;
     delete meta.perspective_shifted_episodes;
+    absorbed = true;
   }
   if (typeof meta.contradictions_presented_this_session === "number") {
     hookState.session_limits.contradictions.used = meta.contradictions_presented_this_session;
     delete meta.contradictions_presented_this_session;
+    absorbed = true;
   }
   if (Array.isArray(meta.reprobe_log)) {
     hookState.session_limits.reprobes.log = meta.reprobe_log;
     hookState.session_limits.reprobes.used = meta.reprobe_log.length;
     delete meta.reprobe_log;
+    absorbed = true;
   }
   if (Array.isArray(meta.intentional_gaps)) {
     hookState.session_limits.gaps.intentional = meta.intentional_gaps;
     delete meta.intentional_gaps;
+    absorbed = true;
   }
   // gate_state 보장
   if (!hookState.gate_state) hookState.gate_state = defaultGateState();
-  return hookState;
+  return absorbed;
 }
 
 function migrateMeta(meta) {

@@ -2591,4 +2591,45 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 6.3 — loadState idempotent");
 }
 
+// Test Phase 6.4: loadState absorbs legacy fields into hookState.session_limits
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // 옛 스키마: 평면 필드들이 meta.json에 있음
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    current_company: "튜닙",
+    gap_probes_this_session: 2,
+    perspective_shifts_this_session: 1,
+    perspective_shifted_episodes: ["ep-001", "ep-002"],
+    contradictions_presented_this_session: 1,
+    reprobe_log: [{ episode: "ep-003", at: "2026-04-01" }],
+    intentional_gaps: [{ from: "2024.01", to: "2024.06", reason: "휴직" }],
+  }));
+
+  run({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/test-resume-panel" });
+
+  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+
+  // 옛 필드들 모두 meta에서 제거됨
+  assert.strictEqual(meta.gap_probes_this_session, undefined, "gap_probes_this_session 제거");
+  assert.strictEqual(meta.perspective_shifts_this_session, undefined, "perspective_shifts_this_session 제거");
+  assert.strictEqual(meta.perspective_shifted_episodes, undefined, "perspective_shifted_episodes 제거");
+  assert.strictEqual(meta.contradictions_presented_this_session, undefined, "contradictions_presented_this_session 제거");
+  assert.strictEqual(meta.reprobe_log, undefined, "reprobe_log 제거");
+  assert.strictEqual(meta.intentional_gaps, undefined, "intentional_gaps 제거");
+  assert.strictEqual(meta.current_company, "튜닙", "current_company 보존");
+
+  // hookState.session_limits로 흡수됨
+  assert.strictEqual(hs.session_limits.gaps.used, 2, "gaps.used 흡수");
+  assert.strictEqual(hs.session_limits.perspectives.used, 1, "perspectives.used 흡수");
+  assert.deepStrictEqual(hs.session_limits.perspectives.episode_refs, ["ep-001", "ep-002"], "episode_refs 흡수");
+  assert.strictEqual(hs.session_limits.contradictions.used, 1, "contradictions.used 흡수");
+  assert.strictEqual(hs.session_limits.reprobes.used, 1, "reprobes.used 흡수");
+  assert.deepStrictEqual(hs.session_limits.reprobes.log[0].episode, "ep-003", "reprobes.log 흡수");
+  assert.strictEqual(hs.session_limits.gaps.intentional.length, 1, "gaps.intentional 흡수");
+  assert.strictEqual(hs.session_limits.gaps.intentional[0].from, "2024.01", "intentional 내용 보존");
+  console.log("PASS: Phase 6.4 — loadState 옛 스키마 흡수");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
