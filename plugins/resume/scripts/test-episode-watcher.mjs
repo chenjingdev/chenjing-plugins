@@ -2483,4 +2483,28 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 5.9 — unknown subagent 안전 처리");
 }
 
+// Test Phase 6.1: defaultHookState() returns expected schema
+{
+  // helper export 없으므로 hook 호출로 간접 검증
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  // meta.json도 hook-state.json도 없는 상태에서 UserPromptSubmit 호출
+  run({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/test-resume-panel" });
+
+  // Phase 6.1 Task 2까지 보류 (loadState 미구현 상태에서는 hook-state.json 생성 안됨)
+  if (existsSync("/tmp/test-resume-panel/.resume-panel/hook-state.json")) {
+    const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+    assert.ok(hs.session_limits, "session_limits exists");
+    assert.deepStrictEqual(hs.session_limits.gaps, { used: 0, max: 3, intentional: [] }, "default gaps");
+    assert.ok(hs.gate_state, "gate_state exists");
+    assert.strictEqual(hs.gate_state.direct_askuserquestion_streak, 0, "default streak 0");
+    assert.deepStrictEqual(hs.gate_state.round_turn_counts, { "0": 1, "1": 0, "2": 0, "3": 0 }, "round 0 incremented by this UserPromptSubmit");
+    assert.strictEqual(hs.profiler_score, 0, "default score 0");
+    assert.deepStrictEqual(hs._score_reasons, [], "default reasons empty");
+    console.log("PASS: Phase 6.1 — defaultHookState 스키마");
+  } else {
+    console.log("SKIP: Phase 6.1 — defaultHookState (loadState 미구현)");
+  }
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");

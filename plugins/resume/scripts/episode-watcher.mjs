@@ -28,6 +28,7 @@ const sourcePath = join(base, "resume-source.json");
 const inboxPath = join(stateDir, "findings-inbox.jsonl");
 const processingPath = join(stateDir, "findings-inbox.processing.jsonl");
 const findingsPath = join(stateDir, "findings.json");
+const hookStatePath = join(stateDir, "hook-state.json");
 
 // ── UserPromptSubmit 분기 — round_turn_counts 증가 ──
 if (input.hook_event_name === "UserPromptSubmit") {
@@ -409,6 +410,15 @@ function defaultGateState() {
     round_turn_counts: { "0": 0, "1": 0, "2": 0, "3": 0 },
     retrospective_invoked: false,
     last_askuserquestion_source: null,
+  };
+}
+
+function defaultHookState() {
+  return {
+    session_limits: defaultSessionLimits(),
+    gate_state: defaultGateState(),
+    profiler_score: 0,
+    _score_reasons: [],
   };
 }
 
