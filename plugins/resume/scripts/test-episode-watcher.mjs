@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import assert from "node:assert";
 
@@ -2630,6 +2630,26 @@ console.log("\nAll pattern eligibility tests passed.");
   assert.strictEqual(hs.session_limits.gaps.intentional.length, 1, "gaps.intentional 흡수");
   assert.strictEqual(hs.session_limits.gaps.intentional[0].from, "2024.01", "intentional 내용 보존");
   console.log("PASS: Phase 6.4 — loadState 옛 스키마 흡수");
+}
+
+// Test Phase 6.5: malformed hook-state.json → backup + default 복구
+{
+  rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
+  mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({ current_company: "튜닙" }));
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "{ broken json");
+
+  run({ hook_event_name: "UserPromptSubmit", cwd: "/tmp/test-resume-panel" });
+
+  const hs = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs.profiler_score, 0, "default profiler_score 0");
+  assert.strictEqual(hs.gate_state.round_turn_counts["0"], 1, "round_turn_counts 정상 +1");
+
+  // 백업 파일이 생성됨
+  const bakFiles = readdirSync("/tmp/test-resume-panel/.resume-panel/")
+    .filter(f => f.startsWith("hook-state.json.bak."));
+  assert.strictEqual(bakFiles.length, 1, "백업 파일 1개 생성");
+  console.log("PASS: Phase 6.5 — malformed hook-state.json 백업 + 복구");
 }
 
 console.log("\n=== ALL TESTS COMPLETE ===");

@@ -433,6 +433,14 @@ function defaultHookState() {
 function loadState(base) {
   const meta = readJSON(metaPath) || {};
   let hookState = readJSON(hookStatePath);
+  if (existsSync(hookStatePath) && hookState === null) {
+    // 파일은 있는데 파싱 실패 → 백업 후 default
+    const bakPath = `${hookStatePath}.bak.${Date.now()}`;
+    try {
+      const raw = readFileSync(hookStatePath, "utf-8");
+      writeFileSync(bakPath, raw);
+    } catch {}
+  }
   if (!hookState) hookState = defaultHookState();
 
   let metaChanged = false;
