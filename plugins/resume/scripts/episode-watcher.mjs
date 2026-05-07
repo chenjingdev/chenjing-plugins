@@ -503,46 +503,6 @@ function absorbLegacyFields(hookState, meta) {
   return absorbed;
 }
 
-function migrateMeta(meta) {
-  if (!meta) meta = {};
-  // Already migrated?
-  if (meta.session_limits && meta.gate_state) return meta;
-
-  const migrated = { ...meta };
-
-  // session_limits
-  migrated.session_limits = defaultSessionLimits();
-  if (typeof meta.gap_probes_this_session === "number") {
-    migrated.session_limits.gaps.used = meta.gap_probes_this_session;
-    delete migrated.gap_probes_this_session;
-  }
-  if (typeof meta.perspective_shifts_this_session === "number") {
-    migrated.session_limits.perspectives.used = meta.perspective_shifts_this_session;
-    delete migrated.perspective_shifts_this_session;
-  }
-  if (Array.isArray(meta.perspective_shifted_episodes)) {
-    migrated.session_limits.perspectives.episode_refs = meta.perspective_shifted_episodes;
-    delete migrated.perspective_shifted_episodes;
-  }
-  if (typeof meta.contradictions_presented_this_session === "number") {
-    migrated.session_limits.contradictions.used = meta.contradictions_presented_this_session;
-    delete migrated.contradictions_presented_this_session;
-  }
-  if (Array.isArray(meta.reprobe_log)) {
-    migrated.session_limits.reprobes.log = meta.reprobe_log;
-    migrated.session_limits.reprobes.used = meta.reprobe_log.length;
-    delete migrated.reprobe_log;
-  }
-  if (Array.isArray(meta.intentional_gaps)) {
-    migrated.session_limits.gaps.intentional = meta.intentional_gaps;
-    delete migrated.intentional_gaps;
-  }
-
-  // gate_state
-  migrated.gate_state = defaultGateState();
-
-  return migrated;
-}
 
 // ── 메시지 수집 ─────────────────────────────────────
 const messages = [];
