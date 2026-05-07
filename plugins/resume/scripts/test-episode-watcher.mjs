@@ -1653,9 +1653,9 @@ console.log("\nAll pattern eligibility tests passed.");
     cwd: "/tmp/test-resume-panel",
   });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.gate_state.agent_calls_in_current_round.senior, 1, "senior count should increment");
-  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0, "direct streak should reset on Task call");
+  const hs33 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs33.gate_state.agent_calls_in_current_round.senior, 1, "senior count should increment");
+  assert.strictEqual(hs33.gate_state.direct_askuserquestion_streak, 0, "direct streak should reset on Task call");
   console.log("PASS: Phase 3.3 — Task 호출 감지");
 }
 
@@ -1688,9 +1688,9 @@ console.log("\nAll pattern eligibility tests passed.");
     cwd: "/tmp/test-resume-panel",
   });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0, "whitelist declared → streak should stay 0");
-  assert.strictEqual(meta.gate_state.last_askuserquestion_source, null, "source should reset to null");
+  const hs34a = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs34a.gate_state.direct_askuserquestion_streak, 0, "whitelist declared → streak should stay 0");
+  assert.strictEqual(hs34a.gate_state.last_askuserquestion_source, null, "source should reset to null");
   console.log("PASS: Phase 3.4a — whitelist 선언 시 streak 비증가");
 }
 
@@ -1723,8 +1723,8 @@ console.log("\nAll pattern eligibility tests passed.");
     cwd: "/tmp/test-resume-panel",
   });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 3, "streak should hit 3");
+  const hs34b = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs34b.gate_state.direct_askuserquestion_streak, 3, "streak should hit 3");
   assert.ok(result, "should emit output");
   const ctx = result.hookSpecificOutput.additionalContext;
   const violationLine = ctx.split("\n\n").find(l => l.includes('"gate":"direct_question_burst"'));
@@ -1889,8 +1889,8 @@ console.log("\nAll pattern eligibility tests passed.");
     cwd: "/tmp/test-resume-panel",
   });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.gate_state.retrospective_invoked, true, "retrospective_invoked should be true");
+  const hs38 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs38.gate_state.retrospective_invoked, true, "retrospective_invoked should be true");
   console.log("PASS: Phase 3.8 — retrospective Task 감지");
 }
 
@@ -1920,19 +1920,19 @@ console.log("\nAll pattern eligibility tests passed.");
   run({ hook_event_name: "PostToolUse", tool_name: "Task", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
   run({ hook_event_name: "PostToolUse", tool_name: "Task", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
 
-  // AskUserQuestion (agent 소스) 3회 — 각각 호출 전에 소스 선언
+  // AskUserQuestion (agent 소스) 3회 — 각각 호출 전에 소스 선언 (hook-state.json에 기록)
   for (let i = 0; i < 3; i++) {
-    const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-    meta.gate_state.last_askuserquestion_source = { source: "agent", agent_name: "senior" };
-    writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+    const hs41 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+    hs41.gate_state.last_askuserquestion_source = { source: "agent", agent_name: "senior" };
+    writeFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", JSON.stringify(hs41));
     run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
   }
 
   // AskUserQuestion (whitelist) 1회
   {
-    const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-    meta.gate_state.last_askuserquestion_source = { source: "whitelist", case: "round0_basic_info" };
-    writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+    const hs41 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+    hs41.gate_state.last_askuserquestion_source = { source: "whitelist", case: "round0_basic_info" };
+    writeFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", JSON.stringify(hs41));
     run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
   }
 
@@ -1970,10 +1970,10 @@ console.log("\nAll pattern eligibility tests passed.");
   run({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
   run({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { subagent_type: "senior" }, cwd: "/tmp/test-resume-panel" });
 
-  const stats = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(stats.agent_invocations.senior, 2, "stats.agent_invocations.senior should be 2");
-  assert.strictEqual(meta.gate_state.agent_calls_in_current_round.senior, 2, "meta gate_state senior should be 2");
+  const stats51 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
+  const hs51 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(stats51.agent_invocations.senior, 2, "stats.agent_invocations.senior should be 2");
+  assert.strictEqual(hs51.gate_state.agent_calls_in_current_round.senior, 2, "hs gate_state senior should be 2");
   console.log("PASS: Phase 5.1 — Agent toolName 수용");
 }
 
@@ -2182,10 +2182,10 @@ console.log("\nAll pattern eligibility tests passed.");
 
   run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.profiler_score, 1, "AUQ should add +1 to profiler_score");
-  const reasons = (meta._score_reasons || []).map(r => r.reason);
-  assert.ok(reasons.some(r => r.includes("AUQ")), `AUQ reason missing in ${JSON.stringify(reasons)}`);
+  const hs55 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs55.profiler_score, 1, "AUQ should add +1 to profiler_score");
+  const reasons55 = (hs55._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons55.some(r => r.includes("AUQ")), `AUQ reason missing in ${JSON.stringify(reasons55)}`);
   console.log("PASS: Phase 5.5 — AUQ 가중치 +1");
 }
 
@@ -2193,28 +2193,33 @@ console.log("\nAll pattern eligibility tests passed.");
 {
   rmSync("/tmp/test-resume-panel", { recursive: true, force: true });
   mkdirSync("/tmp/test-resume-panel/.resume-panel", { recursive: true });
-  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+  // hook-state.json에 직접 초기 상태 기록 (gate_state/profiler_score는 hook-state 소관)
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", JSON.stringify({
     session_limits: { gaps: { used: 0, max: 3, intentional: [] }, perspectives: { used: 0, max: 2, episode_refs: [] }, contradictions: { used: 0, max: 2 }, reprobes: { used: 0, log: [] } },
     gate_state: {
       ...defaultGateStateForTest(),
       last_askuserquestion_source: { source: "agent", agent_name: "senior" },
     },
-    current_round: 1,
     profiler_score: 0,
+    _score_reasons: [],
+  }));
+  // meta.json에는 content 필드만
+  writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify({
+    current_round: 1,
   }));
 
   let lastResult = null;
   for (let i = 0; i < 5; i++) {
-    // AUQ 호출 직전 source 재선언 (기존 hook이 처리 후 null로 만듦)
-    const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-    meta.gate_state.last_askuserquestion_source = { source: "agent", agent_name: "senior" };
-    writeFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", JSON.stringify(meta));
+    // AUQ 호출 직전 source 재선언 (기존 hook이 처리 후 null로 만듦) — hook-state.json에 기록
+    const hs55b = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+    hs55b.gate_state.last_askuserquestion_source = { source: "agent", agent_name: "senior" };
+    writeFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", JSON.stringify(hs55b));
     lastResult = run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
   }
 
   // 5번째 호출에서 score=5 → 임계 도달 → profiler_trigger emit + score 0 리셋
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.profiler_score, 0, "score should reset to 0 after threshold");
+  const hs55bFinal = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs55bFinal.profiler_score, 0, "score should reset to 0 after threshold");
   // additionalContext에 profiler_trigger 메시지가 있어야 함
   assert.ok(lastResult, "5th AUQ should emit output");
   assert.ok(lastResult.hookSpecificOutput.additionalContext.includes('"type":"profiler_trigger"'),
@@ -2266,10 +2271,10 @@ console.log("\nAll pattern eligibility tests passed.");
 
   run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.profiler_score, 3, `expected 3 (1 base + 2 bonus), got ${meta.profiler_score}`);
-  const reasons = (meta._score_reasons || []).map(r => r.reason);
-  assert.ok(reasons.some(r => r.includes("HIGH finding")), `HIGH finding bonus reason missing in ${JSON.stringify(reasons)}`);
+  const hs56b = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs56b.profiler_score, 3, `expected 3 (1 base + 2 bonus), got ${hs56b.profiler_score}`);
+  const reasons56b = (hs56b._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons56b.some(r => r.includes("HIGH finding")), `HIGH finding bonus reason missing in ${JSON.stringify(reasons56b)}`);
   console.log("PASS: Phase 5.6b — AUQ within 60s of HIGH finding → +3");
 }
 
@@ -2291,8 +2296,8 @@ console.log("\nAll pattern eligibility tests passed.");
 
   run({ hook_event_name: "PostToolUse", tool_name: "AskUserQuestion", tool_input: {}, cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.profiler_score, 1, `expected 1 (no bonus), got ${meta.profiler_score}`);
+  const hs56c = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(hs56c.profiler_score, 1, `expected 1 (no bonus), got ${hs56c.profiler_score}`);
   console.log("PASS: Phase 5.6c — AUQ outside 60s window → +1 only");
 }
 
@@ -2478,13 +2483,13 @@ console.log("\nAll pattern eligibility tests passed.");
 
   run({ hook_event_name: "PostToolUse", tool_name: "Agent", tool_input: { subagent_type: "mystery-agent" }, cwd: "/tmp/test-resume-panel" });
 
-  const stats = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(stats._debug.observed_tool_names.Agent, 1, "Agent observed once");
-  const totalInvocations = Object.values(stats.agent_invocations).reduce((a, b) => a + b, 0);
+  const stats59 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/session-stats.json", "utf-8"));
+  const hs59 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.strictEqual(stats59._debug.observed_tool_names.Agent, 1, "Agent observed once");
+  const totalInvocations = Object.values(stats59.agent_invocations).reduce((a, b) => a + b, 0);
   assert.strictEqual(totalInvocations, 0, "no agent_invocations counter incremented for unknown subagent");
-  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 2, "streak unchanged for unknown subagent");
-  assert.strictEqual(meta.gate_state.retrospective_invoked, false, "retrospective_invoked unchanged");
+  assert.strictEqual(hs59.gate_state.direct_askuserquestion_streak, 2, "streak unchanged for unknown subagent");
+  assert.strictEqual(hs59.gate_state.retrospective_invoked, false, "retrospective_invoked unchanged");
   console.log("PASS: Phase 5.9 — unknown subagent 안전 처리");
 }
 

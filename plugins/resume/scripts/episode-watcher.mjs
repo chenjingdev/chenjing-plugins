@@ -92,27 +92,27 @@ if (toolName === "Task" || toolName === "Agent") {
   const subagent = toolInput.subagent_type || "";
   const knownAgents = ["senior", "c-level", "recruiter", "hr", "coffee-chat"];
   ensureStateDir();
-  const meta = migrateMeta(readJSON(metaPath) || {});
-  meta.gate_state = meta.gate_state || defaultGateState();
+  const { meta, hookState, metaChanged } = loadState(base);
 
   const stats = readStats(base);
   ensureDebug(stats);
   stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
 
   if (knownAgents.includes(subagent)) {
-    meta.gate_state.agent_calls_in_current_round[subagent] =
-      (meta.gate_state.agent_calls_in_current_round[subagent] || 0) + 1;
-    meta.gate_state.direct_askuserquestion_streak = 0;
+    hookState.gate_state.agent_calls_in_current_round[subagent] =
+      (hookState.gate_state.agent_calls_in_current_round[subagent] || 0) + 1;
+    hookState.gate_state.direct_askuserquestion_streak = 0;
     stats.agent_invocations[subagent] = (stats.agent_invocations[subagent] || 0) + 1;
   } else if (subagent === "retrospective") {
-    meta.gate_state.retrospective_invoked = true;
+    hookState.gate_state.retrospective_invoked = true;
     stats.agent_invocations.retrospective = (stats.agent_invocations.retrospective || 0) + 1;
   } else if (subagent === "researcher" || subagent === "project-researcher") {
     stats.agent_invocations.researcher = (stats.agent_invocations.researcher || 0) + 1;
   }
   // else: unknown subagent — observed_tool_names만 기록, 카운트 증가 없음
 
-  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  saveHookState(base, hookState);
+  if (metaChanged) saveMeta(base, meta);
   writeStats(base, stats);
   process.exit(0);
 }
@@ -120,20 +120,18 @@ if (toolName === "Task" || toolName === "Agent") {
 // ── AskUserQuestion 호출 감지 (G1 r1_entry + G2 direct_question_burst) ──
 if (toolName === "AskUserQuestion") {
   ensureStateDir();
-  const meta = migrateMeta(readJSON(metaPath) || {});
-  meta.gate_state = meta.gate_state || defaultGateState();
+  const { meta, hookState, metaChanged } = loadState(base);
 
-  const source = meta.gate_state.last_askuserquestion_source;
+  const source = hookState.gate_state.last_askuserquestion_source;
   const isWhitelist = source && source.source === "whitelist";
   const isAgent = source && source.source === "agent";
 
   if (isWhitelist || isAgent) {
-    meta.gate_state.direct_askuserquestion_streak = 0;
+    hookState.gate_state.direct_askuserquestion_streak = 0;
   } else {
-    meta.gate_state.direct_askuserquestion_streak++;
+    hookState.gate_state.direct_askuserquestion_streak++;
   }
-  meta.gate_state.last_askuserquestion_source = null;
-  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  hookState.gate_state.last_askuserquestion_source = null;
 
   // session-stats 집계
   {
@@ -145,40 +143,39 @@ if (toolName === "AskUserQuestion") {
     writeStats(base, stats);
   }
 
-  // 프로파일러 가중치 — AUQ 1회 +1 (모든 source)
-  addProfilerScore(meta, 1, "AUQ");
+  // 프로파일러 가중치 — AUQ 1회 +1
+  addProfilerScore(hookState, 1, "AUQ");
 
-  // 중요도 보너스: 직전 60초 이내에 HIGH finding이 발행됐으면 +2
-  if (meta._last_high_finding_at) {
-    const elapsed = Date.now() - new Date(meta._last_high_finding_at).getTime();
+  // HIGH finding 60초 이내 보너스 +2
+  if (hookState._last_high_finding_at) {
+    const elapsed = Date.now() - new Date(hookState._last_high_finding_at).getTime();
     if (elapsed >= 0 && elapsed < 60_000) {
-      addProfilerScore(meta, 2, "HIGH finding 60초 이내 (+2)");
+      addProfilerScore(hookState, 2, "HIGH finding 60초 이내 (+2)");
     }
   }
 
-  // 임계 도달 시 profiler_trigger emit + score 리셋
-  // (기존 storage 블록과 같은 임계값. THRESHOLD=5)
+  // 임계 도달 시 trigger emit + 리셋
   const profilerMessages = [];
-  if (meta.profiler_score >= 5) {
+  if (hookState.profiler_score >= 5) {
     profilerMessages.push(emit({
       type: "profiler_trigger",
-      delta: (meta._score_reasons || []).slice(-5).map(r => r.reason).join(", "),
-      score: meta.profiler_score,
+      delta: (hookState._score_reasons || []).slice(-5).map(r => r.reason).join(", "),
+      score: hookState.profiler_score,
       source: "AUQ",
     }));
-    meta.profiler_score = 0;
+    hookState.profiler_score = 0;
   }
 
-  // meta 재저장 (위에서 이미 한 번 썼지만 score 변경분 반영)
-  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  saveHookState(base, hookState);
+  if (metaChanged) saveMeta(base, meta);
 
   // Collect violations
   const violations = [];
 
   // G1: r1_entry
   if (meta.current_round === 1 &&
-      (meta.gate_state.agent_calls_in_current_round.senior || 0) === 0 &&
-      (meta.gate_state.agent_calls_in_current_round["c-level"] || 0) === 0 &&
+      (hookState.gate_state.agent_calls_in_current_round.senior || 0) === 0 &&
+      (hookState.gate_state.agent_calls_in_current_round["c-level"] || 0) === 0 &&
       !isWhitelist && !isAgent) {
     violations.push({
       type: "gate_violation",
@@ -188,11 +185,11 @@ if (toolName === "AskUserQuestion") {
   }
 
   // G2: direct_question_burst
-  if (meta.gate_state.direct_askuserquestion_streak >= 3) {
+  if (hookState.gate_state.direct_askuserquestion_streak >= 3) {
     violations.push({
       type: "gate_violation",
       gate: "direct_question_burst",
-      count: meta.gate_state.direct_askuserquestion_streak,
+      count: hookState.gate_state.direct_askuserquestion_streak,
     });
   }
 
