@@ -50,6 +50,12 @@
 - `contradiction_detected` (HIGH): 모순 복원 — 오케스트레이터가 AskUserQuestion으로 직접 복원 질문 (화이트리스트 case 3)
 - `timeline_gap_found` (MEDIUM): hr 에이전트 갭 프로빙 모드 호출
 - `pattern_detected` (MEDIUM): 패턴을 다음 에이전트 브리핑의 "발견된 패턴" 섹션에 포함 (즉시 질문 안 함). `context.target_agent`가 있으면 그 에이전트 우선.
+
+  **발행 주체**: profiler agent — `plugins/resume/.claude/agents/profiler.md` §2 "크로스 컴퍼니 패턴 분석" 결과를 `findings-inbox.jsonl`에 append (Bash echo 패턴).
+  **라우팅 주체**: episode-watcher hook (`scripts/episode-watcher.mjs` finding 라우팅 분기). MEDIUM은 `current_company` 변경 시점에 라우팅.
+  **적재 위치**: `.resume-panel/findings.json` (delivered=true 플래그).
+  **형식 정의**: profiler.md `pt-{timestamp}` 산출 형식 (이 문서의 §finding 정의와 일치).
+
 - `perspective_shift` (MEDIUM): `context.target_agent`를 관점 전환 모드로 호출
 - `gap_detected` (HIGH): 화이트리스트 메타질문 (관련 경험 있음 / 진짜 없음 / 넘어가기)
 - `impact_shallow` (LOW): 전달 안 함. 유저가 "분석해줘" 시 Read.

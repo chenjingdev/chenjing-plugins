@@ -103,6 +103,30 @@ EOF
 
 `snapshot.json` is auto-created on first run by the episode-watcher hook, so manual initialization is not needed.
 
+### `hook-state.json` (신규, 2026-05-07~)
+
+episode-watcher hook이 단독 관리하는 메커니즘 상태. profiler/orchestrator는 read-only로만 참조.
+
+| 필드 | 용도 |
+|---|---|
+| `session_limits.gaps` | gap probe 카운터 + 의도된 gap 목록 (`{used, max, intentional}`) |
+| `session_limits.perspectives` | 관점 전환 사용 수 + episode_refs (`{used, max, episode_refs}`) |
+| `session_limits.contradictions` | 모순 제시 카운터 (`{used, max}`) |
+| `session_limits.reprobes` | 재프로빙 로그 (`{used, log}`) |
+| `gate_state.direct_askuserquestion_streak` | G2 burst 감지 |
+| `gate_state.agent_calls_in_current_round` | 라운드별 에이전트 호출 카운터 |
+| `gate_state.round_turn_counts` | UserPromptSubmit 1회 = 1 turn |
+| `gate_state.retrospective_invoked` | G4 회고 누락 감지 |
+| `gate_state.last_askuserquestion_source` | AUQ 출처 (whitelist/agent/orchestrator_direct) |
+| `profiler_score` | 모델 B 점수 (THRESHOLD=5) |
+| `_score_reasons` | rolling 10 가산 사유 |
+| `_last_high_finding_at` | HIGH finding 60s 보너스 윈도 |
+| `last_timeline_check` | timeline gap 분석 시점 |
+| `last_pattern_analysis_episode_count` | 패턴 분석 trigger 시점 에피소드 수 |
+| `last_pattern_analysis_company_count` | 패턴 분석 trigger 시점 회사 수 |
+
+writer: episode-watcher hook 단독. 다른 주체 write 금지.
+
 ## resume-draft.md Structure (End of Round 3)
 
 ```markdown

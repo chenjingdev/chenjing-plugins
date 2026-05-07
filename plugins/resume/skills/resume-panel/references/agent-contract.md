@@ -224,3 +224,17 @@
 - 리서처 조사 결과에 없는 사실을 지어내지 않는다
 - 대화에 없는 내용을 추측하지 않는다
 - 유저를 평가/판단하지 않는다 — 객관적 질문만
+
+## 8. profiler 산출 형식 cross-reference
+
+profiler agent가 `findings-inbox.jsonl`에 append하는 finding 종류:
+
+| id prefix | type | urgency | 발행 조건 |
+|---|---|---|---|
+| `pt-{ts}` | `pattern_detected` | MEDIUM | 에피소드 ≥3 + 회사 ≥2 + 패턴 발견 |
+| `ps-{ts}` | `perspective_shift` | MEDIUM | 리더십/협업 에피소드 + 과소평가 신호 |
+| `cd-{ts}` | `contradiction_detected` | HIGH (role_scope) / MEDIUM (기타) | claim NLI에서 CONTRADICTION |
+| `tg-{ts}` | `timeline_gap_found` | MEDIUM | 회사 간 6개월+ 또는 회사 내 3개월+ gap |
+
+세부 형식: `plugins/resume/.claude/agents/profiler.md` §2 (pt-), §3 (ps-), §5 (cd-).
+`tg-`는 episode-watcher hook이 직접 발행 (`scripts/episode-watcher.mjs` Timeline gap detection 분기).
