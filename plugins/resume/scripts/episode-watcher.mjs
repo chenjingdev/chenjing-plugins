@@ -560,29 +560,25 @@ if (isResumeSourceChange) {
 
     if (!snapshot) {
       // 첫 실행: 스냅샷 저장 + profiler_score 초기화, 트리거 안 함
-      const metaJSON = readJSON(metaPath) || {};
-      writeFileSync(
-        snapshotPath,
-        JSON.stringify({
-          episode_count: currentCount,
-          project_names: currentProjects,
-          meta_hash: currentHash,
-          star_gaps: countStarGaps(source),
-          current_company: metaJSON?.current_company || null,
-        })
-      );
-      const metaMigrated = migrateMeta(metaJSON);
-      if (metaMigrated.profiler_score === undefined) metaMigrated.profiler_score = 0;
-      writeFileSync(metaPath, JSON.stringify(metaMigrated, null, 2));
+      const { meta: metaJSON, hookState, metaChanged } = loadState(base);
+      writeFileSync(snapshotPath, JSON.stringify({
+        episode_count: currentCount,
+        project_names: currentProjects,
+        meta_hash: currentHash,
+        star_gaps: countStarGaps(source),
+        current_company: metaJSON?.current_company || null,
+      }));
+      saveHookState(base, hookState);
+      if (metaChanged) saveMeta(base, metaJSON);
     } else {
       // 이벤트 가중치 점수 계산
-      const metaJSON = migrateMeta(readJSON(metaPath) || {});
+      const { meta: metaJSON, hookState, metaChanged } = loadState(base);
       const reasons = [];
 
       // +1: 에피소드 저장
       const episodeDelta = currentCount - (snapshot.episode_count || 0);
       if (episodeDelta > 0) {
-        addProfilerScore(metaJSON, episodeDelta, `에피소드 +${episodeDelta}`);
+        addProfilerScore(hookState, episodeDelta, `에피소드 +${episodeDelta}`);
         reasons.push(`에피소드 +${episodeDelta}`);
       }
 
@@ -590,7 +586,7 @@ if (isResumeSourceChange) {
       const snapshotProjects = new Set(snapshot.project_names || []);
       const hasNewProject = currentProjects.some((p) => !snapshotProjects.has(p));
       if (hasNewProject) {
-        addProfilerScore(metaJSON, 3, "새 프로젝트 (+3)");
+        addProfilerScore(hookState, 3, "새 프로젝트 (+3)");
         reasons.push("새 프로젝트 (+3)");
       }
 
@@ -598,26 +594,25 @@ if (isResumeSourceChange) {
       const currentStarGaps = countStarGaps(source);
       const prevStarGaps = snapshot.star_gaps || 0;
       if (currentStarGaps > prevStarGaps) {
-        addProfilerScore(metaJSON, 2, "빈 STAR 증가 (+2)");
+        addProfilerScore(hookState, 2, "빈 STAR 증가 (+2)");
         reasons.push("빈 STAR 증가 (+2)");
       }
 
       // +2: 역할 축소 신호
       if (detectMinimization(source, snapshot)) {
-        addProfilerScore(metaJSON, 2, "역할 축소 신호 (+2)");
+        addProfilerScore(hookState, 2, "역할 축소 신호 (+2)");
         reasons.push("역할 축소 신호 (+2)");
       }
 
       // +2: 메타 변경
       if (currentHash !== snapshot.meta_hash) {
-        addProfilerScore(metaJSON, 2, "meta 변경 (+2)");
+        addProfilerScore(hookState, 2, "meta 변경 (+2)");
         reasons.push("meta 변경 (+2)");
       }
 
       // 임계값 체크
       const THRESHOLD = 5;
-      let updatedMetaFields = {};
-      if (metaJSON.profiler_score >= THRESHOLD) {
+      if (hookState.profiler_score >= THRESHOLD) {
         const starGaps = countStarGaps(source);
         const companyCount = getCompanyCount(source);
         const patternEligible = currentCount >= 3 && companyCount >= 2;
@@ -625,7 +620,7 @@ if (isResumeSourceChange) {
           emit({
             type: "profiler_trigger",
             delta: reasons.join(", "),
-            score: metaJSON.profiler_score,
+            score: hookState.profiler_score,
             episode_count: currentCount,
             star_gaps: starGaps,
             project_count: currentProjects.length,
@@ -634,7 +629,7 @@ if (isResumeSourceChange) {
         );
 
         // Timeline gap detection -- deterministic, runs with profiler trigger
-        const intentionalGaps = metaJSON.session_limits?.gaps?.intentional || [];
+        const intentionalGaps = hookState.session_limits?.gaps?.intentional || [];
         const gaps = detectGaps(source);
         for (const gap of gaps) {
           // Skip intentional gaps
@@ -666,14 +661,14 @@ if (isResumeSourceChange) {
           writeFileSync(inboxPath, existsSync(inboxPath) ? readFileSync(inboxPath, "utf-8") + line : line);
         }
 
-        // Pattern eligibility tracking (flag already in JSON payload above)
+        // Pattern eligibility tracking — now stored in hookState
         const companyCountForMeta = getCompanyCount(source);
         if (currentCount >= 3 && companyCountForMeta >= 2) {
-          updatedMetaFields.last_pattern_analysis_episode_count = currentCount;
-          updatedMetaFields.last_timeline_check = new Date().toISOString();
+          hookState.last_pattern_analysis_episode_count = currentCount;
+          hookState.last_timeline_check = new Date().toISOString();
         }
 
-        metaJSON.profiler_score = 0; // 트리거 후 리셋
+        hookState.profiler_score = 0; // 트리거 후 리셋
       }
 
       // So What chain trigger — check for impact-shallow episodes
@@ -693,7 +688,7 @@ if (isResumeSourceChange) {
                   episode_ref: { company: project.companyName, project: project.name },
                 })
               );
-              addProfilerScore(metaJSON, 3, "so_what (+3)");
+              addProfilerScore(hookState, 3, "so_what (+3)");
               break;
             }
           }
@@ -702,22 +697,16 @@ if (isResumeSourceChange) {
       }
 
       // 스냅샷 업데이트 (항상)
-      writeFileSync(
-        snapshotPath,
-        JSON.stringify({
-          episode_count: currentCount,
-          project_names: currentProjects,
-          meta_hash: currentHash,
-          star_gaps: countStarGaps(source),
-          current_company: metaJSON?.current_company || null,
-        })
-      );
+      writeFileSync(snapshotPath, JSON.stringify({
+        episode_count: currentCount,
+        project_names: currentProjects,
+        meta_hash: currentHash,
+        star_gaps: countStarGaps(source),
+        current_company: metaJSON?.current_company || null,
+      }));
 
-      // meta.json에 점수 저장 (항상)
-      writeFileSync(metaPath, JSON.stringify({
-        ...metaJSON,
-        ...updatedMetaFields,
-      }, null, 2));
+      saveHookState(base, hookState);
+      if (metaChanged) saveMeta(base, metaJSON);
     }
   }
 }
@@ -728,8 +717,8 @@ if (targetPath === "round-transition") {
   const transition = readJSON(transitionPath);
   if (transition && transition.to === 3) {
     ensureStateDir();
-    const meta = migrateMeta(readJSON(metaPath) || {});
-    const gs = meta.gate_state || defaultGateState();
+    const { meta, hookState, metaChanged } = loadState(base);
+    const gs = hookState.gate_state || defaultGateState();
     const missing = [];
     if ((gs.agent_calls_in_current_round.recruiter || 0) === 0) missing.push("recruiter");
     if ((gs.agent_calls_in_current_round.hr || 0) === 0) missing.push("hr");
@@ -755,6 +744,7 @@ if (targetPath === "round-transition") {
       });
       writeStats(base, stats);
     }
+    if (metaChanged) saveMeta(base, meta);
     try { unlinkSync(transitionPath); } catch {}
   }
 }
@@ -763,8 +753,8 @@ if (targetPath === "round-transition") {
 if (targetPath === "session-end") {
   const sessionEndPath = join(stateDir, "session-end.json");
   ensureStateDir();
-  const meta = migrateMeta(readJSON(metaPath) || {});
-  const gs = meta.gate_state || defaultGateState();
+  const { meta, hookState, metaChanged } = loadState(base);
+  const gs = hookState.gate_state || defaultGateState();
   if (!gs.retrospective_invoked) {
     messages.push(emit({
       type: "gate_violation",
@@ -778,6 +768,7 @@ if (targetPath === "session-end") {
     });
     writeStats(base, stats);
   }
+  if (metaChanged) saveMeta(base, meta);
   try { unlinkSync(sessionEndPath); } catch {}
 }
 
@@ -858,14 +849,15 @@ if (existsSync(inboxPath)) {
 
     // HIGH finding 타임스탬프 + scoreDeltas 일괄 처리 (한 번의 read-write)
     if (highFindingDelivered || scoreDeltas.length > 0) {
-      const metaForUpdate = migrateMeta(readJSON(metaPath) || {});
+      const { meta: metaForUpdate, hookState: hsForUpdate, metaChanged: hsMetaChanged } = loadState(base);
       if (highFindingDelivered) {
-        metaForUpdate._last_high_finding_at = new Date().toISOString();
+        hsForUpdate._last_high_finding_at = new Date().toISOString();
       }
       for (const d of scoreDeltas) {
-        addProfilerScore(metaForUpdate, d.delta, d.reason);
+        addProfilerScore(hsForUpdate, d.delta, d.reason);
       }
-      writeFileSync(metaPath, JSON.stringify(metaForUpdate, null, 2));
+      saveHookState(base, hsForUpdate);
+      if (hsMetaChanged) saveMeta(base, metaForUpdate);
     }
 
     try { unlinkSync(processingPath); } catch {}

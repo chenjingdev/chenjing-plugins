@@ -158,10 +158,10 @@ const bashResumeInput = {
   assert.ok(existsSync(join(testBase, ".resume-panel", "snapshot.json")), "snapshot should be created");
   const snap = JSON.parse(readFileSync(join(testBase, ".resume-panel", "snapshot.json"), "utf-8"));
   assert.strictEqual(snap.episode_count, 2, "snapshot should have correct episode count");
-  // first run initializes profiler_score in meta.json
-  assert.ok(existsSync(join(testBase, ".resume-panel", "meta.json")), "meta.json should be created on first run");
-  const metaAfterFirst = JSON.parse(readFileSync(join(testBase, ".resume-panel", "meta.json"), "utf-8"));
-  assert.strictEqual(metaAfterFirst.profiler_score, 0, "first run should initialize profiler_score to 0");
+  // first run initializes profiler_score in hook-state.json
+  assert.ok(existsSync(join(testBase, ".resume-panel", "hook-state.json")), "hook-state.json should be created on first run");
+  const hsAfterFirst = JSON.parse(readFileSync(join(testBase, ".resume-panel", "hook-state.json"), "utf-8"));
+  assert.strictEqual(hsAfterFirst.profiler_score, 0, "first run should initialize profiler_score to 0");
   console.log("PASS: first run creates snapshot and initializes profiler_score = 0");
 }
 
@@ -169,6 +169,10 @@ const bashResumeInput = {
 
 function readMeta() {
   return JSON.parse(readFileSync(join(testBase, ".resume-panel", "meta.json"), "utf-8"));
+}
+
+function readHookState() {
+  return JSON.parse(readFileSync(join(testBase, ".resume-panel", "hook-state.json"), "utf-8"));
 }
 
 // Test: episode save +1 below threshold -> no trigger
@@ -188,8 +192,8 @@ function readMeta() {
 
   const result = runWithBase(bashResumeInput);
   assert.strictEqual(result, null, "episode +1 with score=0 should not trigger (total=1, threshold=5)");
-  const metaAfter = readMeta();
-  assert.strictEqual(metaAfter.profiler_score, 1, "profiler_score should be 1 after +1 episode");
+  const hsAfter = readHookState();
+  assert.strictEqual(hsAfter.profiler_score, 1, "profiler_score should be 1 after +1 episode");
   console.log("PASS: episode save +1 below threshold -> no trigger");
 }
 
@@ -211,8 +215,8 @@ function readMeta() {
   setupTestDir(snapshot1, resumeSource1, meta1);
   const result1 = runWithBase(bashResumeInput);
   assert.strictEqual(result1, null, "score 3 + 1 = 4, should not trigger");
-  const metaAfter1 = readMeta();
-  assert.strictEqual(metaAfter1.profiler_score, 4, "profiler_score should accumulate to 4");
+  const hsAfter1 = readHookState();
+  assert.strictEqual(hsAfter1.profiler_score, 4, "profiler_score should accumulate to 4");
 
   // Call 2: score=4, +1 episode -> total=5, TRIGGERS
   const snapshot2 = { episode_count: 3, project_names: ["프로젝트A"], meta_hash: correctHash, star_gaps: 0 };
@@ -233,8 +237,8 @@ function readMeta() {
   assert.ok(ctx2.includes("[resume-panel]"), "should have resume-panel tag");
   assert.ok(ctx2.includes('"type":"profiler_trigger"'), "should mention profiler");
   assert.ok(ctx2.includes('"score":'), "should include score in output");
-  const metaAfter2 = readMeta();
-  assert.strictEqual(metaAfter2.profiler_score, 0, "profiler_score should reset to 0 after trigger");
+  const hsAfter2 = readHookState();
+  assert.strictEqual(hsAfter2.profiler_score, 0, "profiler_score should reset to 0 after trigger");
   console.log("PASS: score accumulates across calls");
 }
 
@@ -267,8 +271,8 @@ function readMeta() {
   assert.ok(ctx.includes("[resume-panel]"), "should have resume-panel tag");
   assert.ok(ctx.includes('"type":"profiler_trigger"'), "should mention profiler");
   assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
-  const metaAfter = readMeta();
-  assert.strictEqual(metaAfter.profiler_score, 0, "profiler_score should reset to 0 after trigger");
+  const hsAfterNew = readHookState();
+  assert.strictEqual(hsAfterNew.profiler_score, 0, "profiler_score should reset to 0 after trigger");
   console.log("PASS: new company +3 score");
 }
 
@@ -291,8 +295,8 @@ function readMeta() {
   setupTestDir(snapshot1, resumeSource1, meta1);
   const result1 = runWithBase(bashResumeInput);
   assert.strictEqual(result1, null, "score 1 + 1(ep) + 2(gap) = 4, should not trigger");
-  const metaAfter1 = readMeta();
-  assert.strictEqual(metaAfter1.profiler_score, 4, "profiler_score should be 4");
+  const hsAfterGap1 = readHookState();
+  assert.strictEqual(hsAfterGap1.profiler_score, 4, "profiler_score should be 4");
 
   // Second call: score=3, +1 episode + +2 star gap = +3, total = 6 >= 5, triggers
   const snapshot2 = { episode_count: 2, project_names: ["A"], meta_hash: correctHash, star_gaps: 0 };
@@ -310,10 +314,10 @@ function readMeta() {
   assert.ok(result2, "score 3 + 1(ep) + 2(gap) = 6, should trigger");
   const ctx2 = result2.hookSpecificOutput.additionalContext;
   assert.ok(ctx2.includes("빈 STAR"), "should mention star gaps");
-  const metaAfter2 = readMeta();
+  const hsAfterGap2 = readHookState();
   // After trigger (reset to 0), new ep has result="" (no quantified impact) → so_what fires → +3
   // So final score = 0 (reset) + 3 (so_what) = 3
-  assert.strictEqual(metaAfter2.profiler_score, 3, "profiler_score should be 3 after trigger reset + so_what +3");
+  assert.strictEqual(hsAfterGap2.profiler_score, 3, "profiler_score should be 3 after trigger reset + so_what +3");
   console.log("PASS: empty result +2 score");
 }
 
@@ -334,8 +338,8 @@ function readMeta() {
   setupTestDir(snapshot1, resumeSource1, meta1);
   const result1 = runWithBase(bashResumeInput);
   assert.strictEqual(result1, null, "score 1 + 1(ep) + 2(minimization) = 4, should not trigger");
-  const metaAfter1 = readMeta();
-  assert.strictEqual(metaAfter1.profiler_score, 4, "profiler_score should be 4");
+  const hsAfterMin1 = readHookState();
+  assert.strictEqual(hsAfterMin1.profiler_score, 4, "profiler_score should be 4");
 
   // Call 2: score=3, +1 episode + +2 minimization = 3, total=6 >= 5, triggers
   const snapshot2 = { episode_count: 1, project_names: ["A"], meta_hash: correctHash, star_gaps: 0 };
@@ -352,8 +356,8 @@ function readMeta() {
   assert.ok(result2, "score 3 + 1(ep) + 2(minimization) = 6, should trigger");
   const ctx2 = result2.hookSpecificOutput.additionalContext;
   assert.ok(ctx2.includes("역할 축소"), "should mention role minimization signal");
-  const metaAfter2 = readMeta();
-  assert.strictEqual(metaAfter2.profiler_score, 0, "profiler_score should reset to 0");
+  const hsAfterMin2 = readHookState();
+  assert.strictEqual(hsAfterMin2.profiler_score, 0, "profiler_score should reset to 0");
   console.log("PASS: role minimization signal +2 score (도움, 참여, 지원, 보조, 서포트)");
 }
 
@@ -380,8 +384,8 @@ function readMeta() {
   assert.ok(result, "meta change +2 should trigger when combined score >= 5");
   const ctx = result.hookSpecificOutput.additionalContext;
   assert.ok(ctx.includes("meta 변경"), "should mention meta change");
-  const metaAfter = readMeta();
-  assert.strictEqual(metaAfter.profiler_score, 0, "profiler_score should reset to 0 after trigger");
+  const hsAfterMeta = readHookState();
+  assert.strictEqual(hsAfterMeta.profiler_score, 0, "profiler_score should reset to 0 after trigger");
   console.log("PASS: meta change +2 score");
 }
 
@@ -415,8 +419,8 @@ function readMeta() {
   assert.ok(ctx.includes('"type":"profiler_trigger"'), "should mention profiler");
   assert.ok(ctx.includes("새 프로젝트"), "should mention new project");
   assert.ok(ctx.includes("meta 변경"), "should mention meta change");
-  const metaAfter = readMeta();
-  assert.strictEqual(metaAfter.profiler_score, 0, "profiler_score should reset to 0");
+  const hsAfterCombined = readHookState();
+  assert.strictEqual(hsAfterCombined.profiler_score, 0, "profiler_score should reset to 0");
   console.log("PASS: combined events: new company + meta change = immediate trigger");
 }
 
@@ -440,8 +444,8 @@ function readMeta() {
   setupTestDir(snapshot1, resumeSource1, meta1);
   const result1 = runWithBase(bashResumeInput);
   assert.ok(result1, "should trigger (score 4 + 1 = 5)");
-  const metaAfterTrigger = readMeta();
-  assert.strictEqual(metaAfterTrigger.profiler_score, 0, "profiler_score should be 0 after trigger");
+  const hsAfterTrigger = readHookState();
+  assert.strictEqual(hsAfterTrigger.profiler_score, 0, "profiler_score should be 0 after trigger");
 
   // Second: +1 episode from fresh, should NOT trigger
   const snapAfterTrigger = JSON.parse(readFileSync(join(testBase, ".resume-panel", "snapshot.json"), "utf-8"));
@@ -459,8 +463,8 @@ function readMeta() {
   writeFileSync(join(testBase, "resume-source.json"), JSON.stringify(resumeSource2));
   const result2 = runWithBase(bashResumeInput);
   assert.strictEqual(result2, null, "after reset, +1 episode should NOT trigger");
-  const metaAfterFresh = readMeta();
-  assert.strictEqual(metaAfterFresh.profiler_score, 1, "profiler_score should be 1 after fresh +1");
+  const hsAfterFresh = readHookState();
+  assert.strictEqual(hsAfterFresh.profiler_score, 1, "profiler_score should be 1 after fresh +1");
   console.log("PASS: score resets to 0 after trigger, next call starts fresh");
 }
 
@@ -1389,9 +1393,9 @@ const bashPatternInput = {
   const ctx = result.hookSpecificOutput.additionalContext;
   assert.ok(ctx.includes('"pattern_eligible":true'), "should include pattern eligibility flag when 3+ episodes across 2+ companies");
 
-  // meta.json should have last_pattern_analysis_episode_count
-  const metaAfter = readPatternMeta();
-  assert.strictEqual(metaAfter.last_pattern_analysis_episode_count, 3, "should track episode count for pattern analysis");
+  // hook-state.json should have last_pattern_analysis_episode_count
+  const hsPattern1 = JSON.parse(readFileSync(join(patternTestBase, ".resume-panel", "hook-state.json"), "utf-8"));
+  assert.strictEqual(hsPattern1.last_pattern_analysis_episode_count, 3, "should track episode count for pattern analysis in hook-state");
   console.log("PASS: pattern eligibility flag with 3+ episodes across 2+ companies");
 
   rmSync(patternTestBase, { recursive: true, force: true });
@@ -1568,20 +1572,20 @@ console.log("\nAll pattern eligibility tests passed.");
     cwd: "/tmp/test-resume-panel",
   });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.ok(meta.session_limits, "session_limits missing");
-  assert.ok(meta.session_limits.gaps, "session_limits.gaps missing");
-  assert.strictEqual(meta.session_limits.gaps.max, 3);
-  assert.strictEqual(meta.session_limits.gaps.used, 0);
-  assert.ok(Array.isArray(meta.session_limits.gaps.intentional), "gaps.intentional should be array");
-  assert.strictEqual(meta.session_limits.perspectives.max, 2);
-  assert.strictEqual(meta.session_limits.contradictions.max, 2);
-  assert.ok(meta.gate_state, "gate_state missing");
-  assert.strictEqual(meta.gate_state.direct_askuserquestion_streak, 0);
-  assert.deepStrictEqual(meta.gate_state.agent_calls_in_current_round, {
+  const hs31 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.ok(hs31.session_limits, "session_limits missing");
+  assert.ok(hs31.session_limits.gaps, "session_limits.gaps missing");
+  assert.strictEqual(hs31.session_limits.gaps.max, 3);
+  assert.strictEqual(hs31.session_limits.gaps.used, 0);
+  assert.ok(Array.isArray(hs31.session_limits.gaps.intentional), "gaps.intentional should be array");
+  assert.strictEqual(hs31.session_limits.perspectives.max, 2);
+  assert.strictEqual(hs31.session_limits.contradictions.max, 2);
+  assert.ok(hs31.gate_state, "gate_state missing");
+  assert.strictEqual(hs31.gate_state.direct_askuserquestion_streak, 0);
+  assert.deepStrictEqual(hs31.gate_state.agent_calls_in_current_round, {
     senior: 0, "c-level": 0, recruiter: 0, hr: 0, "coffee-chat": 0
   });
-  console.log("PASS: Phase 3.1 — meta.json 초기 스키마");
+  console.log("PASS: Phase 3.1 — hook-state.json 초기 스키마");
 }
 
 // Test Phase 3.2: 기존 meta.json (구 스키마)의 마이그레이션
@@ -1611,17 +1615,19 @@ console.log("\nAll pattern eligibility tests passed.");
     cwd: "/tmp/test-resume-panel",
   });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.strictEqual(meta.session_limits.gaps.used, 1, "gaps.used migrated");
-  assert.strictEqual(meta.session_limits.perspectives.used, 0, "perspectives.used migrated");
-  assert.deepStrictEqual(meta.session_limits.perspectives.episode_refs, ["epA"]);
-  assert.strictEqual(meta.session_limits.contradictions.used, 2, "contradictions.used migrated");
-  assert.strictEqual(meta.session_limits.reprobes.log.length, 1, "reprobes.log migrated");
-  assert.deepStrictEqual(meta.session_limits.gaps.intentional, [{ from: "2018.09", to: "2019.05" }]);
-  // 구 필드 삭제 확인
-  assert.strictEqual(meta.gap_probes_this_session, undefined, "old field should be removed");
-  assert.strictEqual(meta.contradictions_presented_this_session, undefined, "old field should be removed");
-  console.log("PASS: Phase 3.2 — meta.json 마이그레이션");
+  const meta32 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const hs32 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  // hook fields migrated to hook-state.json
+  assert.strictEqual(hs32.session_limits.gaps.used, 1, "gaps.used migrated to hook-state");
+  assert.strictEqual(hs32.session_limits.perspectives.used, 0, "perspectives.used migrated to hook-state");
+  assert.deepStrictEqual(hs32.session_limits.perspectives.episode_refs, ["epA"]);
+  assert.strictEqual(hs32.session_limits.contradictions.used, 2, "contradictions.used migrated to hook-state");
+  assert.strictEqual(hs32.session_limits.reprobes.log.length, 1, "reprobes.log migrated to hook-state");
+  assert.deepStrictEqual(hs32.session_limits.gaps.intentional, [{ from: "2018.09", to: "2019.05" }]);
+  // 구 필드 meta에서 삭제 확인
+  assert.strictEqual(meta32.gap_probes_this_session, undefined, "old field should be removed from meta");
+  assert.strictEqual(meta32.contradictions_presented_this_session, undefined, "old field should be removed from meta");
+  console.log("PASS: Phase 3.2 — meta.json 마이그레이션 → hook-state.json");
 }
 
 // Test Phase 3.3: Task tool 호출이 agent_calls_in_current_round 증가시킴
@@ -2129,13 +2135,13 @@ console.log("\nAll pattern eligibility tests passed.");
   }));
   run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/resume-source.json", content: "{}" }, cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.ok(Array.isArray(meta._score_reasons), "_score_reasons should be an array");
-  assert.ok(meta._score_reasons.length >= 2, `_score_reasons should have ≥2 entries, got ${meta._score_reasons.length}`);
-  const reasons = meta._score_reasons.map(r => r.reason);
+  const hs54 = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.ok(Array.isArray(hs54._score_reasons), "_score_reasons should be an array");
+  assert.ok(hs54._score_reasons.length >= 2, `_score_reasons should have ≥2 entries, got ${hs54._score_reasons.length}`);
+  const reasons = hs54._score_reasons.map(r => r.reason);
   assert.ok(reasons.some(r => r.includes("에피소드")), "에피소드 reason missing");
   assert.ok(reasons.some(r => r.includes("새 프로젝트")), "새 프로젝트 reason missing");
-  console.log("PASS: Phase 5.4 — _score_reasons 누적");
+  console.log("PASS: Phase 5.4 — _score_reasons 누적 (hook-state.json)");
 }
 
 // Test Phase 5.4b: _score_reasons rolling 10 (slice -9 + push = max 10)
@@ -2158,11 +2164,11 @@ console.log("\nAll pattern eligibility tests passed.");
   }));
   run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/resume-source.json", content: "{}" }, cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  assert.ok(meta._score_reasons.length <= 10, `_score_reasons should be ≤10, got ${meta._score_reasons.length}`);
+  const hs54b = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  assert.ok(hs54b._score_reasons.length <= 10, `_score_reasons should be ≤10, got ${hs54b._score_reasons.length}`);
   // 가장 오래된 seed-0가 잘려나갔는지 확인
-  const reasons = meta._score_reasons.map(r => r.reason);
-  assert.ok(!reasons.includes("seed-0"), "seed-0 (oldest) should be evicted");
+  const reasons54b = hs54b._score_reasons.map(r => r.reason);
+  assert.ok(!reasons54b.includes("seed-0"), "seed-0 (oldest) should be evicted");
   console.log("PASS: Phase 5.4b — _score_reasons rolling 10");
 }
 
@@ -2247,9 +2253,9 @@ console.log("\nAll pattern eligibility tests passed.");
     env: { ...process.env, RESUME_PANEL_BASE: "/tmp/test-resume-panel-high-bonus" },
   });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel-high-bonus/.resume-panel/meta.json", "utf-8"));
-  assert.ok(meta._last_high_finding_at, "_last_high_finding_at should be set");
-  assert.ok(new Date(meta._last_high_finding_at).getTime() > Date.now() - 60_000, "should be recent");
+  const hs56a = JSON.parse(readFileSync("/tmp/test-resume-panel-high-bonus/.resume-panel/hook-state.json", "utf-8"));
+  assert.ok(hs56a._last_high_finding_at, "_last_high_finding_at should be set in hook-state.json");
+  assert.ok(new Date(hs56a._last_high_finding_at).getTime() > Date.now() - 60_000, "should be recent");
   console.log("PASS: Phase 5.6a — HIGH finding sets _last_high_finding_at");
   rmSync("/tmp/test-resume-panel-high-bonus", { recursive: true, force: true });
 }
@@ -2322,11 +2328,11 @@ console.log("\nAll pattern eligibility tests passed.");
   }));
   run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/resume-source.json", content: "{}" }, cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
+  const hs57a = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
   // 두 번째 실행에서 +1 (에피소드) + +3 (so_what) = +4 누적 (첫 실행은 snapshot init이라 점수 0)
   // 단 임계 5에 못 미치면 그대로 4로 남고, 도달하면 0 리셋. 두 번째 fire에서 4면 리셋 안 함.
-  const reasons = (meta._score_reasons || []).map(r => r.reason);
-  assert.ok(reasons.some(r => r.includes("so_what")), `so_what reason missing in ${JSON.stringify(reasons)}`);
+  const reasons57a = (hs57a._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons57a.some(r => r.includes("so_what")), `so_what reason missing in ${JSON.stringify(reasons57a)}`);
   console.log("PASS: Phase 5.7a — so_what 가중치 +3");
 }
 
@@ -2352,9 +2358,9 @@ console.log("\nAll pattern eligibility tests passed.");
 
   run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/some.txt", content: "x" }, cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  const reasons = (meta._score_reasons || []).map(r => r.reason);
-  assert.ok(reasons.some(r => r.includes("perspective_shift")), `perspective_shift reason missing in ${JSON.stringify(reasons)}`);
+  const hs57b = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  const reasons57b = (hs57b._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons57b.some(r => r.includes("perspective_shift")), `perspective_shift reason missing in ${JSON.stringify(reasons57b)}`);
   console.log("PASS: Phase 5.7b — perspective_shift 가중치 +3");
 }
 
@@ -2379,9 +2385,9 @@ console.log("\nAll pattern eligibility tests passed.");
 
   run({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: "/work/some.txt", content: "x" }, cwd: "/tmp/test-resume-panel" });
 
-  const meta = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/meta.json", "utf-8"));
-  const reasons = (meta._score_reasons || []).map(r => r.reason);
-  assert.ok(reasons.some(r => r.includes("contradiction_detected")), `contradiction_detected reason missing in ${JSON.stringify(reasons)}`);
+  const hs57c = JSON.parse(readFileSync("/tmp/test-resume-panel/.resume-panel/hook-state.json", "utf-8"));
+  const reasons57c = (hs57c._score_reasons || []).map(r => r.reason);
+  assert.ok(reasons57c.some(r => r.includes("contradiction_detected")), `contradiction_detected reason missing in ${JSON.stringify(reasons57c)}`);
   console.log("PASS: Phase 5.7c — contradiction_detected 가중치 +3");
 }
 
