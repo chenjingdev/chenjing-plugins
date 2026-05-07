@@ -86,41 +86,25 @@ if (toolName === "Task" || toolName === "Agent") {
   const meta = migrateMeta(readJSON(metaPath) || {});
   meta.gate_state = meta.gate_state || defaultGateState();
 
+  const stats = readStats(base);
+  ensureDebug(stats);
+  stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
+
   if (knownAgents.includes(subagent)) {
     meta.gate_state.agent_calls_in_current_round[subagent] =
       (meta.gate_state.agent_calls_in_current_round[subagent] || 0) + 1;
     meta.gate_state.direct_askuserquestion_streak = 0;
-    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-
-    const stats = readStats(base);
-    ensureDebug(stats);
-    stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
     stats.agent_invocations[subagent] = (stats.agent_invocations[subagent] || 0) + 1;
-    writeStats(base, stats);
   } else if (subagent === "retrospective") {
     meta.gate_state.retrospective_invoked = true;
-    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-
-    const stats = readStats(base);
-    ensureDebug(stats);
-    stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
     stats.agent_invocations.retrospective = (stats.agent_invocations.retrospective || 0) + 1;
-    writeStats(base, stats);
   } else if (subagent === "researcher" || subagent === "project-researcher") {
-    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-
-    const stats = readStats(base);
-    ensureDebug(stats);
-    stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
     stats.agent_invocations.researcher = (stats.agent_invocations.researcher || 0) + 1;
-    writeStats(base, stats);
-  } else {
-    const stats = readStats(base);
-    ensureDebug(stats);
-    stats._debug.observed_tool_names[toolName] = (stats._debug.observed_tool_names[toolName] || 0) + 1;
-    writeStats(base, stats);
-    writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   }
+  // else: unknown subagent — observed_tool_names만 기록, 카운트 증가 없음
+
+  writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+  writeStats(base, stats);
   process.exit(0);
 }
 
@@ -539,8 +523,6 @@ if (isResumeSourceChange) {
         reasons.push("meta 변경 (+2)");
       }
 
-      let score = metaJSON.profiler_score;
-
       // 임계값 체크
       const THRESHOLD = 5;
       let updatedMetaFields = {};
@@ -561,7 +543,7 @@ if (isResumeSourceChange) {
         );
 
         // Timeline gap detection -- deterministic, runs with profiler trigger
-        const intentionalGaps = metaJSON.intentional_gaps || metaJSON.session_limits?.gaps?.intentional || [];
+        const intentionalGaps = metaJSON.session_limits?.gaps?.intentional || [];
         const gaps = detectGaps(source);
         for (const gap of gaps) {
           // Skip intentional gaps
