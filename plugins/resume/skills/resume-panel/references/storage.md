@@ -127,6 +127,54 @@ episode-watcher hook이 단독 관리하는 메커니즘 상태. profiler/orches
 
 writer: episode-watcher hook 단독. 다른 주체 write 금지.
 
+### `current-focus.md` (신규, 2026-05-09~)
+
+세션 중 컨텍스트가 250k+ 토큰을 넘어 `/compact`가 임박했을 때, compact를 가로질러 활성 작업 메모리를 잇기 위한 브릿지 파일. 위치: `<base>/.resume-panel/current-focus.md`.
+
+**스키마** (markdown):
+
+```markdown
+# Current Focus
+
+session_id: <Claude Code session UUID>
+saved_at: <ISO8601 timestamp>
+turn: <누적 턴 수>
+
+## 활성 컨텍스트
+- round: <0|1|1.5|2|3>
+- 회사: <현재 다루는 회사명 또는 null>
+- 활성 페르소나: <senior|c-level|recruiter|hr|coffee-chat|null>
+
+## 검증 중인 클레임
+- <fact-check 중이거나 STAR 보강 중인 1-3개 항목>
+
+## 다음 턴 액션
+- <다음 사용자 발화에 어떻게 반응하려 했는지 1-2줄>
+
+## 미해결 sub-thread
+- [ ] <짧고 즉시 처리 가능한 미완 항목>
+
+## 직전 흐름 (4-5턴 압축)
+<자유 텍스트 200-400자>
+```
+
+**필수 필드**: `session_id`, `saved_at`. 둘 중 하나라도 누락되면 hook이 파싱 실패로 간주하고 `.bak.<ts>`로 백업 후 무시.
+
+**writer**: Claude (오케스트레이터). hook은 절대 작성하지 않는다 — 휘발 메모리는 Claude만 알기 때문.
+
+**reader**: episode-watcher hook의 SessionStart:compact 분기. 매칭 조건 (session_id 일치 + saved_at 30분 이내) 통과 시 raw 본문을 additionalContext로 주입.
+
+**라이프사이클**:
+1. UserPromptSubmit hook이 250k 토큰 임계치 도달 시 `compaction_warning` 발행 → Claude가 작성.
+2. 사용자가 `/compact` 입력 → compact 실행 → 새 컨텍스트.
+3. SessionStart:compact hook이 자동 재로드.
+4. 다음 정상 compact-resume 사이클이 자동으로 덮어쓴다.
+
+**영속 facts와의 책임 분리**:
+- `meta.json` / `hook-state.json` / `findings.json` / episode log는 **확정된 사실** 보관.
+- `current-focus.md`는 **휘발성 작업 메모리만** 보관.
+- 중복 금지: STAR 데이터, 회사 메타, finding 같은 fact는 영속 파일에 이미 있으니 current-focus.md에 다시 적지 않는다.
+
 ## resume-draft.md Structure (End of Round 3)
 
 ```markdown
