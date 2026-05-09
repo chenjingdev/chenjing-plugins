@@ -97,6 +97,37 @@
 
 hook에서 전달하지 않음. 유저가 "분석해줘/리뷰해줘" 요청 시 `.resume-panel/findings.json`을 Read하여 제시.
 
+### 6. `compaction_warning` (2026-05-09~)
+
+세션 컨텍스트가 250k+ 토큰을 넘었거나 PreCompact 시점에 발행. compact 전후 작업 흐름을 잇는 브릿지 트리거.
+
+```json
+{
+  "type": "compaction_warning",
+  "tokens_estimate": 280000,
+  "threshold": 250000,
+  "backstop": false,
+  "message": "..."
+}
+```
+
+**필드**:
+- `tokens_estimate`: transcript 파일 크기 / 4 추정 토큰 수 (UserPromptSubmit 발행 시).
+- `threshold`: 임계치 (현재 250000).
+- `backstop`: PreCompact 시점에서 발행된 보조 알림이면 `true`. UserPromptSubmit 임계치 권고는 `false`.
+- `message`: Claude에게 전달되는 행동 지시문.
+
+**발행 주체**:
+- UserPromptSubmit hook — `tokens_estimate >= 250000` AND `current-focus.md`의 `saved_at`이 5분 이내가 아닌 경우.
+- PreCompact hook — `current-focus.md`가 없거나 5분 이상 stale인 경우.
+
+**Claude 처리 의무**:
+1. 다음 응답 직전에 `.resume-panel/current-focus.md`를 `references/storage.md` §current-focus.md 스키마대로 저장.
+2. 사용자에게 "/compact 권고" 한 줄 안내.
+3. 5분 이내 같은 경고가 또 와도 이미 저장된 파일이 있으면 hook 측 de-bounce로 suppress된다 (Claude는 매번 답할 필요 없음).
+
+**재로드**: `/compact` 후 `SessionStart` hook의 `source === "compact"` 분기가 current-focus.md를 자동으로 additionalContext에 주입한다. Claude는 추가 동작 없이 다음 사용자 발화에 이어서 응답.
+
 ## 인터뷰 흐름 보호
 
 - HIGH: 현재 질문-답변 사이클 완료 후 끼워넣기
