@@ -2817,14 +2817,86 @@ function runFocus(input) {
   console.log("PASS: Phase 7.0a — readCurrentFocus missing");
 }
 
-// Phase 7.0b — activated in Task 5 (SessionStart branch)
-// {
-//   setupFocusBase("# Current Focus\n(no session_id, no saved_at)\n");
-//   runFocus({ hook_event_name: "SessionStart", source: "compact", session_id: "s-1" });
-//   const baks = readdirSync(join(focusBase, ".resume-panel")).filter(f => f.startsWith("current-focus.md.bak."));
-//   assert.ok(baks.length === 1, `expected exactly 1 bak file, got ${baks.length}`);
-//   console.log("PASS: Phase 7.0b — readCurrentFocus malformed backed up");
-// }
+// Phase 7.0b — readCurrentFocus malformed → backup (activated here)
+{
+  setupFocusBase("# Current Focus\n(no session_id, no saved_at)\n");
+  runFocus({
+    hook_event_name: "SessionStart",
+    source: "compact",
+    session_id: "s-1",
+  });
+  const baks = readdirSync(join(focusBase, ".resume-panel")).filter(f => f.startsWith("current-focus.md.bak."));
+  assert.ok(baks.length === 1, `expected exactly 1 bak file, got ${baks.length}`);
+  console.log("PASS: Phase 7.0b — readCurrentFocus malformed backed up");
+}
+
+// Phase 7.5 — SessionStart:compact match → reload
+{
+  const now = new Date().toISOString();
+  const focusContent = `# Current Focus\nsession_id: sess-abc\nsaved_at: ${now}\nturn: 12\n\n## 활성 컨텍스트\n- round: 1\n- 회사: 코인원\n`;
+  setupFocusBase(focusContent);
+  const result = runFocus({
+    hook_event_name: "SessionStart",
+    source: "compact",
+    session_id: "sess-abc",
+  });
+  assert.ok(result, "matching SessionStart:compact should produce output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes("session_id: sess-abc"), "additionalContext should contain raw focus");
+  assert.ok(ctx.includes("코인원"), "should preserve focus body");
+  console.log("PASS: Phase 7.5 — SessionStart:compact reload");
+}
+
+// Phase 7.6 — SessionStart:compact session_id mismatch → no inject
+{
+  const now = new Date().toISOString();
+  setupFocusBase(`# Current Focus\nsession_id: sess-OLD\nsaved_at: ${now}\nturn: 5\n`);
+  const result = runFocus({
+    hook_event_name: "SessionStart",
+    source: "compact",
+    session_id: "sess-NEW",
+  });
+  assert.strictEqual(result, null, "session_id mismatch should produce no output");
+  console.log("PASS: Phase 7.6 — session_id mismatch ignored");
+}
+
+// Phase 7.7 — SessionStart:compact stale (>30min) → no inject
+{
+  const stale = new Date(Date.now() - 31 * 60_000).toISOString();
+  setupFocusBase(`# Current Focus\nsession_id: sess-abc\nsaved_at: ${stale}\nturn: 5\n`);
+  const result = runFocus({
+    hook_event_name: "SessionStart",
+    source: "compact",
+    session_id: "sess-abc",
+  });
+  assert.strictEqual(result, null, "stale focus (>30min) should produce no output");
+  console.log("PASS: Phase 7.7 — stale focus ignored");
+}
+
+// Phase 7.8 — SessionStart non-compact source → noop
+{
+  const now = new Date().toISOString();
+  setupFocusBase(`# Current Focus\nsession_id: sess-abc\nsaved_at: ${now}\nturn: 5\n`);
+  const result = runFocus({
+    hook_event_name: "SessionStart",
+    source: "startup",
+    session_id: "sess-abc",
+  });
+  assert.strictEqual(result, null, "non-compact SessionStart should noop");
+  console.log("PASS: Phase 7.8 — non-compact source ignored");
+}
+
+// Phase 7.9 — SessionStart:compact missing focus → noop
+{
+  setupFocusBase(undefined);
+  const result = runFocus({
+    hook_event_name: "SessionStart",
+    source: "compact",
+    session_id: "sess-abc",
+  });
+  assert.strictEqual(result, null, "missing focus should noop");
+  console.log("PASS: Phase 7.9 — missing focus ignored");
+}
 
 // Phase 7.1 — UserPromptSubmit: under 250k → no warning
 {

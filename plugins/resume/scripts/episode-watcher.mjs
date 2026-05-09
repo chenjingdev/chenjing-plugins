@@ -116,6 +116,32 @@ if (input.hook_event_name === "PreCompact") {
   process.exit(0);
 }
 
+// ── SessionStart 분기 — compact 직후 focus 재로드 ──
+if (input.hook_event_name === "SessionStart") {
+  if (input.source !== "compact") {
+    process.exit(0);
+  }
+  const focus = readCurrentFocus();
+  if (!focus) {
+    process.exit(0);
+  }
+  if (focus.session_id !== input.session_id) {
+    process.exit(0);
+  }
+  const ageMs = Date.now() - new Date(focus.saved_at).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > 30 * 60_000) {
+    process.exit(0);
+  }
+  process.stdout.write(JSON.stringify({
+    continue: true,
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext: focus.raw,
+    },
+  }));
+  process.exit(0);
+}
+
 const toolName = input.tool_name;
 const toolInput = input.tool_input || {};
 
