@@ -2796,7 +2796,7 @@ function runFocus(input) {
     const stdout = execFileSync("node", [script], {
       input: JSON.stringify(input),
       encoding: "utf-8",
-      env: { ...process.env, RESUME_PANEL_BASE: focusBase, RESUME_PANEL_FOCUS_PROBE: "1" },
+      env: { ...process.env, RESUME_PANEL_BASE: focusBase },
     });
     return stdout.trim() ? JSON.parse(stdout.trim()) : null;
   } catch (e) {

@@ -246,7 +246,7 @@ hook이 `[resume-panel]{"type":"compaction_warning",...}` 메시지를 보낸 �
 
 **1. 파일 작성**: `.resume-panel/current-focus.md`를 `references/storage.md` §current-focus.md 스키마대로 저장. 다음 7개 섹션을 모두 채운다:
 
-- `session_id` — Claude Code 환경에서 알 수 있는 세션 ID. 모르면 임의의 UUID라도 부여.
+- `session_id` — Claude Code 환경에서 알 수 있는 세션 ID. 모를 경우 빈 문자열로 두지 말고 작성을 중단한다 (가짜 UUID는 SessionStart 매칭 실패로 silent ignore됨). 알 방법이 없으면 사용자에게 "이 compact는 자동 복원 안 됨"을 안내.
 - `saved_at` — 현재 ISO8601 타임스탬프.
 - `turn` — 현재까지 누적 턴 수 (대략 추정 가능).
 - `## 활성 컨텍스트` — round, 다루는 회사, 활성 페르소나.

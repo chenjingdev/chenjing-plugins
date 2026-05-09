@@ -126,7 +126,7 @@ hook에서 전달하지 않음. 유저가 "분석해줘/리뷰해줘" 요청 시
 2. 사용자에게 "/compact 권고" 한 줄 안내.
 3. 5분 이내 같은 경고가 또 와도 이미 저장된 파일이 있으면 hook 측 de-bounce로 suppress된다 (Claude는 매번 답할 필요 없음).
 
-**재로드**: `/compact` 후 `SessionStart` hook의 `source === "compact"` 분기가 current-focus.md를 자동으로 additionalContext에 주입한다. Claude는 추가 동작 없이 다음 사용자 발화에 이어서 응답.
+**재로드**: `/compact` 후 `SessionStart` hook의 `source === "compact"` 분기가 current-focus.md를 자동으로 additionalContext에 주입한다. Claude는 추가 동작 없이 다음 사용자 발화에 이어서 응답. 이때 주입되는 본문은 raw markdown이며 `[resume-panel]` 프리픽스가 붙지 않는다 — 다른 메시지 타입과 다른 점.
 
 ## 인터뷰 흐름 보호
 
