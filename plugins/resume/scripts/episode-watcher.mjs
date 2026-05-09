@@ -7,7 +7,7 @@
 // 출력: JSON → hookSpecificOutput.additionalContext로 오케스트레이터에 주입
 // 환경변수: RESUME_PANEL_BASE (테스트용, 없으면 input.cwd 사용)
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, mkdirSync, renameSync, unlinkSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -527,6 +527,17 @@ function readCurrentFocus() {
     turn: turnMatch ? parseInt(turnMatch[1], 10) : 0,
     raw,
   };
+}
+
+function estimateTokens(transcriptPath) {
+  if (!transcriptPath || typeof transcriptPath !== "string") return 0;
+  if (!existsSync(transcriptPath)) return 0;
+  try {
+    const { size } = statSync(transcriptPath);
+    return Math.floor(size / 4);
+  } catch {
+    return 0;
+  }
 }
 
 // ── 메시지 수집 ─────────────────────────────────────

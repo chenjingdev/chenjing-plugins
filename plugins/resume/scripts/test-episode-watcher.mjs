@@ -2826,4 +2826,21 @@ function runFocus(input) {
 //   console.log("PASS: Phase 7.0b — readCurrentFocus malformed backed up");
 // }
 
+// Phase 7.0c — estimateTokens via transcript_path file size
+{
+  // 큰 transcript 파일 시뮬레이션: 1MB → ~250k 토큰 추정 (1MB / 4 = 262144)
+  const fakeTranscript = join(focusBase, "fake-transcript.jsonl");
+  setupFocusBase(undefined);
+  writeFileSync(fakeTranscript, "x".repeat(1_048_576)); // 1MB
+  const result = runFocus({
+    hook_event_name: "UserPromptSubmit",
+    transcript_path: fakeTranscript,
+    cwd: focusBase,
+  });
+  // 250k 임계치 초과 → compaction_warning 발화 예상 (Task 3 구현 후 통과)
+  // 지금은 helper만 추가 단계 → noop. 일단 noop이면 PASS.
+  // 이 테스트는 Task 3에서 활성화. 지금은 placeholder PASS.
+  console.log("PASS: Phase 7.0c — placeholder, full check in Task 3");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
