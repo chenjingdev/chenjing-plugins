@@ -240,6 +240,31 @@ Agent(
 
 retrospective 호출 → 파일 저장 순서 엄수. 게이트 G4 참조.
 
+## 컨텍스트 압축 브릿지 (`compaction_warning`)
+
+hook이 `[resume-panel]{"type":"compaction_warning",...}` 메시지를 보낸 경우 — UserPromptSubmit 임계치 권고든 PreCompact backstop이든 — 다음을 동일하게 수행한다.
+
+**1. 파일 작성**: `.resume-panel/current-focus.md`를 `references/storage.md` §current-focus.md 스키마대로 저장. 다음 7개 섹션을 모두 채운다:
+
+- `session_id` — Claude Code 환경에서 알 수 있는 세션 ID. 모르면 임의의 UUID라도 부여.
+- `saved_at` — 현재 ISO8601 타임스탬프.
+- `turn` — 현재까지 누적 턴 수 (대략 추정 가능).
+- `## 활성 컨텍스트` — round, 다루는 회사, 활성 페르소나.
+- `## 검증 중인 클레임` — 지금 사용자한테 fact-check 중이거나 STAR 보강 중인 항목.
+- `## 다음 턴 액션` — 사용자 다음 발화에 어떻게 반응하려 했는지.
+- `## 미해결 sub-thread` — 짧고 즉시 처리 가능한 미완 항목.
+- `## 직전 흐름 (4-5턴 압축)` — 자유 텍스트 200-400자.
+
+**중복 금지**: STAR 데이터, 회사 메타, finding 같은 확정된 사실은 영속 파일(`meta.json`/`hook-state.json`/`findings.json`/episode log)이 이미 갖고 있다. current-focus.md는 **휘발성 작업 메모리만** 담는다.
+
+**2. 사용자 안내**: 한 줄로 안내한다.
+
+> "컨텍스트가 250k를 넘어 `/compact` 권고합니다. 작업 메모리는 `.resume-panel/current-focus.md`에 저장했고 compact 직후 자동 복원됩니다."
+
+**3. compact 후 동작**: SessionStart:compact hook이 current-focus.md를 자동으로 컨텍스트에 주입한다. Claude는 추가 동작 없이 사용자 다음 발화에 이어서 응답하면 된다.
+
+**De-bounce**: 5분 이내 동일 경고가 또 들어와도 hook이 자동 suppress하므로 매번 다시 작성할 필요 없음. 단 이미 작성된 파일을 갱신할 필요는 있을 수 있다 (직전 흐름이 변했으면).
+
 ## 라운드별 저장 타이밍
 
 `references/storage.md` 참조.
