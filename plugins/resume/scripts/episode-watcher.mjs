@@ -88,6 +88,34 @@ if (input.hook_event_name === "UserPromptSubmit") {
   process.exit(0);
 }
 
+// ── PreCompact 분기 — backstop 메시지 ──────────────
+if (input.hook_event_name === "PreCompact") {
+  ensureStateDir();
+  const focus = readCurrentFocus();
+  let needsBackstop = true;
+  if (focus) {
+    const ageMs = Date.now() - new Date(focus.saved_at).getTime();
+    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 5 * 60_000) {
+      needsBackstop = false;
+    }
+  }
+  if (needsBackstop) {
+    const payload = emit({
+      type: "compaction_warning",
+      backstop: true,
+      message: "compact 직전 backstop. current-focus.md가 없거나 stale이다. 가능하면 즉시 references/storage.md 스키마대로 저장 후 compact 진행. (이 메시지는 PreCompact 시점에 hook이 주입한 것)",
+    });
+    process.stdout.write(JSON.stringify({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: "PreCompact",
+        additionalContext: payload,
+      },
+    }));
+  }
+  process.exit(0);
+}
+
 const toolName = input.tool_name;
 const toolInput = input.tool_input || {};
 

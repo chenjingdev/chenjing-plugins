@@ -2876,4 +2876,43 @@ function runFocus(input) {
   console.log("PASS: Phase 7.2b — de-bounce within 5min");
 }
 
+// Phase 7.3 — PreCompact: focus missing → backstop emit
+{
+  setupFocusBase(undefined);
+  const result = runFocus({
+    hook_event_name: "PreCompact",
+    session_id: "s-1",
+  });
+  assert.ok(result, "PreCompact with no focus should produce output");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes('"type":"compaction_warning"'), "should emit compaction_warning");
+  assert.ok(ctx.includes('"backstop":true'), "should mark as backstop");
+  console.log("PASS: Phase 7.3 — PreCompact backstop missing focus");
+}
+
+// Phase 7.4 — PreCompact: fresh focus (<5min) → noop
+{
+  setupFocusBase(`# Current Focus\nsession_id: s-1\nsaved_at: ${new Date().toISOString()}\nturn: 5\n`);
+  const result = runFocus({
+    hook_event_name: "PreCompact",
+    session_id: "s-1",
+  });
+  assert.strictEqual(result, null, "PreCompact with fresh focus should noop");
+  console.log("PASS: Phase 7.4 — PreCompact fresh focus noop");
+}
+
+// Phase 7.4b — PreCompact: stale focus (>5min) → backstop emit
+{
+  const stale = new Date(Date.now() - 6 * 60_000).toISOString();
+  setupFocusBase(`# Current Focus\nsession_id: s-1\nsaved_at: ${stale}\nturn: 5\n`);
+  const result = runFocus({
+    hook_event_name: "PreCompact",
+    session_id: "s-1",
+  });
+  assert.ok(result, "PreCompact with stale focus should emit backstop");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes('"type":"compaction_warning"'), "should emit compaction_warning");
+  console.log("PASS: Phase 7.4b — PreCompact backstop stale focus");
+}
+
 console.log("\n=== ALL TESTS COMPLETE ===");
