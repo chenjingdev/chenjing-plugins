@@ -29,6 +29,7 @@ const inboxPath = join(stateDir, "findings-inbox.jsonl");
 const processingPath = join(stateDir, "findings-inbox.processing.jsonl");
 const findingsPath = join(stateDir, "findings.json");
 const hookStatePath = join(stateDir, "hook-state.json");
+const currentFocusPath = join(stateDir, "current-focus.md");
 
 // ── hook 필드 목록 (loadState에서 사용) ─────────────
 const HOOK_FIELDS = [
@@ -503,6 +504,30 @@ function absorbLegacyFields(hookState, meta) {
   return absorbed;
 }
 
+function readCurrentFocus() {
+  if (!existsSync(currentFocusPath)) return null;
+  let raw;
+  try {
+    raw = readFileSync(currentFocusPath, "utf-8");
+  } catch {
+    return null;
+  }
+  const sessionMatch = raw.match(/^session_id:\s*(\S+)\s*$/m);
+  const savedAtMatch = raw.match(/^saved_at:\s*(\S+)\s*$/m);
+  const turnMatch = raw.match(/^turn:\s*(\d+)\s*$/m);
+  if (!sessionMatch || !savedAtMatch) {
+    // 파싱 실패 → 백업 후 null
+    const bakPath = `${currentFocusPath}.bak.${Date.now()}`;
+    try { writeFileSync(bakPath, raw); } catch {}
+    return null;
+  }
+  return {
+    session_id: sessionMatch[1],
+    saved_at: savedAtMatch[1],
+    turn: turnMatch ? parseInt(turnMatch[1], 10) : 0,
+    raw,
+  };
+}
 
 // ── 메시지 수집 ─────────────────────────────────────
 const messages = [];

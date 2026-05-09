@@ -2779,4 +2779,51 @@ console.log("\nAll pattern eligibility tests passed.");
   console.log("PASS: Phase 6.7 — pattern_detected MEDIUM 라우팅");
 }
 
+// ── Phase 7: Mid-session compaction bridge ─────────────
+
+const focusBase = "/tmp/test-resume-panel-focus";
+
+function setupFocusBase(focusContent) {
+  rmSync(focusBase, { recursive: true, force: true });
+  mkdirSync(join(focusBase, ".resume-panel"), { recursive: true });
+  if (focusContent !== undefined) {
+    writeFileSync(join(focusBase, ".resume-panel", "current-focus.md"), focusContent);
+  }
+}
+
+function runFocus(input) {
+  try {
+    const stdout = execFileSync("node", [script], {
+      input: JSON.stringify(input),
+      encoding: "utf-8",
+      env: { ...process.env, RESUME_PANEL_BASE: focusBase, RESUME_PANEL_FOCUS_PROBE: "1" },
+    });
+    return stdout.trim() ? JSON.parse(stdout.trim()) : null;
+  } catch (e) {
+    if (e.stdout) return e.stdout.trim() ? JSON.parse(e.stdout.trim()) : null;
+    throw e;
+  }
+}
+
+// Phase 7.0a — readCurrentFocus: missing file returns null
+{
+  setupFocusBase(undefined);
+  const result = runFocus({
+    hook_event_name: "SessionStart",
+    source: "compact",
+    session_id: "s-1",
+  });
+  assert.strictEqual(result, null, "missing focus file should produce no output");
+  console.log("PASS: Phase 7.0a — readCurrentFocus missing");
+}
+
+// Phase 7.0b — activated in Task 5 (SessionStart branch)
+// {
+//   setupFocusBase("# Current Focus\n(no session_id, no saved_at)\n");
+//   runFocus({ hook_event_name: "SessionStart", source: "compact", session_id: "s-1" });
+//   const baks = readdirSync(join(focusBase, ".resume-panel")).filter(f => f.startsWith("current-focus.md.bak."));
+//   assert.ok(baks.length === 1, `expected exactly 1 bak file, got ${baks.length}`);
+//   console.log("PASS: Phase 7.0b — readCurrentFocus malformed backed up");
+// }
+
 console.log("\n=== ALL TESTS COMPLETE ===");
