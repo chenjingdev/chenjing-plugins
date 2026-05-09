@@ -55,6 +55,36 @@ if (input.hook_event_name === "UserPromptSubmit") {
   saveHookState(base, hookState);
   if (metaChanged) saveMeta(base, meta);
   writeStats(base, stats);
+
+  // ── compaction_warning 분기 ───────────────────────
+  const tokens = estimateTokens(input.transcript_path);
+  const TOKEN_THRESHOLD = 250_000;
+  if (tokens >= TOKEN_THRESHOLD) {
+    const focus = readCurrentFocus();
+    let suppress = false;
+    if (focus) {
+      const ageMs = Date.now() - new Date(focus.saved_at).getTime();
+      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < 5 * 60_000) {
+        suppress = true;
+      }
+    }
+    if (!suppress) {
+      const payload = emit({
+        type: "compaction_warning",
+        tokens_estimate: tokens,
+        threshold: TOKEN_THRESHOLD,
+        message: "컨텍스트가 250k 토큰 이상이다. 다음 응답 직전에 .resume-panel/current-focus.md를 references/storage.md 스키마대로 저장하고, 사용자에게 '/compact 권고' 한 줄 안내해라.",
+      });
+      process.stdout.write(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: "UserPromptSubmit",
+          additionalContext: payload,
+        },
+      }));
+    }
+  }
+
   process.exit(0);
 }
 

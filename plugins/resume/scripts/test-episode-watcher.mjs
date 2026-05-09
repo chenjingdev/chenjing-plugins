@@ -2826,21 +2826,54 @@ function runFocus(input) {
 //   console.log("PASS: Phase 7.0b — readCurrentFocus malformed backed up");
 // }
 
-// Phase 7.0c — estimateTokens via transcript_path file size
+// Phase 7.1 — UserPromptSubmit: under 250k → no warning
 {
-  // 큰 transcript 파일 시뮬레이션: 1MB → ~250k 토큰 추정 (1MB / 4 = 262144)
-  const fakeTranscript = join(focusBase, "fake-transcript.jsonl");
+  const fakeTranscript = join(focusBase, "small-transcript.jsonl");
   setupFocusBase(undefined);
-  writeFileSync(fakeTranscript, "x".repeat(1_048_576)); // 1MB
+  writeFileSync(fakeTranscript, "x".repeat(100_000)); // 100KB → 25k tokens
   const result = runFocus({
     hook_event_name: "UserPromptSubmit",
     transcript_path: fakeTranscript,
     cwd: focusBase,
   });
-  // 250k 임계치 초과 → compaction_warning 발화 예상 (Task 3 구현 후 통과)
-  // 지금은 helper만 추가 단계 → noop. 일단 noop이면 PASS.
-  // 이 테스트는 Task 3에서 활성화. 지금은 placeholder PASS.
-  console.log("PASS: Phase 7.0c — placeholder, full check in Task 3");
+  if (result && result.hookSpecificOutput && result.hookSpecificOutput.additionalContext) {
+    assert.ok(!result.hookSpecificOutput.additionalContext.includes("compaction_warning"),
+      "should not emit compaction_warning under threshold");
+  }
+  console.log("PASS: Phase 7.1 — under threshold no warning");
+}
+
+// Phase 7.2 — UserPromptSubmit: >= 250k → warning emitted
+{
+  const fakeTranscript = join(focusBase, "big-transcript.jsonl");
+  setupFocusBase(undefined);
+  writeFileSync(fakeTranscript, "x".repeat(1_100_000)); // 1.1MB → ~275k tokens
+  const result = runFocus({
+    hook_event_name: "UserPromptSubmit",
+    transcript_path: fakeTranscript,
+    cwd: focusBase,
+  });
+  assert.ok(result, "should produce output above threshold");
+  const ctx = result.hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes('"type":"compaction_warning"'), "should emit compaction_warning");
+  console.log("PASS: Phase 7.2 — over threshold warning emitted");
+}
+
+// Phase 7.2b — de-bounce: focus saved within 5 min → suppress warning
+{
+  const fakeTranscript = join(focusBase, "big-transcript-2.jsonl");
+  setupFocusBase(`# Current Focus\nsession_id: s-1\nsaved_at: ${new Date().toISOString()}\nturn: 5\n`);
+  writeFileSync(fakeTranscript, "x".repeat(1_100_000));
+  const result = runFocus({
+    hook_event_name: "UserPromptSubmit",
+    transcript_path: fakeTranscript,
+    cwd: focusBase,
+  });
+  if (result && result.hookSpecificOutput && result.hookSpecificOutput.additionalContext) {
+    assert.ok(!result.hookSpecificOutput.additionalContext.includes("compaction_warning"),
+      "should suppress warning when focus is fresh (<5min)");
+  }
+  console.log("PASS: Phase 7.2b — de-bounce within 5min");
 }
 
 console.log("\n=== ALL TESTS COMPLETE ===");
