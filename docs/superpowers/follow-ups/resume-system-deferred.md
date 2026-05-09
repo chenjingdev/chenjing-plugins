@@ -76,3 +76,19 @@
 - [ ] `meta.json`에 `session_limits`, `gate_state` 같은 hook 필드가 잔존하지 않음 (loadState idempotent 검증).
 
 위 항목 중 하나라도 비정상이면 후속 라운드 spec(이슈 4·5 + 추가 발견)에 포함.
+
+---
+
+## 다음 라이브 세션 검증 체크리스트 (2026-05-09 spec 후속)
+
+`docs/superpowers/specs/2026-05-09-mid-session-compaction-bridge-design.md` 시행 효과를 다음 실제 resume 세션 — 컨텍스트가 250k 이상으로 늘어난 세션 — 의 회고에서 확인:
+
+- [ ] 컨텍스트 ≥ 250k 시점에 hook이 `[resume-panel]{"type":"compaction_warning",...}`을 한 번 이상 발행했는지 transcript 또는 디버그 로그에서 확인.
+- [ ] Claude가 `compaction_warning` 받은 직후 턴에 `.resume-panel/current-focus.md`를 작성했는지 (`saved_at` 타임스탬프 기준).
+- [ ] current-focus.md에 `session_id`, `saved_at`, `turn` 메타가 모두 있고, 7개 섹션(활성 컨텍스트/검증 중인 클레임/다음 턴 액션/미해결 sub-thread/직전 흐름) 모두 채워졌는지.
+- [ ] 5분 이내 추가 UserPromptSubmit이 와도 `compaction_warning`이 다시 발화하지 않는지 (de-bounce 동작).
+- [ ] `/compact` 직전 PreCompact backstop이 발화했거나, 발화하지 않은 경우 그 이유 (focus가 5분 이내 신선이었음).
+- [ ] `/compact` 직후 새 컨텍스트에 current-focus.md raw 본문이 additionalContext로 들어왔는지 (Claude가 그 내용을 인지하고 있는지 회고에서 확인).
+- [ ] session_id가 새 세션과 일치하지 않거나 30분 초과인 경우 재주입이 일어나지 않는지 (negative test — 다른 세션 시작 시).
+
+위 항목 중 하나라도 비정상이면 후속 라운드 spec에 포함.
