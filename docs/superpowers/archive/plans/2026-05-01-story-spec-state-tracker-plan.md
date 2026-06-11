@@ -1,6 +1,6 @@
 # story-spec 상태 트래커 + HTML 캔버스 도입 plan
 
-> 근거 retrospective: [`story-spec-session-2026-05-01.md`](./story-spec-session-2026-05-01.md)
+> 근거 retrospective: [`story-spec-session-2026-05-01.md`](../../../retrospectives/story-spec-session-2026-05-01.md)
 > 결정 출처: 2026-05-01 grill 세션 10개 질문
 > 적용 대상: `plugins/story-spec/skills/story-spec/`
 
