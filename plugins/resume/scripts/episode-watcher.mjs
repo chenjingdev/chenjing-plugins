@@ -31,6 +31,14 @@ const findingsPath = join(stateDir, "findings.json");
 const hookStatePath = join(stateDir, "hook-state.json");
 const currentFocusPath = join(stateDir, "current-focus.md");
 
+// ── 워크스페이스 가드 ────────────────────────────────
+// 플러그인이 전역 활성화라 모든 프로젝트에서 훅이 실행된다.
+// resume-source.json도 .resume-panel/도 없으면 resume 세션이 아니므로
+// 상태 파일을 만들지 않고 즉시 종료한다.
+if (!existsSync(sourcePath) && !existsSync(stateDir)) {
+  process.exit(0);
+}
+
 // ── hook 필드 목록 (loadState에서 사용) ─────────────
 const HOOK_FIELDS = [
   "session_limits", "gate_state", "profiler_score",

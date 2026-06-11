@@ -113,6 +113,23 @@ function run(input) {
   }
 }
 
+// Test 6: 워크스페이스 가드 — resume-source.json도 .resume-panel/도 없는 폴더에서는
+// 상태 파일을 만들지 않고 즉시 종료해야 함 (전역 플러그인의 무관 프로젝트 오염 방지)
+{
+  const guardBase = "/tmp/test-resume-panel-guard";
+  rmSync(guardBase, { recursive: true, force: true });
+  mkdirSync(guardBase, { recursive: true });
+  const stdout = execFileSync("node", [script], {
+    input: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "아무 프롬프트", cwd: guardBase }),
+    encoding: "utf-8",
+    env: { ...process.env, RESUME_PANEL_BASE: guardBase },
+  });
+  assert.strictEqual(stdout.trim(), "", "non-workspace should produce no output");
+  assert.ok(!existsSync(join(guardBase, ".resume-panel")), "non-workspace should not create .resume-panel/");
+  rmSync(guardBase, { recursive: true, force: true });
+  console.log("PASS: workspace guard (no state files outside resume workspace)");
+}
+
 // ── Delta detection tests ─────────────────────────────
 
 const testBase = "/tmp/test-resume-panel-delta";
