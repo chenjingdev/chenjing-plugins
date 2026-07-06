@@ -7,6 +7,7 @@
 - **질문**: /vet에 그대로 넣을 한 문단.
 - **도메인**: repo (chenjing-plugins 사실) | public (공개 기술 사실).
 - **정답 키**: 핵심 사실 3~6항목, 각 항목에 실측 근거(파일:라인 또는 공식 출처).
+- 하위 문자 항목(예: 3a/3b)은 각각 독립적으로 일치/모순/무언급을 판정한다 — 주 항목 번호 수는 3~6 규칙의 기준이고, 하위 항목은 그 세부 채점 단위다.
 - 채점 절차는 `protocol.md` 참조.
 
 ---
@@ -18,7 +19,8 @@
 | # | 핵심 사실 | 근거 |
 |---|---|---|
 | 1 | 리더에게 도구·저장소 접근을 주지 않고, spec 본문을 프롬프트에 직접 포함한다(파일 경로 금지) | plugins/fableus/skills/spec-gate/SKILL.md:41-47 |
-| 2 | 통과 = 확정 blocking 0건, 확정 = 같은 지점(앵커 일치 AND 논지 일치)을 2인 이상이 제기 | plugins/fableus/skills/spec-gate/SKILL.md:56-71 |
+| 2a | 확정 집계의 "같은 지점" = 앵커 일치 AND 논지 일치 — 동일 앵커라도 논지가 다르면 별개 이슈로 분리 집계 | plugins/fableus/skills/spec-gate/SKILL.md:56-57 |
+| 2b | 확정 blocking = 같은 지점을 2인 이상이 제기한 것, 통과 = 확정 blocking 0건(1인 단독·discretionary는 정보성 표시만) | plugins/fableus/skills/spec-gate/SKILL.md:62-63,69 |
 | 3 | 라운드 상한은 없다 — 중단은 사용자 몫 | plugins/fableus/skills/spec-gate/SKILL.md:23-26 |
 | 4 | 집계에 별도 LLM 심판을 두지 않는다 | plugins/fableus/skills/spec-gate/SKILL.md:60-61 |
 
@@ -38,9 +40,11 @@
 **정답 키**:
 | # | 핵심 사실 | 근거 |
 |---|---|---|
-| 1 | 누적 점수 임계값 THRESHOLD=5 — 도달 시 profiler_trigger를 emit하고 점수를 0으로 리셋한다 | plugins/resume/scripts/episode-watcher.mjs:702-703,759 |
+| 1 | 누적 점수 임계값 THRESHOLD=5 — 도달 시 profiler_trigger를 emit하고 점수를 0으로 리셋한다 | plugins/resume/scripts/episode-watcher.mjs:702-703,709,759 |
 | 2 | 에피소드 N개 증가 → +N, 새 회사/프로젝트 추가 → +3 | plugins/resume/scripts/episode-watcher.mjs:667-679 |
-| 3 | 빈 STAR(result) 증가 +2, 역할 축소 키워드(도움/참여 등) +2, meta(target_company/position) 변경 +2 | plugins/resume/scripts/episode-watcher.mjs:682-699,371 |
+| 3a | 빈 STAR(result) 증가 시 +2 | plugins/resume/scripts/episode-watcher.mjs:681-687 |
+| 3b | 역할 축소 키워드(도움/참여/지원/보조/서포트) 감지 시 +2 | plugins/resume/scripts/episode-watcher.mjs:689-691,371 |
+| 3c | meta(target_company/position) 변경(해시 불일치) 시 +2 | plugins/resume/scripts/episode-watcher.mjs:695-697 |
 | 4 | AskUserQuestion 호출은 별도 핸들러에서 +1 (그 핸들러도 5점 도달 시 emit + 리셋) | plugins/resume/scripts/episode-watcher.mjs:240,252,259 |
 | 5 | 가산은 addProfilerScore 헬퍼가 하고 사유는 _score_reasons에 rolling(최근 10개) 누적 | plugins/resume/scripts/episode-watcher.mjs:483-492 |
 
@@ -62,7 +66,8 @@
 **정답 키**:
 | # | 핵심 사실 | 근거 |
 |---|---|---|
-| 1 | 모든 서브에이전트가 하나의 고정 티어로 실행 — 세션 모델도 자기 비용 판단도 아니고 역할별 티어 구분이 없다(worker·verifier·synthesizer 동일) | plugins/tiers/skills/ultracode/SKILL.md:10 |
+| 1a | 모든 서브에이전트가 하나의 고정 티어로 실행 — 세션 모델도, 자기 비용 판단도 아니다 | plugins/tiers/skills/ultracode/SKILL.md:10 |
+| 1b | 역할별 티어 구분이 없다 — worker·verifier·synthesizer 모두 동일 티어 | plugins/tiers/skills/ultracode/SKILL.md:10 |
 | 2 | 티어는 ${CLAUDE_PLUGIN_DATA}/ultracode.json의 {model, effort}에서 읽는다 | plugins/tiers/skills/ultracode/SKILL.md:14 |
 | 3 | 파일이 없거나 못 읽으면 {"model":"opus","effort":"xhigh"}로 폴백 | plugins/tiers/skills/ultracode/SKILL.md:15 |
 | 4 | 모든 agent() 호출은 정확히 {model, effort} 두 키를 실어야 하며, model 누락 시 값비싼 세션 모델을 조용히 상속한다 | plugins/tiers/skills/ultracode/SKILL.md:31 |
@@ -78,7 +83,10 @@
 | 2 | 토큰 추정은 transcript 파일 크기 ÷ 4 (statSync size / 4) | plugins/resume/scripts/episode-watcher.mjs:624-633 |
 | 3 | current-focus.md가 5분 이내에 저장돼 있으면 경고를 suppress(디바운스) | plugins/resume/scripts/episode-watcher.mjs:73-78 |
 | 4 | PreCompact 훅은 backstop — current-focus.md가 없거나 5분 이상 stale이면 경고 발행 | plugins/resume/scripts/episode-watcher.mjs:99-125 |
-| 5 | SessionStart 훅은 source=="compact"이고 session_id 일치 + 저장 후 30분 이내일 때만 current-focus.md 원문을 additionalContext로 재주입([resume-panel] 프리픽스 없이) | plugins/resume/scripts/episode-watcher.mjs:127-151 · plugins/resume/skills/resume-panel/references/hook-protocol.md:129 |
+| 5a | SessionStart 훅은 source=="compact"일 때만 재주입을 진행한다(아니면 즉시 종료) | plugins/resume/scripts/episode-watcher.mjs:129 |
+| 5b | 저장된 focus의 session_id가 현재 세션 session_id와 일치해야 한다 | plugins/resume/scripts/episode-watcher.mjs:136 |
+| 5c | 저장(saved_at) 후 30분 이내일 때만 유효(age > 30분이면 종료) | plugins/resume/scripts/episode-watcher.mjs:139-140 |
+| 5d | 위 조건 충족 시 current-focus.md 원문(raw markdown)을 additionalContext로 재주입하되 [resume-panel] 프리픽스는 붙이지 않는다 | plugins/resume/scripts/episode-watcher.mjs:143-149 · plugins/resume/skills/resume-panel/references/hook-protocol.md:129 |
 
 ## Q7 (public)
 **질문**: Claude Code의 훅(hooks) 시스템에 대해 설명해줘. 훅은 설정에서 어떤 구조로 등록하고, command 타입 훅은 이벤트 데이터를 어떻게 전달받아? 훅이 어떤 종료 코드로 동작을 차단하는지, 그리고 PreToolUse·PostToolUse·UserPromptSubmit·SessionStart·PreCompact가 각각 언제 발화하는지 알려줘.
