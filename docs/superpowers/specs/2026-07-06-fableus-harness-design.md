@@ -18,6 +18,12 @@
 
 부수 효과: 특정 모델 비의존이므로 모델 세대가 바뀌어도 그대로 동작한다.
 
+외부 교차 검증 (2026-07-06 딥리서치, tmp-2026-07-06-new-chat-1·2 세션):
+- 공식: Fable 5 = Mythos-class 상위 티어, API 가격 정확히 2배($10/$50 vs $5/$25 MTok), 컨텍스트·출력 동일. SWE-bench 95.0 vs 88.6.
+- 제3자 실측: 같은 Fable 가중치가 하네스(Cursor vs Claude Code)에 따라 FuncPass +12.8pp 차이 — "격차는 하네스가 만든다" (Endor Labs).
+- 경계 정리: 못 닫는 것 = 내장 지식·추론 깊이(가중치). 닫을 수 있는 것 = 메타인지 절차(언제 충분한지·뭘 검증할지·언제 물을지). "덜 물어봄"은 거의 순수 절차 — 조사를 먼저 강제하면 물을 거리가 줄어든다.
+- 운영 원칙: **바닥(floor)은 세우되 천장(ceiling)은 위조하지 말라.** 하네스는 판단의 그림자(유창함)를 재현할 수 있으므로, 게이트는 산문이 아니라 산문 밖 실측에 건다.
+
 ## 2. 분업 원칙
 
 | 역할 | 담당 | 근거 |
@@ -116,6 +122,9 @@ spec-kit이 30개 에이전트 호환 제약으로 포기한 프리미티브를 
 | Agent tool `model` 파라미터 | 리더 모델 지정 (G-9) | v1 |
 | 플러그인 SessionStart 훅 | 하네스 규칙 2줄을 전 세션에 자동 주입 (CLAUDE.md 수정 불요) | v1 (D3) |
 | PreToolUse 게이트 가드 (opt-in) | spec이 존재하는데 `gate: passed`가 없으면 구현 파일 쓰기를 경고/차단 — "게이트 통과 전 구현 금지"를 하네스가 강제 | v2 |
+| Stop훅 증거 게이트 (opt-in) | 완료 선언을 실제 실행된 검증 출력(exit code)에 바인딩 — 유창한 완료 서술의 자기기만 방지 (딥리서치 9개 비평 생존 1위 항목) | v2 |
+
+모델 지정 우선순위 (내부 확인됨): `CLAUDE_CODE_SUBAGENT_MODEL`(env, 전역) > Agent per-call `model` > 에이전트 frontmatter `model` > 세션 모델. cold-reader는 frontmatter `model: opus`를 기본으로 하고 `--reader`가 per-call로 덮는다. 사용자가 `CLAUDE_CODE_SUBAGENT_MODEL`을 설정해두면 리더 모델 지정이 무력화되므로 스킬이 이를 경고한다.
 
 ## 5. 테스트 계획
 
