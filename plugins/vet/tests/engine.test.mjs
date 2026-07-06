@@ -89,4 +89,25 @@ const rb = (anchor, category, evidence = '근거') => ({ anchor, category, evide
   assert.ok(r2.error)
 }
 
-console.log('engine.test.mjs: 5/5 통과')
+// 6) I-7 방어: 형식 깨진 보고({} — rebuttals 배열 부재)는 실패로 정규화 → 재시도→unverified 경로.
+{
+  // 6a) intent가 최초+재시도 모두 형식 깨진 보고 → unverified, 부분 집계 없음
+  const { result } = await run({ question: 'q', draft: DRAFT }, (p, opts) =>
+    opts.label.startsWith('verify:intent') ? {} : { rebuttals: [rb('C-1', 'fact-error')] })
+  assert.equal(result.unverified, true)
+  assert.deepEqual(result.failedLenses, ['intent'])
+  assert.equal(result.confirmed.length, 0)
+  assert.equal(result.informational.length, 0)
+
+  // 6b) logic이 최초만 형식 깨진 보고, 재시도는 정상 → unverified 아님, 총 4회 호출
+  let malformedOnce = false
+  const { result: r2, calls } = await run({ question: 'q', draft: DRAFT }, (p, opts) => {
+    if (opts.label.startsWith('verify:logic') && !malformedOnce) { malformedOnce = true; return {} }
+    return { rebuttals: [] }
+  })
+  assert.equal(r2.unverified, false)
+  assert.equal(calls.length, 4)
+  assert.equal(r2.stats.validatorCalls, 4)
+}
+
+console.log('engine.test.mjs: 6/6 통과')

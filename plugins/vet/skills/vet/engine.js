@@ -82,14 +82,20 @@ const spawn = (lens) => agent(PROMPT(lens), {
   effort: 'high',
 })
 
-let reports = await parallel(LENSES.map(l => () => spawn(l)))
+// 하네스 계약: agent()는 실패 시 null을 반환하고, parallel()의 thunk가 던져도 결과는 null이며
+// parallel 자체는 reject하지 않는다 — 실패 처리는 null 검사만으로 충분하다.
+// I-7 방어: 보고가 null은 아니지만 형식이 깨진 경우(rebuttals 배열 부재)도 실패로 정규화(null)해
+// 기존 재시도→unverified 경로에 그대로 태운다 — 부분·오집계 없이 답을 삼키지 않는다.
+const spawnValid = (lens) => spawn(lens).then(r => (r && Array.isArray(r.rebuttals)) ? r : null)
+
+let reports = await parallel(LENSES.map(l => () => spawnValid(l)))
 let validatorCalls = 3
 
 // FR-017: 실패한 검증자만 1회 재시도 (전체 재실행 아님)
 const failedIdx = reports.map((r, i) => (r ? -1 : i)).filter(i => i >= 0)
 if (failedIdx.length > 0) {
   log('검증자 재시도: ' + failedIdx.map(i => LENSES[i].key).join(', '))
-  const retries = await parallel(failedIdx.map(i => () => spawn(LENSES[i])))
+  const retries = await parallel(failedIdx.map(i => () => spawnValid(LENSES[i])))
   failedIdx.forEach((idx, j) => { reports[idx] = retries[j] })
   validatorCalls += failedIdx.length
 }
