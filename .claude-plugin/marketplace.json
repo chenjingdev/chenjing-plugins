@@ -20,6 +20,11 @@
       "skills": [
         "./skills/story-spec"
       ]
+    },
+    {
+      "name": "fableus",
+      "description": "Opus 전용 spec 하네스: /spec + /spec-gate",
+      "source": "./plugins/fableus"
     }
   ]
 }

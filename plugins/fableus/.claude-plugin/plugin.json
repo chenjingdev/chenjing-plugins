@@ -1,0 +1,5 @@
+{
+  "name": "fableus",
+  "description": "Fable 없이 Opus만으로 알잘딱 spec을 만드는 하네스 — 인터뷰형 spec 작성(/spec) + 콜드 리드 실측 게이트(/spec-gate)",
+  "version": "0.1.0"
+}
