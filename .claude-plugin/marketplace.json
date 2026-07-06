@@ -38,6 +38,14 @@
         "./skills/ultracode",
         "./skills/deep-research"
       ]
+    },
+    {
+      "name": "vet",
+      "description": "spec 없는 일상 지대의 규율 세트 — 항상 켜짐 규율 훅 + 작업 계약 + 옵트인 답변 게이트 /vet (렌즈 3검증자 2표 합의)",
+      "source": "./plugins/vet",
+      "skills": [
+        "./skills/vet"
+      ]
     }
   ]
 }
