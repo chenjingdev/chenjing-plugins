@@ -83,7 +83,7 @@ spec-kit은 **설치하지 않는다**. 채용분만 흡수(MIT, README에 출�
 
 ### 4.3 /spec-gate 동작 규칙 (확정 사항)
 
-시운전 게이트 spec(`~/dev/tmp-speckit-trial/specs/001-dryrun-gate/spec.md`)과 그에 대한 Opus 콜드 리드 라운드 1 결과를 반영한 확정치:
+시운전 게이트 spec(`~/dev/tmp-speckit-trial/specs/001-dryrun-gate/spec.md`)에 대한 Opus 콜드 리드 라운드 1 결과를 반영한 확정치(G-1~G-9)에, 2026-07-07 도그푸딩 게이트 R2~R4에서 사용자가 채택한 결정(D-8~D-12)으로 갱신·증보(G-4·G-8 개정, G-10~G-12 신설)한 것:
 
 | # | 결정 | 내용 |
 |---|---|---|
@@ -131,7 +131,7 @@ spec-kit이 30개 에이전트 호환 제약으로 포기한 프리미티브를 
 
 ## 5. 테스트 계획
 
-1. **도그푸딩**: /spec-gate 스킬 자체의 spec이 이미 존재(시운전 산출물). 이를 이 파이프라인의 첫 통과 spec으로 라운드 2 완주 → superpowers writing-plans로 인계 → Opus로 구현
+1. **도그푸딩**: /spec-gate 스킬 자체의 spec이 이미 존재(시운전 산출물). 이를 이 파이프라인의 첫 통과 spec으로 완주 (실측: 2026-07-07, 4라운드 · 리더 호출 8회 · D-5~D-12 채택 · passed) → superpowers writing-plans로 인계 → Opus로 구현
 2. **SC 검증**: 모호 항목 3개를 심은 벤치 spec으로 1라운드 전부 포착하는지 확인 (라운드 1 실측: Opus 콜드 리더가 작성자 미인지 모순 4건 발견 — 통과)
 3. **사후 검증 루프 (후순위)**: "하네스 있는 Opus vs 맨몸 Opus"의 되묻기·오가정 수 비교 (알잘딱 벤치 — llm-bench 다중턴 러너 활용, v1 범위 밖)
 

@@ -1,7 +1,9 @@
 # Gate Report: Executor Dry-Run Gate
 
 > spec: plugins/fableus/specs/001-spec-gate/spec.md
-> 판정 기준: blocking 0건 = passed (G-4) · 최대 3라운드 (G-8)
+> 판정 기준: 확정 blocking 0건 = passed · 라운드 상한 없음(중단은 사용자 몫)
+> (R1~R2는 구 기준 — 단일 리더·blocking 0건·최대 3라운드 — 으로 시작했고,
+>  R2 환류에서 채택된 D-8·D-9로 기준이 갱신됨. R3부터 3-리더 합의 적용.)
 
 ## Round 1 — 2026-07-06T15:14:57Z — reader: opus
 

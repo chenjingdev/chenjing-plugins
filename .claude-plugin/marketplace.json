@@ -24,7 +24,11 @@
     {
       "name": "fableus",
       "description": "Opus 전용 spec 하네스: /spec + /spec-gate",
-      "source": "./plugins/fableus"
+      "source": "./plugins/fableus",
+      "skills": [
+        "./skills/spec",
+        "./skills/spec-gate"
+      ]
     }
   ]
 }
