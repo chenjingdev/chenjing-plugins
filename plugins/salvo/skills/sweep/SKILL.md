@@ -1,10 +1,10 @@
 ---
 name: sweep
-description: "Use when the user wants EVERY instance found, not just a good answer — 'find all X', 'audit for all Y', 'catch every bug/case', 'exhaustive/complete review', 'don't miss any', 'full coverage', '빠짐없이 / 전부 찾아'. Spawns N independent finder subagents in parallel and unions their findings by a mechanical rule, because a single pass reliably misses a few items and independent passes miss *different* ones — so the union recovers what either alone drops. This is a recall tool. To gate the precision of one already-drafted answer instead, use /fableus:vet."
+description: "Use when the user wants EVERY instance found, not just a good answer — 'find all X', 'audit for all Y', 'catch every bug/case', 'exhaustive/complete review', 'don't miss any', 'full coverage', '빠짐없이 / 전부 찾아'. Spawns N independent finder subagents in parallel and unions their findings by a mechanical rule, because a single pass reliably misses a few items and independent passes miss *different* ones — so the union recovers what either alone drops. This is a recall tool. To gate the precision of one already-drafted answer instead, use /salvo:vet."
 argument-hint: "<what to find> — the target defect or pattern to hunt exhaustively, and where"
 ---
 
-# /fableus:sweep — Exhaustive-recall union sweep
+# /salvo:sweep — Exhaustive-recall union sweep
 
 For a "find every X" request, one pass is not enough and a sharper critic does
 not fix it. Spawn N independent finder subagents in parallel over the same
@@ -18,7 +18,7 @@ are uncorrelated, so what one pass drops the other tends to catch.
   bug). No single pass is trustworthy for "all".
 - Two *independent* passes, unioned, hit 12/12: the uncorrelated misses covered
   each other. A third pass added nothing.
-- /fableus:vet on the same task (one draft plus three lens-validators) recalled
+- /salvo:vet on the same task (one draft plus three lens-validators) recalled
   11/12 at ~3x the cost. That is the tell: validators *check the draft's claims*
   (precision) — they do not *hunt what the draft never found* (recall). A "find
   all" request is a recall problem, so it wants N independent finders and a
@@ -37,7 +37,7 @@ turn.
   its meaning.
 - Sanity-check the shape of the request. Sweep answers "did we find them all?"
   (recall). If the request is really "is this one answer correct?" (precision),
-  that is /fableus:vet — redirect and stop.
+  that is /salvo:vet — redirect and stop.
 
 ### 2. Spawn N=2 independent finders, in parallel
 - With the Agent tool, spawn **N=2** finder subagents (default model opus, with
@@ -103,10 +103,10 @@ evidence, and **which passes found it**. Split the list two ways:
   finder measured it, so flag each as a re-verification candidate. These are
   exactly where an independent second look pays off.
 
-### 6. Optional handoff to /fableus:vet
+### 6. Optional handoff to /salvo:vet
 Sweep maximizes recall — it does not check that each finding is *characterized*
 correctly. If the user also wants each finding's claim gated for precision, hand
-the union to /fableus:vet. The two tools are orthogonal: sweep = recall (did we
+the union to /salvo:vet. The two tools are orthogonal: sweep = recall (did we
 find everything?), vet = precision (is each claim right?).
 
 ## Do NOT

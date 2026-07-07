@@ -22,13 +22,14 @@
       ]
     },
     {
-      "name": "fableus",
-      "description": "An Opus-only Fable discipline harness — spec zone (/fableus:spec, /fableus:spec-gate) + everyday zone (/fableus:vet answer gate, always-on discipline hooks)",
-      "source": "./plugins/fableus",
+      "name": "salvo",
+      "description": "One pass is a guess; a salvo is a measurement — N independent passes fired in parallel, merged by pure rules: intersection (/salvo:spec-gate), union (/salvo:sweep), consensus (/salvo:vet), plus /salvo:spec and always-on discipline hooks",
+      "source": "./plugins/salvo",
       "skills": [
         "./skills/spec",
         "./skills/spec-gate",
-        "./skills/vet"
+        "./skills/vet",
+        "./skills/sweep"
       ]
     },
     {

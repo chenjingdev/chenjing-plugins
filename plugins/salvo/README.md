@@ -1,6 +1,7 @@
-# fableus
+# salvo
 
-Fable 없이 Opus만으로 "알잘딱" spec을 만드는 Claude Code 하네스.
+혼자 한 발 쏘는 대신, 독립된 여러 문이 일제히 쏘고 순수 규칙으로 모은다 —
+교집합(`/spec-gate`)·합집합(`/sweep`)·합의(`/vet`)의 Claude Code 하네스.
 원리: **모델이 알아서 복원해야 했던 것을 구조가 실어 나르게 한다.**
 
 ## 파이프라인

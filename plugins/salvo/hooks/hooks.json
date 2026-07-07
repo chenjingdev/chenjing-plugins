@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"[fableus 하네스 규칙] 1. 전제 신선도: 과거 결정·문서를 상속하기 전에 그 근거가 지금도 유효한지 확인하라. 2. 가정 선언: 무단 가정 금지 — 가정했으면 산출물의 Assumptions에 기록하라.\"}}'"
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"[salvo 하네스 규칙] 1. 전제 신선도: 과거 결정·문서를 상속하기 전에 그 근거가 지금도 유효한지 확인하라. 2. 가정 선언: 무단 가정 금지 — 가정했으면 산출물의 Assumptions에 기록하라.\"}}'"
           },
           {
             "type": "command",

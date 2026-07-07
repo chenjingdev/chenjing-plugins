@@ -1,11 +1,11 @@
 ---
 name: vet
-description: "Use when the user runs /fableus:vet — an opt-in answer gate for one important question: draft the answer as C-n anchored atomic claims, verify it in parallel with 3 different-lens validators (fixed to opus), and reflect only 2-vote confirmed rebuttals."
+description: "Use when the user runs /salvo:vet — an opt-in answer gate for one important question: draft the answer as C-n anchored atomic claims, verify it in parallel with 3 different-lens validators (fixed to opus), and reflect only 2-vote confirmed rebuttals."
 argument-hint: "<question> — the important question to verify before answering"
 disable-model-invocation: true
 ---
 
-# /fableus:vet — Opt-in answer gate
+# /salvo:vet — Opt-in answer gate
 
 For one important question: the session drafts C-n claims with premises
 measured directly, the bundled engine
@@ -19,7 +19,7 @@ discipline does not auto-trigger it (FR-010).
 **Not for coverage requests.** /vet gates the *precision* of one answer — its
 validators verify the draft's claims, they do not hunt what the draft missed.
 For a "find all X" / audit / exhaustive-review request (a recall problem), use
-/fableus:sweep instead.
+/salvo:sweep instead.
 
 **Language**: Deliver the /vet answer and its change log in the user's
 conversation language. (Unlike /spec and /spec-gate, /vet produces no persisted

@@ -35,7 +35,7 @@ consumed by cold readers and implementers.
 
 ### 0.5 Machine lint (floor check before cold reading, G-11)
 Before cold reading, run a reproducible floor check. The assumed template is
-the fableus spec template, and the required sections are those tagged
+the salvo spec template, and the required sections are those tagged
 `*(mandatory)*`.
 - **There are exactly two hard-fail (reject) conditions**:
   1. A required section is empty — comments/whitespace only still count as
@@ -53,7 +53,7 @@ the fableus spec template, and the required sections are those tagged
 ### 1. Cold read (full isolation, G-2 · N in parallel)
 - Read `references/reader-prompt.md` and substitute `{{SPEC_BODY}}` with the
   entire spec body.
-- With the Agent tool, spawn `fableus:cold-reader`-type subagents **N in
+- With the Agent tool, spawn `salvo:cold-reader`-type subagents **N in
   parallel**: each reader's model = the --reader value, prompt = the full
   substituted reader prompt. Do not pass a file path — embed the body directly
   in the prompt (this guarantees isolation, G-2). Do not give readers tool or
