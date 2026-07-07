@@ -16,6 +16,11 @@ revises by reflecting only confirmed rebuttals and shows the change log
 transparently. This skill is manual opt-in only — the layer-1/layer-2
 discipline does not auto-trigger it (FR-010).
 
+**Not for coverage requests.** /vet gates the *precision* of one answer — its
+validators verify the draft's claims, they do not hunt what the draft missed.
+For a "find all X" / audit / exhaustive-review request (a recall problem), use
+/fableus:sweep instead.
+
 **Language**: Deliver the /vet answer and its change log in the user's
 conversation language. (Unlike /spec and /spec-gate, /vet produces no persisted
 document — its output lives only in this conversation turn.)
