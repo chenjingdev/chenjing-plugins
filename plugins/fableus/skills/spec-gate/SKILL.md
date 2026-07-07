@@ -95,6 +95,11 @@ the fableus spec template, and the required sections are those tagged
   - Question = the issue's "what is ambiguous", options = the reader's
     proposals A/B/C (label them explicitly as "implementer's guess") + the
     automatically provided free-form input.
+  - **Calibrate to the user's domain-knowledge level** (inherit the /spec
+    calibration probe if it ran this session; otherwise infer from the
+    conversation): for concepts the user is not comfortable with, explain with
+    a concrete example before presenting the options. An answer to a question
+    the user did not understand becomes a wrong decision baked into the spec.
   - If the user answers "leave it to the implementer's discretion": add the
     item + reason to the spec's `## Deferred to Implementer` section (G-7 — a
     waiver is the act of stating it explicitly in the spec body, so that next

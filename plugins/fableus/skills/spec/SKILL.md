@@ -38,6 +38,26 @@ contract consumed by cold readers and implementers.
   to use as interview material (the user's intent, not your research, is
   authoritative).
 
+### 2.5 Domain-knowledge calibration (one probe)
+Interview answers become Decision Ledger entries — ground truth for the spec.
+A question the user did not actually understand produces a wrong decision
+recorded as fact, which is far more expensive than the ten seconds this probe
+costs. So calibrate before asking design questions:
+
+- From the product description, pick 4-6 domain terms the interview will lean
+  on (mix difficulty: a couple basic, a couple intermediate, a couple
+  advanced).
+- Ask **one** AskUserQuestion (multiSelect): "Which of these terms are you
+  comfortable with? (This calibrates my explanations — it is not a test.)"
+- Unchecked terms become your explain-first list: for those concepts, give a
+  concrete example **before** presenting options. For checked terms, stay
+  terse and technical.
+- The probe sets a prior, not a verdict. Recalibrate on evidence as the
+  conversation unfolds: if the user asks "what does X mean?" or answers beside
+  the point, lower the level for that area; if they use domain jargon fluently,
+  raise it. Never re-quiz.
+- Calibration changes the conversation only — never the spec document content.
+
 ### 3. Interview (superpowers brainstorming UX)
 - **One question per message.** AskUserQuestion with 2-4 options + free-form
   input.
