@@ -1,34 +1,35 @@
 <!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>vet 벤치 채점표 — 2026-07-07</title>
+<title>vet 벤치 채점표 (3팔) — 2026-07-07</title>
 <style>
 :root{--bg:#fff;--fg:#1a1a1a;--muted:#6b7280;--line:#e5e7eb;--card:#f9fafb;--accent:#2563eb;--bad:#dc2626;--ok:#16a34a}
 @media(prefers-color-scheme:dark){:root{--bg:#111418;--fg:#e5e7eb;--muted:#9ca3af;--line:#2a2f36;--card:#1a1f26;--accent:#60a5fa;--bad:#f87171;--ok:#4ade80}}
-*{box-sizing:border-box}body{margin:0;padding:1.5rem;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif;max-width:1100px;margin-inline:auto}
+*{box-sizing:border-box}body{margin:0;padding:1.5rem;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif;max-width:1200px;margin-inline:auto}
 h1{font-size:1.25rem}h2{font-size:1.05rem;margin:2.2rem 0 .4rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
 .dom{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:.05rem .5rem;vertical-align:middle}
 .q{color:var(--muted);margin:.3rem 0 .8rem}
 details{margin:.4rem 0;border:1px solid var(--line);border-radius:8px;background:var(--card)}
 summary{cursor:pointer;padding:.5rem .8rem;font-weight:600;font-size:.9rem}
 .ans{white-space:pre-wrap;padding:.8rem;border-top:1px solid var(--line);max-height:420px;overflow-y:auto;font-size:.88rem}
-table.keys{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.88rem}
-.keys th,.keys td{border-bottom:1px solid var(--line);padding:.4rem .5rem;text-align:left;vertical-align:top}
-.keys th{color:var(--muted);font-size:.78rem}
-.ev{color:var(--muted);font-size:.78rem;max-width:220px}
-.radios{white-space:nowrap}.radios label{margin-right:.6rem;font-size:.82rem;cursor:pointer}
-#totals{position:sticky;top:0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.7rem 1rem;margin-bottom:1rem;z-index:9}
+table.keys{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.86rem}
+.keys th,.keys td{border-bottom:1px solid var(--line);padding:.4rem .45rem;text-align:left;vertical-align:top}
+.keys th{color:var(--muted);font-size:.76rem}
+.ev{color:var(--muted);font-size:.76rem;max-width:180px}
+.radios{white-space:nowrap}.radios label{margin-right:.45rem;font-size:.8rem;cursor:pointer}
+#totals{position:sticky;top:0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.7rem 1rem;margin-bottom:1rem;z-index:9;font-size:.92rem}
 #totals b.bad{color:var(--bad)}#totals b.ok{color:var(--ok)}
 button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:.5rem 1rem;cursor:pointer;font-size:.9rem}
 .note{color:var(--muted);font-size:.82rem}
 </style></head><body>
-<h1>vet 벤치 채점표 — 10문항 × 2팔</h1>
-<p class="note">채점 규칙(I-11): 답변을 정답 키 항목별로 <b>일치/모순/무언급</b> 분류. <b>모순 수 = 확정 오류</b>. 무언급은 오류 아님(별도 기록). 진행 상황은 자동 저장됩니다.</p>
-<div id="totals">채점 진행: <span id="prog">0</span>/108 · 확정 오류 — 기준선 <b id="tb">0</b> vs vet <b id="tv">0</b> · 무언급 — 기준선 <span id="ub">0</span> vs vet <span id="uv">0</span> · <span id="verdict"></span>
-<div style="margin-top:.5rem"><button onclick="exportJson()">채점 결과 내보내기 (JSON 다운로드)</button></div></div>
+<h1>vet 벤치 채점표 — 10문항 × 3팔</h1>
+<p class="note">채점 규칙(I-11): 정답 키 항목별 <b>일치/모순/무언급</b>. <b>모순 수 = 확정 오류</b>. 판정: vet vs Fable은 <b>≤</b>(대체 성립) · vet vs opus 단독은 <b>&lt;</b>(게이트 가치, 엄격). 기존 채점(기준선·vet)은 자동 복원됩니다.</p>
+<div id="totals">채점 진행: <span id="prog">0</span>/162 · 확정 오류 — Fable <b id="tb">0</b> · opus 단독 <b id="to">0</b> · vet <b id="tv">0</b> · 무언급 — <span id="ub">0</span>/<span id="uo">0</span>/<span id="uv">0</span><br>
+<span id="verdict1"></span> · <span id="verdict2"></span>
+<div style="margin-top:.5rem"><button onclick="exportJson()">채점 결과 내보내기 (JSON)</button></div></div>
 <section id="Q1">
 <h2>Q1 <span class="dom">repo</span></h2>
 <p class="q">fableus 플러그인의 /spec-gate는 콜드 리더를 어떻게 격리하고, 통과 판정 기준과 라운드 상한은 어떻게 되어 있어?</p>
-<details><summary>기준선 (Fable 단독) 답변 — $0.54 · 40초</summary><div class="ans">확인했습니다. `plugins/fableus/skills/spec-gate/SKILL.md`와 `plugins/fableus/agents/cold-reader.md` 기준으로 답하면:
+<details><summary>기준선 (Fable 단독) — $0.54 · 40초</summary><div class="ans">확인했습니다. `plugins/fableus/skills/spec-gate/SKILL.md`와 `plugins/fableus/agents/cold-reader.md` 기준으로 답하면:
 
 **콜드 리더 격리 방식 (G-2, 완전 격리)**
 - 리더는 `fableus:cold-reader` 타입 서브에이전트로 N개 병렬 스폰되는데, 파일 경로를 넘기지 않고 스펙 본문 전체를 `references/reader-prompt.md`의 `{{SPEC_BODY}}` 자리에 직접 치환해서 프롬프트에 내장합니다. 문서 하나만 보고 판단하도록 강제하는 구조입니다.
@@ -42,7 +43,39 @@ button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:.5
 - 리더 수 기본값은 3이며 `--readers`로 조정 가능하되 N &lt; 2면 합의 투표가 구조적으로 불가능해 거부합니다(G-10).
 
 **라운드 상한**
-- **상한이 없습니다**(G-8 · D-9). 매 라운드가 AskUserQuestion 사용자 피드백으로 끝나는 구조라, 수렴하지 않는다고 판단해 멈추는 결정은 그 시점의 사용자 몫으로 설계돼 있습니다. 라운드 번호는 같은 디렉터리의 `gate-report.md` 마지막 라운드 + 1로 이어가고, blocking이 남으면 frontmatter를 `round-N-blocked`로 갱신한 뒤 반영 후 재실행을 제안하는 식으로 반복합니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $1.36 · 70초</summary><div class="ans">fableus `/spec-gate`는 세 축으로 답이 나뉩니다.
+- **상한이 없습니다**(G-8 · D-9). 매 라운드가 AskUserQuestion 사용자 피드백으로 끝나는 구조라, 수렴하지 않는다고 판단해 멈추는 결정은 그 시점의 사용자 몫으로 설계돼 있습니다. 라운드 번호는 같은 디렉터리의 `gate-report.md` 마지막 라운드 + 1로 이어가고, blocking이 남으면 frontmatter를 `round-N-blocked`로 갱신한 뒤 반영 후 재실행을 제안하는 식으로 반복합니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.31 · 68초</summary><div class="ans">두 정의 파일을 실측했습니다. `SKILL.md`와 `agents/cold-reader.md` 기준으로 답변합니다.
+
+## 1. 콜드 리더 격리 (G-2, &quot;full isolation&quot;)
+
+격리는 **세 겹**으로 강제됩니다:
+
+- **에이전트 정의 자체가 무도구·무맥락** — `agents/cold-reader.md`는 `tools: []`(도구 없음), `model: opus`로 선언되어 있고, 시스템 프롬프트가 &quot;문서 하나만 받아 그 문서만으로 구현 가능성을 판단한다. 프롬프트에 포함된 문서 외에는 어떤 컨텍스트도 없고 도구를 쓸 수 없다&quot;고 못 박습니다.
+- **파일 경로 대신 본문 임베드** — 게이트는 리더를 띄울 때 spec 파일 경로를 넘기지 **않고**, `reader-prompt.md`의 `{{SPEC_BODY}}`를 spec 본문 전체로 치환해 프롬프트에 직접 박아 넣습니다. SKILL.md는 이 방식이 &quot;격리를 보장한다(G-2)&quot;고 명시합니다 (SKILL.md:57-60).
+- **저장소·도구 접근 차단** — &quot;Do not give readers tool or repository access&quot;를 절차와 &quot;Do NOT&quot; 섹션에서 이중으로 금지합니다 (SKILL.md:60, 120).
+
+그 위에 **N개를 병렬로 독립 실행**합니다(기본 3명, `--readers N`). 서로의 출력을 보지 못하므로 합의가 우연이 아닌 독립적 재현이 되도록 설계돼 있습니다.
+
+## 2. 통과 판정 기준
+
+핵심 규칙: **Confirmed blocking = &quot;같은 지점&quot;을 2명 이상 리더가 제기** (SKILL.md:79-81).
+
+- **&quot;같은 지점&quot;의 정의** — anchor(대상 FR 번호/섹션명)가 일치하고 **AND thesis(논지)까지 일치**해야 같은 지점. anchor가 같아도 논지가 다르면 별개 이슈로 분리 집계합니다 (SKILL.md:67-76). 이 집계는 순수 기계적 합산이며, **별도 LLM 심판을 두지 않습니다**(주관성이 다시 스며드는 걸 막기 위해, D-10).
+- **통과 = confirmed blocking 0건** → verdict `passed` (waiver가 있으면 `passed-with-waivers`) (SKILL.md:88-91).
+- **1명만 제기한(solo) blocking과 discretionary 이슈는 informational only** — 표시만 되고 통과를 막지 않습니다 (SKILL.md:80-81, 93).
+- **그 전에 머신 lint 플로어 체크**(§0.5): 콜드 리딩 이전의 재현 가능한 사전 필터로, **hard-fail(즉시 reject)은 정확히 2개**뿐입니다 — ① 필수(`*(mandatory)*`) 섹션이 비어 있음, ② `[NEEDS CLARIFICATION:` 마커 잔존. 나머지(모호한 형용사, 숫자/검증 술어 없는 SC 항목)는 **경고일 뿐 reject 사유가 아닙니다** (SKILL.md:36-51).
+- **구조적 전제** — `N &lt; 2`면 합의 투표가 구조적으로 불가능하므로 아예 거부하고 중단합니다 (SKILL.md:22-23, G-10). 또 리더 중 **하나라도 spawn 실패 시 라운드 전체를 중단**하고 부분 결과를 기록하지 않습니다 (SKILL.md:63-64).
+
+## 3. 라운드 상한
+
+**상한이 없습니다** (SKILL.md:31-34, G-8·D-9).
+
+라운드 번호는 같은 디렉터리의 `gate-report.md`를 읽어 &quot;마지막 라운드 + 1&quot;(리포트 없으면 1)로 매깁니다. 근거는 **매 라운드가 사용자 피드백(AskUserQuestion)으로 끝나기 때문** — 리더 의견이 발산하는지 판단하고 멈출지 결정하는 건 그 시점의 사용자 몫이므로, 자동 상한을 두지 않습니다.
+
+루프 구조는: confirmed blocking이 N건 남으면 frontmatter를 `round-N-blocked`로 바꾸고 **confirmed blocking만** AskUserQuestion으로 되돌려(solo/discretionary는 표시만) 사용자 답변을 spec 본문에 반영한 뒤 다음 라운드 재실행을 제안 → confirmed blocking 0이 될 때까지 반복입니다 (SKILL.md:87-110).
+
+---
+
+정리하면 — **격리**는 무도구 에이전트 + 본문 직접 임베드 + 저장소 차단의 3중 강제, **통과**는 &quot;2명 이상이 같은 anchor·논지로 제기한 blocking이 0건&quot;(단, 사전에 2개 hard-fail lint 통과), **라운드 상한**은 사용자 판단에 맡기고 명시적으로 두지 않음, 입니다.</div></details><details><summary>vet arm (opus + 검증자 3) — $1.36 · 70초</summary><div class="ans">fableus `/spec-gate`는 세 축으로 답이 나뉩니다.
 
 ## 1. 콜드 리더 격리
 
@@ -73,11 +106,11 @@ button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:.5
 - **검증 비용**: validator calls 3회 (r1: 3, r2: 0)
 
 &gt; 참고: 두 지적 모두 1표 informational이라 스킬 규율(FR-015)상 강제 수정 대상이 아니지만, 둘 다 타당한 뉘앙스 보정이라 정직성 차원에서 본문 서술을 미리 완화해 반영했습니다.</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>리더에게 도구·저장소 접근을 주지 않고, spec 본문을 프롬프트에 직접 포함한다(파일 경로 금지)</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:53-60</td><td class="radios"><label><input type="radio" name="Q1-b-1" value="match">일치</label><label><input type="radio" name="Q1-b-1" value="contradict">모순</label><label><input type="radio" name="Q1-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-1" value="match">일치</label><label><input type="radio" name="Q1-v-1" value="contradict">모순</label><label><input type="radio" name="Q1-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2a</td><td>확정 집계의 &quot;같은 지점&quot; = 앵커 일치 AND 논지 일치 — 동일 앵커라도 논지가 다르면 별개 이슈로 분리 집계</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:71-73</td><td class="radios"><label><input type="radio" name="Q1-b-2a" value="match">일치</label><label><input type="radio" name="Q1-b-2a" value="contradict">모순</label><label><input type="radio" name="Q1-b-2a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-2a" value="match">일치</label><label><input type="radio" name="Q1-v-2a" value="contradict">모순</label><label><input type="radio" name="Q1-v-2a" value="unmentioned">무언급</label></td></tr><tr><td>2b</td><td>확정 blocking = 같은 지점을 2인 이상이 제기한 것, 통과 = 확정 blocking 0건(1인 단독·discretionary는 정보성 표시만)</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:79-81,88</td><td class="radios"><label><input type="radio" name="Q1-b-2b" value="match">일치</label><label><input type="radio" name="Q1-b-2b" value="contradict">모순</label><label><input type="radio" name="Q1-b-2b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-2b" value="match">일치</label><label><input type="radio" name="Q1-v-2b" value="contradict">모순</label><label><input type="radio" name="Q1-v-2b" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>라운드 상한은 없다 — 중단은 사용자 몫</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:32-34</td><td class="radios"><label><input type="radio" name="Q1-b-3" value="match">일치</label><label><input type="radio" name="Q1-b-3" value="contradict">모순</label><label><input type="radio" name="Q1-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-3" value="match">일치</label><label><input type="radio" name="Q1-v-3" value="contradict">모순</label><label><input type="radio" name="Q1-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>집계에 별도 LLM 심판을 두지 않는다</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:77-78</td><td class="radios"><label><input type="radio" name="Q1-b-4" value="match">일치</label><label><input type="radio" name="Q1-b-4" value="contradict">모순</label><label><input type="radio" name="Q1-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-4" value="match">일치</label><label><input type="radio" name="Q1-v-4" value="contradict">모순</label><label><input type="radio" name="Q1-v-4" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>리더에게 도구·저장소 접근을 주지 않고, spec 본문을 프롬프트에 직접 포함한다(파일 경로 금지)</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:53-60</td><td class="radios"><label><input type="radio" name="Q1-b-1" value="match">일치</label><label><input type="radio" name="Q1-b-1" value="contradict">모순</label><label><input type="radio" name="Q1-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-o-1" value="match">일치</label><label><input type="radio" name="Q1-o-1" value="contradict">모순</label><label><input type="radio" name="Q1-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-1" value="match">일치</label><label><input type="radio" name="Q1-v-1" value="contradict">모순</label><label><input type="radio" name="Q1-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2a</td><td>확정 집계의 &quot;같은 지점&quot; = 앵커 일치 AND 논지 일치 — 동일 앵커라도 논지가 다르면 별개 이슈로 분리 집계</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:71-73</td><td class="radios"><label><input type="radio" name="Q1-b-2a" value="match">일치</label><label><input type="radio" name="Q1-b-2a" value="contradict">모순</label><label><input type="radio" name="Q1-b-2a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-o-2a" value="match">일치</label><label><input type="radio" name="Q1-o-2a" value="contradict">모순</label><label><input type="radio" name="Q1-o-2a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-2a" value="match">일치</label><label><input type="radio" name="Q1-v-2a" value="contradict">모순</label><label><input type="radio" name="Q1-v-2a" value="unmentioned">무언급</label></td></tr><tr><td>2b</td><td>확정 blocking = 같은 지점을 2인 이상이 제기한 것, 통과 = 확정 blocking 0건(1인 단독·discretionary는 정보성 표시만)</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:79-81,88</td><td class="radios"><label><input type="radio" name="Q1-b-2b" value="match">일치</label><label><input type="radio" name="Q1-b-2b" value="contradict">모순</label><label><input type="radio" name="Q1-b-2b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-o-2b" value="match">일치</label><label><input type="radio" name="Q1-o-2b" value="contradict">모순</label><label><input type="radio" name="Q1-o-2b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-2b" value="match">일치</label><label><input type="radio" name="Q1-v-2b" value="contradict">모순</label><label><input type="radio" name="Q1-v-2b" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>라운드 상한은 없다 — 중단은 사용자 몫</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:32-34</td><td class="radios"><label><input type="radio" name="Q1-b-3" value="match">일치</label><label><input type="radio" name="Q1-b-3" value="contradict">모순</label><label><input type="radio" name="Q1-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-o-3" value="match">일치</label><label><input type="radio" name="Q1-o-3" value="contradict">모순</label><label><input type="radio" name="Q1-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-3" value="match">일치</label><label><input type="radio" name="Q1-v-3" value="contradict">모순</label><label><input type="radio" name="Q1-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>집계에 별도 LLM 심판을 두지 않는다</td><td class="ev">plugins/fableus/skills/spec-gate/SKILL.md:77-78</td><td class="radios"><label><input type="radio" name="Q1-b-4" value="match">일치</label><label><input type="radio" name="Q1-b-4" value="contradict">모순</label><label><input type="radio" name="Q1-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-o-4" value="match">일치</label><label><input type="radio" name="Q1-o-4" value="contradict">모순</label><label><input type="radio" name="Q1-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q1-v-4" value="match">일치</label><label><input type="radio" name="Q1-v-4" value="contradict">모순</label><label><input type="radio" name="Q1-v-4" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q2">
 <h2>Q2 <span class="dom">repo</span></h2>
 <p class="q">tiers 플러그인의 deep-research 엔진은 검증(Verify) 단계에서 주장 하나를 몇 표로 판정하고, 판정 결과는 몇 가지로 나뉘어?</p>
-<details><summary>기준선 (Fable 단독) 답변 — $0.53 · 40초</summary><div class="ans">`plugins/tiers/skills/deep-research/engine.js`를 직접 확인한 결과입니다.
+<details><summary>기준선 (Fable 단독) — $0.53 · 40초</summary><div class="ans">`plugins/tiers/skills/deep-research/engine.js`를 직접 확인한 결과입니다.
 
 **표 수: 주장 하나당 3표** (`VOTES_PER_CLAIM = 3`, engine.js:40). 각 voter는 회의적 입장에서 반박을 시도하는 적대적 검증자이고, 반박(refute) 2표 이상이면 주장이 탈락합니다 (`REFUTATIONS_REQUIRED = 2`, engine.js:41).
 
@@ -87,7 +120,27 @@ button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:.5
 2. **refuted (반박됨, ✗)** — 반박 표가 2표 이상으로 실질 심사에서 탈락한 경우.
 3. **unverified (판정 불가, ?)** — voter 에이전트 에러나 사용자 스킵으로 유효 표가 2표 미만이라 판정 자체가 불가능한 경우. 주석(engine.js:292)에 따르면 인프라 실패를 &quot;반박됨&quot;으로 잘못 읽지 않기 위해 별도 범주로 분리한 것입니다 (go/ccissue/69883 참조).
 
-즉 단순 2/3 다수결이 아니라, 무효표를 구분해서 &quot;탈락&quot;과 &quot;미검증&quot;을 다르게 취급하는 구조입니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $1.05 · 16초</summary><div class="ans">검증 완료 — **확정 반박 0건** (검증자 3명 모두 통과, `unverified: false`). /vet 규율에 따라 재검증 없이 초안이 그대로 최종 확정입니다.
+즉 단순 2/3 다수결이 아니라, 무효표를 구분해서 &quot;탈락&quot;과 &quot;미검증&quot;을 다르게 취급하는 구조입니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.29 · 46초</summary><div class="ans">`engine.js`를 직접 확인했다.
+
+## 답
+
+**검증(Verify) 단계 — 주장당 3표, 판정 결과는 3가지.**
+
+**표 수: 3표** (`VOTES_PER_CLAIM = 3`)
+- 주장 하나마다 적대적 검증관(adversarial verifier) 3명이 병렬로 붙어 &quot;반증(refute)&quot;을 시도한다. 3표 중 **2표 이상이 반증하면 주장을 죽인다** (`REFUTATIONS_REQUIRED = 2`, 즉 2/3 다수결).
+
+**판정 결과: 3가지** (engine.js:290-310)
+
+| 결과 | 조건 | 코드 |
+|------|------|------|
+| **confirmed (생존)** | 유효표가 정족수(2) 이상 **그리고** 반증표 &lt; 2 | `survives` |
+| **refuted (기각)** | 반증표 ≥ 2 (실질 판단으로 기각) | `isRefuted` |
+| **unverified (검증불가)** | 위 둘 다 아님 — 유효표가 너무 적어 판정 불가(검증관 에러/rate-limit) | `!survives &amp;&amp; !isRefuted` |
+
+핵심은 세 번째 갈래다. 코드 주석(engine.js:292, `go/ccissue/69883`)에 명시돼 있듯 **인프라 장애(검증관 에이전트 실패)를 &quot;반증됨&quot;으로 오독하지 않기 위해** unverified를 별도로 분리한다 — 즉 &quot;근거로 기각당한 것&quot;과 &quot;검증 자체를 못 한 것&quot;을 구분한다.
+
+## 남은 가정
+- 질문의 &quot;tiers 플러그인 deep-research 엔진&quot;을 `plugins/tiers/skills/deep-research/engine.js`(개발 워킹트리 버전)로 해석했다. `~/.claude/plugins/cache`에도 동일 플러그인 사본이 있으나 확인은 dev 소스 기준으로 했다.</div></details><details><summary>vet arm (opus + 검증자 3) — $1.05 · 16초</summary><div class="ans">검증 완료 — **확정 반박 0건** (검증자 3명 모두 통과, `unverified: false`). /vet 규율에 따라 재검증 없이 초안이 그대로 최종 확정입니다.
 
 ---
 
@@ -115,11 +168,11 @@ tiers 플러그인의 deep-research 엔진(`plugins/tiers/skills/deep-research/e
 ## Change log (/vet)
 - No changes (0 confirmed rebuttals) — 초안 5개 주장(C-1~C-5) 모두 검증 통과
 - Verification cost: 3 validator calls (r1: 3, r2: 0)</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>주장당 3표(VOTES_PER_CLAIM=3), 반박 2표(REFUTATIONS_REQUIRED=2) 이상이면 기각</td><td class="ev">plugins/tiers/skills/deep-research/engine.js:40-41</td><td class="radios"><label><input type="radio" name="Q2-b-1" value="match">일치</label><label><input type="radio" name="Q2-b-1" value="contradict">모순</label><label><input type="radio" name="Q2-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-v-1" value="match">일치</label><label><input type="radio" name="Q2-v-1" value="contradict">모순</label><label><input type="radio" name="Q2-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>판정은 3가지: survives / isRefuted / unverified(유효표 부족)</td><td class="ev">plugins/tiers/skills/deep-research/engine.js:290-303</td><td class="radios"><label><input type="radio" name="Q2-b-2" value="match">일치</label><label><input type="radio" name="Q2-b-2" value="contradict">모순</label><label><input type="radio" name="Q2-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-v-2" value="match">일치</label><label><input type="radio" name="Q2-v-2" value="contradict">모순</label><label><input type="radio" name="Q2-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>인프라 실패(검증자 에러)는 &quot;반박됨&quot;으로 세지 않고 unverified로 분리한다</td><td class="ev">plugins/tiers/skills/deep-research/engine.js:292,316-328</td><td class="radios"><label><input type="radio" name="Q2-b-3" value="match">일치</label><label><input type="radio" name="Q2-b-3" value="contradict">모순</label><label><input type="radio" name="Q2-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-v-3" value="match">일치</label><label><input type="radio" name="Q2-v-3" value="contradict">모순</label><label><input type="radio" name="Q2-v-3" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>주장당 3표(VOTES_PER_CLAIM=3), 반박 2표(REFUTATIONS_REQUIRED=2) 이상이면 기각</td><td class="ev">plugins/tiers/skills/deep-research/engine.js:40-41</td><td class="radios"><label><input type="radio" name="Q2-b-1" value="match">일치</label><label><input type="radio" name="Q2-b-1" value="contradict">모순</label><label><input type="radio" name="Q2-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-o-1" value="match">일치</label><label><input type="radio" name="Q2-o-1" value="contradict">모순</label><label><input type="radio" name="Q2-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-v-1" value="match">일치</label><label><input type="radio" name="Q2-v-1" value="contradict">모순</label><label><input type="radio" name="Q2-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>판정은 3가지: survives / isRefuted / unverified(유효표 부족)</td><td class="ev">plugins/tiers/skills/deep-research/engine.js:290-303</td><td class="radios"><label><input type="radio" name="Q2-b-2" value="match">일치</label><label><input type="radio" name="Q2-b-2" value="contradict">모순</label><label><input type="radio" name="Q2-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-o-2" value="match">일치</label><label><input type="radio" name="Q2-o-2" value="contradict">모순</label><label><input type="radio" name="Q2-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-v-2" value="match">일치</label><label><input type="radio" name="Q2-v-2" value="contradict">모순</label><label><input type="radio" name="Q2-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>인프라 실패(검증자 에러)는 &quot;반박됨&quot;으로 세지 않고 unverified로 분리한다</td><td class="ev">plugins/tiers/skills/deep-research/engine.js:292,316-328</td><td class="radios"><label><input type="radio" name="Q2-b-3" value="match">일치</label><label><input type="radio" name="Q2-b-3" value="contradict">모순</label><label><input type="radio" name="Q2-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-o-3" value="match">일치</label><label><input type="radio" name="Q2-o-3" value="contradict">모순</label><label><input type="radio" name="Q2-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q2-v-3" value="match">일치</label><label><input type="radio" name="Q2-v-3" value="contradict">모순</label><label><input type="radio" name="Q2-v-3" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q3">
 <h2>Q3 <span class="dom">repo</span></h2>
 <p class="q">resume-panel 플러그인에서 이력서 자료가 바뀔 때 프로파일러 에이전트가 자동으로 호출되는 조건이 궁금해. episode-watcher 훅이 어떤 변화 이벤트에 각각 몇 점을 매기고, 어느 누적 점수에 도달하면 프로파일러를 트리거하며, 트리거한 뒤 그 점수는 어떻게 처리돼?</p>
-<details><summary>기준선 (Fable 단독) 답변 — $0.87 · 49초</summary><div class="ans">확인했습니다. 구현은 `plugins/resume/scripts/episode-watcher.mjs` (PostToolUse 훅) 에 있고, 점수는 `.resume-panel/hook-state.json`의 `profiler_score`에 누적됩니다. **임계값은 5점이고, 도달하면 `profiler_trigger` 메시지를 내보낸 뒤 점수를 0으로 리셋합니다.**
+<details><summary>기준선 (Fable 단독) — $0.87 · 49초</summary><div class="ans">확인했습니다. 구현은 `plugins/resume/scripts/episode-watcher.mjs` (PostToolUse 훅) 에 있고, 점수는 `.resume-panel/hook-state.json`의 `profiler_score`에 누적됩니다. **임계값은 5점이고, 도달하면 `profiler_trigger` 메시지를 내보낸 뒤 점수를 0으로 리셋합니다.**
 
 ## 이벤트별 가중치
 
@@ -145,7 +198,63 @@ tiers 플러그인의 deep-research 엔진(`plugins/tiers/skills/deep-research/e
 - 트리거 직후 `hookState.profiler_score = 0`으로 리셋합니다 (`episode-watcher.mjs:759`, AUQ 경로는 `:259`). 점수 사유 이력(`_score_reasons`)은 최근 10개까지 남습니다.
 - 트리거와 함께 결정론적 타임라인 공백 감지도 같이 돌아서, 의도적 공백이 아닌 경력 공백을 MEDIUM finding으로 inbox에 적재합니다 (`episode-watcher.mjs:719-750`).
 
-동작상 뉘앙스 두 가지: **첫 실행**(스냅샷 없음)에는 점수 계산 없이 스냅샷만 저장하고 트리거하지 않습니다 (`episode-watcher.mjs:649-660`). 그리고 resume-source 분기에서 임계값 체크가 so_what 가점(+3)보다 **먼저** 실행되므로, so_what 점수는 이번 체크가 아니라 다음 이벤트의 임계값 판정에 반영됩니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $5.69 · 736초</summary><div class="ans">라운드 2 결과: **확정 반박 0건** — C-2 수정으로 라운드 1 확정 반박이 해소됐습니다. 정보성 지적 2건(C-7, C-12 각 1표)만 남았고, 이는 규정상 강제 수정 근거가 아니라 표시만 합니다(FR-015). 확정 반박이 0이므로 3번째 호출 없이 종료합니다.
+동작상 뉘앙스 두 가지: **첫 실행**(스냅샷 없음)에는 점수 계산 없이 스냅샷만 저장하고 트리거하지 않습니다 (`episode-watcher.mjs:649-660`). 그리고 resume-source 분기에서 임계값 체크가 so_what 가점(+3)보다 **먼저** 실행되므로, so_what 점수는 이번 체크가 아니라 다음 이벤트의 임계값 판정에 반영됩니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.46 · 83초</summary><div class="ans">코드를 직접 확인했습니다. `episode-watcher.mjs`는 PostToolUse 훅으로, 이력서 자료(`resume-source.json`) 변경뿐 아니라 `AskUserQuestion` 호출과 인박스 finding 소비 세 경로에서 점수를 누적합니다. 정리하면 다음과 같습니다.
+
+## 1. 변화 이벤트별 배점
+
+프로파일러 점수(`profiler_score`)는 `hook-state.json`에 누적되며, 세 경로에서 가산됩니다.
+
+**경로 A — `resume-source.json` 변경 감지** (`episode-watcher.mjs:639`~)
+
+`.resume-panel/snapshot.json`(직전 스냅샷)과 현재 자료를 비교해 델타별로 매깁니다.
+
+| 이벤트 | 점수 | 근거 |
+|---|---|---|
+| 에피소드 추가 | **개당 +1** (`episodeDelta`만큼) | `:669` |
+| 새 회사/프로젝트 추가 | **+3** | `:677` |
+| 빈 STAR 증가 (result 등 누락) | **+2** | `:685` |
+| 역할 축소 신호(`도움`·`참여`·`지원`·`보조`·`서포트` 키워드) | **+2** | `:691` |
+| meta 변경(목표 회사/직무 해시 변동) | **+2** | `:697` |
+| so_what(수치 임팩트 없는 얕은 에피소드) | **+3** | `:779` |
+
+**경로 B — `AskUserQuestion` 호출** (`:214`~)
+
+| 이벤트 | 점수 | 근거 |
+|---|---|---|
+| AUQ 1회 | **+1** | `:240` |
+| 직전 60초 이내 HIGH finding 존재 시 보너스 | **+2** | `:246` |
+
+**경로 C — 인박스 finding 소비** (`:891`~)
+
+| 이벤트 | 점수 | 근거 |
+|---|---|---|
+| 전달(delivered)된 `perspective_shift` / `contradiction_detected` finding | **+3** | `:922` |
+
+&gt; 참고: **첫 실행**(스냅샷이 아직 없을 때)은 스냅샷만 저장하고 점수를 매기거나 트리거하지 않습니다(`:649`).
+
+## 2. 트리거 임계값
+
+누적 `profiler_score`가 **5점 이상**(`THRESHOLD = 5`)에 도달하면 프로파일러를 트리거합니다.
+
+- 경로 A: `:702`~`:703` — `profiler_score &gt;= 5`이면 `profiler_trigger` 페이로드를 emit하고, 함께 **timeline gap 탐지**(공백 기간 검출 → 인박스 적재)와 **패턴 분석 자격 추적**도 결정론적으로 실행합니다(`:719`~`:757`).
+- 경로 B: `:252` — AUQ 경로에서도 동일하게 `profiler_score &gt;= 5`이면 `profiler_trigger`를 emit합니다.
+
+emit되는 payload에는 이번 델타 사유(`delta`), 트리거 시점의 누적 점수(`score`), 에피소드/프로젝트 수, `pattern_eligible`(에피소드 ≥3 &amp;&amp; 회사 ≥2) 등이 담겨 오케스트레이터의 `additionalContext`로 주입됩니다.
+
+## 3. 트리거 후 점수 처리
+
+트리거 직후 **`profiler_score = 0`으로 리셋**됩니다 (경로 A `:759`, 경로 B `:259`).
+
+단, 한 가지 미묘한 순서 효과가 있습니다:
+
+- **so_what의 +3은 임계값 체크·리셋 *이후*에 가산**됩니다(`:763`~`:785`가 `:759` 리셋 뒤에 위치). 따라서 A 경로에서 5점 도달로 트리거·리셋된 같은 실행에서 so_what이 잡히면, 점수는 0이 아니라 **3으로 남아 다음 이벤트로 이월**됩니다. 이 시점에 재-임계 체크는 하지 않으므로 그 실행에서 다시 트리거되지는 않습니다.
+- 마찬가지로 임계 미달 상태(예: 2점)에서 so_what(+3)이 잡혀 5점이 되어도, so_what 가산 뒤에는 임계 체크가 없어 **그 실행에서는 트리거되지 않고** 다음 `resume-source` 변경이나 AUQ 호출 때 5점 이상으로 트리거됩니다.
+
+점수 사유는 `_score_reasons` 배열에 최근 10개까지만 슬라이딩 보관됩니다(`addProfilerScore`, `:483`~).
+
+---
+
+요약하면: **에피소드+1 / 새 프로젝트+3 / 빈 STAR+2 / 역할축소+2 / meta변경+2 / so_what+3 / AUQ+1 / HIGH직후 AUQ+2 / 중요 finding+3**을 누적해 **5점**에 닿으면 프로파일러를 트리거하고, 트리거 즉시 **0으로 리셋**합니다(다만 so_what 가산은 리셋 뒤라 다음 라운드로 이월될 수 있음).</div></details><details><summary>vet arm (opus + 검증자 3) — $5.69 · 736초</summary><div class="ans">라운드 2 결과: **확정 반박 0건** — C-2 수정으로 라운드 1 확정 반박이 해소됐습니다. 정보성 지적 2건(C-7, C-12 각 1표)만 남았고, 이는 규정상 강제 수정 근거가 아니라 표시만 합니다(FR-015). 확정 반박이 0이므로 3번째 호출 없이 종료합니다.
 
 ---
 
@@ -189,11 +298,11 @@ tiers 플러그인의 deep-research 엔진(`plugins/tiers/skills/deep-research/e
 - **(informational · no forced revision) C-7 [premise-error · 1 vote (logic)] (r2):** &#x27;새 에피소드&#x27; 판정이 실제로는 위치 기반 휴리스틱 — 비(非)말단 프로젝트에 추가 시 오탐/누락. 위 &quot;정확도 주의&quot;로 표시만 하고 C-7 점수/조건 본문은 유지.
 - **(informational · no forced revision) C-12 [premise-error · 1 vote (logic)] (r2):** `so_what` 채점도 동일 위치 휴리스틱을 상속 — 동일 반례. 위 &quot;정확도 주의&quot;에 반영·표시.
 - **Verification cost:** 6 validator calls (r1: 3, r2: 3)</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>누적 점수 임계값 THRESHOLD=5 — 도달 시 profiler_trigger를 emit하고 점수를 0으로 리셋한다</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:702-703,709,759</td><td class="radios"><label><input type="radio" name="Q3-b-1" value="match">일치</label><label><input type="radio" name="Q3-b-1" value="contradict">모순</label><label><input type="radio" name="Q3-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-1" value="match">일치</label><label><input type="radio" name="Q3-v-1" value="contradict">모순</label><label><input type="radio" name="Q3-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>에피소드 N개 증가 → +N, 새 프로젝트 이름 추가 → +3 (getProjectNames로 프로젝트 이름 집합만 비교 — &quot;새 회사&quot;를 독립적으로 감지하지는 않는다)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:667-679 · 345-347</td><td class="radios"><label><input type="radio" name="Q3-b-2" value="match">일치</label><label><input type="radio" name="Q3-b-2" value="contradict">모순</label><label><input type="radio" name="Q3-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-2" value="match">일치</label><label><input type="radio" name="Q3-v-2" value="contradict">모순</label><label><input type="radio" name="Q3-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3a</td><td>빈 STAR 증가 시 +2 (countStarGaps는 situation/task/action/result 중 하나라도 비면 gap으로 센다 — result만이 아니다)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:681-687 · 355-368</td><td class="radios"><label><input type="radio" name="Q3-b-3a" value="match">일치</label><label><input type="radio" name="Q3-b-3a" value="contradict">모순</label><label><input type="radio" name="Q3-b-3a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-3a" value="match">일치</label><label><input type="radio" name="Q3-v-3a" value="contradict">모순</label><label><input type="radio" name="Q3-v-3a" value="unmentioned">무언급</label></td></tr><tr><td>3b</td><td>역할 축소 키워드(도움/참여/지원/보조/서포트) 감지 시 +2</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:689-691,371</td><td class="radios"><label><input type="radio" name="Q3-b-3b" value="match">일치</label><label><input type="radio" name="Q3-b-3b" value="contradict">모순</label><label><input type="radio" name="Q3-b-3b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-3b" value="match">일치</label><label><input type="radio" name="Q3-v-3b" value="contradict">모순</label><label><input type="radio" name="Q3-v-3b" value="unmentioned">무언급</label></td></tr><tr><td>3c</td><td>meta(target_company/position) 변경(해시 불일치) 시 +2</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:695-697 · 349-352</td><td class="radios"><label><input type="radio" name="Q3-b-3c" value="match">일치</label><label><input type="radio" name="Q3-b-3c" value="contradict">모순</label><label><input type="radio" name="Q3-b-3c" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-3c" value="match">일치</label><label><input type="radio" name="Q3-v-3c" value="contradict">모순</label><label><input type="radio" name="Q3-v-3c" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>AskUserQuestion 호출은 별도 핸들러에서 +1 (그 핸들러도 5점 도달 시 emit + 리셋)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:240,252,259</td><td class="radios"><label><input type="radio" name="Q3-b-4" value="match">일치</label><label><input type="radio" name="Q3-b-4" value="contradict">모순</label><label><input type="radio" name="Q3-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-4" value="match">일치</label><label><input type="radio" name="Q3-v-4" value="contradict">모순</label><label><input type="radio" name="Q3-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>가산은 addProfilerScore 헬퍼가 하고 사유는 _score_reasons에 rolling(최근 10개) 누적</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:483-492</td><td class="radios"><label><input type="radio" name="Q3-b-5" value="match">일치</label><label><input type="radio" name="Q3-b-5" value="contradict">모순</label><label><input type="radio" name="Q3-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-5" value="match">일치</label><label><input type="radio" name="Q3-v-5" value="contradict">모순</label><label><input type="radio" name="Q3-v-5" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>누적 점수 임계값 THRESHOLD=5 — 도달 시 profiler_trigger를 emit하고 점수를 0으로 리셋한다</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:702-703,709,759</td><td class="radios"><label><input type="radio" name="Q3-b-1" value="match">일치</label><label><input type="radio" name="Q3-b-1" value="contradict">모순</label><label><input type="radio" name="Q3-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-o-1" value="match">일치</label><label><input type="radio" name="Q3-o-1" value="contradict">모순</label><label><input type="radio" name="Q3-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-1" value="match">일치</label><label><input type="radio" name="Q3-v-1" value="contradict">모순</label><label><input type="radio" name="Q3-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>에피소드 N개 증가 → +N, 새 프로젝트 이름 추가 → +3 (getProjectNames로 프로젝트 이름 집합만 비교 — &quot;새 회사&quot;를 독립적으로 감지하지는 않는다)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:667-679 · 345-347</td><td class="radios"><label><input type="radio" name="Q3-b-2" value="match">일치</label><label><input type="radio" name="Q3-b-2" value="contradict">모순</label><label><input type="radio" name="Q3-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-o-2" value="match">일치</label><label><input type="radio" name="Q3-o-2" value="contradict">모순</label><label><input type="radio" name="Q3-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-2" value="match">일치</label><label><input type="radio" name="Q3-v-2" value="contradict">모순</label><label><input type="radio" name="Q3-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3a</td><td>빈 STAR 증가 시 +2 (countStarGaps는 situation/task/action/result 중 하나라도 비면 gap으로 센다 — result만이 아니다)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:681-687 · 355-368</td><td class="radios"><label><input type="radio" name="Q3-b-3a" value="match">일치</label><label><input type="radio" name="Q3-b-3a" value="contradict">모순</label><label><input type="radio" name="Q3-b-3a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-o-3a" value="match">일치</label><label><input type="radio" name="Q3-o-3a" value="contradict">모순</label><label><input type="radio" name="Q3-o-3a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-3a" value="match">일치</label><label><input type="radio" name="Q3-v-3a" value="contradict">모순</label><label><input type="radio" name="Q3-v-3a" value="unmentioned">무언급</label></td></tr><tr><td>3b</td><td>역할 축소 키워드(도움/참여/지원/보조/서포트) 감지 시 +2</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:689-691,371</td><td class="radios"><label><input type="radio" name="Q3-b-3b" value="match">일치</label><label><input type="radio" name="Q3-b-3b" value="contradict">모순</label><label><input type="radio" name="Q3-b-3b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-o-3b" value="match">일치</label><label><input type="radio" name="Q3-o-3b" value="contradict">모순</label><label><input type="radio" name="Q3-o-3b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-3b" value="match">일치</label><label><input type="radio" name="Q3-v-3b" value="contradict">모순</label><label><input type="radio" name="Q3-v-3b" value="unmentioned">무언급</label></td></tr><tr><td>3c</td><td>meta(target_company/position) 변경(해시 불일치) 시 +2</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:695-697 · 349-352</td><td class="radios"><label><input type="radio" name="Q3-b-3c" value="match">일치</label><label><input type="radio" name="Q3-b-3c" value="contradict">모순</label><label><input type="radio" name="Q3-b-3c" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-o-3c" value="match">일치</label><label><input type="radio" name="Q3-o-3c" value="contradict">모순</label><label><input type="radio" name="Q3-o-3c" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-3c" value="match">일치</label><label><input type="radio" name="Q3-v-3c" value="contradict">모순</label><label><input type="radio" name="Q3-v-3c" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>AskUserQuestion 호출은 별도 핸들러에서 +1 (그 핸들러도 5점 도달 시 emit + 리셋)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:240,252,259</td><td class="radios"><label><input type="radio" name="Q3-b-4" value="match">일치</label><label><input type="radio" name="Q3-b-4" value="contradict">모순</label><label><input type="radio" name="Q3-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-o-4" value="match">일치</label><label><input type="radio" name="Q3-o-4" value="contradict">모순</label><label><input type="radio" name="Q3-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-4" value="match">일치</label><label><input type="radio" name="Q3-v-4" value="contradict">모순</label><label><input type="radio" name="Q3-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>가산은 addProfilerScore 헬퍼가 하고 사유는 _score_reasons에 rolling(최근 10개) 누적</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:483-492</td><td class="radios"><label><input type="radio" name="Q3-b-5" value="match">일치</label><label><input type="radio" name="Q3-b-5" value="contradict">모순</label><label><input type="radio" name="Q3-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-o-5" value="match">일치</label><label><input type="radio" name="Q3-o-5" value="contradict">모순</label><label><input type="radio" name="Q3-o-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q3-v-5" value="match">일치</label><label><input type="radio" name="Q3-v-5" value="contradict">모순</label><label><input type="radio" name="Q3-v-5" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q4">
 <h2>Q4 <span class="dom">repo</span></h2>
 <p class="q">story-spec 플러그인의 인터뷰 방법론은 몇 개의 층으로 나뉘고 각 층은 어떻게 운영돼? 항상 적용되는 층과 사용자가 매번 고르는 층이 각각 몇 개고, 후자는 어떤 식으로 사용자에게 제시되는지 설명해줘.</p>
-<details><summary>기준선 (Fable 단독) 답변 — $0.67 · 52초</summary><div class="ans">story-spec의 인터뷰 방법론은 **2개 층**으로 나뉩니다 (`methodologies/INDEX.md` 기준).
+<details><summary>기준선 (Fable 단독) — $0.67 · 52초</summary><div class="ans">story-spec의 인터뷰 방법론은 **2개 층**으로 나뉩니다 (`methodologies/INDEX.md` 기준).
 
 ## Layer 1 — 메타 자세 (항상 적용, 5개)
 
@@ -223,7 +332,39 @@ tiers 플러그인의 deep-research 엔진(`plugins/tiers/skills/deep-research/e
 
 순위는 고정이 아니라 `category-weights.md`의 가중치로 동적 재정렬됩니다: LOD별 디폴트 1~3순위에 시드 점수(3/2/1점)를 주고, manifest의 앱 카테고리(8종: tool-productivity, game-habit, sensitive-regulated 등)에 따라 방법론별 +1/0/-1을 가산해 상위 3개를 뽑습니다. 예컨대 도구·생산성 앱에서는 Mom Test가, 게임·습관 앱에서는 Laddering이 위로 올라옵니다.
 
-두 가지 운영 규칙도 있습니다: 같은 노드를 재방문하면 manifest에 기록된 `methodology_l*` 값을 default로 다시 제시하고(변경 가능), 방법론 전환은 사용자가 &quot;다른 방법으로&quot;라고 요청할 때만 — AI가 자기 판단으로 멋대로 바꾸지 않습니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $1.93 · 61초</summary><div class="ans">## story-spec 인터뷰 방법론의 층 구조
+두 가지 운영 규칙도 있습니다: 같은 노드를 재방문하면 manifest에 기록된 `methodology_l*` 값을 default로 다시 제시하고(변경 가능), 방법론 전환은 사용자가 &quot;다른 방법으로&quot;라고 요청할 때만 — AI가 자기 판단으로 멋대로 바꾸지 않습니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.68 · 170초</summary><div class="ans">확인 완료. 핵심 사실과 함께 **전제 하나를 바로잡아** 답하겠습니다.
+
+## 먼저: 전제 정정
+
+질문은 &quot;**인터뷰 방법론**이 층으로 나뉜다&quot;고 하셨는데, 실측 결과 **&quot;층위(layer)&quot;로 나뉘는 건 `/spec`의 인터뷰 방법론이 아니라 `vet` 스킬의 규율 세트**입니다.
+
+- `/spec` 인터뷰(`plugins/fableus/skills/spec/SKILL.md`)에는 &quot;층/layer/계층&quot; 프레이밍이 **전혀 없습니다** — 절차 단계(모드 선택 → 사전조사 → 보정 → 인터뷰 → 작성/자가검증 → 인계)로만 기술돼 있습니다.
+- &quot;3층위&quot;라는 표현은 오직 `plugins/fableus/specs/001-vet-v1/spec.md`에만 존재합니다(grep 26곳, 다른 파일엔 없음). 정의상 &quot;**규율 세트(discipline set)**&quot;이지 인터뷰가 아닙니다.
+
+그런데 질문의 나머지 신호(&quot;몇 개의 층&quot;, &quot;항상 적용 vs 매번 고르는&quot;, &quot;후자를 어떻게 제시&quot;)는 이 vet 3층위와 정확히 일치합니다. 그래서 **묻고 계신 대상은 vet의 3층위 규율 세트**로 판단하고 그 기준으로 답합니다.
+
+## vet 규율 세트 — 3개 층위
+
+| 층위 | 이름 | 운영 방식 | 발동 |
+|---|---|---|---|
+| **1** | 항상 켜짐 훅 규율 | SessionStart 훅의 `additionalContext`로 4개 규율(실측·가정선언·전제검증·추천커밋)을 매 세션 주입 | **무조건 자동** (FR-005: 매 SessionStart, 옵트인 요구 금지) |
+| **2** | assume-and-declare 작업 계약 | 자명하지 않은 요청 실행 전 5줄 계약(의도 재진술/조사한 것/남은 가정/완료 기준) 선언 후 확인 안 기다리고 진행 | **기본 켜짐**, 요청이 자명한 턴(대상·할일·완료기준 다 명시 또는 순수 질문)일 때만 생략 (FR-006~008) |
+| **3** | 옵트인 `/vet` 답변 게이트 | 질문 분해 → 전제 실측 → 각 주장에 앵커 `C-n` → 렌즈 3명(전제·논리·의도) 병렬 검증 → 순수 코드 집계(2명+ 동일 앵커·카테고리 = 확정) → 반영 → 최대 1회 재검증 | **사용자 명시 호출로만** (FR-010: 자동 발동 금지) |
+
+## 항상 적용 vs 매번 고르는
+
+- **항상 적용(세션 자동, 사용자 옵트인 불필요): 2개** → 층위 1, 층위 2
+  - 층위 1은 무조건 매 세션, 층위 2는 기본 켜짐이되 자명한 턴만 생략 — 둘 다 &quot;사용자가 고르는&quot; 게 아니라 세션이 알아서 적용.
+- **사용자가 매번 고르는(옵트인): 1개** → 층위 3
+
+## 후자(층위 3)가 사용자에게 제시되는 방식
+
+**슬래시 커맨드 `/vet &lt;질문&gt;`** 형태로 노출됩니다(스킬 `vet`, FR-010). 자동 트리거는 명시적으로 **금지**돼 있어서, 사용자가 고위험이라고 판단한 턴에 **직접 `/vet`를 타이핑해 발동**하는 방식으로만 켜집니다.
+
+이 설계에는 알려진 사각이 명시돼 있습니다(spec.md:106-107): &quot;고위험 턴인데 `/vet` 부를 생각을 못 하는&quot; 경우 옵트인이라 못 잡으므로, **층위 1·2가 그 안전망** 역할을 합니다 — 그래서 v1은 3층위를 전부 배포합니다.
+
+---
+참고로, 만약 진짜로 `/spec`의 **인터뷰 방법론** 쪽(모드 선택·보정 probe·라이브 대시보드·한 질문 인터뷰 등)이 궁금하셨던 거라면 그건 층위 구조가 아닌 다른 틀이라 별도로 설명드리겠습니다.</div></details><details><summary>vet arm (opus + 검증자 3) — $1.93 · 61초</summary><div class="ans">## story-spec 인터뷰 방법론의 층 구조
 
 **몇 개 층인가 — 2개 층입니다.**
 
@@ -279,11 +420,11 @@ Miracle Question, JTBD Switch, Mom Test, MICE Quotient, Tetralemma, Socratic, To
 - **(informational · 강제 수정 아님)** C-11 [logic-flaw · 1표 (logic)]: &quot;Layer 2 선택이 반복되는 LOD는 6단계다&quot;라는 서술이 L1·L2를 반례로 갖는 과잉 일반화라는 지적 — L1·L2는 앱 전체에 1회 정의(반복 아님), L3~L6만 노드마다 반복. 1표 informational이라 초안을 강제 수정하지 않았으나(FR-015), 위 답변 마지막 문단에 해당 구분을 명시해 정확성을 보완했습니다.
 - **확정 반박 0건** — 나머지 C-1~C-10 및 수치(2개 층 / 5개 / 17개 / 4옵션)는 2표 합의 반박 없이 통과. 재검증 미실행(SC-003).
 - Verification cost: 3 validator calls (r1: 3, r2: 0)</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>방법론은 2층: Layer 1 메타 자세(전 단계 상시 적용) + Layer 2 전문 도구(매 LOD 진입 시 선택)</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:3-6</td><td class="radios"><label><input type="radio" name="Q4-b-1" value="match">일치</label><label><input type="radio" name="Q4-b-1" value="contradict">모순</label><label><input type="radio" name="Q4-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-1" value="match">일치</label><label><input type="radio" name="Q4-v-1" value="contradict">모순</label><label><input type="radio" name="Q4-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>Layer 1은 5개(Clean Language·OARS·Yes-And·Bloom 게이지·System 1/2), 사용자에게 옵션으로 노출하지 않는다</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:12-22</td><td class="radios"><label><input type="radio" name="Q4-b-2" value="match">일치</label><label><input type="radio" name="Q4-b-2" value="contradict">모순</label><label><input type="radio" name="Q4-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-2" value="match">일치</label><label><input type="radio" name="Q4-v-2" value="contradict">모순</label><label><input type="radio" name="Q4-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>Layer 2는 17개이며 매 LOD 진입 시 1-3순위 + &quot;직접 입력&quot;으로 제시, 1순위에 ⭐</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:26 · 6 · 67-69</td><td class="radios"><label><input type="radio" name="Q4-b-3" value="match">일치</label><label><input type="radio" name="Q4-b-3" value="contradict">모순</label><label><input type="radio" name="Q4-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-3" value="match">일치</label><label><input type="radio" name="Q4-v-3" value="contradict">모순</label><label><input type="radio" name="Q4-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>LOD별 추천 1-3순위는 카테고리 가중치(category-weights.md)로 동적 조정된다</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:8</td><td class="radios"><label><input type="radio" name="Q4-b-4" value="match">일치</label><label><input type="radio" name="Q4-b-4" value="contradict">모순</label><label><input type="radio" name="Q4-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-4" value="match">일치</label><label><input type="radio" name="Q4-v-4" value="contradict">모순</label><label><input type="radio" name="Q4-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>AI는 자기 판단으로 방법론을 멋대로 전환하지 않고, 사용자가 &quot;다른 방법으로&quot; 요청할 때만 전환</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:81</td><td class="radios"><label><input type="radio" name="Q4-b-5" value="match">일치</label><label><input type="radio" name="Q4-b-5" value="contradict">모순</label><label><input type="radio" name="Q4-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-5" value="match">일치</label><label><input type="radio" name="Q4-v-5" value="contradict">모순</label><label><input type="radio" name="Q4-v-5" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>방법론은 2층: Layer 1 메타 자세(전 단계 상시 적용) + Layer 2 전문 도구(매 LOD 진입 시 선택)</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:3-6</td><td class="radios"><label><input type="radio" name="Q4-b-1" value="match">일치</label><label><input type="radio" name="Q4-b-1" value="contradict">모순</label><label><input type="radio" name="Q4-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-o-1" value="match">일치</label><label><input type="radio" name="Q4-o-1" value="contradict">모순</label><label><input type="radio" name="Q4-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-1" value="match">일치</label><label><input type="radio" name="Q4-v-1" value="contradict">모순</label><label><input type="radio" name="Q4-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>Layer 1은 5개(Clean Language·OARS·Yes-And·Bloom 게이지·System 1/2), 사용자에게 옵션으로 노출하지 않는다</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:12-22</td><td class="radios"><label><input type="radio" name="Q4-b-2" value="match">일치</label><label><input type="radio" name="Q4-b-2" value="contradict">모순</label><label><input type="radio" name="Q4-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-o-2" value="match">일치</label><label><input type="radio" name="Q4-o-2" value="contradict">모순</label><label><input type="radio" name="Q4-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-2" value="match">일치</label><label><input type="radio" name="Q4-v-2" value="contradict">모순</label><label><input type="radio" name="Q4-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>Layer 2는 17개이며 매 LOD 진입 시 1-3순위 + &quot;직접 입력&quot;으로 제시, 1순위에 ⭐</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:26 · 6 · 67-69</td><td class="radios"><label><input type="radio" name="Q4-b-3" value="match">일치</label><label><input type="radio" name="Q4-b-3" value="contradict">모순</label><label><input type="radio" name="Q4-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-o-3" value="match">일치</label><label><input type="radio" name="Q4-o-3" value="contradict">모순</label><label><input type="radio" name="Q4-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-3" value="match">일치</label><label><input type="radio" name="Q4-v-3" value="contradict">모순</label><label><input type="radio" name="Q4-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>LOD별 추천 1-3순위는 카테고리 가중치(category-weights.md)로 동적 조정된다</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:8</td><td class="radios"><label><input type="radio" name="Q4-b-4" value="match">일치</label><label><input type="radio" name="Q4-b-4" value="contradict">모순</label><label><input type="radio" name="Q4-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-o-4" value="match">일치</label><label><input type="radio" name="Q4-o-4" value="contradict">모순</label><label><input type="radio" name="Q4-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-4" value="match">일치</label><label><input type="radio" name="Q4-v-4" value="contradict">모순</label><label><input type="radio" name="Q4-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>AI는 자기 판단으로 방법론을 멋대로 전환하지 않고, 사용자가 &quot;다른 방법으로&quot; 요청할 때만 전환</td><td class="ev">plugins/story-spec/skills/story-spec/methodologies/INDEX.md:81</td><td class="radios"><label><input type="radio" name="Q4-b-5" value="match">일치</label><label><input type="radio" name="Q4-b-5" value="contradict">모순</label><label><input type="radio" name="Q4-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-o-5" value="match">일치</label><label><input type="radio" name="Q4-o-5" value="contradict">모순</label><label><input type="radio" name="Q4-o-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q4-v-5" value="match">일치</label><label><input type="radio" name="Q4-v-5" value="contradict">모순</label><label><input type="radio" name="Q4-v-5" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q5">
 <h2>Q5 <span class="dom">repo</span></h2>
 <p class="q">tiers 플러그인의 /tiers:ultracode 스킬은 멀티 에이전트 오케스트레이션에서 서브에이전트 모델을 어떻게 정해? 역할별로 티어를 다르게 두는지, 티어 값은 어디서 읽고 설정이 없으면 무엇으로 폴백하는지, 그리고 각 agent 호출이 지켜야 하는 계약이 뭔지 알려줘.</p>
-<details><summary>기준선 (Fable 단독) 답변 — $0.68 · 88초</summary><div class="ans">`plugins/tiers/skills/ultracode/SKILL.md`를 직접 확인했습니다. 질문하신 네 가지 모두 스킬 파일에 명시돼 있어서 그대로 정리해 드립니다. (참고: 질문에 &quot;ultracode&quot; 키워드가 있어 하네스가 멀티 에이전트 오케스트레이션 옵트인으로 감지했지만, 이건 스킬 이름을 언급하신 것이고 실제 작업은 파일 하나를 읽는 조회라 워크플로 없이 직접 확인했습니다.)
+<details><summary>기준선 (Fable 단독) — $0.68 · 88초</summary><div class="ans">`plugins/tiers/skills/ultracode/SKILL.md`를 직접 확인했습니다. 질문하신 네 가지 모두 스킬 파일에 명시돼 있어서 그대로 정리해 드립니다. (참고: 질문에 &quot;ultracode&quot; 키워드가 있어 하네스가 멀티 에이전트 오케스트레이션 옵트인으로 감지했지만, 이건 스킬 이름을 언급하신 것이고 실제 작업은 파일 하나를 읽는 조회라 워크플로 없이 직접 확인했습니다.)
 
 ## 서브에이전트 모델 결정 방식: 단일 고정 티어
 
@@ -303,7 +444,42 @@ Miracle Question, JTBD Switch, Mom Test, MICE Quotient, Tetralemma, Socratic, To
 - `meta.phases` 항목에도 `model: &quot;&lt;MODEL&gt;&quot;`을 미러링해서 진행 UI에 티어가 보이게 해야 합니다.
 - 그 외 표준 Workflow 규칙은 그대로 적용됩니다: 패턴·스케일은 작업에 맞게 선택(pipeline 우선, adversarial verify, loop-until-dry 등), 최종 결과는 `return`으로 반환(`log()` 출력은 반환값이 아님), 조용한 상한(silent cap) 금지 — 버린 건 `log()`로 알리기, `isolation`은 병렬 에이전트가 파일을 변경할 때만 문자열 `&#x27;worktree&#x27;`로.
 
-워크플로가 끝난 뒤에는 메인 루프에서 결과를 종합해 주고, 어떤 티어로 실행됐는지 한 줄로 밝히는 것까지가 스킬의 마무리 규칙입니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $1.76 · 298초</summary><div class="ans">round 1 검증이 끝났습니다. **확정 반박(confirmed) 0건** → 초안이 즉시 확정됩니다(재검증 생략, SC-003). 정보성 반박 1건(C-1, logic 렌즈 단독 1표)은 표시 전용이며 강제 수정 대상이 아닙니다(FR-015).
+워크플로가 끝난 뒤에는 메인 루프에서 결과를 종합해 주고, 어떤 티어로 실행됐는지 한 줄로 밝히는 것까지가 스킬의 마무리 규칙입니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.32 · 67초</summary><div class="ans">`plugins/tiers/skills/ultracode/SKILL.md`를 직접 읽고 답합니다. (참고로 &quot;ultracode&quot;가 이번 턴에 Workflow 오케스트레이션 옵트인으로 잡혔지만, 이건 스킬 *사용* 요청이 아니라 스킬 *동작에 대한 질문*이라 워크플로를 돌리지 않고 파일 근거로 직접 설명합니다.)
+
+## 1. 역할별로 티어를 다르게 두는가 → 아니오, 완전 균일
+
+`/tiers:ultracode`의 존재 이유 자체가 &quot;모든 서브에이전트를 하나의 고정 티어로&quot; 돌리는 것입니다. 역할 분화가 명시적으로 금지돼 있습니다.
+
+- worker·verifier·synthesizer 전부 동일 (`SKILL.md:10` — &quot;There are no per-role tiers in this skill … all identical&quot;)
+- &quot;mechanical&quot; 단계 다운그레이드, &quot;hard&quot; 단계 업그레이드, 단계별 티어링 발명 전부 금지 — &quot;One tier for every agent, period.&quot; (`SKILL.md:32`)
+- 일반 ultracode 키워드 가이드가 같은 턴에 발동해도, 티어 선택은 **이 계약이 이긴다** (`SKILL.md:10`)
+
+## 2. 티어 값을 어디서 읽고, 없으면 무엇으로 폴백하는가
+
+**읽는 곳:** `${CLAUDE_PLUGIN_DATA}/ultracode.json` → `{model, effort}` (`SKILL.md:14`)
+
+**폴백:** 파일이 없거나 읽을 수 없으면 → `{&quot;model&quot;:&quot;opus&quot;,&quot;effort&quot;:&quot;xhigh&quot;}` (`SKILL.md:15`)
+
+**해석 순서 (인자 있는 실행 경로, `SKILL.md:24`):**
+1. config에서 티어 확정 (없으면 위 폴백)
+2. 그 뒤 **선행 오버라이드 토큰**을 적용 — 맨 앞의 bare 토큰이
+   - `opus|sonnet|haiku|fable` → MODEL 교체
+   - `low|medium|high|xhigh|max` → EFFORT 교체
+3. 이 토큰들을 떼어낸 나머지가 TASK
+
+이 오버라이드는 그 호출 1회에만 적용되고 config 파일은 바꾸지 않습니다. 기본 티어 변경은 별도로 `/tiers:ultracode setup`을 거쳐야 하며, 그때만 `ultracode.json`에 write합니다 (`SKILL.md:42-49`). 그리고 워크플로 런칭 직전, 확정된 티어를 한 줄로 표시해 사용자가 끼어들 수 있게 합니다 (예: &quot;티어: opus/xhigh&quot;, `SKILL.md:27`).
+
+## 3. 각 `agent()` 호출이 지켜야 하는 계약 (`SKILL.md:29-33`)
+
+- **모든 `agent()` 호출은 정확히 `{model: MODEL, effort: EFFORT}` 두 키를 다 실어야 한다 — 예외 없음.** `model`이 빠지면 조용히 세션 모델(비싼 쪽)을 상속하는데, 이 스킬이 막으려는 바로 그 실패 모드다.
+- **균일성이 기능이다** — 단계별 티어링 금지 (위 1번과 동일).
+- **`meta.phases` 항목에도 티어를 미러링**한다 (`model: &quot;&lt;MODEL&gt;&quot;`) — 진행 UI에 티어가 보이도록.
+
+여기에 표준 Workflow 규칙도 그대로 유지됩니다 (`SKILL.md:35-40`): 패턴/스케일은 작업에 맞춰 평소처럼(pipeline 우선, adversarial verify, loop-until-dry 등), 최종 결과 객체를 `return`(=`log()` 출력은 반환값 아님), 누락은 `log()`로 명시(silent cap 금지), `isolation`은 병렬 에이전트가 파일을 변경할 때만 문자열 `&#x27;worktree&#x27;`.
+
+---
+
+한 줄 요약: **config(`${CLAUDE_PLUGIN_DATA}/ultracode.json`) 한 곳에서 읽은 단일 `{model,effort}`를 모든 에이전트에 똑같이 박고**(없으면 `opus/xhigh` 폴백, 선행 토큰으로 1회성 오버라이드 가능), 계약의 핵심은 &quot;**빠짐없이 두 키를 명시해 세션 모델 상속을 차단**하고 역할 불문 균일 티어를 강제&quot;하는 것입니다.</div></details><details><summary>vet arm (opus + 검증자 3) — $1.76 · 298초</summary><div class="ans">round 1 검증이 끝났습니다. **확정 반박(confirmed) 0건** → 초안이 즉시 확정됩니다(재검증 생략, SC-003). 정보성 반박 1건(C-1, logic 렌즈 단독 1표)은 표시 전용이며 강제 수정 대상이 아닙니다(FR-015).
 
 ---
 
@@ -340,11 +516,11 @@ ultracode에는 역할별 티어가 **없습니다**. worker·verifier·synthesi
 - **No changes (0 confirmed rebuttals)** — 초안 C-1~C-11 그대로 확정.
 - (informational · no forced revision) **C-1 [premise-error · 1 vote (logic)]**: &quot;config에 저장된 단 하나의 고정 티어로 실행된다&quot;는 표현이 폴백·오버라이드 출처를 뭉뚱그렸다는 지적(SKILL.md:15 폴백, :24 오버라이드, C-6의 현재 config 부재와 긴장). 1표라 강제 수정 아님 — 다만 위 §3에서 우선순위를 `config → 폴백 → 오버라이드`로 명시해 전체 답변 차원에서 이미 해소됨.
 - Verification cost: **3 validator calls (r1: 3, r2: 0)**</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1a</td><td>모든 서브에이전트가 하나의 고정 티어로 실행 — 세션 모델도, 자기 비용 판단도 아니다</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:10</td><td class="radios"><label><input type="radio" name="Q5-b-1a" value="match">일치</label><label><input type="radio" name="Q5-b-1a" value="contradict">모순</label><label><input type="radio" name="Q5-b-1a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-1a" value="match">일치</label><label><input type="radio" name="Q5-v-1a" value="contradict">모순</label><label><input type="radio" name="Q5-v-1a" value="unmentioned">무언급</label></td></tr><tr><td>1b</td><td>역할별 티어 구분이 없다 — worker·verifier·synthesizer 모두 동일 티어</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:10</td><td class="radios"><label><input type="radio" name="Q5-b-1b" value="match">일치</label><label><input type="radio" name="Q5-b-1b" value="contradict">모순</label><label><input type="radio" name="Q5-b-1b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-1b" value="match">일치</label><label><input type="radio" name="Q5-v-1b" value="contradict">모순</label><label><input type="radio" name="Q5-v-1b" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>티어는 ${CLAUDE_PLUGIN_DATA}/ultracode.json의 {model, effort}에서 읽는다</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:14</td><td class="radios"><label><input type="radio" name="Q5-b-2" value="match">일치</label><label><input type="radio" name="Q5-b-2" value="contradict">모순</label><label><input type="radio" name="Q5-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-2" value="match">일치</label><label><input type="radio" name="Q5-v-2" value="contradict">모순</label><label><input type="radio" name="Q5-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>파일이 없거나 못 읽으면 {&quot;model&quot;:&quot;opus&quot;,&quot;effort&quot;:&quot;xhigh&quot;}로 폴백</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:15</td><td class="radios"><label><input type="radio" name="Q5-b-3" value="match">일치</label><label><input type="radio" name="Q5-b-3" value="contradict">모순</label><label><input type="radio" name="Q5-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-3" value="match">일치</label><label><input type="radio" name="Q5-v-3" value="contradict">모순</label><label><input type="radio" name="Q5-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>모든 agent() 호출은 정확히 {model, effort} 두 키를 실어야 하며, model 누락 시 값비싼 세션 모델을 조용히 상속한다</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:31</td><td class="radios"><label><input type="radio" name="Q5-b-4" value="match">일치</label><label><input type="radio" name="Q5-b-4" value="contradict">모순</label><label><input type="radio" name="Q5-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-4" value="match">일치</label><label><input type="radio" name="Q5-v-4" value="contradict">모순</label><label><input type="radio" name="Q5-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>균일성이 핵심 — 단계별로 티어를 올리거나 내리지 않는다</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:32</td><td class="radios"><label><input type="radio" name="Q5-b-5" value="match">일치</label><label><input type="radio" name="Q5-b-5" value="contradict">모순</label><label><input type="radio" name="Q5-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-5" value="match">일치</label><label><input type="radio" name="Q5-v-5" value="contradict">모순</label><label><input type="radio" name="Q5-v-5" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1a</td><td>모든 서브에이전트가 하나의 고정 티어로 실행 — 세션 모델도, 자기 비용 판단도 아니다</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:10</td><td class="radios"><label><input type="radio" name="Q5-b-1a" value="match">일치</label><label><input type="radio" name="Q5-b-1a" value="contradict">모순</label><label><input type="radio" name="Q5-b-1a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-o-1a" value="match">일치</label><label><input type="radio" name="Q5-o-1a" value="contradict">모순</label><label><input type="radio" name="Q5-o-1a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-1a" value="match">일치</label><label><input type="radio" name="Q5-v-1a" value="contradict">모순</label><label><input type="radio" name="Q5-v-1a" value="unmentioned">무언급</label></td></tr><tr><td>1b</td><td>역할별 티어 구분이 없다 — worker·verifier·synthesizer 모두 동일 티어</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:10</td><td class="radios"><label><input type="radio" name="Q5-b-1b" value="match">일치</label><label><input type="radio" name="Q5-b-1b" value="contradict">모순</label><label><input type="radio" name="Q5-b-1b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-o-1b" value="match">일치</label><label><input type="radio" name="Q5-o-1b" value="contradict">모순</label><label><input type="radio" name="Q5-o-1b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-1b" value="match">일치</label><label><input type="radio" name="Q5-v-1b" value="contradict">모순</label><label><input type="radio" name="Q5-v-1b" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>티어는 ${CLAUDE_PLUGIN_DATA}/ultracode.json의 {model, effort}에서 읽는다</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:14</td><td class="radios"><label><input type="radio" name="Q5-b-2" value="match">일치</label><label><input type="radio" name="Q5-b-2" value="contradict">모순</label><label><input type="radio" name="Q5-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-o-2" value="match">일치</label><label><input type="radio" name="Q5-o-2" value="contradict">모순</label><label><input type="radio" name="Q5-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-2" value="match">일치</label><label><input type="radio" name="Q5-v-2" value="contradict">모순</label><label><input type="radio" name="Q5-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>파일이 없거나 못 읽으면 {&quot;model&quot;:&quot;opus&quot;,&quot;effort&quot;:&quot;xhigh&quot;}로 폴백</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:15</td><td class="radios"><label><input type="radio" name="Q5-b-3" value="match">일치</label><label><input type="radio" name="Q5-b-3" value="contradict">모순</label><label><input type="radio" name="Q5-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-o-3" value="match">일치</label><label><input type="radio" name="Q5-o-3" value="contradict">모순</label><label><input type="radio" name="Q5-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-3" value="match">일치</label><label><input type="radio" name="Q5-v-3" value="contradict">모순</label><label><input type="radio" name="Q5-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>모든 agent() 호출은 정확히 {model, effort} 두 키를 실어야 하며, model 누락 시 값비싼 세션 모델을 조용히 상속한다</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:31</td><td class="radios"><label><input type="radio" name="Q5-b-4" value="match">일치</label><label><input type="radio" name="Q5-b-4" value="contradict">모순</label><label><input type="radio" name="Q5-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-o-4" value="match">일치</label><label><input type="radio" name="Q5-o-4" value="contradict">모순</label><label><input type="radio" name="Q5-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-4" value="match">일치</label><label><input type="radio" name="Q5-v-4" value="contradict">모순</label><label><input type="radio" name="Q5-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>균일성이 핵심 — 단계별로 티어를 올리거나 내리지 않는다</td><td class="ev">plugins/tiers/skills/ultracode/SKILL.md:32</td><td class="radios"><label><input type="radio" name="Q5-b-5" value="match">일치</label><label><input type="radio" name="Q5-b-5" value="contradict">모순</label><label><input type="radio" name="Q5-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-o-5" value="match">일치</label><label><input type="radio" name="Q5-o-5" value="contradict">모순</label><label><input type="radio" name="Q5-o-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q5-v-5" value="match">일치</label><label><input type="radio" name="Q5-v-5" value="contradict">모순</label><label><input type="radio" name="Q5-v-5" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q6">
 <h2>Q6 <span class="dom">repo</span></h2>
 <p class="q">resume-panel 플러그인은 세션 컨텍스트가 커져 compact가 임박했을 때 작업 맥락이 끊기지 않도록 어떤 훅 장치를 두고 있어? 어떤 훅 이벤트에서 무슨 기준으로 경고를 발행하고, 토큰 양은 어떻게 추정하며, 중복 경고는 어떻게 억제하고, compact 직후에는 저장해둔 맥락을 어떻게 다시 불러오는지 설명해줘.</p>
-<details><summary>기준선 (Fable 단독) 답변 — $1.03 · 106초</summary><div class="ans">확인 완료했습니다. 정확히는 `resume` 플러그인의 `resume-panel` 스킬로, compact 브릿지 장치는 훅 스크립트 하나(`episode-watcher.mjs`)와 브릿지 파일 하나(`.resume-panel/current-focus.md`)로 구성됩니다. 훅은 `hooks/hooks.json`에서 UserPromptSubmit / PreCompact / SessionStart / PostToolUse 네 이벤트에 같은 스크립트로 등록돼 있고, 그중 앞의 세 이벤트가 compact 브릿지를 담당합니다.
+<details><summary>기준선 (Fable 단독) — $1.03 · 106초</summary><div class="ans">확인 완료했습니다. 정확히는 `resume` 플러그인의 `resume-panel` 스킬로, compact 브릿지 장치는 훅 스크립트 하나(`episode-watcher.mjs`)와 브릿지 파일 하나(`.resume-panel/current-focus.md`)로 구성됩니다. 훅은 `hooks/hooks.json`에서 UserPromptSubmit / PreCompact / SessionStart / PostToolUse 네 이벤트에 같은 스크립트로 등록돼 있고, 그중 앞의 세 이벤트가 compact 브릿지를 담당합니다.
 
 ## 전체 그림
 
@@ -378,7 +554,81 @@ ultracode에는 역할별 티어가 **없습니다**. worker·verifier·synthesi
 
 storage.md에 정의된 스키마대로 Claude가 작성하며, 담는 것은 **휘발성 작업 메모리만**입니다: 활성 라운드/회사/페르소나, 검증 중인 클레임 1–3개, 다음 턴에 하려던 액션, 미해결 sub-thread 체크리스트, 직전 4–5턴 압축(200–400자). STAR 데이터나 finding 같은 영속 데이터는 이미 다른 파일에 있으므로 중복 기재 금지 규칙이 있습니다. 파일은 별도 정리 없이 다음 compact-resume 사이클에서 자동으로 덮어써집니다.
 
-요약하면: **UserPromptSubmit(250k 임계, 파일크기÷4 추정) → 경고 발행(5분 de-bounce) → Claude가 current-focus.md 저장 → PreCompact가 미저장/stale 시 backstop → compact → SessionStart(source=compact, 세션 일치+30분 이내)가 원문 재주입**의 사이클입니다. 문서(hook-protocol.md §compaction_warning)와 실제 구현이 일치하는 것도 확인했습니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $2.0 · 40초</summary><div class="ans">검증 완료: 3명 검증자 전부 성공(`unverified: false`), **확정 반박 0건**. 초안이 그대로 최종본입니다. 재검증은 돌리지 않습니다(SC-003).
+요약하면: **UserPromptSubmit(250k 임계, 파일크기÷4 추정) → 경고 발행(5분 de-bounce) → Claude가 current-focus.md 저장 → PreCompact가 미저장/stale 시 backstop → compact → SessionStart(source=compact, 세션 일치+30분 이내)가 원문 재주입**의 사이클입니다. 문서(hook-protocol.md §compaction_warning)와 실제 구현이 일치하는 것도 확인했습니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.53 · 107초</summary><div class="ans">코드까지 확인 완료했습니다. 문서(`hook-protocol.md`)와 실제 구현(`episode-watcher.mjs`)을 대조한 결과를 정리합니다.
+
+## 요약
+
+resume-panel은 **하나의 스크립트(`scripts/episode-watcher.mjs`)를 4개 훅 이벤트에 배선**해두고, 그중 `UserPromptSubmit`·`PreCompact`·`SessionStart` 세 이벤트가 compact 브릿지를 담당합니다. `hooks/hooks.json`을 보면 네 이벤트(PostToolUse·UserPromptSubmit·PreCompact·SessionStart)가 전부 같은 노드 스크립트를 부르고, 스크립트 안에서 `input.hook_event_name`으로 분기합니다.
+
+핵심은 **&quot;저장은 Claude가, 감시·재주입은 훅이&quot;** 라는 역할 분담입니다. 훅은 `current-focus.md`를 절대 직접 쓰지 않고 읽기·신선도 판정·재주입만 합니다.
+
+---
+
+## 1. 경고 발행 — 두 경로
+
+### (A) UserPromptSubmit: 토큰 임계치 권고 (`episode-watcher.mjs:67-94`)
+
+매 사용자 발화마다 transcript 크기로 토큰을 추정해 **250,000 토큰 이상**이면 `compaction_warning`을 `additionalContext`로 주입합니다.
+
+```
+type: &quot;compaction_warning&quot;, tokens_estimate, threshold: 250000
+message: &quot;…current-focus.md를 …스키마대로 저장하고, 사용자에게 &#x27;/compact 권고&#x27; 한 줄 안내해라.&quot;
+```
+
+### (B) PreCompact: backstop (`episode-watcher.mjs:99-125`)
+
+실제 compact가 임박한 시점(사용자가 `/compact` 또는 자동 compact)에서, 저장된 focus가 **없거나 오래됐으면** `backstop: true` 메시지를 주입합니다. &quot;지금이라도 즉시 저장하고 compact 진행&quot;이라는 최후 방어선입니다. (A)에서 이미 저장됐으면 여기서는 조용히 넘어갑니다.
+
+즉 임계치 권고(A)를 놓치거나 무시하고 진행돼도, compact 직전(B)이 한 번 더 잡아주는 **이중 안전망** 구조입니다.
+
+---
+
+## 2. 토큰 추정 방식 (`estimateTokens`, `:624-633`)
+
+정교한 토크나이저가 아니라 **transcript 파일의 바이트 크기 ÷ 4**입니다.
+
+```js
+const { size } = statSync(transcriptPath);
+return Math.floor(size / 4);
+```
+
+`transcript_path`가 없거나 파일이 없거나 `statSync` 실패 시 `0`을 반환 → 그 턴은 경고 없이 통과. &quot;바이트≈4byte/token&quot; 가정에 기댄 값싼 근사이며, 실제 토큰과는 오차가 있는 휴리스틱입니다.
+
+---
+
+## 3. 중복 경고 억제 (de-bounce)
+
+두 경로 모두 **`current-focus.md`의 `saved_at`이 5분 이내면 발행하지 않습니다.**
+
+- **UserPromptSubmit** (`:71-78`): focus가 있고 `saved_at`이 `0 ≤ age &lt; 5분`이면 `suppress = true` → 경고 스킵. 즉 방금 저장했으면 매 발화마다 250k를 넘겨도 다시 조르지 않습니다.
+- **PreCompact** (`:104-108`): 같은 5분 창이면 `needsBackstop = false` → backstop 스킵.
+
+신선도 판정은 `saved_at`을 `Date` 파싱해 `Date.now()`와의 차를 쓰며, `ageMs`가 `Number.isFinite &amp;&amp; ≥0` 검사를 통과해야 유효(미래 타임스탬프·파싱 실패 방어). `readCurrentFocus`(`:598-622`)는 `session_id`/`saved_at` 파싱이 실패하면 파일을 `.bak`으로 백업하고 `null`을 반환 — 이 경우 focus 없음으로 간주되어 경고는 다시 뜹니다.
+
+---
+
+## 4. compact 직후 재로드 (`SessionStart`, `:127-151`)
+
+compact가 끝나고 새 세션이 시작될 때, 저장해둔 맥락을 **`additionalContext`로 자동 재주입**합니다. 다음 4개 가드를 모두 통과해야 주입됩니다:
+
+1. `input.source === &quot;compact&quot;` — compact로 인한 시작일 때만 (일반 시작이면 즉시 종료)
+2. `current-focus.md`가 존재 (`readCurrentFocus`)
+3. **`focus.session_id === input.session_id`** — 다른 세션의 focus를 잘못 끌어오지 않도록 세션 일치 검증
+4. **`saved_at`이 30분 이내** (`age ≤ 30 * 60_000`) — 너무 오래된 맥락은 재주입 안 함
+
+통과하면 파싱한 필드가 아니라 **원문 마크다운 전체(`focus.raw`)를 그대로 주입**하며, 다른 메시지와 달리 `[resume-panel]` 프리픽스가 붙지 않습니다(오케스트레이터가 `JSON.parse`하지 않고 그대로 컨텍스트로 읽음). Claude는 별도 동작 없이 다음 사용자 발화에 이어서 작업을 계속합니다.
+
+주의: 억제(3번)는 신선도 창이 **5분**, 재로드(4번)는 **30분**으로 서로 다릅니다. 저장 직후 5분은 조르지 않되, compact 후 재주입은 30분까지 유효한 맥락으로 인정하는 설계입니다.
+
+---
+
+## 검증 중 발견한 문서–코드 드리프트 (참고)
+
+`hook-protocol.md` §6은 UserPromptSubmit 발행 메시지에 `&quot;backstop&quot;: false`가 들어간다고 적었지만, 실제 코드(`:80-85`)는 UserPromptSubmit 경로에서 `backstop` 필드를 **아예 넣지 않습니다**(PreCompact만 `backstop: true`를 명시). 값이 `false`든 `undefined`든 falsy라 분기 동작에는 차이가 없지만, 문서의 예시 JSON은 실제 페이로드와 정확히 일치하지는 않습니다. 기능적 버그는 아니고 문서 표기상의 사소한 불일치입니다.
+
+---
+
+**남은 가정**: `references/storage.md`의 current-focus.md 스키마 전문은 열어보지 않았고, 훅이 파싱하는 필드(`session_id`/`saved_at`/`turn`)만 코드에서 확인했습니다. 실제 저장 본문 스키마(무엇을 요약해 담는지)가 궁금하시면 `storage.md`의 §current-focus.md를 이어서 확인해 드리겠습니다.</div></details><details><summary>vet arm (opus + 검증자 3) — $2.0 · 40초</summary><div class="ans">검증 완료: 3명 검증자 전부 성공(`unverified: false`), **확정 반박 0건**. 초안이 그대로 최종본입니다. 재검증은 돌리지 않습니다(SC-003).
 
 ---
 
@@ -430,11 +680,11 @@ resume-panel은 세션 컨텍스트가 커져 `/compact`가 임박했을 때 작
 ## Change log (/vet)
 - No changes (0 confirmed rebuttals)
 - Verification cost: 3 validator calls (r1: 3, r2: 0)</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>UserPromptSubmit 훅에서 추정 토큰이 TOKEN_THRESHOLD=250,000 이상이면 compaction_warning을 emit</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:68-94</td><td class="radios"><label><input type="radio" name="Q6-b-1" value="match">일치</label><label><input type="radio" name="Q6-b-1" value="contradict">모순</label><label><input type="radio" name="Q6-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-1" value="match">일치</label><label><input type="radio" name="Q6-v-1" value="contradict">모순</label><label><input type="radio" name="Q6-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>토큰 추정은 transcript 파일 크기 ÷ 4 (statSync size / 4)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:624-633</td><td class="radios"><label><input type="radio" name="Q6-b-2" value="match">일치</label><label><input type="radio" name="Q6-b-2" value="contradict">모순</label><label><input type="radio" name="Q6-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-2" value="match">일치</label><label><input type="radio" name="Q6-v-2" value="contradict">모순</label><label><input type="radio" name="Q6-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>current-focus.md가 5분 이내에 저장돼 있으면 경고를 suppress(디바운스)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:73-78</td><td class="radios"><label><input type="radio" name="Q6-b-3" value="match">일치</label><label><input type="radio" name="Q6-b-3" value="contradict">모순</label><label><input type="radio" name="Q6-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-3" value="match">일치</label><label><input type="radio" name="Q6-v-3" value="contradict">모순</label><label><input type="radio" name="Q6-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>PreCompact 훅은 backstop — current-focus.md가 없거나 5분 이상 stale이면 경고 발행</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:99-125</td><td class="radios"><label><input type="radio" name="Q6-b-4" value="match">일치</label><label><input type="radio" name="Q6-b-4" value="contradict">모순</label><label><input type="radio" name="Q6-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-4" value="match">일치</label><label><input type="radio" name="Q6-v-4" value="contradict">모순</label><label><input type="radio" name="Q6-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5a</td><td>SessionStart 훅은 source==&quot;compact&quot;일 때만 재주입을 진행한다(아니면 즉시 종료)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:129</td><td class="radios"><label><input type="radio" name="Q6-b-5a" value="match">일치</label><label><input type="radio" name="Q6-b-5a" value="contradict">모순</label><label><input type="radio" name="Q6-b-5a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-5a" value="match">일치</label><label><input type="radio" name="Q6-v-5a" value="contradict">모순</label><label><input type="radio" name="Q6-v-5a" value="unmentioned">무언급</label></td></tr><tr><td>5b</td><td>저장된 focus의 session_id가 현재 세션 session_id와 일치해야 한다</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:136</td><td class="radios"><label><input type="radio" name="Q6-b-5b" value="match">일치</label><label><input type="radio" name="Q6-b-5b" value="contradict">모순</label><label><input type="radio" name="Q6-b-5b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-5b" value="match">일치</label><label><input type="radio" name="Q6-v-5b" value="contradict">모순</label><label><input type="radio" name="Q6-v-5b" value="unmentioned">무언급</label></td></tr><tr><td>5c</td><td>저장(saved_at) 후 30분 이내일 때만 유효(age &gt; 30분이면 종료)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:139-140</td><td class="radios"><label><input type="radio" name="Q6-b-5c" value="match">일치</label><label><input type="radio" name="Q6-b-5c" value="contradict">모순</label><label><input type="radio" name="Q6-b-5c" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-5c" value="match">일치</label><label><input type="radio" name="Q6-v-5c" value="contradict">모순</label><label><input type="radio" name="Q6-v-5c" value="unmentioned">무언급</label></td></tr><tr><td>5d</td><td>위 조건 충족 시 current-focus.md 원문(raw markdown)을 additionalContext로 재주입하되 [resume-panel] 프리픽스는 붙이지 않는다</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:143-149 · plugins/resume/skills/resume-panel/references/hook-protocol.md:129</td><td class="radios"><label><input type="radio" name="Q6-b-5d" value="match">일치</label><label><input type="radio" name="Q6-b-5d" value="contradict">모순</label><label><input type="radio" name="Q6-b-5d" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-5d" value="match">일치</label><label><input type="radio" name="Q6-v-5d" value="contradict">모순</label><label><input type="radio" name="Q6-v-5d" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>UserPromptSubmit 훅에서 추정 토큰이 TOKEN_THRESHOLD=250,000 이상이면 compaction_warning을 emit</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:68-94</td><td class="radios"><label><input type="radio" name="Q6-b-1" value="match">일치</label><label><input type="radio" name="Q6-b-1" value="contradict">모순</label><label><input type="radio" name="Q6-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-o-1" value="match">일치</label><label><input type="radio" name="Q6-o-1" value="contradict">모순</label><label><input type="radio" name="Q6-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-1" value="match">일치</label><label><input type="radio" name="Q6-v-1" value="contradict">모순</label><label><input type="radio" name="Q6-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>토큰 추정은 transcript 파일 크기 ÷ 4 (statSync size / 4)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:624-633</td><td class="radios"><label><input type="radio" name="Q6-b-2" value="match">일치</label><label><input type="radio" name="Q6-b-2" value="contradict">모순</label><label><input type="radio" name="Q6-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-o-2" value="match">일치</label><label><input type="radio" name="Q6-o-2" value="contradict">모순</label><label><input type="radio" name="Q6-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-2" value="match">일치</label><label><input type="radio" name="Q6-v-2" value="contradict">모순</label><label><input type="radio" name="Q6-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>current-focus.md가 5분 이내에 저장돼 있으면 경고를 suppress(디바운스)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:73-78</td><td class="radios"><label><input type="radio" name="Q6-b-3" value="match">일치</label><label><input type="radio" name="Q6-b-3" value="contradict">모순</label><label><input type="radio" name="Q6-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-o-3" value="match">일치</label><label><input type="radio" name="Q6-o-3" value="contradict">모순</label><label><input type="radio" name="Q6-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-3" value="match">일치</label><label><input type="radio" name="Q6-v-3" value="contradict">모순</label><label><input type="radio" name="Q6-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>PreCompact 훅은 backstop — current-focus.md가 없거나 5분 이상 stale이면 경고 발행</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:99-125</td><td class="radios"><label><input type="radio" name="Q6-b-4" value="match">일치</label><label><input type="radio" name="Q6-b-4" value="contradict">모순</label><label><input type="radio" name="Q6-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-o-4" value="match">일치</label><label><input type="radio" name="Q6-o-4" value="contradict">모순</label><label><input type="radio" name="Q6-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-4" value="match">일치</label><label><input type="radio" name="Q6-v-4" value="contradict">모순</label><label><input type="radio" name="Q6-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5a</td><td>SessionStart 훅은 source==&quot;compact&quot;일 때만 재주입을 진행한다(아니면 즉시 종료)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:129</td><td class="radios"><label><input type="radio" name="Q6-b-5a" value="match">일치</label><label><input type="radio" name="Q6-b-5a" value="contradict">모순</label><label><input type="radio" name="Q6-b-5a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-o-5a" value="match">일치</label><label><input type="radio" name="Q6-o-5a" value="contradict">모순</label><label><input type="radio" name="Q6-o-5a" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-5a" value="match">일치</label><label><input type="radio" name="Q6-v-5a" value="contradict">모순</label><label><input type="radio" name="Q6-v-5a" value="unmentioned">무언급</label></td></tr><tr><td>5b</td><td>저장된 focus의 session_id가 현재 세션 session_id와 일치해야 한다</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:136</td><td class="radios"><label><input type="radio" name="Q6-b-5b" value="match">일치</label><label><input type="radio" name="Q6-b-5b" value="contradict">모순</label><label><input type="radio" name="Q6-b-5b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-o-5b" value="match">일치</label><label><input type="radio" name="Q6-o-5b" value="contradict">모순</label><label><input type="radio" name="Q6-o-5b" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-5b" value="match">일치</label><label><input type="radio" name="Q6-v-5b" value="contradict">모순</label><label><input type="radio" name="Q6-v-5b" value="unmentioned">무언급</label></td></tr><tr><td>5c</td><td>저장(saved_at) 후 30분 이내일 때만 유효(age &gt; 30분이면 종료)</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:139-140</td><td class="radios"><label><input type="radio" name="Q6-b-5c" value="match">일치</label><label><input type="radio" name="Q6-b-5c" value="contradict">모순</label><label><input type="radio" name="Q6-b-5c" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-o-5c" value="match">일치</label><label><input type="radio" name="Q6-o-5c" value="contradict">모순</label><label><input type="radio" name="Q6-o-5c" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-5c" value="match">일치</label><label><input type="radio" name="Q6-v-5c" value="contradict">모순</label><label><input type="radio" name="Q6-v-5c" value="unmentioned">무언급</label></td></tr><tr><td>5d</td><td>위 조건 충족 시 current-focus.md 원문(raw markdown)을 additionalContext로 재주입하되 [resume-panel] 프리픽스는 붙이지 않는다</td><td class="ev">plugins/resume/scripts/episode-watcher.mjs:143-149 · plugins/resume/skills/resume-panel/references/hook-protocol.md:129</td><td class="radios"><label><input type="radio" name="Q6-b-5d" value="match">일치</label><label><input type="radio" name="Q6-b-5d" value="contradict">모순</label><label><input type="radio" name="Q6-b-5d" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-o-5d" value="match">일치</label><label><input type="radio" name="Q6-o-5d" value="contradict">모순</label><label><input type="radio" name="Q6-o-5d" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q6-v-5d" value="match">일치</label><label><input type="radio" name="Q6-v-5d" value="contradict">모순</label><label><input type="radio" name="Q6-v-5d" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q7">
 <h2>Q7 <span class="dom">public</span></h2>
 <p class="q">Claude Code의 훅(hooks) 시스템에 대해 설명해줘. 훅은 설정에서 어떤 구조로 등록하고, command 타입 훅은 이벤트 데이터를 어떻게 전달받아? 훅이 어떤 종료 코드로 동작을 차단하는지, 그리고 PreToolUse·PostToolUse·UserPromptSubmit·SessionStart·PreCompact가 각각 언제 발화하는지 알려줘.</p>
-<details><summary>기준선 (Fable 단독) 답변 — $1.72 · 99초</summary><div class="ans"># Claude Code 훅(hooks) 시스템
+<details><summary>기준선 (Fable 단독) — $1.72 · 99초</summary><div class="ans"># Claude Code 훅(hooks) 시스템
 
 ## 1. 등록 구조
 
@@ -508,7 +758,114 @@ exit code보다 정밀한 제어가 필요하면 exit 0으로 stdout에 **JSON�
 - **SessionStart** — 새 세션 시작 또는 재개 시. `source`로 신규 시작(`startup`), 재개(`resume`), `/clear` 후, compact 후를 구분합니다.
 - **PreCompact** — 컨텍스트 압축(compaction) **직전**. `trigger`가 `manual`이면 `/compact` 명령, `auto`면 컨텍스트 윈도우가 차서 자동 실행되는 경우입니다.
 
-참고로 훅 편집 후에는 `/hooks` 메뉴를 열거나 재시작해야 반영되는 경우가 있고, 디버깅은 `claude --debug`로 훅 실행 로그를 보는 게 가장 빠릅니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $1.99 · 42초</summary><div class="ans">검증 완료 — **확정 반박 0건** (검증자 3명 중 앵커+카테고리 2표 합의에 도달한 반박 없음). 초안이 그대로 최종안입니다. 재검증은 생략합니다(SC-003).
+참고로 훅 편집 후에는 `/hooks` 메뉴를 열거나 재시작해야 반영되는 경우가 있고, 디버깅은 `claude --debug`로 훅 실행 로그를 보는 게 가장 빠릅니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.49 · 110초</summary><div class="ans">공식 문서로 확인했습니다. 아래는 검증된 내용을 정리한 것입니다.
+
+# Claude Code 훅(Hooks) 시스템
+
+훅은 세션 수명주기의 특정 지점에서 **셸 명령을 자동 실행**하는 메커니즘입니다. Claude가 판단해서 실행하는 게 아니라, **하네스(Claude Code 런타임)가 결정론적으로** 실행합니다 — 그래서 &quot;항상 X 하라&quot; 같은 규칙을 확실하게 강제할 수 있습니다.
+
+## 1. 설정 등록 구조 (3단계 중첩)
+
+`settings.json`(또는 `.claude/settings.json`, `settings.local.json`)의 `hooks` 키 아래에 등록합니다.
+
+```json
+{
+  &quot;hooks&quot;: {
+    &quot;PreToolUse&quot;: [
+      {
+        &quot;matcher&quot;: &quot;Bash&quot;,
+        &quot;hooks&quot;: [
+          {
+            &quot;type&quot;: &quot;command&quot;,
+            &quot;command&quot;: &quot;${CLAUDE_PROJECT_DIR}/.claude/hooks/block-rm.sh&quot;,
+            &quot;timeout&quot;: 600
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+계층을 풀어 보면:
+
+| 계층 | 의미 |
+|------|------|
+| `hooks` | 최상위 컨테이너 |
+| `&quot;PreToolUse&quot;` | **이벤트 이름** (발화 시점) |
+| `matcher` | **필터** — 어떤 툴/상황에서 발화할지. 정규식 지원 (`&quot;Bash&quot;`, `&quot;Edit\|Write&quot;`, `&quot;mcp__.*&quot;`) |
+| `hooks[]` | 실제 핸들러 배열 — `type`, `command`, 선택적 `timeout`(초) |
+
+- `matcher`는 이벤트에 따라 의미가 다릅니다. `PreToolUse`/`PostToolUse`는 **툴 이름**으로 매칭하고, `SessionStart`/`PreCompact`는 **발화 원인**(startup/resume, manual/auto 등)으로 매칭합니다.
+- `UserPromptSubmit`처럼 matcher를 지원하지 않는 이벤트는 발생할 때마다 무조건 발화합니다.
+- 현재 `type`은 `&quot;command&quot;`가 사실상 유일합니다.
+
+## 2. command 훅의 이벤트 데이터 전달 — stdin JSON
+
+command 타입 훅은 **stdin으로 JSON을 받습니다**. 훅 스크립트는 `jq` 등으로 이걸 파싱합니다.
+
+**모든 이벤트 공통 필드:**
+```json
+{
+  &quot;session_id&quot;: &quot;abc123&quot;,
+  &quot;transcript_path&quot;: &quot;/.../transcript.jsonl&quot;,
+  &quot;cwd&quot;: &quot;/home/user/my-project&quot;,
+  &quot;permission_mode&quot;: &quot;default&quot;,
+  &quot;hook_event_name&quot;: &quot;PreToolUse&quot;
+}
+```
+
+**이벤트별 추가 필드:**
+
+| 이벤트 | 고유 필드 |
+|--------|-----------|
+| `PreToolUse` | `tool_name`, `tool_input` (실행 **직전**의 인자) |
+| `PostToolUse` | `tool_name`, `tool_input`, `tool_response` (실행 **결과** 포함) |
+| `UserPromptSubmit` | `prompt` (제출된 사용자 입력) |
+| `SessionStart` | `source` (startup/resume/…), `model`, `agent_type` |
+
+예를 들어 `rm -rf`를 차단하는 훅은 stdin에서 `.tool_input.command`를 꺼내 검사합니다:
+```bash
+COMMAND=$(jq -r &#x27;.tool_input.command&#x27;)
+```
+
+## 3. 종료 코드와 차단 동작
+
+| 종료 코드 | 동작 |
+|-----------|------|
+| **0** | 성공. stdout에서 JSON 출력 필드를 파싱. 대부분 이벤트는 stdout이 디버그 로그로만 감. **단, `UserPromptSubmit`·`SessionStart`는 stdout이 Claude의 컨텍스트로 주입됨** |
+| **2** | **차단 에러**. stdout(및 그 안의 JSON)은 무시하고, **stderr를 Claude에게 에러 메시지로 되먹임**. 실제 차단 여부는 이벤트별로 다름(아래) |
+| 그 외(1 포함) | **비차단 에러**. 실행은 그대로 진행되고 stderr는 디버그 로그로만 감 |
+
+⚠️ 핵심 함정: **관용적으로 실패를 뜻하는 exit 1은 차단하지 않습니다.** 오직 **exit 2만** 동작을 막습니다.
+
+**exit 2의 이벤트별 실제 효과:**
+
+| 이벤트 | exit 2 결과 |
+|--------|-------------|
+| `PreToolUse` | **툴 호출 차단** |
+| `UserPromptSubmit` | **프롬프트 처리 차단 + 프롬프트 삭제** |
+| `PostToolUse` | Claude에게 stderr 표시 (툴은 이미 실행됨 → 비차단) |
+| `Stop` | Claude가 멈추지 못하게 막고 대화 계속 |
+| `PreCompact` | **압축(compaction) 차단** |
+| `SessionStart` | stderr를 **사용자에게만** 표시 (비차단) |
+
+&gt; 더 정밀한 제어는 exit 0으로 두고 stdout에 JSON을 반환하는 방식입니다. 예: `PreToolUse`에서 `hookSpecificOutput.permissionDecision`을 `&quot;allow&quot;`/`&quot;deny&quot;`/`&quot;ask&quot;`로 반환하면 권한 흐름을 세밀하게 조종할 수 있습니다.
+
+## 4. 각 이벤트 발화 시점
+
+- **PreToolUse** — Claude가 툴 인자를 만든 뒤, **툴이 실행되기 직전**. 여기서 차단·승인 가능. (matcher = 툴 이름)
+- **PostToolUse** — **툴 호출이 성공한 직후**. 결과(`tool_response`)를 검사·후처리. (matcher = 툴 이름)
+- **UserPromptSubmit** — 사용자가 프롬프트를 제출한 뒤 **Claude가 처리하기 전**. 컨텍스트 주입이나 차단에 사용. (matcher 없음, 매번 발화)
+- **SessionStart** — 세션을 **새로 시작하거나 재개할 때**. matcher로 원인 구분:
+  - `startup` (새 세션) · `resume` (`--resume`/`--continue`/`/resume`) · `clear` (`/clear`) · `compact` (압축 발생)
+  - stdout이 컨텍스트로 주입되므로 초기 규칙·상태 로드에 자주 쓰입니다. (이 대화 맨 위의 &quot;fableus 하네스 규칙 / vet 규율&quot; 블록이 바로 이 SessionStart 훅으로 주입된 예시입니다.)
+- **PreCompact** — **컨텍스트 압축이 실행되기 직전**. matcher:
+  - `manual` (`/compact` 수동 호출) · `auto` (컨텍스트 한도 도달 시 자동)
+
+---
+
+**참고 사항 (실측 중 발견):** 문서상 `PreCompact`의 exit 2가 &quot;압축 차단&quot;으로 명시되어 있는데, 이건 제 사전 지식(PreCompact는 비차단)과 달랐던 부분이라 문서 기준으로 정정해 반영했습니다. 또한 이벤트 목록에는 위 5개 외에 `Notification`, `Stop`, `SubagentStop`, `SessionEnd`도 존재합니다(질문 범위 밖이라 표에만 일부 포함). 세부 스키마는 버전에 따라 필드가 추가될 수 있습니다(예: `prompt_id`는 v2.1.196+).</div></details><details><summary>vet arm (opus + 검증자 3) — $1.99 · 42초</summary><div class="ans">검증 완료 — **확정 반박 0건** (검증자 3명 중 앵커+카테고리 2표 합의에 도달한 반박 없음). 초안이 그대로 최종안입니다. 재검증은 생략합니다(SC-003).
 
 ---
 
@@ -600,11 +957,11 @@ JSON에는 **공통 필드** `session_id`, `transcript_path`, `cwd`, `hook_event
 ## Change log (/vet)
 - **No changes (0 confirmed rebuttals)** — 렌즈 분산 검증자 3명이 18개 앵커(C-1~C-18)를 검증했으나 (앵커+카테고리) 2표 합의에 도달한 반박이 없어 초안이 그대로 최종안이 됨.
 - Verification cost: **3 validator calls** (r1: 3, r2: 0 — 재검증 미실행)</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>훅은 설정의 최상위 &quot;hooks&quot; 객체 아래 이벤트 이름별로 등록하고, PreToolUse/PostToolUse는 matcher로 대상 도구를 선택한다</td><td class="ev">https://code.claude.com/docs/en/hooks (Hook configuration)</td><td class="radios"><label><input type="radio" name="Q7-b-1" value="match">일치</label><label><input type="radio" name="Q7-b-1" value="contradict">모순</label><label><input type="radio" name="Q7-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-1" value="match">일치</label><label><input type="radio" name="Q7-v-1" value="contradict">모순</label><label><input type="radio" name="Q7-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>command 타입 훅은 셸 명령을 실행하며 이벤트 데이터를 JSON으로 stdin에서 받는다</td><td class="ev">https://code.claude.com/docs/en/hooks (Hook Types)</td><td class="radios"><label><input type="radio" name="Q7-b-2" value="match">일치</label><label><input type="radio" name="Q7-b-2" value="contradict">모순</label><label><input type="radio" name="Q7-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-2" value="match">일치</label><label><input type="radio" name="Q7-v-2" value="contradict">모순</label><label><input type="radio" name="Q7-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>command 훅의 종료 코드 2는 blocking error — stderr가 Claude에 피드백되고 동작이 차단된다(exit 0 = 성공)</td><td class="ev">https://code.claude.com/docs/en/hooks (Exit Codes)</td><td class="radios"><label><input type="radio" name="Q7-b-3" value="match">일치</label><label><input type="radio" name="Q7-b-3" value="contradict">모순</label><label><input type="radio" name="Q7-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-3" value="match">일치</label><label><input type="radio" name="Q7-v-3" value="contradict">모순</label><label><input type="radio" name="Q7-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>PreToolUse는 도구 호출 실행 전, PostToolUse는 도구 호출 성공 후에 발화한다</td><td class="ev">https://code.claude.com/docs/en/hooks (All Hook Events)</td><td class="radios"><label><input type="radio" name="Q7-b-4" value="match">일치</label><label><input type="radio" name="Q7-b-4" value="contradict">모순</label><label><input type="radio" name="Q7-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-4" value="match">일치</label><label><input type="radio" name="Q7-v-4" value="contradict">모순</label><label><input type="radio" name="Q7-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>UserPromptSubmit는 프롬프트 제출 직후·Claude 처리 전, SessionStart는 세션 시작/재개 시, PreCompact는 컨텍스트 compaction 직전에 발화</td><td class="ev">https://code.claude.com/docs/en/hooks (All Hook Events)</td><td class="radios"><label><input type="radio" name="Q7-b-5" value="match">일치</label><label><input type="radio" name="Q7-b-5" value="contradict">모순</label><label><input type="radio" name="Q7-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-5" value="match">일치</label><label><input type="radio" name="Q7-v-5" value="contradict">모순</label><label><input type="radio" name="Q7-v-5" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>훅은 설정의 최상위 &quot;hooks&quot; 객체 아래 이벤트 이름별로 등록하고, PreToolUse/PostToolUse는 matcher로 대상 도구를 선택한다</td><td class="ev">https://code.claude.com/docs/en/hooks (Hook configuration)</td><td class="radios"><label><input type="radio" name="Q7-b-1" value="match">일치</label><label><input type="radio" name="Q7-b-1" value="contradict">모순</label><label><input type="radio" name="Q7-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-o-1" value="match">일치</label><label><input type="radio" name="Q7-o-1" value="contradict">모순</label><label><input type="radio" name="Q7-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-1" value="match">일치</label><label><input type="radio" name="Q7-v-1" value="contradict">모순</label><label><input type="radio" name="Q7-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>command 타입 훅은 셸 명령을 실행하며 이벤트 데이터를 JSON으로 stdin에서 받는다</td><td class="ev">https://code.claude.com/docs/en/hooks (Hook Types)</td><td class="radios"><label><input type="radio" name="Q7-b-2" value="match">일치</label><label><input type="radio" name="Q7-b-2" value="contradict">모순</label><label><input type="radio" name="Q7-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-o-2" value="match">일치</label><label><input type="radio" name="Q7-o-2" value="contradict">모순</label><label><input type="radio" name="Q7-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-2" value="match">일치</label><label><input type="radio" name="Q7-v-2" value="contradict">모순</label><label><input type="radio" name="Q7-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>command 훅의 종료 코드 2는 blocking error — stderr가 Claude에 피드백되고 동작이 차단된다(exit 0 = 성공)</td><td class="ev">https://code.claude.com/docs/en/hooks (Exit Codes)</td><td class="radios"><label><input type="radio" name="Q7-b-3" value="match">일치</label><label><input type="radio" name="Q7-b-3" value="contradict">모순</label><label><input type="radio" name="Q7-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-o-3" value="match">일치</label><label><input type="radio" name="Q7-o-3" value="contradict">모순</label><label><input type="radio" name="Q7-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-3" value="match">일치</label><label><input type="radio" name="Q7-v-3" value="contradict">모순</label><label><input type="radio" name="Q7-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>PreToolUse는 도구 호출 실행 전, PostToolUse는 도구 호출 성공 후에 발화한다</td><td class="ev">https://code.claude.com/docs/en/hooks (All Hook Events)</td><td class="radios"><label><input type="radio" name="Q7-b-4" value="match">일치</label><label><input type="radio" name="Q7-b-4" value="contradict">모순</label><label><input type="radio" name="Q7-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-o-4" value="match">일치</label><label><input type="radio" name="Q7-o-4" value="contradict">모순</label><label><input type="radio" name="Q7-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-4" value="match">일치</label><label><input type="radio" name="Q7-v-4" value="contradict">모순</label><label><input type="radio" name="Q7-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>UserPromptSubmit는 프롬프트 제출 직후·Claude 처리 전, SessionStart는 세션 시작/재개 시, PreCompact는 컨텍스트 compaction 직전에 발화</td><td class="ev">https://code.claude.com/docs/en/hooks (All Hook Events)</td><td class="radios"><label><input type="radio" name="Q7-b-5" value="match">일치</label><label><input type="radio" name="Q7-b-5" value="contradict">모순</label><label><input type="radio" name="Q7-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-o-5" value="match">일치</label><label><input type="radio" name="Q7-o-5" value="contradict">모순</label><label><input type="radio" name="Q7-o-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q7-v-5" value="match">일치</label><label><input type="radio" name="Q7-v-5" value="contradict">모순</label><label><input type="radio" name="Q7-v-5" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q8">
 <h2>Q8 <span class="dom">public</span></h2>
 <p class="q">Claude Code가 읽는 settings.json은 어떤 위치들에 있고 각각 어떤 범위에 적용돼? 사용자·프로젝트·로컬·관리(managed) 설정 파일의 경로를 각각 알려주고, 같은 설정이 여러 곳에 있을 때 어느 것이 우선하는지 우선순위 순서를 설명해줘.</p>
-<details><summary>기준선 (Fable 단독) 답변 — $1.46 · 47초</summary><div class="ans">## settings.json 위치와 적용 범위
+<details><summary>기준선 (Fable 단독) — $1.46 · 47초</summary><div class="ans">## settings.json 위치와 적용 범위
 
 Claude Code는 네 계층의 settings.json을 읽습니다:
 
@@ -627,7 +984,35 @@ Claude Code는 네 계층의 settings.json을 읽습니다:
 - **관리(managed) 설정은 항상 최상위**라 사용자·프로젝트·로컬·CLI 플래그 어느 것으로도 뒤집을 수 없습니다. 기업 정책용 키들(`availableModels`, `allowManagedHooksOnly`, `strictKnownMarketplaces` 등)은 아예 관리 설정에서만 인식됩니다.
 - 단순 덮어쓰기가 아닌 예외도 일부 있습니다. 예: `permissions`의 allow/deny 배열이나 `allowedMcpServers` 같은 목록형 정책 키는 소스 간 병합되고, `disableClaudeAiConnectors`처럼 &quot;어느 소스든 true면 승리&quot;인 키도 있습니다.
 
-참고로 이 머신에서 실측한 결과, 현재는 `~/.claude/settings.json`(사용자 설정)만 존재하고 이 프로젝트의 프로젝트·로컬·관리 설정 파일은 없습니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $2.5 · 33초</summary><div class="ans">round 2 재검증 결과 **확정 반박 0건, 정보성 0건** — verbatim 근거로 보강한 개정안이 세 검증자를 모두 통과했습니다. 최종 답변을 전달합니다.
+참고로 이 머신에서 실측한 결과, 현재는 `~/.claude/settings.json`(사용자 설정)만 존재하고 이 프로젝트의 프로젝트·로컬·관리 설정 파일은 없습니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.24 · 41초</summary><div class="ans">확인 결과: 이 머신에는 `~/.claude/settings.json`만 실제로 존재하고, 프로젝트/로컬/managed 파일은 없습니다. 아래는 Claude Code가 읽는 전체 계층입니다.
+
+## settings.json 파일 위치와 적용 범위
+
+| 종류 | 경로 | 적용 범위 | VCS 커밋 |
+|------|------|-----------|----------|
+| **User (사용자)** | `~/.claude/settings.json` | 해당 사용자의 **모든 프로젝트** | — |
+| **Project (프로젝트 공유)** | `&lt;프로젝트&gt;/.claude/settings.json` | 그 프로젝트, **팀 전체 공유** | ✅ 커밋함 |
+| **Project Local (로컬)** | `&lt;프로젝트&gt;/.claude/settings.local.json` | 그 프로젝트, **나 개인만** | ❌ (자동 gitignore) |
+| **Managed (관리/엔터프라이즈)** | OS별 관리 정책 경로 (아래) | 시스템 전체, **관리자가 배포** | — |
+
+**Managed(managed-settings.json) 경로는 OS마다 다릅니다:**
+- macOS: `/Library/Application Support/ClaudeCode/managed-settings.json`
+- Linux / WSL: `/etc/claude-code/managed-settings.json`
+- Windows: `C:\ProgramData\ClaudeCode\managed-settings.json`
+
+&gt; 이 머신(darwin) 실측: `~/.claude/settings.json`만 존재. 프로젝트 `.claude/settings.json`·`.local.json`·macOS managed 파일은 없습니다.
+
+## 우선순위 (같은 설정이 겹칠 때, 높음 → 낮음)
+
+1. **Managed (관리 정책)** — 가장 강함. 관리자가 강제하며 사용자가 덮어쓸 수 없음
+2. **명령줄 인자** (`--` 플래그 등, 세션 한정)
+3. **Project Local** — `.claude/settings.local.json`
+4. **Project 공유** — `.claude/settings.json`
+5. **User** — `~/.claude/settings.json` — 가장 약함 (기본값 역할)
+
+즉 **좁은 범위(로컬 &gt; 프로젝트 &gt; 사용자)일수록 우선**하되, 그 위에 **managed 정책이 모든 것을 눌러 이깁니다**. 예를 들어 같은 permission 규칙이 사용자·프로젝트·로컬에 다 있으면 로컬 값이 실제로 적용되고, managed에 금지 정책이 있으면 나머지가 뭐라 하든 managed가 이깁니다.
+
+참고로 `enterpriseManagedPolicy` 같은 정책 항목은 오직 managed 파일에서만 의미가 있고, 하위 파일에 넣어도 무시됩니다. 특정 설정을 어디에 둘지(예: &quot;이 permission을 사용자 전역으로 옮겨줘&quot;) 실제로 바꾸시려면 `/update-config`로 처리해 드릴 수 있습니다.</div></details><details><summary>vet arm (opus + 검증자 3) — $2.5 · 33초</summary><div class="ans">round 2 재검증 결과 **확정 반박 0건, 정보성 0건** — verbatim 근거로 보강한 개정안이 세 검증자를 모두 통과했습니다. 최종 답변을 전달합니다.
 
 ---
 
@@ -679,11 +1064,11 @@ Claude Code는 여러 위치의 설정을 읽어 **병합**하며, 각 파일은
 
 ### 검증 노트 (투명성)
 round 1의 확정 반박(C-4·C-6)은 검증자들이 스스로 &quot;repo에서 확인 불가&quot;라며 **저장소 내 벤치 답안 키(`items.md`)와 구버전 지식**에 앵커링한 데서 나왔습니다. /vet의 최상위 원칙인 **실측 우선**에 따라 라이브 공식 문서를 verbatim 재측정한 결과 원래 주장이 옳았고, 오히려 답안 키가 stale함이 드러났습니다. 그래서 반박에 굴복해 답을 틀리게(레거시 경로로) 바꾸는 대신 **요구된 근거를 보강**하는 방향으로 개정했고, round 2에서 확정 반박 0건으로 수렴했습니다.</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>사용자 설정: ~/.claude/settings.json (모든 프로젝트 적용)</td><td class="ev">https://code.claude.com/docs/en/settings (File Locations)</td><td class="radios"><label><input type="radio" name="Q8-b-1" value="match">일치</label><label><input type="radio" name="Q8-b-1" value="contradict">모순</label><label><input type="radio" name="Q8-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-1" value="match">일치</label><label><input type="radio" name="Q8-v-1" value="contradict">모순</label><label><input type="radio" name="Q8-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>프로젝트: .claude/settings.json (소스 컨트롤 공유), 로컬: .claude/settings.local.json (gitignore, 커밋 안 함)</td><td class="ev">https://code.claude.com/docs/en/settings (File Locations)</td><td class="radios"><label><input type="radio" name="Q8-b-2" value="match">일치</label><label><input type="radio" name="Q8-b-2" value="contradict">모순</label><label><input type="radio" name="Q8-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-2" value="match">일치</label><label><input type="radio" name="Q8-v-2" value="contradict">모순</label><label><input type="radio" name="Q8-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>관리(managed) 경로: macOS /Library/Application Support/ClaudeCode/managed-settings.json, Linux /etc/claude-code/managed-settings.json, Windows C:\Program Files\ClaudeCode\managed-settings.json</td><td class="ev">https://code.claude.com/docs/en/settings (File Locations)</td><td class="radios"><label><input type="radio" name="Q8-b-3" value="match">일치</label><label><input type="radio" name="Q8-b-3" value="contradict">모순</label><label><input type="radio" name="Q8-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-3" value="match">일치</label><label><input type="radio" name="Q8-v-3" value="contradict">모순</label><label><input type="radio" name="Q8-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>우선순위(높음→낮음): Managed &gt; 명령줄 인자 &gt; Local &gt; Project &gt; User</td><td class="ev">https://code.claude.com/docs/en/settings (Precedence Order)</td><td class="radios"><label><input type="radio" name="Q8-b-4" value="match">일치</label><label><input type="radio" name="Q8-b-4" value="contradict">모순</label><label><input type="radio" name="Q8-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-4" value="match">일치</label><label><input type="radio" name="Q8-v-4" value="contradict">모순</label><label><input type="radio" name="Q8-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>Managed 설정은 최상위이며 무엇으로도 덮어쓸 수 없다</td><td class="ev">https://code.claude.com/docs/en/settings (Precedence Order)</td><td class="radios"><label><input type="radio" name="Q8-b-5" value="match">일치</label><label><input type="radio" name="Q8-b-5" value="contradict">모순</label><label><input type="radio" name="Q8-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-5" value="match">일치</label><label><input type="radio" name="Q8-v-5" value="contradict">모순</label><label><input type="radio" name="Q8-v-5" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>사용자 설정: ~/.claude/settings.json (모든 프로젝트 적용)</td><td class="ev">https://code.claude.com/docs/en/settings (File Locations)</td><td class="radios"><label><input type="radio" name="Q8-b-1" value="match">일치</label><label><input type="radio" name="Q8-b-1" value="contradict">모순</label><label><input type="radio" name="Q8-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-o-1" value="match">일치</label><label><input type="radio" name="Q8-o-1" value="contradict">모순</label><label><input type="radio" name="Q8-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-1" value="match">일치</label><label><input type="radio" name="Q8-v-1" value="contradict">모순</label><label><input type="radio" name="Q8-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>프로젝트: .claude/settings.json (소스 컨트롤 공유), 로컬: .claude/settings.local.json (gitignore, 커밋 안 함)</td><td class="ev">https://code.claude.com/docs/en/settings (File Locations)</td><td class="radios"><label><input type="radio" name="Q8-b-2" value="match">일치</label><label><input type="radio" name="Q8-b-2" value="contradict">모순</label><label><input type="radio" name="Q8-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-o-2" value="match">일치</label><label><input type="radio" name="Q8-o-2" value="contradict">모순</label><label><input type="radio" name="Q8-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-2" value="match">일치</label><label><input type="radio" name="Q8-v-2" value="contradict">모순</label><label><input type="radio" name="Q8-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>관리(managed) 경로: macOS /Library/Application Support/ClaudeCode/managed-settings.json, Linux /etc/claude-code/managed-settings.json, Windows C:\Program Files\ClaudeCode\managed-settings.json</td><td class="ev">https://code.claude.com/docs/en/settings (File Locations)</td><td class="radios"><label><input type="radio" name="Q8-b-3" value="match">일치</label><label><input type="radio" name="Q8-b-3" value="contradict">모순</label><label><input type="radio" name="Q8-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-o-3" value="match">일치</label><label><input type="radio" name="Q8-o-3" value="contradict">모순</label><label><input type="radio" name="Q8-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-3" value="match">일치</label><label><input type="radio" name="Q8-v-3" value="contradict">모순</label><label><input type="radio" name="Q8-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>우선순위(높음→낮음): Managed &gt; 명령줄 인자 &gt; Local &gt; Project &gt; User</td><td class="ev">https://code.claude.com/docs/en/settings (Precedence Order)</td><td class="radios"><label><input type="radio" name="Q8-b-4" value="match">일치</label><label><input type="radio" name="Q8-b-4" value="contradict">모순</label><label><input type="radio" name="Q8-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-o-4" value="match">일치</label><label><input type="radio" name="Q8-o-4" value="contradict">모순</label><label><input type="radio" name="Q8-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-4" value="match">일치</label><label><input type="radio" name="Q8-v-4" value="contradict">모순</label><label><input type="radio" name="Q8-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>Managed 설정은 최상위이며 무엇으로도 덮어쓸 수 없다</td><td class="ev">https://code.claude.com/docs/en/settings (Precedence Order)</td><td class="radios"><label><input type="radio" name="Q8-b-5" value="match">일치</label><label><input type="radio" name="Q8-b-5" value="contradict">모순</label><label><input type="radio" name="Q8-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-o-5" value="match">일치</label><label><input type="radio" name="Q8-o-5" value="contradict">모순</label><label><input type="radio" name="Q8-o-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q8-v-5" value="match">일치</label><label><input type="radio" name="Q8-v-5" value="contradict">모순</label><label><input type="radio" name="Q8-v-5" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q9">
 <h2>Q9 <span class="dom">public</span></h2>
 <p class="q">Claude Code 플러그인은 어떤 구성 요소를 담을 수 있고 디렉터리 구조는 어떻게 돼? 매니페스트 파일의 이름과 위치, 스킬·에이전트·훅·MCP 서버가 각각 어디에 놓이는지, 그리고 플러그인 스킬이 어떻게 이름 지어지는지 알려줘.</p>
-<details><summary>기준선 (Fable 단독) 답변 — $0.84 · 90초</summary><div class="ans">확인 끝났습니다. 로컬 저장소(chenjing-plugins의 fableus)와 설치된 플러그인들(codex, agrune, obsidian-skills)의 실제 구조를 실측한 근거로 답합니다.
+<details><summary>기준선 (Fable 단독) — $0.84 · 90초</summary><div class="ans">확인 끝났습니다. 로컬 저장소(chenjing-plugins의 fableus)와 설치된 플러그인들(codex, agrune, obsidian-skills)의 실제 구조를 실측한 근거로 답합니다.
 
 ## 플러그인이 담을 수 있는 구성 요소
 
@@ -733,7 +1118,81 @@ fableus/
 
 트리거링은 SKILL.md frontmatter의 `description`이 담당합니다 — 모델이 이 설명을 보고 스킬을 자동 호출할지 판단하므로, &quot;Use when …&quot; 형태로 쓰는 게 관례입니다.
 
-한 가지 남은 가정: 위 구성 요소 목록은 이 머신에 설치된 플러그인들에서 실측한 범위 기준이라, 최신 Claude Code 버전에서 추가된 요소(예: LSP 서버 설정)가 있다면 목록에 빠져 있을 수 있습니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $1.72 · 69초</summary><div class="ans">검증 완료. **확정 반박 0건**(2표 합의 없음)이므로 초안이 그대로 최종입니다. 재검증은 돌리지 않습니다(SC-003). 검증자가 남긴 1표짜리 정보성 지적 2건은 강제 수정 근거가 아니므로(FR-015) 변경 로그에 투명하게 표시만 합니다.
+한 가지 남은 가정: 위 구성 요소 목록은 이 머신에 설치된 플러그인들에서 실측한 범위 기준이라, 최신 Claude Code 버전에서 추가된 요소(예: LSP 서버 설정)가 있다면 목록에 빠져 있을 수 있습니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.36 · 72초</summary><div class="ans">이 저장소의 실제 플러그인 4개(`fableus`, `resume`, `story-spec`, `tiers`)를 확인한 결과와 Claude Code 플러그인 규격을 합쳐 답합니다.
+
+## 디렉터리 구조 (한 플러그인 기준)
+
+이 저장소의 `fableus` 플러그인에서 실측한 구조입니다:
+
+```
+plugins/fableus/
+├── .claude-plugin/
+│   └── plugin.json        ← 매니페스트 (필수)
+├── skills/
+│   ├── vet/SKILL.md
+│   ├── spec/SKILL.md
+│   └── spec-gate/SKILL.md
+├── agents/
+│   └── cold-reader.md
+├── hooks/
+│   └── hooks.json
+├── commands/              ← (이 저장소엔 없음, 규격상 여기)
+├── .mcp.json             ← (이 저장소엔 없음, 규격상 여기)
+└── README.md
+```
+
+## 매니페스트 파일
+
+- **이름·위치**: `&lt;plugin-root&gt;/.claude-plugin/plugin.json` — 이 저장소 4개 플러그인 모두 정확히 이 경로에 있습니다.
+- **필수 필드**: `name` 하나. 나머지(`description`, `version`, `author`, `homepage`, `repository`, `license`, `keywords`)는 선택.
+- 실측한 `fableus/.claude-plugin/plugin.json`:
+  ```json
+  { &quot;name&quot;: &quot;fableus&quot;, &quot;description&quot;: &quot;...&quot;, &quot;version&quot;: &quot;0.1.5&quot; }
+  ```
+- 주의: `.claude-plugin/` 폴더 안에는 매니페스트만 둡니다. 실제 구성 요소(skills/agents/hooks)는 **플러그인 루트** 아래 각자 폴더에 둡니다.
+
+## 구성 요소별 위치 (기본 규약)
+
+| 요소 | 기본 위치 | 형식 | 이 저장소 실측 |
+|------|-----------|------|------|
+| **Skills** | `skills/&lt;이름&gt;/SKILL.md` | 스킬마다 하위 폴더 + `SKILL.md` | ✅ 확인됨 |
+| **Agents** | `agents/*.md` | 파일 하나당 서브에이전트 | ✅ `agents/cold-reader.md` |
+| **Hooks** | `hooks/hooks.json` | 이벤트→명령 매핑 JSON | ✅ `hooks/hooks.json` (SessionStart) |
+| **Commands** | `commands/*.md` | 파일 하나당 슬래시 명령 | ⚠️ 이 저장소엔 없음 |
+| **MCP servers** | `.mcp.json` (루트) | 서버 정의 JSON | ⚠️ 이 저장소엔 없음 |
+
+**경로 재정의**: 기본 폴더에 두면 자동 탐색되지만, `plugin.json`에 `commands`/`agents`/`hooks`/`mcpServers` 키로 커스텀 경로를 지정할 수도 있습니다. 훅·MCP 정의에서 플러그인 파일을 참조할 땐 `${CLAUDE_PLUGIN_ROOT}` 환경 변수를 씁니다.
+
+## 담을 수 있는 구성 요소
+
+Skills, Agents(서브에이전트), Slash Commands, Hooks, MCP 서버 — 이 5가지를 한 플러그인에 자유롭게 조합합니다. 하나만 담아도 되고(이 저장소 `resume`은 스킬 1개), 여러 종류를 섞어도 됩니다(`fableus`는 skills 3 + agent 1 + hooks).
+
+## 플러그인 스킬 이름 규칙
+
+**`플러그인이름:스킬이름`** 네임스페이스 형식입니다.
+
+- `SKILL.md`의 frontmatter `name`은 짧은 이름만 씁니다 — 실측: `vet/SKILL.md`의 `name: vet`.
+- 호출·표시될 땐 플러그인 이름이 접두어로 붙습니다 → `/fableus:vet`, `fableus:spec`, `fableus:spec-gate`.
+- 이 세션의 사용 가능 스킬 목록에도 `fableus:spec`, `codex:rescue`, `claude-hud:setup`처럼 동일한 `plugin:skill` 형식으로 나타납니다.
+- 덕분에 다른 플러그인이 같은 짧은 이름(`spec` 등)을 써도 충돌하지 않습니다.
+
+## 마켓플레이스 (배포용, 별도 개념)
+
+여러 플러그인을 배포하려면 저장소 루트에 `.claude-plugin/marketplace.json`을 둡니다 (이 저장소가 그 예). 각 플러그인의 `source` 경로와 메타데이터를 나열합니다:
+
+```json
+{
+  &quot;name&quot;: &quot;chenjing-plugins&quot;,
+  &quot;plugins&quot;: [
+    { &quot;name&quot;: &quot;fableus&quot;, &quot;source&quot;: &quot;./plugins/fableus&quot;,
+      &quot;skills&quot;: [&quot;./skills/spec&quot;, &quot;./skills/spec-gate&quot;, &quot;./skills/vet&quot;] }
+  ]
+}
+```
+
+---
+
+**남은 가정**: `commands/`와 `.mcp.json(mcpServers)`의 위치·형식은 이 저장소에 실제 예시가 없어 Claude Code 플러그인 일반 규격에 근거한 것입니다(실측 아님). 나머지(매니페스트 경로·필드, skills/agents/hooks 위치, 스킬 네임스페이스 규칙)는 이 저장소 파일에서 직접 확인했습니다.</div></details><details><summary>vet arm (opus + 검증자 3) — $1.72 · 69초</summary><div class="ans">검증 완료. **확정 반박 0건**(2표 합의 없음)이므로 초안이 그대로 최종입니다. 재검증은 돌리지 않습니다(SC-003). 검증자가 남긴 1표짜리 정보성 지적 2건은 강제 수정 근거가 아니므로(FR-015) 변경 로그에 투명하게 표시만 합니다.
 
 ---
 
@@ -788,11 +1247,11 @@ my-plugin/
 - (informational · no forced revision) **C-4** [logic-flaw · 1 vote (logic)]: &quot;모든 구성요소 디렉터리는 루트에 놓인다&quot;는 포괄 규칙이 레포 내에서 완전 일관되지는 않다는 지적 — resume 플러그인은 에이전트를 `plugins/resume/.claude/agents/`(루트 형제가 아닌 `.claude/` 안)에 둠. 표에 적은 **공식 규칙(`agents/` = 루트)**은 유지하되, resume의 `.claude/agents/`는 비표준 변형(플러그인 에이전트로 자동 로드되지 않을 가능성)임을 함께 밝혀 둡니다.
 - (informational · no forced revision) **C-6** [logic-flaw · 1 vote (logic)]: `agents/&lt;name&gt;.md` 규칙을 fableus 단일 사례로 일반화했다는 지적 — resume는 9개 서브에이전트를 `agents/`가 아닌 `.claude/agents/`에 둠. (위와 같은 레포 내 반례 관찰. 카노니컬 규칙 자체는 불변.)
 - **Verification cost**: 3 validator calls (r1: 3, r2: 0)</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>매니페스트는 플러그인 루트의 .claude-plugin/plugin.json이고, .claude-plugin/ 안에는 plugin.json만 둔다</td><td class="ev">https://code.claude.com/docs/en/plugins (Plugin structure overview)</td><td class="radios"><label><input type="radio" name="Q9-b-1" value="match">일치</label><label><input type="radio" name="Q9-b-1" value="contradict">모순</label><label><input type="radio" name="Q9-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-1" value="match">일치</label><label><input type="radio" name="Q9-v-1" value="contradict">모순</label><label><input type="radio" name="Q9-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>구성 디렉터리는 .claude-plugin/이 아니라 플러그인 루트에 둔다: skills/, agents/, hooks/, commands/</td><td class="ev">https://code.claude.com/docs/en/plugins (Plugin structure overview)</td><td class="radios"><label><input type="radio" name="Q9-b-2" value="match">일치</label><label><input type="radio" name="Q9-b-2" value="contradict">모순</label><label><input type="radio" name="Q9-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-2" value="match">일치</label><label><input type="radio" name="Q9-v-2" value="contradict">모순</label><label><input type="radio" name="Q9-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>스킬은 skills/ 아래 &lt;name&gt;/SKILL.md 디렉터리로 둔다</td><td class="ev">https://code.claude.com/docs/en/plugins (structure table)</td><td class="radios"><label><input type="radio" name="Q9-b-3" value="match">일치</label><label><input type="radio" name="Q9-b-3" value="contradict">모순</label><label><input type="radio" name="Q9-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-3" value="match">일치</label><label><input type="radio" name="Q9-v-3" value="contradict">모순</label><label><input type="radio" name="Q9-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>훅은 hooks/hooks.json에, MCP 서버는 루트의 .mcp.json에 설정한다</td><td class="ev">https://code.claude.com/docs/en/plugins (structure table)</td><td class="radios"><label><input type="radio" name="Q9-b-4" value="match">일치</label><label><input type="radio" name="Q9-b-4" value="contradict">모순</label><label><input type="radio" name="Q9-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-4" value="match">일치</label><label><input type="radio" name="Q9-v-4" value="contradict">모순</label><label><input type="radio" name="Q9-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>플러그인 스킬은 항상 네임스페이스가 붙는다: /plugin-name:skill-name</td><td class="ev">https://code.claude.com/docs/en/plugins (Why namespacing)</td><td class="radios"><label><input type="radio" name="Q9-b-5" value="match">일치</label><label><input type="radio" name="Q9-b-5" value="contradict">모순</label><label><input type="radio" name="Q9-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-5" value="match">일치</label><label><input type="radio" name="Q9-v-5" value="contradict">모순</label><label><input type="radio" name="Q9-v-5" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>매니페스트는 플러그인 루트의 .claude-plugin/plugin.json이고, .claude-plugin/ 안에는 plugin.json만 둔다</td><td class="ev">https://code.claude.com/docs/en/plugins (Plugin structure overview)</td><td class="radios"><label><input type="radio" name="Q9-b-1" value="match">일치</label><label><input type="radio" name="Q9-b-1" value="contradict">모순</label><label><input type="radio" name="Q9-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-o-1" value="match">일치</label><label><input type="radio" name="Q9-o-1" value="contradict">모순</label><label><input type="radio" name="Q9-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-1" value="match">일치</label><label><input type="radio" name="Q9-v-1" value="contradict">모순</label><label><input type="radio" name="Q9-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>구성 디렉터리는 .claude-plugin/이 아니라 플러그인 루트에 둔다: skills/, agents/, hooks/, commands/</td><td class="ev">https://code.claude.com/docs/en/plugins (Plugin structure overview)</td><td class="radios"><label><input type="radio" name="Q9-b-2" value="match">일치</label><label><input type="radio" name="Q9-b-2" value="contradict">모순</label><label><input type="radio" name="Q9-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-o-2" value="match">일치</label><label><input type="radio" name="Q9-o-2" value="contradict">모순</label><label><input type="radio" name="Q9-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-2" value="match">일치</label><label><input type="radio" name="Q9-v-2" value="contradict">모순</label><label><input type="radio" name="Q9-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>스킬은 skills/ 아래 &lt;name&gt;/SKILL.md 디렉터리로 둔다</td><td class="ev">https://code.claude.com/docs/en/plugins (structure table)</td><td class="radios"><label><input type="radio" name="Q9-b-3" value="match">일치</label><label><input type="radio" name="Q9-b-3" value="contradict">모순</label><label><input type="radio" name="Q9-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-o-3" value="match">일치</label><label><input type="radio" name="Q9-o-3" value="contradict">모순</label><label><input type="radio" name="Q9-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-3" value="match">일치</label><label><input type="radio" name="Q9-v-3" value="contradict">모순</label><label><input type="radio" name="Q9-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>훅은 hooks/hooks.json에, MCP 서버는 루트의 .mcp.json에 설정한다</td><td class="ev">https://code.claude.com/docs/en/plugins (structure table)</td><td class="radios"><label><input type="radio" name="Q9-b-4" value="match">일치</label><label><input type="radio" name="Q9-b-4" value="contradict">모순</label><label><input type="radio" name="Q9-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-o-4" value="match">일치</label><label><input type="radio" name="Q9-o-4" value="contradict">모순</label><label><input type="radio" name="Q9-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-4" value="match">일치</label><label><input type="radio" name="Q9-v-4" value="contradict">모순</label><label><input type="radio" name="Q9-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>플러그인 스킬은 항상 네임스페이스가 붙는다: /plugin-name:skill-name</td><td class="ev">https://code.claude.com/docs/en/plugins (Why namespacing)</td><td class="radios"><label><input type="radio" name="Q9-b-5" value="match">일치</label><label><input type="radio" name="Q9-b-5" value="contradict">모순</label><label><input type="radio" name="Q9-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-o-5" value="match">일치</label><label><input type="radio" name="Q9-o-5" value="contradict">모순</label><label><input type="radio" name="Q9-o-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q9-v-5" value="match">일치</label><label><input type="radio" name="Q9-v-5" value="contradict">모순</label><label><input type="radio" name="Q9-v-5" value="unmentioned">무언급</label></td></tr></table>
 </section><section id="Q10">
 <h2>Q10 <span class="dom">public</span></h2>
 <p class="q">Claude Code의 CLAUDE.md 메모리 파일은 어떤 범위(스코프)들에 놓일 수 있고 각 경로는 어디야? 여러 CLAUDE.md가 발견되면 서로 덮어쓰는지 아니면 합쳐지는지, @ 임포트 문법과 그 재귀 깊이 한계, 그리고 AGENTS.md와의 관계까지 설명해줘.</p>
-<details><summary>기준선 (Fable 단독) 답변 — $0.95 · 80초</summary><div class="ans">공식 문서(code.claude.com/docs/en/memory)를 확인한 내용 기준으로 정리했습니다.
+<details><summary>기준선 (Fable 단독) — $0.95 · 80초</summary><div class="ans">공식 문서(code.claude.com/docs/en/memory)를 확인한 내용 기준으로 정리했습니다.
 
 ## CLAUDE.md의 스코프와 경로
 
@@ -833,7 +1292,64 @@ Claude Code는 **CLAUDE.md만 읽고 AGENTS.md는 읽지 않습니다.** 저장�
 
 참고로 `/init`을 AGENTS.md가 있는 저장소에서 실행하면 그 내용을 읽어 생성되는 CLAUDE.md에 반영해 줍니다(`.cursorrules`, `.windsurfrules` 등도 마찬가지).
 
-한 가지 짚어둘 점: 임포트 재귀 깊이가 과거 문서에서는 5홉으로 안내된 적이 있는데, 현재 공식 문서는 **4홉**으로 명시하고 있어 그 기준으로 답했습니다.</div></details><details><summary>vet arm (opus + 검증자 3) 답변 — $1.82 · 297초</summary><div class="ans">검증 완료 — 라운드 1 결과: **확정 반박 0건** (2표 합의 없음), 정보성 반박 2건(둘 다 `logic` 렌즈 1표). `unverified: false`(검증자 3명 모두 정상 반환). /vet 규약상 확정 반박이 0이면 초안이 즉시 최종이고 재검증은 돌리지 않습니다(SC-003). 정보성(1표) 반박은 강제 수정 근거가 아니며 아래 변경 로그에 투명 공개만 합니다(FR-015).
+한 가지 짚어둘 점: 임포트 재귀 깊이가 과거 문서에서는 5홉으로 안내된 적이 있는데, 현재 공식 문서는 **4홉**으로 명시하고 있어 그 기준으로 답했습니다.</div></details><details><summary>opus 단독 (게이트 없음) — $0.51 · 91초</summary><div class="ans">공식 문서(code.claude.com/docs/en/memory)를 확인해 답하겠습니다. 짐작으로 알고 있던 내용 중 두 가지가 실제 문서와 달라서(임포트 깊이, Windows 관리형 경로), 확인하길 잘했습니다.
+
+## 1. CLAUDE.md가 놓일 수 있는 스코프와 경로
+
+로드 순서는 **넓은 범위 → 좁은 범위** 순입니다. 즉 넓은 것이 먼저 들어가고, 좁은 것(작업 위치에 가까운 것)이 나중에 읽힙니다.
+
+| 스코프 | 경로 | 범위 |
+|---|---|---|
+| **Managed policy (조직 관리형)** | macOS: `/Library/Application Support/ClaudeCode/CLAUDE.md`&lt;br&gt;Linux/WSL: `/etc/claude-code/CLAUDE.md`&lt;br&gt;Windows: `C:\Program Files\ClaudeCode\CLAUDE.md` | 머신의 모든 세션·모든 저장소. 개인 설정으로 제외 불가 |
+| **User (사용자)** | `~/.claude/CLAUDE.md` | 내 모든 프로젝트 |
+| **Project (프로젝트)** | `./CLAUDE.md` **또는** `./.claude/CLAUDE.md` | 팀 공유(버전 관리에 커밋) |
+| **Local (로컬)** | `./CLAUDE.local.md` | 나만의 프로젝트별 설정(`.gitignore` 대상) |
+
+- 관리형은 `managed-settings.json`의 `claudeMd` 키로 파일 없이 인라인 주입도 가능합니다(관리·정책 설정에서만 유효).
+- 프로젝트 규모가 크면 `.claude/rules/*.md`로 분할할 수 있고, 이건 `.claude/CLAUDE.md`와 동일 우선순위로 로드됩니다(경로 스코프 규칙은 매칭 파일을 읽을 때만 로드).
+
+## 2. 여러 CLAUDE.md — 덮어쓰기? 합치기?
+
+**합쳐집니다(concatenate). 서로 덮어쓰지 않습니다.**
+
+- 발견된 모든 파일이 컨텍스트에 순서대로 이어붙습니다.
+- **디렉터리 트리 탐색**: 현재 작업 디렉터리(cwd)에서 위로 올라가며 각 디렉터리의 `CLAUDE.md`·`CLAUDE.local.md`를 수집합니다. 예를 들어 `foo/bar/`에서 실행하면 `foo/CLAUDE.md` → `foo/bar/CLAUDE.md` 순(루트→cwd 방향)으로 들어갑니다. 즉 실행 위치에 가까운 것이 **나중에** 읽힙니다.
+- 같은 디렉터리 안에서는 `CLAUDE.local.md`가 `CLAUDE.md` **뒤에** 붙습니다.
+- **하위 디렉터리**의 CLAUDE.md는 시작 시가 아니라 Claude가 그 디렉터리의 파일을 읽을 때 **온디맨드**로 로드됩니다.
+- 충돌 처리는 강제 규칙이 아니라 &quot;순서상 나중 것이 우세한 경향&quot; 수준입니다. 문서도 서로 모순되는 지시가 있으면 Claude가 임의로 하나를 고를 수 있다고 명시합니다. 확실히 막으려면 CLAUDE.md가 아니라 훅을 쓰라고 안내합니다.
+- 모노레포에서 남의 팀 CLAUDE.md가 딸려오면 `claudeMdExcludes`(글로브/경로)로 제외할 수 있으나, **관리형 정책 파일은 제외 불가**입니다.
+
+## 3. `@` 임포트 문법과 재귀 깊이
+
+- 문법: `@path/to/import` — CLAUDE.md 안 어디서든 참조하면 시작 시 해당 파일이 펼쳐져 컨텍스트에 로드됩니다.
+- **상대·절대 경로 모두 허용.** 상대 경로는 cwd가 아니라 **임포트를 담은 파일 기준**으로 해석됩니다. `@~/.claude/...`처럼 홈 경로도 가능(워크트리 간 개인 설정 공유에 유용).
+- **재귀 최대 깊이: 4 hops.** (임포트된 파일이 또 임포트 가능, 최대 4단계) — 흔히 알려진 &quot;5&quot;가 아니라 문서상 **four hops**입니다.
+- 임포트 파싱은 **마크다운 코드 스팬/펜스 코드블록을 건너뜁니다.** 경로를 임포트 없이 언급하려면 백틱으로 감싸면 됩니다(`` `@README` ``는 리터럴, 백틱 밖 `@README`는 임포트).
+- 임포트해도 **컨텍스트 절약은 안 됩니다** — 임포트 파일도 시작 시 전부 로드되므로 정리·구성 목적일 뿐입니다.
+- 프로젝트에서 외부 임포트를 처음 만나면 승인 다이얼로그가 뜨고, 거절하면 임포트는 비활성 상태로 남습니다.
+
+## 4. AGENTS.md와의 관계
+
+**Claude Code는 `AGENTS.md`를 직접 읽지 않습니다. 오직 `CLAUDE.md`만 읽습니다.**
+
+기존에 AGENTS.md를 쓰던 저장소라면 중복 없이 브리징하는 방법:
+
+- **임포트 방식(권장)**: `CLAUDE.md` 맨 위에 `@AGENTS.md`를 넣으면 세션 시작 시 그 내용을 로드하고, 아래에 Claude 전용 지시를 덧붙일 수 있습니다.
+  ```markdown
+  @AGENTS.md
+
+  ## Claude Code
+  Use plan mode for changes under `src/billing/`.
+  ```
+- **심볼릭 링크**: Claude 전용 내용이 필요 없으면 `ln -s AGENTS.md CLAUDE.md`. 단 Windows는 심링크에 관리자/개발자 모드가 필요해 `@AGENTS.md` 임포트가 권장됩니다.
+- **`/init`**: 이미 `AGENTS.md`가 있는 저장소에서 실행하면 그 내용을 읽어 생성되는 `CLAUDE.md`에 반영합니다. `.cursorrules`, `.devin/rules/`, `.windsurfrules` 같은 다른 도구 설정도 함께 읽습니다.
+
+---
+
+**핵심 요약**: 스코프는 관리형 → 사용자 → 프로젝트 → 로컬 4단계 + 하위 디렉터리 온디맨드. 발견된 파일은 덮어쓰기가 아니라 루트→cwd 방향으로 **전부 이어붙임**. `@` 임포트는 상대·절대 경로 모두 가능하며 재귀 **최대 4 hops**, 코드블록 안은 무시. AGENTS.md는 직접 읽히지 않고 `@AGENTS.md` 임포트나 심링크로 CLAUDE.md에 연결해야 합니다.
+
+Sources:
+- [How Claude remembers your project — Claude Code Docs](https://code.claude.com/docs/en/memory)</div></details><details><summary>vet arm (opus + 검증자 3) — $1.82 · 297초</summary><div class="ans">검증 완료 — 라운드 1 결과: **확정 반박 0건** (2표 합의 없음), 정보성 반박 2건(둘 다 `logic` 렌즈 1표). `unverified: false`(검증자 3명 모두 정상 반환). /vet 규약상 확정 반박이 0이면 초안이 즉시 최종이고 재검증은 돌리지 않습니다(SC-003). 정보성(1표) 반박은 강제 수정 근거가 아니며 아래 변경 로그에 투명 공개만 합니다(FR-015).
 
 ---
 
@@ -881,7 +1397,7 @@ Claude Code는 **CLAUDE.md만 읽고 AGENTS.md는 읽지 않습니다.** 저장�
 - Verification cost: **3 validator calls** (r1: 3, r2: 0)
 
 &gt; 참고: 두 정보성 지적 모두 `logic` 렌즈 단독 1표라 확정에 이르지 못했지만, 방향성은 타당합니다. 실무상 유의점 하나 — **Managed policy는 &quot;무조건 이기는 규칙&quot;이 아니라 &quot;끌 수 없는 지시&quot;** 입니다. 강제 차단이 필요하면 CLAUDE.md가 아니라 managed settings의 `permissions.deny`나 PreToolUse 훅을 써야 합니다(문서도 &quot;CLAUDE.md는 강제 집행 계층이 아니다&quot;라고 명시).</div></details>
-<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선</th><th>vet</th></tr><tr><td>1</td><td>스코프별 경로: 사용자 ~/.claude/CLAUDE.md, 프로젝트 ./CLAUDE.md 또는 ./.claude/CLAUDE.md, 로컬 ./CLAUDE.local.md(gitignore), 관리 정책 macOS /Library/Application Support/ClaudeCode/CLAUDE.md · Linux/WSL /etc/claude-code/CLAUDE.md · Windows C:\Program Files\ClaudeCode\CLAUDE.md</td><td class="ev">https://code.claude.com/docs/en/memory (Choose where to put CLAUDE.md)</td><td class="radios"><label><input type="radio" name="Q10-b-1" value="match">일치</label><label><input type="radio" name="Q10-b-1" value="contradict">모순</label><label><input type="radio" name="Q10-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-1" value="match">일치</label><label><input type="radio" name="Q10-v-1" value="contradict">모순</label><label><input type="radio" name="Q10-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>발견된 CLAUDE.md들은 서로 덮어쓰지 않고 모두 context에 이어 붙는다(broad→specific 순서 로드)</td><td class="ev">https://code.claude.com/docs/en/memory (How CLAUDE.md files load)</td><td class="radios"><label><input type="radio" name="Q10-b-2" value="match">일치</label><label><input type="radio" name="Q10-b-2" value="contradict">모순</label><label><input type="radio" name="Q10-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-2" value="match">일치</label><label><input type="radio" name="Q10-v-2" value="contradict">모순</label><label><input type="radio" name="Q10-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>CLAUDE.md는 @path/to/import 문법으로 다른 파일을 임포트하며, 임포트된 파일은 launch 시 함께 로드된다</td><td class="ev">https://code.claude.com/docs/en/memory (Import additional files)</td><td class="radios"><label><input type="radio" name="Q10-b-3" value="match">일치</label><label><input type="radio" name="Q10-b-3" value="contradict">모순</label><label><input type="radio" name="Q10-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-3" value="match">일치</label><label><input type="radio" name="Q10-v-3" value="contradict">모순</label><label><input type="radio" name="Q10-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>임포트 재귀 최대 깊이는 4 hops이고, 상대 경로는 working directory가 아니라 임포트하는 파일 기준으로 해석</td><td class="ev">https://code.claude.com/docs/en/memory (Import additional files)</td><td class="radios"><label><input type="radio" name="Q10-b-4" value="match">일치</label><label><input type="radio" name="Q10-b-4" value="contradict">모순</label><label><input type="radio" name="Q10-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-4" value="match">일치</label><label><input type="radio" name="Q10-v-4" value="contradict">모순</label><label><input type="radio" name="Q10-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>Claude Code는 AGENTS.md가 아니라 CLAUDE.md를 읽는다 — AGENTS.md 재사용은 CLAUDE.md에서 @AGENTS.md로 임포트</td><td class="ev">https://code.claude.com/docs/en/memory (AGENTS.md)</td><td class="radios"><label><input type="radio" name="Q10-b-5" value="match">일치</label><label><input type="radio" name="Q10-b-5" value="contradict">모순</label><label><input type="radio" name="Q10-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-5" value="match">일치</label><label><input type="radio" name="Q10-v-5" value="contradict">모순</label><label><input type="radio" name="Q10-v-5" value="unmentioned">무언급</label></td></tr></table>
+<table class="keys"><tr><th>#</th><th>핵심 사실</th><th>근거</th><th>기준선(Fable)</th><th>opus 단독</th><th>vet</th></tr><tr><td>1</td><td>스코프별 경로: 사용자 ~/.claude/CLAUDE.md, 프로젝트 ./CLAUDE.md 또는 ./.claude/CLAUDE.md, 로컬 ./CLAUDE.local.md(gitignore), 관리 정책 macOS /Library/Application Support/ClaudeCode/CLAUDE.md · Linux/WSL /etc/claude-code/CLAUDE.md · Windows C:\Program Files\ClaudeCode\CLAUDE.md</td><td class="ev">https://code.claude.com/docs/en/memory (Choose where to put CLAUDE.md)</td><td class="radios"><label><input type="radio" name="Q10-b-1" value="match">일치</label><label><input type="radio" name="Q10-b-1" value="contradict">모순</label><label><input type="radio" name="Q10-b-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-o-1" value="match">일치</label><label><input type="radio" name="Q10-o-1" value="contradict">모순</label><label><input type="radio" name="Q10-o-1" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-1" value="match">일치</label><label><input type="radio" name="Q10-v-1" value="contradict">모순</label><label><input type="radio" name="Q10-v-1" value="unmentioned">무언급</label></td></tr><tr><td>2</td><td>발견된 CLAUDE.md들은 서로 덮어쓰지 않고 모두 context에 이어 붙는다(broad→specific 순서 로드)</td><td class="ev">https://code.claude.com/docs/en/memory (How CLAUDE.md files load)</td><td class="radios"><label><input type="radio" name="Q10-b-2" value="match">일치</label><label><input type="radio" name="Q10-b-2" value="contradict">모순</label><label><input type="radio" name="Q10-b-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-o-2" value="match">일치</label><label><input type="radio" name="Q10-o-2" value="contradict">모순</label><label><input type="radio" name="Q10-o-2" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-2" value="match">일치</label><label><input type="radio" name="Q10-v-2" value="contradict">모순</label><label><input type="radio" name="Q10-v-2" value="unmentioned">무언급</label></td></tr><tr><td>3</td><td>CLAUDE.md는 @path/to/import 문법으로 다른 파일을 임포트하며, 임포트된 파일은 launch 시 함께 로드된다</td><td class="ev">https://code.claude.com/docs/en/memory (Import additional files)</td><td class="radios"><label><input type="radio" name="Q10-b-3" value="match">일치</label><label><input type="radio" name="Q10-b-3" value="contradict">모순</label><label><input type="radio" name="Q10-b-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-o-3" value="match">일치</label><label><input type="radio" name="Q10-o-3" value="contradict">모순</label><label><input type="radio" name="Q10-o-3" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-3" value="match">일치</label><label><input type="radio" name="Q10-v-3" value="contradict">모순</label><label><input type="radio" name="Q10-v-3" value="unmentioned">무언급</label></td></tr><tr><td>4</td><td>임포트 재귀 최대 깊이는 4 hops이고, 상대 경로는 working directory가 아니라 임포트하는 파일 기준으로 해석</td><td class="ev">https://code.claude.com/docs/en/memory (Import additional files)</td><td class="radios"><label><input type="radio" name="Q10-b-4" value="match">일치</label><label><input type="radio" name="Q10-b-4" value="contradict">모순</label><label><input type="radio" name="Q10-b-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-o-4" value="match">일치</label><label><input type="radio" name="Q10-o-4" value="contradict">모순</label><label><input type="radio" name="Q10-o-4" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-4" value="match">일치</label><label><input type="radio" name="Q10-v-4" value="contradict">모순</label><label><input type="radio" name="Q10-v-4" value="unmentioned">무언급</label></td></tr><tr><td>5</td><td>Claude Code는 AGENTS.md가 아니라 CLAUDE.md를 읽는다 — AGENTS.md 재사용은 CLAUDE.md에서 @AGENTS.md로 임포트</td><td class="ev">https://code.claude.com/docs/en/memory (AGENTS.md)</td><td class="radios"><label><input type="radio" name="Q10-b-5" value="match">일치</label><label><input type="radio" name="Q10-b-5" value="contradict">모순</label><label><input type="radio" name="Q10-b-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-o-5" value="match">일치</label><label><input type="radio" name="Q10-o-5" value="contradict">모순</label><label><input type="radio" name="Q10-o-5" value="unmentioned">무언급</label></td><td class="radios"><label><input type="radio" name="Q10-v-5" value="match">일치</label><label><input type="radio" name="Q10-v-5" value="contradict">모순</label><label><input type="radio" name="Q10-v-5" value="unmentioned">무언급</label></td></tr></table>
 </section>
 <script>
 const KEY='vet-bench-scoring-2026-07-07';
@@ -891,23 +1407,24 @@ document.querySelectorAll('input[type=radio]').forEach(r=>{
   r.addEventListener('change',()=>{saved[r.name]=r.value;localStorage.setItem(KEY,JSON.stringify(saved));tally();});
 });
 function tally(){
-  let tb=0,tv=0,ub=0,uv=0,done=0;
+  let t={b:0,o:0,v:0},u={b:0,o:0,v:0},done=0;
   const names=new Set([...document.querySelectorAll('input[type=radio]')].map(r=>r.name));
   names.forEach(n=>{
     const v=saved[n];if(!v)return;done++;
-    const isB=n.includes('-b-');
-    if(v==='contradict'){isB?tb++:tv++;}
-    if(v==='unmentioned'){isB?ub++:uv++;}
+    const arm=n.split('-')[1];
+    if(v==='contradict')t[arm]++;
+    if(v==='unmentioned')u[arm]++;
   });
-  prog.textContent=done;tb!==undefined&&(document.getElementById('tb').textContent=tb);
-  document.getElementById('tv').textContent=tv;
-  document.getElementById('ub').textContent=ub;document.getElementById('uv').textContent=uv;
-  const el=document.getElementById('verdict');
-  if(done===names.size){el.innerHTML=tv<=tb?'<b class="ok">SC-001 충족 (vet ≤ 기준선)</b>':'<b class="bad">SC-001 미충족</b>';}
-  else el.textContent='(전체 채점 후 판정)';
+  prog.textContent=done;
+  tb.textContent=t.b;to.textContent=t.o;tv.textContent=t.v;
+  ub.textContent=u.b;uo.textContent=u.o;uv.textContent=u.v;
+  if(done===names.size){
+    verdict1.innerHTML='vs Fable: '+(t.v<=t.b?'<b class="ok">SC-001 충족 (vet '+t.v+' ≤ '+t.b+')</b>':'<b class="bad">미충족 (vet '+t.v+' > '+t.b+')</b>');
+    verdict2.innerHTML='vs opus 단독: '+(t.v<t.o?'<b class="ok">게이트 가치 입증 (vet '+t.v+' < '+t.o+')</b>':'<b class="bad">게이트 가치 미입증 (vet '+t.v+' ≥ '+t.o+')</b>');
+  } else {verdict1.textContent='(전체 채점 후 판정)';verdict2.textContent='';}
 }
 function exportJson(){
-  const blob=new Blob([JSON.stringify({date:'2026-07-07',scores:saved},null,1)],{type:'application/json'});
+  const blob=new Blob([JSON.stringify({date:'2026-07-07',arms:['baseline=fable','opussolo','vet'],scores:saved},null,1)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='vet-bench-scores.json';a.click();
 }
 tally();
