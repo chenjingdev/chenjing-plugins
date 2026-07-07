@@ -61,6 +61,10 @@ costs. So calibrate before asking design questions:
   conversation unfolds: if the user asks "what does X mean?" or answers beside
   the point, lower the level for that area; if they use domain jargon fluently,
   raise it. Never re-quiz.
+- If you skip the probe because every term is already settled (e.g., the user
+  authored this domain), say so in one sentence ("Calibration: skipping the
+  probe — your level here is already established"). A silent skip is
+  indistinguishable from a broken skill.
 - Calibration changes the conversation only — never the spec document content.
 
 ### 3. Interview (superpowers brainstorming UX)
