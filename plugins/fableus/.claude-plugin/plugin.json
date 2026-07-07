@@ -1,5 +1,5 @@
 {
   "name": "fableus",
   "description": "An Opus-only Fable discipline harness — spec zone (/fableus:spec, /fableus:spec-gate) + everyday zone (/fableus:vet answer gate, always-on discipline hooks)",
-  "version": "0.1.3"
+  "version": "0.1.4"
 }

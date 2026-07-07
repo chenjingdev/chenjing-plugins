@@ -57,6 +57,12 @@ costs. So calibrate before asking design questions:
 - Unchecked terms become your explain-first list: for those concepts, give a
   concrete example **before** presenting options. For checked terms, stay
   terse and technical.
+- State that list out loud right after the probe ("Explain-first terms: X, Y")
+  and honor it for the entire interview — the discipline decays after a few
+  turns when the list lives only in your head, and a list posted in the
+  conversation is one you keep seeing. A parenthetical translation next to the
+  term (e.g., "코드 실측(as-built)") is NOT an explanation — lead with the
+  example, then use the term.
 - The probe sets a prior, not a verdict. Recalibrate on evidence as the
   conversation unfolds: if the user asks "what does X mean?" or answers beside
   the point, lower the level for that area; if they use domain jargon fluently,
