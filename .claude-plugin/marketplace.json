@@ -23,7 +23,7 @@
     },
     {
       "name": "fableus",
-      "description": "Opus 전용 페이블 규율 하네스 — spec 지대(/fableus:spec, /fableus:spec-gate) + 일상 지대(/fableus:vet 답변 게이트, 상시 규율 훅)",
+      "description": "An Opus-only Fable discipline harness — spec zone (/fableus:spec, /fableus:spec-gate) + everyday zone (/fableus:vet answer gate, always-on discipline hooks)",
       "source": "./plugins/fableus",
       "skills": [
         "./skills/spec",

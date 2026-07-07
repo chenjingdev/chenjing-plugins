@@ -1,54 +1,71 @@
 ---
 name: spec
-description: "인터뷰로 아이디어를 구현 위임 가능한 spec으로 만든다. 신규 시스템이면 Symphony급 시스템 spec, 기존 코드베이스 변경이면 기능 spec. 사용: /spec <아이디어 설명>. 완성 후 /spec-gate로 실측 검증."
+description: "Turn a raw idea into a spec an execution model can implement from the document alone, via a structured interview. Use this whenever the user describes a feature idea, wants a design or spec document, says 'I want to build X', or asks to scope or plan a system before coding. For a brand-new system it produces a system-level implementation contract (architecture, state, boundaries, contracts, error taxonomy); for a change to an existing codebase it produces a feature spec. Usage: /spec <idea description>. After drafting, validate with /spec-gate."
 ---
 
-# /spec — 인터뷰형 spec 작성
+# /spec — Interview-driven spec authoring
 
-목표: **실행 모델(Opus)이 이 문서만 읽고 구현할 수 있는 spec.** 품질의
-최종 판정은 /spec-gate가 하므로, 여기서는 과잉 상세보다 "축"을 채우는 데
-집중한다. 축 = 범위·상태·경계·계약·에러 분류. 값(네이밍·포맷·알고리즘
-세부)은 구현자 재량으로 남긴다.
+Goal: **a spec the execution model (Opus) can implement by reading this
+document alone.** The final quality verdict comes from /spec-gate, so here you
+focus on filling in the *axes* rather than over-detailing. Axes = scope, state,
+boundaries, contracts, error taxonomy. Values (naming, format, algorithm
+details) are left to the implementer's discretion.
 
-## 절차
+**Language**: Conduct the interview — questions, AskUserQuestion options, and
+reports — in the user's conversation language. Write the spec document itself
+(spec.md, produced from the templates) in English: it is a machine-facing
+contract consumed by cold readers and implementers.
 
-### 1. 모드 판별
-- 현재 디렉터리가 기존 코드베이스(소스 파일 존재)이고 요청이 그 변경이면
-  → **기능 모드** (`references/spec-template.md`)
-- 새 시스템/앱 아이디어면 → **시스템 모드** (`references/spec-template-system.md`)
-- 애매하면 AskUserQuestion으로 한 번 묻는다.
+## Procedure
 
-### 2. 사전 조사 (인터뷰 전에)
-- **기능 모드**: 관련 코드를 직접 조사한다 — 따라야 할 기존 패턴, 터치할
-  파일, 제약을 찾아 `파일:라인` 인용으로 확보한다. 조사 결과는 spec 본문에
-  박는다(구현 세션이 다시 뒤지지 않게).
-- **전제 신선도 규칙**: 과거 결정·문서를 상속하기 전에 그 근거가 지금도
-  유효한지 확인한다. 메모리(Honcho)와 최근 커밋을 대조하라.
-- **시스템 모드**: 유사 도구·선행 사례를 아는 만큼 정리해 인터뷰 재료로
-  쓴다 (조사보다 사용자의 의도가 정본).
+### 1. Mode selection
+- If the current directory is an existing codebase (source files present) and
+  the request is a change to it → **feature mode**
+  (`references/spec-template.md`)
+- If it is a new system/app idea → **system mode**
+  (`references/spec-template-system.md`)
+- If ambiguous, ask once with AskUserQuestion.
 
-### 3. 인터뷰 (superpowers 브레인스토밍 UX)
-- **한 메시지 한 질문.** AskUserQuestion 선택지 2-4개 + 직접 입력.
-- 순서: 목적/성공 기준 → 범위(명시적 out-of-scope) → 상태·데이터 축 →
-  실패 모드 → 수락 기준.
-- 정량화 규율: "빠르게"→"몇 ms?", "여러 개"→정확한 수. 모호한 형용사를
-  spec에 옮기지 않는다.
-- 내린 모든 방향 결정은 **Decision Ledger**에 근거·기각 대안과 함께 기록.
-- 사용자가 답을 모르면: 합리적 기본값을 제안하고 채택 시 **Assumptions**에
-  선언한다. 무단 가정 금지.
-- 판단이 진짜 갈리는데 답을 못 얻은 지점만 본문에
-  `[NEEDS CLARIFICATION: 구체적 질문]`으로 박는다. **최대 3개** —
-  우선순위: 범위 > 보안 > UX > 기술 세부. 나머지는 기본값+Assumptions.
+### 2. Pre-research (before the interview)
+- **Feature mode**: investigate the relevant code yourself — find the existing
+  patterns to follow, the files you will touch, and the constraints, and
+  capture them as `file:line` citations. Bake the findings into the spec body
+  (so the implementation session does not have to dig again).
+- **Assumption-freshness rule**: before inheriting a past decision or document,
+  verify its rationale still holds today. Cross-check against memory (Honcho)
+  and recent commits.
+- **System mode**: gather as much as you know about similar tools and prior art
+  to use as interview material (the user's intent, not your research, is
+  authoritative).
 
-### 4. 작성과 자가 검증
-- `specs/` 아래 다음 순번으로 `specs/NNN-slug/spec.md` 생성
-  (NNN = 기존 디렉터리 스캔 후 다음 3자리, slug = 2-4단어 kebab-case).
-- 템플릿 구조를 유지하며 작성. frontmatter `**Gate**: not-run`.
-- 자가 검증(최대 3회 수정): 모호 형용사 잔존? 수락 기준이 관찰 가능?
-  모든 결정이 Ledger에? 마커 잔존 0개? (작성 중 상한은 3개지만, /spec-gate 린트가 잔존 마커 ≥1을 반려한다)
-- 마커가 남아 있으면 각각을 AskUserQuestion(제안 답변 A/B/C + 직접 입력)
-  으로 해소하고 본문에 반영한다.
+### 3. Interview (superpowers brainstorming UX)
+- **One question per message.** AskUserQuestion with 2-4 options + free-form
+  input.
+- Order: purpose/success criteria → scope (explicit out-of-scope) → state/data
+  axes → failure modes → acceptance criteria.
+- Quantification discipline: "fast" → "how many ms?", "several" → an exact
+  number. Do not carry vague adjectives into the spec.
+- Record every directional decision you make in the **Decision Ledger**, along
+  with its rationale and the rejected alternatives.
+- If the user does not know the answer: propose a reasonable default and, if
+  adopted, declare it in **Assumptions**. No unstated assumptions.
+- Only where the judgment genuinely forks and you could not get an answer, mark
+  it inline in the body as `[NEEDS CLARIFICATION: specific question]`.
+  **At most 3** — priority: scope > security > UX > technical detail. Handle
+  the rest with defaults + Assumptions.
 
-### 5. 인계
-- 완성 보고 후 **/spec-gate 실행을 제안**한다. 게이트 통과 전에는 구현
-  단계로 넘어가지 않는다.
+### 4. Writing and self-verification
+- Create `specs/NNN-slug/spec.md` as the next entry under `specs/`
+  (NNN = the next 3-digit number after scanning existing directories,
+  slug = 2-4 word kebab-case).
+- Write it while keeping the template structure. Frontmatter `**Gate**: not-run`.
+- Self-verify (up to 3 revision passes): any vague adjectives left? are
+  acceptance criteria observable? is every decision in the Ledger? zero markers
+  remaining? (During drafting the cap is 3, but the /spec-gate lint rejects on
+  ≥1 remaining marker.)
+- If any markers remain, resolve each one with AskUserQuestion (proposed
+  answers A/B/C + free-form input) and reflect it into the body.
+
+### 5. Handoff
+- After reporting completion, **propose running /spec-gate**. Do not move on to
+  the implementation phase before the gate passes.

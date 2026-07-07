@@ -6,143 +6,146 @@
 
 **Status**: Draft
 
-**Gate**: not-run  <!-- not-run | round-N-blocked | passed | passed-with-waivers — 작성 세션만 갱신 -->
+**Gate**: not-run  <!-- not-run | round-N-blocked | passed | passed-with-waivers — writing session updates only -->
 
 **Input**: User description: "$ARGUMENTS"
 
 ## User Scenarios & Testing *(mandatory)*
 
 <!--
-  중요: 사용자 스토리는 중요도 순으로 정렬된 사용자 여정으로서 우선순위를 매겨야 한다.
-  각 사용자 스토리/여정은 독립적으로 테스트 가능해야 한다 — 즉 그중 단 하나만 구현해도
-  가치를 전달하는 실행 가능한 MVP(최소 기능 제품)가 나와야 한다.
+  IMPORTANT: User stories must be prioritized as user journeys ordered by
+  importance. Each user story/journey must be independently testable — that is,
+  implementing any single one of them should yield a viable MVP (minimum viable
+  product) that delivers value on its own.
 
-  각 스토리에 우선순위(P1, P2, P3 등)를 부여하되 P1이 가장 중요하다.
-  각 스토리를 다음이 가능한 독립적인 기능 조각으로 생각하라:
-  - 독립적으로 개발 가능
-  - 독립적으로 테스트 가능
-  - 독립적으로 배포 가능
-  - 독립적으로 사용자에게 시연 가능
+  Assign each story a priority (P1, P2, P3, etc.), with P1 the most important.
+  Think of each story as an independent slice of functionality that can be:
+  - Developed independently
+  - Tested independently
+  - Deployed independently
+  - Demonstrated to the user independently
 -->
 
 ### User Story 1 - [Brief Title] (Priority: P1)
 
-[이 사용자 여정을 평이한 언어로 서술한다]
+[Describe this user journey in plain language]
 
-**Why this priority**: [이 우선순위인 이유와 그 가치를 설명한다]
+**Why this priority**: [Explain why it has this priority and the value it delivers]
 
-**Independent Test**: [독립적으로 테스트할 수 있는 방법을 서술한다 — 예: "[특정 동작]으로 완전히 테스트 가능하며 [특정 가치]를 전달한다"]
+**Independent Test**: [Describe how it can be tested independently — e.g., "fully testable via [specific action] and delivers [specific value]"]
 
 **Acceptance Scenarios**:
 
-1. **Given** [초기 상태], **When** [동작], **Then** [기대 결과]
-2. **Given** [초기 상태], **When** [동작], **Then** [기대 결과]
+1. **Given** [initial state], **When** [action], **Then** [expected outcome]
+2. **Given** [initial state], **When** [action], **Then** [expected outcome]
 
 ---
 
 ### User Story 2 - [Brief Title] (Priority: P2)
 
-[이 사용자 여정을 평이한 언어로 서술한다]
+[Describe this user journey in plain language]
 
-**Why this priority**: [이 우선순위인 이유와 그 가치를 설명한다]
+**Why this priority**: [Explain why it has this priority and the value it delivers]
 
-**Independent Test**: [독립적으로 테스트할 수 있는 방법을 서술한다]
+**Independent Test**: [Describe how it can be tested independently]
 
 **Acceptance Scenarios**:
 
-1. **Given** [초기 상태], **When** [동작], **Then** [기대 결과]
+1. **Given** [initial state], **When** [action], **Then** [expected outcome]
 
 ---
 
 ### User Story 3 - [Brief Title] (Priority: P3)
 
-[이 사용자 여정을 평이한 언어로 서술한다]
+[Describe this user journey in plain language]
 
-**Why this priority**: [이 우선순위인 이유와 그 가치를 설명한다]
+**Why this priority**: [Explain why it has this priority and the value it delivers]
 
-**Independent Test**: [독립적으로 테스트할 수 있는 방법을 서술한다]
+**Independent Test**: [Describe how it can be tested independently]
 
 **Acceptance Scenarios**:
 
-1. **Given** [초기 상태], **When** [동작], **Then** [기대 결과]
+1. **Given** [initial state], **When** [action], **Then** [expected outcome]
 
 ---
 
-[필요한 만큼 사용자 스토리를 추가하되, 각각 우선순위를 부여한다]
+[Add as many user stories as needed, assigning each a priority]
 
 ### Edge Cases
 
 <!--
-  조치 필요: 이 섹션의 내용은 플레이스홀더다.
-  올바른 엣지 케이스로 채운다.
+  ACTION REQUIRED: the content of this section is a placeholder.
+  Fill it with the actual edge cases.
 -->
 
-- [경계 조건]이 발생하면 어떻게 되는가?
-- 시스템은 [에러 시나리오]를 어떻게 처리하는가?
+- What happens when [boundary condition] occurs?
+- How does the system handle [error scenario]?
 
 ## Requirements *(mandatory)*
 
 <!--
-  조치 필요: 이 섹션의 내용은 플레이스홀더다.
-  올바른 기능 요구사항으로 채운다.
+  ACTION REQUIRED: the content of this section is a placeholder.
+  Fill it with the actual functional requirements.
 -->
 
 ### Functional Requirements
 
-- **FR-001**: 시스템은 [구체적 기능]을 MUST 제공한다 (예: "사용자가 계정을 생성할 수 있게 한다")
-- **FR-002**: 시스템은 [구체적 기능]을 MUST 제공한다 (예: "이메일 주소를 검증한다")
-- **FR-003**: 사용자는 [핵심 상호작용]을 MUST 할 수 있다 (예: "비밀번호를 재설정한다")
-- **FR-004**: 시스템은 [데이터 요건]을 MUST 충족한다 (예: "사용자 설정을 영속화한다")
-- **FR-005**: 시스템은 [동작]을 MUST 수행한다 (예: "모든 보안 이벤트를 로깅한다")
+- **FR-001**: The system MUST provide [specific capability] (e.g., "let users create an account")
+- **FR-002**: The system MUST provide [specific capability] (e.g., "validate the email address")
+- **FR-003**: Users MUST be able to [key interaction] (e.g., "reset their password")
+- **FR-004**: The system MUST satisfy [data requirement] (e.g., "persist user settings")
+- **FR-005**: The system MUST perform [behavior] (e.g., "log all security events")
 
-*불명확한 요구사항 표기 예시:*
+*Example of marking unclear requirements:*
 
-- **FR-006**: 시스템은 [NEEDS CLARIFICATION: 인증 방식 미지정 — 이메일/비밀번호, SSO, OAuth?]를 통해 사용자를 MUST 인증한다
-- **FR-007**: 시스템은 사용자 데이터를 [NEEDS CLARIFICATION: 보존 기간 미지정] 동안 MUST 보존한다
+- **FR-006**: The system MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified — email/password, SSO, OAuth?]
+- **FR-007**: The system MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
 
-### Key Entities *(데이터를 다루는 기능이면 포함)*
+### Key Entities *(include if the feature handles data)*
 
-- **[Entity 1]**: [무엇을 나타내는가, 구현 세부 없이 핵심 속성]
-- **[Entity 2]**: [무엇을 나타내는가, 다른 엔티티와의 관계]
+- **[Entity 1]**: [what it represents, key attributes without implementation detail]
+- **[Entity 2]**: [what it represents, relationships to other entities]
 
 ## Success Criteria *(mandatory)*
 
 <!--
-  조치 필요: 측정 가능한 성공 기준을 정의한다.
-  기술 중립적이고 측정 가능해야 한다.
+  ACTION REQUIRED: define measurable success criteria.
+  They must be technology-neutral and measurable.
 -->
 
 ### Measurable Outcomes
 
-- **SC-001**: [측정 가능한 지표, 예: "사용자가 2분 이내에 계정 생성을 완료할 수 있다"]
-- **SC-002**: [측정 가능한 지표, 예: "시스템이 성능 저하 없이 동시 사용자 1000명을 처리한다"]
-- **SC-003**: [사용자 만족 지표, 예: "사용자의 90%가 첫 시도에 주요 작업을 성공적으로 완료한다"]
-- **SC-004**: [비즈니스 지표, 예: "[X] 관련 지원 티켓을 50% 감소시킨다"]
+- **SC-001**: [measurable metric, e.g., "users can complete account creation within 2 minutes"]
+- **SC-002**: [measurable metric, e.g., "the system handles 1000 concurrent users with no performance degradation"]
+- **SC-003**: [user-satisfaction metric, e.g., "90% of users complete the primary task successfully on the first attempt"]
+- **SC-004**: [business metric, e.g., "reduce support tickets related to [X] by 50%"]
 
 ## Decision Ledger *(mandatory)*
 
-<!-- 인터뷰 중 내린 모든 방향 결정을 기록한다. "근거"가 있어야 나중 세션이
-     전제 신선도(그 근거가 아직 유효한가)를 검증할 수 있다. -->
+<!-- Record every directional decision made during the interview. The
+     "rationale" is what lets a later session verify assumption freshness
+     (whether that rationale still holds). -->
 
-| # | 결정 | 근거 (당시 사실) | 기각한 대안 |
+| # | Decision | Rationale (facts at the time) | Rejected alternatives |
 |---|---|---|---|
-| D-1 | [결정 내용] | [이 결정을 강제한 당시 조건/사실] | [고려했으나 버린 안 + 이유] |
+| D-1 | [the decision] | [the conditions/facts at the time that forced this decision] | [alternative considered and dropped + why] |
 
-## Deferred to Implementer *(waive 기록)*
+## Deferred to Implementer *(waiver record)*
 
-<!-- 게이트가 제기했으나 작성자가 "구현자 재량"으로 명시 위임한 항목.
-     여기 적힌 항목은 콜드 리더가 재제기하지 않는다 (G-7). -->
+<!-- Items the gate raised but the author explicitly delegated as "implementer's
+     discretion". Items listed here are not re-raised by cold readers (G-7). -->
 
-- [항목]: 구현자 재량. 사유: [왜 spec이 정하지 않아도 되는가]
+- [item]: implementer's discretion. Reason: [why the spec does not need to decide this]
 
 ## Assumptions
 
 <!--
-  조치 필요: 이 섹션의 내용은 플레이스홀더다.
-  기능 설명에 특정 세부사항이 명시되지 않아 합리적 기본값으로 채운 것들을 적는다.
+  ACTION REQUIRED: the content of this section is a placeholder.
+  List the details the feature description did not specify and that you filled
+  with reasonable defaults.
 -->
 
-- [대상 사용자에 대한 가정, 예: "사용자는 안정적인 인터넷 연결을 갖는다"]
-- [범위 경계에 대한 가정, 예: "모바일 지원은 v1 범위 밖이다"]
-- [데이터/환경에 대한 가정, 예: "기존 인증 시스템을 재사용한다"]
-- [기존 시스템/서비스 의존성, 예: "기존 사용자 프로필 API 접근이 필요하다"]
+- [assumption about the target users, e.g., "users have a stable internet connection"]
+- [assumption about scope boundaries, e.g., "mobile support is out of scope for v1"]
+- [assumption about data/environment, e.g., "reuse the existing authentication system"]
+- [dependency on an existing system/service, e.g., "requires access to the existing user profile API"]

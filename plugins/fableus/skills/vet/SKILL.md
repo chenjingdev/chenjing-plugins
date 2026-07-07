@@ -1,75 +1,95 @@
 ---
 name: vet
-description: "Use when the user runs /fableus:vet — 중요한 질문의 답변을 C-n 앵커 초안 → 렌즈 3검증자(opus 고정) 병렬 검증 → 2표 확정 반박만 반영하는 옵트인 답변 게이트."
-argument-hint: "<질문> — 검증해서 답할 중요한 질문"
+description: "Use when the user runs /fableus:vet — an opt-in answer gate for one important question: draft the answer as C-n anchored atomic claims, verify it in parallel with 3 different-lens validators (fixed to opus), and reflect only 2-vote confirmed rebuttals."
+argument-hint: "<question> — the important question to verify before answering"
 disable-model-invocation: true
 ---
 
-# /fableus:vet — 옵트인 답변 게이트
+# /fableus:vet — Opt-in answer gate
 
-중요한 질문 하나에 대해: 세션이 전제를 실측한 C-n 초안을 만들고, 번들 엔진
-(`${CLAUDE_PLUGIN_ROOT}/skills/vet/engine.js`)이 렌즈가 다른 검증자 3명(opus
-고정)을 병렬 스폰하며, 순수 코드가 (앵커+카테고리) 2표 합의만 확정 반박으로
-집계한다. 세션은 확정 반박만 반영해 수정하고 수정 내역을 투명 표시한다.
-이 스킬은 수동 옵트인 전용이다 — 층위 1·2 규율이 자동으로 이걸 트리거하지
-않는다 (FR-010).
+For one important question: the session drafts C-n claims with premises
+measured directly, the bundled engine
+(`${CLAUDE_PLUGIN_ROOT}/skills/vet/engine.js`) spawns 3 different-lens
+validators (fixed to opus) in parallel, and pure code aggregates only
+(anchor + category) 2-vote agreement into confirmed rebuttals. The session
+revises by reflecting only confirmed rebuttals and shows the change log
+transparently. This skill is manual opt-in only — the layer-1/layer-2
+discipline does not auto-trigger it (FR-010).
 
-## 절차
+**Language**: Deliver the /vet answer and its change log in the user's
+conversation language. (Unlike /spec and /spec-gate, /vet produces no persisted
+document — its output lives only in this conversation turn.)
 
-### 1. 입력
-- 질문 = $ARGUMENTS. 비어 있으면 직전 대화에서 명백할 때만 그것을 쓰고,
-  아니면 한 줄로 물어라.
-- 질문이 한 턴에 담기 힘들 만큼 크면 거부하고 축소를 권고하라(분할 없음).
+## Procedure
 
-### 2. 초안 (세션이 직접 작성)
-- 질문을 하위 질문으로 분해하고, **전제를 실측**하라(Read/Grep/Glob으로 파일
-  확인 — 검증자에게 미루지 말 것).
-- 답변을 원자 주장 단위로 쪼개고 각 주장 앞에 안정적 앵커를 붙여라:
+### 1. Input
+- Question = $ARGUMENTS. If empty, use the question only when it is obvious from
+  the immediately preceding conversation; otherwise ask for it in one line.
+- If the question is too large to fit in a single turn, reject it and recommend
+  narrowing it (no splitting).
+
+### 2. Draft (written by the session itself)
+- Decompose the question into sub-questions and **measure the premises
+  directly** (verify files with Read/Grep/Glob — do not defer this to the
+  validators).
+- Break the answer into atomic claims and prefix each claim with a stable
+  anchor:
 
   ```
-  - C-1: <원자 주장 1> (근거: <파일:라인 또는 추론>)
-  - C-2: <원자 주장 2> …
+  - C-1: <atomic claim 1> (evidence: <file:line or reasoning>)
+  - C-2: <atomic claim 2> …
   ```
-- 초안 모델 = 지금 이 세션의 모델 그대로(FR-011). 벤치에서만 저자가 opus
-  세션에서 실행해 초안을 opus로 고정한다 — 스킬에 별도 벤치 분기는 없다.
+- Draft model = whatever this session's model already is (FR-011). Only in the
+  bench does the author run it from an opus session to pin the draft to opus —
+  the skill has no separate bench branch.
 
-### 3. 검증 (엔진 호출, round 1)
-`Workflow({scriptPath: '${CLAUDE_PLUGIN_ROOT}/skills/vet/engine.js', args: {question: <질문>, draft: <초안 전문>, round: 1}})`
+### 3. Verification (engine call, round 1)
+`Workflow({scriptPath: '${CLAUDE_PLUGIN_ROOT}/skills/vet/engine.js', args: {question: <question>, draft: <full draft>, round: 1}})`
 
-- `args`는 **실제 JSON 객체**로 넘겨라 — JSON 문자열로 감싸면 안 된다.
-- 경로에 `${CLAUDE_PLUGIN_ROOT}`가 문자 그대로 남아 있으면 이 스킬의 base
-  directory + `/engine.js`를 쓰라.
-- 반환에 `error`가 있으면(앵커 누락 등) 초안을 고쳐 다시 호출하라.
+- Pass `args` as a **real JSON object** — do not wrap it as a JSON string.
+- If `${CLAUDE_PLUGIN_ROOT}` remains literally in the path, use this skill's
+  base directory + `/engine.js`.
+- If the return has an `error` (e.g., a missing anchor), fix the draft and call
+  again.
 
-### 4. 결과 처리
-- **`unverified: true`** → 수정 없이 초안을 그대로 전달하되 맨 위에 배너:
-  `⚠ 검증 미완료 — 검증자 실패(<failedLenses>), 재시도 1회 후에도 실패. 아래 답변은 미검증 초안이다.` 종료 (FR-017 — 답을 삼키지 않는다).
-- **확정 반박 0건** → 초안이 즉시 최종. 재검증을 돌리지 마라(추가 호출 0,
-  SC-003). 5로 가서 "변경 없음"으로 마감.
-- **확정 반박 ≥1건** → 모든 확정 반박을 반영해 초안을 수정하라. 수정 시
-  앵커를 유지하라(같은 주장은 같은 C-n, 주장 삭제 시 번호 재사용 금지).
-  정보성 반박은 수정 근거로 쓰지 마라(FR-015 — 표시만 한다). 그리고:
-  **재검증 정확히 1회** — 수정된 초안 전문으로 엔진을 `round: 2`로 재호출
-  (FR-016, 전면 재검증). round 2 결과의 확정 반박이 남으면 반영하되 "미해소"
-  로 표시하고 종료한다 — 3회차 호출은 없다.
+### 4. Handling the result
+- **`unverified: true`** → deliver the draft as-is with no revision, but put a
+  banner at the top:
+  `⚠ Verification incomplete — validators failed (<failedLenses>), still failing after 1 retry. The answer below is an unverified draft.`
+  Stop (FR-017 — never swallow the answer).
+- **Zero confirmed rebuttals** → the draft is final immediately. Do not run
+  re-verification (0 extra calls, SC-003). Go to step 5 and close out with
+  "no changes".
+- **≥1 confirmed rebuttal** → revise the draft to reflect all confirmed
+  rebuttals. Preserve anchors when revising (the same claim keeps the same C-n;
+  do not reuse a number when a claim is deleted). Do not use informational
+  rebuttals as grounds for a revision (FR-015 — display only). Then:
+  **re-verify exactly once** — call the engine again with the full revised
+  draft at `round: 2` (FR-016, full re-verification). If confirmed rebuttals
+  remain in the round 2 result, reflect them but mark them "unresolved" and
+  stop — there is no third call.
 
-### 5. 최종 출력 (한 메시지에)
-최종 답변 본문 + 수정 내역 섹션:
+### 5. Final output (in one message)
+The final answer body + a change-log section:
 
 ```
-## 수정 내역 (/vet)
-- C-3 [fact-error · 2표(fact,logic)]: "<수정 전 요지>" → "<수정 후 요지>" — 근거: <evidence 요약>
-- (r2 미해소) C-7 [logic-flaw · 2표]: <반영 내용> — 재검증에서 잔존, 반영 후 종료
-- (정보성 · 수정 강제 없음) C-5 [unsupported · 1표(intent)]: <요지>
-- 검증 비용: 검증자 호출 <stats.validatorCalls 합계>회 (r1: N, r2: M)
+## Change log (/vet)
+- C-3 [fact-error · 2 votes (fact,logic)]: "<gist before>" → "<gist after>" — evidence: <evidence summary>
+- (r2 unresolved) C-7 [logic-flaw · 2 votes]: <what was reflected> — persisted at re-verification, reflected then stopped
+- (informational · no forced revision) C-5 [unsupported · 1 vote (intent)]: <gist>
+- Verification cost: <sum of stats.validatorCalls> validator calls (r1: N, r2: M)
 ```
 
-확정 반박 0건이면 첫 줄을 `- 변경 없음 (확정 반박 0건)`으로.
-`/vet` 산출물은 이 대화 턴에만 존재한다 — 파일로 저장하지 마라(일회성).
+If there are zero confirmed rebuttals, make the first line
+`- No changes (0 confirmed rebuttals)`.
+The `/vet` output exists only in this conversation turn — do not save it to a
+file (one-shot).
 
-## 하지 말 것
-- 정보성(1표) 반박으로 수정을 강제하는 것 (FR-015).
-- 3회차 검증·수렴 루프 (FR-016 — 재검증은 수정 시 정확히 1회).
-- 부분 집계로 진행하거나 답변을 보류하는 것 (FR-017).
-- 복수 초안 경쟁(best-of-N) — v1 범위 밖 (FR-019).
-- 검증자에게 파일 경로만 넘기는 것 — 엔진이 초안을 인라인로 전달한다 (FR-013).
+## Do NOT
+- Force a revision based on an informational (1-vote) rebuttal (FR-015).
+- A third verification / convergence loop (FR-016 — re-verification is exactly
+  once, only when revising).
+- Proceed on a partial aggregation or withhold the answer (FR-017).
+- Run a best-of-N competition among multiple drafts — out of scope for v1 (FR-019).
+- Pass only a file path to the validators — the engine passes the draft inline
+  (FR-013).

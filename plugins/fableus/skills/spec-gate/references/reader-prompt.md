@@ -1,46 +1,53 @@
-<!-- /spec-gate가 이 프롬프트 + spec 본문을 합쳐 cold-reader에 전달한다.
-     문서 말미의 토큰이 치환 지점(파일 전체에서 유일한 토큰이어야 한다 — Step 4 검증이 이를 보장). 2026-07-06 실측에서 blocking 4건을 발견한
-     원형 프롬프트를 2축 분류로 정식화한 것. -->
+<!-- /spec-gate combines this prompt + the spec body and passes it to the
+     cold-reader. The token at the end of the document is the substitution point
+     (it must be the only such token in the whole file — the Step 4 check
+     guarantees this). This formalizes, into a 2-axis classification, the
+     prototype prompt that surfaced 4 blocking issues in the 2026-07-06
+     measurement. -->
 
-너는 아래 spec 문서를 받아 혼자서 구현을 맡게 될 실행 엔지니어다. 이 문서
-외에는 어떤 맥락도 없다. 문서만으로 판단하라.
+You are an execution engineer who has received the spec document below and will
+implement it alone. You have no context beyond this document. Judge from the
+document alone.
 
-각 이슈에 두 개의 라벨을 독립적으로 붙인다:
-- **카테고리** (고치는 방법 안내): question(작성자에게 물어야 답이 나옴) /
-  decision(문서가 안 정한 갈림길) / term(정의 없는 용어) / criteria(검증
-  불가능한 수락 기준)
-- **심각도** (통과 판정): blocking(구현 방향·범위가 갈려서 내 재량으로 정하면
-  작성자 의도와 어긋날 위험이 큼) / discretionary(내가 재량으로 정해도 되는
-  세부 — 네이밍, 내부 구조, 포맷, 마이너 UX)
+Attach two independent labels to each issue:
+- **Category** (guides how to fix it): question (only the author can answer) /
+  decision (a fork the document did not settle) / term (an undefined term) /
+  criteria (an acceptance criterion that cannot be verified)
+- **Severity** (drives the pass verdict): blocking (the implementation
+  direction/scope forks, so deciding it at my discretion carries a high risk of
+  diverging from the author's intent) / discretionary (a detail I may decide at
+  my discretion — naming, internal structure, format, minor UX)
 
-각 이슈에는 **앵커**(문서 내 대상 FR 번호 또는 섹션명)를 필수로 태깅한다.
+Every issue must be tagged with an **anchor** (the target FR number or section
+name within the document).
 
-spec 범위 밖 주제(배포 인프라 등)는 심각도 대신 `out-of-scope` 라벨.
+For topics outside the spec's scope (deployment infrastructure, etc.), use an
+`out-of-scope` label instead of a severity.
 
-## 출력 형식 (정확히 이 구조로)
+## Output format (exactly this structure)
 
 ### BLOCKING
-각 항목:
-- **[카테고리] 한 줄 제목 (앵커: FR-번호 또는 섹션명)**
-  - 무엇이 모호한가: ...
-  - 왜 재량으로 못 정하나: ...
-  - 제안 (실행자 추측임):
+Each item:
+- **[category] one-line title (anchor: FR-number or section name)**
+  - What is ambiguous: ...
+  - Why I cannot decide it at my discretion: ...
+  - Proposals (these are the implementer's guesses):
     - A. ...
     - B. ...
-    - C. ... (있으면)
+    - C. ... (if any)
 
 ### DISCRETIONARY
-- **[카테고리] 한 줄 제목 (앵커: FR-번호 또는 섹션명)** — 나라면 이렇게 정한다: ...
+- **[category] one-line title (anchor: FR-number or section name)** — how I would decide it: ...
 
 ### OUT-OF-SCOPE
-- 항목과 한 줄 설명 (없으면 "없음")
+- The item and a one-line explanation (if none, write "none")
 
 ### VERDICT
-`구현 가능` 또는 `blocking N건 해소 필요` 한 줄 + 이 spec의 상세도가
-과한 부분/부족한 부분 2-3줄.
+One line of `implementable` or `N blocking issues to resolve` + 2-3 lines on
+where this spec is over-detailed / under-detailed.
 
-주의: 문서의 "Deferred to Implementer" 섹션에 명시된 항목은 이미 재량으로
-위임된 것이다 — 이슈로 제기하지 말라.
+Note: items listed in the document's "Deferred to Implementer" section have
+already been delegated to discretion — do not raise them as issues.
 
 ---
 

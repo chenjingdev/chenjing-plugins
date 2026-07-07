@@ -1,15 +1,15 @@
-# Gate Report: [spec 제목]
+# Gate Report: [spec title]
 
-> spec: [spec.md 상대 경로]
-> 판정 기준: 확정 blocking 0건 = passed (G-4) · 라운드 상한 없음(중단은 사용자 몫) (G-8)
+> spec: [relative path to spec.md]
+> Pass rule: zero confirmed blocking = passed (G-4) · no round cap (stopping is the user's call) (G-8)
 
-## Round [N] — [ISO 시각] — reader: [모델명] ×[N명]
+## Round [N] — [ISO timestamp] — reader: [model name] ×[N]
 
-**판정: [passed | blocked (N 확정 blocking) | passed-with-waivers]**
+**Verdict: [passed | blocked (N confirmed blocking) | passed-with-waivers]**
 
-| # | 심각도 | 카테고리 | 제목 (앵커) | 표 | 상태 |
+| # | Severity | Category | Title (anchor) | Votes | Status |
 |---|---|---|---|---|---|
-| R[N]-1 | 확정 blocking | decision | ... (FR-xxx) | 2/3 | open |
+| R[N]-1 | confirmed blocking | decision | ... (FR-xxx) | 2/3 | open |
 
-### 상세
-[리더 출력의 BLOCKING/DISCRETIONARY/OUT-OF-SCOPE/VERDICT 원문 붙여넣기]
+### Details
+[Paste the raw BLOCKING/DISCRETIONARY/OUT-OF-SCOPE/VERDICT from the reader outputs]

@@ -1,92 +1,114 @@
 ---
 name: spec-gate
-description: "spec 문서를 실행 모델 독립 리더 3명이 병렬 콜드 리드해 '스스로 정할 수 없는 것(blocking)'을 실측하는 게이트. 2인 이상 합의한 확정 blocking 0건까지 인터뷰 환류. 사용: /spec-gate <spec.md 경로> [--reader <model>] [--readers <N>]"
+description: "A gate that measures a spec by having N independent execution-model readers (default 3) cold-read it in parallel and surface what an implementer cannot decide on their own (blocking). It loops the interview back until zero confirmed blocking issues remain — confirmed = raised by 2 or more readers. Use this after /spec produces a spec.md, or whenever the user wants to validate or harden a spec before implementation. Usage: /spec-gate <path to spec.md> [--reader <model>] [--readers <N>]"
 ---
 
-# /spec-gate — 콜드 리드 실측 게이트
+# /spec-gate — Cold-read measurement gate
 
-문서 품질을 작성자의 자가 점검이 아니라 **독립 리더 여러 명의 병렬 콜드
-리드와 2인 이상 합의**로 판정한다.
-게이트 자체는 읽기 전용이다: spec.md 본문은 절대 수정하지 않는다 (G-5).
+Judge document quality not by the author's self-check but by **parallel cold
+reads from several independent readers plus agreement of 2 or more** of them.
+The gate itself is read-only: it never edits the spec.md body (G-5).
 
-## 절차
+**Language**: Run the gate's user-facing interaction — the AskUserQuestion
+feedback and the report to the user — in the user's conversation language.
+Everything written into the documents (gate-report.md, and any edits the
+writing session makes to spec.md) is in English, as a machine-facing contract
+consumed by cold readers and implementers.
 
-### 0. 입력 검증
-- 인자에서 spec 경로, `--reader <model>`(기본 `opus`), `--readers <N>`(기본 3)을
-  파싱한다. `N < 2`이면 거부하고 종료한다 — 합의 투표가 구조적으로 불가능하다
-  (G-10).
-- env `CLAUDE_CODE_SUBAGENT_MODEL`이 설정돼 있으면 경고한다 — 이 env는
-  per-call model 지정을 덮어써서 `--reader`를 무력화한다 (모델 우선순위:
-  env > per-call > frontmatter > 세션).
-- 파일이 없거나 비어 있으면: 실행을 거부하고 이유를 보고한다. 여기서 종료.
-- 파일이 30,000단어를 넘으면: 거부하고 문서 축소를 권고한다. 여기서 종료.
-- spec과 같은 디렉터리의 `gate-report.md`를 읽어 라운드 번호를 정한다:
-  마지막 라운드 번호 + 1(리포트가 없으면 1). **라운드 상한은 없다** — 매
-  라운드가 사용자 환류로 끝나므로, 발산 판단과 중단은 그 시점의 사용자 몫이다
-  (G-8 · D-9).
+## Procedure
 
-### 0.5 기계 린트 (콜드 리드 전 바닥 검사, G-11)
-콜드 리드에 앞서 재현 가능한 바닥 검사를 수행한다. 전제 템플릿은 fableus spec
-템플릿이며, 필수 섹션 = `*(mandatory)*` 태그가 붙은 섹션이다.
-- **하드 폴(반려)은 정확히 두 조건**뿐이다:
-  1. 필수 섹션이 공백 — 주석·공백만 있어도 공백으로 본다.
-  2. `[NEEDS CLARIFICATION:` 마커(대괄호+콜론 형식으로 매칭) 1개 이상 잔존.
-  둘 중 하나라도 걸리면 콜드 리드 없이 반려하고 이유를 보고한 뒤 종료한다.
-- **경고(정보성만)**: 모호 형용사 잔존, SC 항목의 숫자/검증 술어 부재. 이들은
-  리포트에 경고로 기록하되 반려하지 않는다 — 무-임계 문체 검사는 정상 문서도
-  반려시킨다 (D-11).
-- 린트는 재현 가능한 사전 필터일 뿐, 통과 판정을 대체하지 않는다 — 통과는
-  언제나 확정 blocking 0건이다.
+### 0. Input validation
+- Parse the spec path, `--reader <model>` (default `opus`), and
+  `--readers <N>` (default 3) from the arguments. If `N < 2`, reject and stop —
+  a consensus vote is structurally impossible (G-10).
+- If the env var `CLAUDE_CODE_SUBAGENT_MODEL` is set, warn — this env var
+  overrides the per-call model and nullifies `--reader` (model priority:
+  env > per-call > frontmatter > session).
+- If the file is missing or empty: refuse to run and report the reason. Stop
+  here.
+- If the file exceeds 30,000 words: reject and recommend shrinking the
+  document. Stop here.
+- Read `gate-report.md` in the same directory as the spec to determine the
+  round number: last round number + 1 (or 1 if there is no report). **There is
+  no round cap** — since every round ends with user feedback, judging
+  divergence and deciding to stop is the user's call at that point (G-8 · D-9).
 
-### 1. 콜드 리드 (완전 격리, G-2 · N명 병렬)
-- `references/reader-prompt.md`를 읽어 `{{SPEC_BODY}}`를 spec 본문 전체로
-  치환한다.
-- Agent tool로 `fableus:cold-reader` 타입 서브에이전트를 **N명 병렬로**
-  스폰한다: 각 리더의 model = --reader 값, 프롬프트 = 치환된 리더 프롬프트 전문.
-  파일 경로를 넘기지 말 것 — 본문을 프롬프트에 직접 포함한다(격리 보장, G-2).
-  리더에게 도구·저장소 접근을 주지 않는다.
-- 라운드가 5분 이상 걸릴 수 있다. 백그라운드로 돌리고 전원 완료를 기다린다.
-- **전원 성공을 요구한다** — 한 명이라도 스폰 실패 시 라운드를 중단하고 실패
-  사실만 보고하며, 부분 결과를 기록하지 않는다 (Edge Case). 종료.
+### 0.5 Machine lint (floor check before cold reading, G-11)
+Before cold reading, run a reproducible floor check. The assumed template is
+the fableus spec template, and the required sections are those tagged
+`*(mandatory)*`.
+- **There are exactly two hard-fail (reject) conditions**:
+  1. A required section is empty — comments/whitespace only still count as
+     empty.
+  2. One or more `[NEEDS CLARIFICATION:` markers remain (matched on the
+     bracket+colon form).
+  If either triggers, reject without cold reading, report the reason, and stop.
+- **Warnings (informational only)**: leftover vague adjectives, SC items
+  missing a number or a verification predicate. Record these as warnings in the
+  report but do not reject on them — a threshold-free style check would reject
+  even sound documents (D-11).
+- The lint is only a reproducible pre-filter; it does not substitute for the
+  pass verdict — passing is always zero confirmed blocking.
 
-### 2. 집계 + 리포트 기록 (게이트의 유일한 쓰기, G-12)
-- 리더 출력을 **앵커 기반**으로 집계한다 (D-10 · D-12):
-  - 리더는 각 이슈에 앵커(대상 FR 번호 또는 섹션명)를 태깅한다. 동일 앵커의
-    blocking 제기는 기계적으로 합산한다.
-  - **"같은 지점" = 앵커 일치 AND 논지 일치**. 동일 앵커라도 논지가 다르면
-    별개 이슈로 분리 집계하고, 분리 근거를 리포트에 기록한다.
-  - 앵커가 불일치하는데 논지가 같은 이슈만 작성 세션이 의미 기준으로 병합하고,
-    병합 근거를 리포트에 기록한다.
-  - 집계에 별도 LLM 심판을 두지 않는다 — 배격한 주관성이 집계 단계로
-    회귀한다 (D-10).
-- **확정 blocking = 같은 지점을 2인 이상이 제기한 것**. 1인 단독 blocking과
-  discretionary는 정보성으로만 표시하고 통과를 막지 않는다.
-- `references/gate-report-template.md` 형식으로 `gate-report.md`에 라운드 블록을
-  **추가**한다(기존 라운드 보존). 이슈 표에 "표"(예: 2/3) 컬럼을 포함한다.
-  이슈 ID는 `R{라운드}-{순번}`.
+### 1. Cold read (full isolation, G-2 · N in parallel)
+- Read `references/reader-prompt.md` and substitute `{{SPEC_BODY}}` with the
+  entire spec body.
+- With the Agent tool, spawn `fableus:cold-reader`-type subagents **N in
+  parallel**: each reader's model = the --reader value, prompt = the full
+  substituted reader prompt. Do not pass a file path — embed the body directly
+  in the prompt (this guarantees isolation, G-2). Do not give readers tool or
+  repository access.
+- A round can take 5+ minutes. Run it in the background and wait for all of
+  them to finish.
+- **Require all to succeed** — if even one fails to spawn, abort the round,
+  report only the failure, and record no partial results (Edge Case). Stop.
 
-### 3. 판정과 환류
-- **확정 blocking 0건** → 판정 `passed`. 사용자에게 보고하고, spec frontmatter의
-  `**Gate**:` 라인을 `passed`(waive가 있으면 `passed-with-waivers`)로
-  갱신한다. 이 갱신은 게이트가 아니라 작성 세션(현재 세션)의 쓰기다 (G-5).
-- **확정 blocking N건** → frontmatter를 `round-N-blocked`로 갱신하고, **확정
-  blocking만** AskUserQuestion으로 환류한다(1인 단독·discretionary는 표시만):
-  - 질문 = 이슈의 "무엇이 모호한가", 선택지 = 리더의 제안 A/B/C
-    (라벨에 "실행자 추측" 명시) + 자동 제공되는 직접 입력.
-  - 사용자가 "구현자 재량으로 남긴다"고 답하면: spec의
-    `## Deferred to Implementer` 섹션에 항목+사유를 추가한다 (G-7 — waive는
-    spec 본문에 명시하는 행위다. 그래야 다음 라운드 콜드 리더가 재제기하지
-    않는다).
-  - 그 외 답변: 해당 내용을 spec 본문(관련 섹션)에 반영한다. 반영은 작성
-    세션의 편집이며, 사용자 답변을 근거로만 한다 — 리더의 추측을 무단
-    채택하지 않는다 (G-6).
-- 반영이 끝나면 재실행을 제안한다(다음 라운드).
+### 2. Aggregate + write the report (the gate's only write, G-12)
+- Aggregate reader outputs **by anchor** (D-10 · D-12):
+  - Readers tag each issue with an anchor (the target FR number or section
+    name). Blocking issues raised against the same anchor are summed
+    mechanically.
+  - **"Same point" = anchor match AND thesis match**. Even on the same anchor,
+    if the thesis differs, count them as separate issues and record the basis
+    for the split in the report.
+  - Only issues where the anchors differ but the thesis is the same may the
+    writing session merge on a semantic basis, recording the basis for the
+    merge in the report.
+  - Do not put a separate LLM judge in the aggregation — the subjectivity we
+    rejected would creep back into the aggregation step (D-10).
+- **Confirmed blocking = the same point raised by 2 or more readers.** A solo
+  (single-reader) blocking and discretionary issues are shown as informational
+  only and do not block passing.
+- **Append** a round block to `gate-report.md` in the
+  `references/gate-report-template.md` format (preserving existing rounds).
+  Include a "votes" (e.g., 2/3) column in the issue table. Issue IDs are
+  `R{round}-{index}`.
 
-## 하지 말 것
-- 게이트 판정을 건너뛰고 "대충 통과"를 선언하는 것 — 확정 blocking 판정은
-  리더 출력이 정본이다.
-- discretionary 이슈를 해소하려고 spec을 부풀리는 것 — 정보성 표시로 둔다
-  (G-4). "값"은 구현자 몫이다.
-- 리더에게 파일 경로·저장소 접근을 주는 것 (G-2).
-- 집계를 별도 LLM 심판에게 맡기는 것 — 배격한 주관성이 집계 단계로 회귀한다
-  (D-10).
+### 3. Verdict and feedback loop
+- **Zero confirmed blocking** → verdict `passed`. Report to the user and update
+  the spec frontmatter's `**Gate**:` line to `passed` (or
+  `passed-with-waivers` if there are waivers). This update is a write by the
+  writing session (the current session), not by the gate (G-5).
+- **N confirmed blocking** → update the frontmatter to `round-N-blocked` and
+  loop **only the confirmed blocking** back via AskUserQuestion (solo and
+  discretionary are display-only):
+  - Question = the issue's "what is ambiguous", options = the reader's
+    proposals A/B/C (label them explicitly as "implementer's guess") + the
+    automatically provided free-form input.
+  - If the user answers "leave it to the implementer's discretion": add the
+    item + reason to the spec's `## Deferred to Implementer` section (G-7 — a
+    waiver is the act of stating it explicitly in the spec body, so that next
+    round's cold readers do not re-raise it).
+  - Any other answer: reflect the content into the spec body (the relevant
+    section). The reflection is an edit by the writing session, grounded only
+    in the user's answer — do not silently adopt a reader's guess (G-6).
+- Once reflection is done, propose re-running (the next round).
+
+## Do NOT
+- Skip the gate verdict and declare a "rough pass" — for the confirmed-blocking
+  verdict, the reader outputs are authoritative.
+- Inflate the spec to resolve discretionary issues — leave them as
+  informational display (G-4). "Values" are the implementer's job.
+- Give readers file paths or repository access (G-2).
+- Hand aggregation to a separate LLM judge — the subjectivity we rejected would
+  creep back into the aggregation step (D-10).
