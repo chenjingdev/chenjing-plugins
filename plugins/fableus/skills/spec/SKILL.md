@@ -47,6 +47,11 @@ costs. So calibrate before asking design questions:
 - From the product description, pick 4-6 domain terms the interview will lean
   on (mix difficulty: a couple basic, a couple intermediate, a couple
   advanced).
+- Before probing, check memory (Honcho) and the current conversation for
+  existing evidence of the user's level in this domain; drop terms that are
+  already settled and probe only what is genuinely uncertain. Memory is the
+  persistent store for calibration — do not create separate glossary or
+  profile files (they go stale and drift from what the conversation shows).
 - Ask **one** AskUserQuestion (multiSelect): "Which of these terms are you
   comfortable with? (This calibrates my explanations — it is not a test.)"
 - Unchecked terms become your explain-first list: for those concepts, give a
