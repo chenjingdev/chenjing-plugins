@@ -1,18 +1,18 @@
 ---
 name: spec-gate
-description: "A gate that measures a spec by having N independent execution-model readers (default 3) cold-read it in parallel and surface what an implementer cannot decide on their own (blocking). It loops the interview back until zero confirmed blocking issues remain — confirmed = raised by 2 or more readers. Use this after /spec produces a spec.md, or whenever the user wants to validate or harden a spec before implementation. Usage: /spec-gate <path to spec.md> [--reader <model>] [--readers <N>]"
+description: "A gate that measures a spec by having N independent execution-model readers (default 3) cold-read it in parallel and surface what an implementer cannot decide on their own (blocking). It loops the interview back until zero confirmed blocking issues remain — confirmed = raised by 2 or more readers. Use this after /spec produces a SPEC.md, or whenever the user wants to validate or harden a spec before implementation. Usage: /spec-gate <path to SPEC.md> [--reader <model>] [--readers <N>]"
 ---
 
 # /spec-gate — Cold-read measurement gate
 
 Judge document quality not by the author's self-check but by **parallel cold
 reads from several independent readers plus agreement of 2 or more** of them.
-The gate itself is read-only: it never edits the spec.md body (G-5).
+The gate itself is read-only: it never edits the SPEC.md body (G-5).
 
 **Language**: Run the gate's user-facing interaction — the AskUserQuestion
 feedback and the report to the user — in the user's conversation language.
 Everything written into the documents (gate-report.md, and any edits the
-writing session makes to spec.md) is in English, as a machine-facing contract
+writing session makes to SPEC.md) is in English, as a machine-facing contract
 consumed by cold readers and implementers.
 
 ## Procedure

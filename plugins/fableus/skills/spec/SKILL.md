@@ -13,7 +13,7 @@ details) are left to the implementer's discretion.
 
 **Language**: Conduct the interview — questions, AskUserQuestion options, and
 reports — in the user's conversation language. Write the spec document itself
-(spec.md, produced from the templates) in English: it is a machine-facing
+(SPEC.md, produced from the templates) in English: it is a machine-facing
 contract consumed by cold readers and implementers.
 
 ## Procedure
@@ -98,7 +98,7 @@ understood.
   the rest with defaults + Assumptions.
 
 ### 4. Writing and self-verification
-- Create `specs/NNN-slug/spec.md` as the next entry under `specs/`
+- Create `specs/NNN-slug/SPEC.md` as the next entry under `specs/`
   (NNN = the next 3-digit number after scanning existing directories,
   slug = 2-4 word kebab-case).
 - Write it while keeping the template structure. Frontmatter `**Gate**: not-run`.

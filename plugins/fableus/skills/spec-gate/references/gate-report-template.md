@@ -1,6 +1,6 @@
 # Gate Report: [spec title]
 
-> spec: [relative path to spec.md]
+> spec: [relative path to SPEC.md]
 > Pass rule: zero confirmed blocking = passed (G-4) · no round cap (stopping is the user's call) (G-8)
 
 ## Round [N] — [ISO timestamp] — reader: [model name] ×[N]

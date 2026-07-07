@@ -13,7 +13,7 @@ Fable 없이 Opus만으로 "알잘딱" spec을 만드는 Claude Code 하네스.
 ## 스킬
 
 - `/spec <아이디어>` — 모드 자동 판별(기능/시스템), 한 질문 인터뷰,
-  Decision Ledger 기록, `specs/NNN-slug/spec.md` 생성
+  Decision Ledger 기록, `specs/NNN-slug/SPEC.md` 생성
 - `/spec-gate <spec 경로> [--reader <model>] [--readers <N>]` — 도구 없는
   cold-reader **N명(기본 3)이 병렬** 콜드 리드 → 앵커 기반 합의 집계(2인 이상
   = 확정 blocking) → 확정 0건까지 선택지 인터뷰 환류. 콜드 리드 전 기계
