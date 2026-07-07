@@ -65,6 +65,10 @@ costs. So calibrate before asking design questions:
   authored this domain), say so in one sentence ("Calibration: skipping the
   probe — your level here is already established"). A silent skip is
   indistinguishable from a broken skill.
+- If you notice mid-interview that calibration never ran (resumed session,
+  interview already underway when the skill loaded), run the probe at the next
+  natural pause instead of skipping it — a missed slot is not a reason to fly
+  uncalibrated for the rest of the interview.
 - Calibration changes the conversation only — never the spec document content.
 
 ### 3. Interview (superpowers brainstorming UX)
