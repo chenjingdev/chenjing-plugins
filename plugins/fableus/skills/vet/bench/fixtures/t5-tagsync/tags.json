@@ -1,0 +1,11 @@
+{
+  "roadmap": [
+    "notes/planning.md"
+  ],
+  "intro": [
+    "notes/welcome.md"
+  ],
+  "setup": [
+    "notes/welcome.md"
+  ]
+}
