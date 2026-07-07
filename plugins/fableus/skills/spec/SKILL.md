@@ -38,44 +38,48 @@ contract consumed by cold readers and implementers.
   to use as interview material (the user's intent, not your research, is
   authoritative).
 
-### 2.5 Domain-knowledge calibration (one probe)
-Interview answers become Decision Ledger entries — ground truth for the spec.
-A question the user did not actually understand produces a wrong decision
-recorded as fact, which is far more expensive than the ten seconds this probe
-costs. So calibrate before asking design questions:
+### 2.5 Calibration + live dashboard
 
-- From the product description, pick 4-6 domain terms the interview will lean
-  on (mix difficulty: a couple basic, a couple intermediate, a couple
-  advanced).
-- Before probing, check memory (Honcho) and the current conversation for
-  existing evidence of the user's level in this domain; drop terms that are
-  already settled and probe only what is genuinely uncertain. Memory is the
-  persistent store for calibration — do not create separate glossary or
-  profile files (they go stale and drift from what the conversation shows).
-- Ask **one** AskUserQuestion (multiSelect): "Which of these terms are you
-  comfortable with? (This calibrates my explanations — it is not a test.)"
-- Unchecked terms become your explain-first list: for those concepts, give a
-  concrete example **before** presenting options. For checked terms, stay
-  terse and technical.
-- State that list out loud right after the probe ("Explain-first terms: X, Y")
-  and honor it for the entire interview — the discipline decays after a few
-  turns when the list lives only in your head, and a list posted in the
-  conversation is one you keep seeing. A parenthetical translation next to the
-  term (e.g., "코드 실측(as-built)") is NOT an explanation — lead with the
-  example, then use the term.
-- The probe sets a prior, not a verdict. Recalibrate on evidence as the
-  conversation unfolds: if the user asks "what does X mean?" or answers beside
-  the point, lower the level for that area; if they use domain jargon fluently,
-  raise it. Never re-quiz.
-- If you skip the probe because every term is already settled (e.g., the user
-  authored this domain), say so in one sentence ("Calibration: skipping the
-  probe — your level here is already established"). A silent skip is
-  indistinguishable from a broken skill.
-- If you notice mid-interview that calibration never ran (resumed session,
-  interview already underway when the skill loaded), run the probe at the next
-  natural pause instead of skipping it — a missed slot is not a reason to fly
-  uncalibrated for the rest of the interview.
-- Calibration changes the conversation only — never the spec document content.
+Interview answers become Decision Ledger entries — ground truth for the spec —
+so the user has to actually understand each question before answering it. Two
+tools carry that: a ten-second probe that tells you which terms need
+introducing, and a live dashboard the user can open in a browser whenever a
+term or the current state is unclear. Neither constrains what you write in the
+spec; they exist so the user never answers a question they only half
+understood.
+
+**Probe (once, before the first design question)**
+- Check memory (Honcho) and the conversation first — if the user's level in
+  this domain is already evident, tell them in one line ("Calibration:
+  skipping the probe — your level here is already established") and move on.
+- Otherwise pick 4-6 domain terms the interview will lean on (mixed
+  difficulty) and ask one AskUserQuestion (multiSelect): "Which of these are
+  you comfortable with? (This calibrates my explanations — it is not a test.)"
+- The probe sets a prior; conversation evidence keeps updating it. A "what
+  does X mean?" lowers the level for that area, fluent jargon raises it.
+- If the probe's natural slot has already passed (resumed session, interview
+  already underway), run it at the next pause — late calibration still beats
+  none.
+
+**Dashboard (create at interview start, keep current as you go)**
+- Copy `assets/dashboard-template.html` (bundled with this skill) to
+  `specs/NNN-slug/dashboard.html` and open it for the user (`open <path>`).
+  The template auto-refreshes every 3 seconds, so rewriting the file is all
+  that "live" takes.
+- Fill the placeholders in the user's conversation language and keep three
+  sections current:
+  - **Progress**: the pipeline steps (research → calibration → interview →
+    drafting → self-check → gate rounds), current step marked.
+  - **Decision log**: each I-n decision as it lands, newest first.
+  - **Glossary**: every domain term the interview leans on — one-line meaning
+    plus a concrete example, newest first, added the moment the term first
+    appears. Mark probe-familiar terms per the template comments.
+- The glossary is the user's safety net. When you introduce a term the user
+  did not check as familiar, lead with its example in the conversation, and
+  add it to the dashboard — then even when an inline explanation slips (over
+  a long interview, some will), the user always has a place to look it up.
+- Update the dashboard after each interview answer and each gate round; the
+  user trusts what it shows, so a stale dashboard misleads more than none.
 
 ### 3. Interview (superpowers brainstorming UX)
 - **One question per message.** AskUserQuestion with 2-4 options + free-form

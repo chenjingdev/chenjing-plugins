@@ -108,6 +108,9 @@ the fableus spec template, and the required sections are those tagged
     section). The reflection is an edit by the writing session, grounded only
     in the user's answer — do not silently adopt a reader's guess (G-6).
 - Once reflection is done, propose re-running (the next round).
+- If a `dashboard.html` exists next to the spec (created by /spec), update its
+  Progress and Decision-log sections with this round's result — the user
+  watches that page for live state.
 
 ## Do NOT
 - Skip the gate verdict and declare a "rough pass" — for the confirmed-blocking

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="3">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{SPEC_NAME}} — spec dashboard</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --ok: #16a34a; --warn: #d97706; --card: #f9fafb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --fg: #e5e7eb; --muted: #9ca3af; --line: #2a2f36;
+      --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --card: #1a1f26;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.5rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.6 -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    max-width: 900px; margin-inline: auto;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 2rem 0 .75rem; padding-bottom: .35rem;
+       border-bottom: 1px solid var(--line); }
+  .meta { color: var(--muted); font-size: .85rem; margin-bottom: 1rem; }
+  .status { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
+            font-size: .8rem; border: 1px solid var(--line); background: var(--card); }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .8rem; }
+  .term { font-weight: 600; white-space: nowrap; }
+  .new { color: var(--warn); font-size: .75rem; margin-left: .3rem; }
+  .familiar { color: var(--muted); }
+  ol.steps { padding-left: 1.2rem; margin: 0; }
+  ol.steps li { margin: .25rem 0; color: var(--muted); }
+  ol.steps li.done { color: var(--fg); }
+  ol.steps li.done::marker { color: var(--ok); }
+  ol.steps li.now { color: var(--accent); font-weight: 600; }
+  ul.log { padding-left: 1.2rem; margin: 0; }
+  ul.log li { margin: .3rem 0; }
+  .log time { color: var(--muted); font-size: .8rem; margin-right: .4rem; }
+  .empty { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<h1>{{SPEC_NAME}}</h1>
+<div class="meta">
+  <span class="status">{{STATUS}}</span> · 마지막 갱신 {{UPDATED_AT}} · 이 페이지는 3초마다 자동 새로고침됩니다
+</div>
+
+<h2>진행사항</h2>
+<ol class="steps">
+  <!-- STEPS: 각 단계를 li로. class="done"(완료) / class="now"(현재) / 없음(예정) -->
+  {{STEPS}}
+</ol>
+
+<h2>결정 로그</h2>
+<ul class="log">
+  <!-- DECISIONS: 최근 결정이 위로. <li><time>HH:MM</time> D-n/I-n 결정 한 줄</li> -->
+  {{DECISIONS}}
+</ul>
+
+<h2>용어집</h2>
+<table>
+  <thead><tr><th>용어</th><th>뜻 (한 줄)</th><th>예시</th></tr></thead>
+  <tbody>
+    <!-- GLOSSARY: 새 용어가 위로. 프로브에서 익숙 체크된 용어는 tr class="familiar".
+         이번 인터뷰에서 처음 등장한 용어는 용어 옆 <span class="new">new</span>. -->
+    {{GLOSSARY}}
+  </tbody>
+</table>
+</body>
+</html>
