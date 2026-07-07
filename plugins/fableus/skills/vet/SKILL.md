@@ -1,11 +1,11 @@
 ---
 name: vet
-description: "Use when the user runs /vet — 중요한 질문의 답변을 C-n 앵커 초안 → 렌즈 3검증자(opus 고정) 병렬 검증 → 2표 확정 반박만 반영하는 옵트인 답변 게이트."
+description: "Use when the user runs /fableus:vet — 중요한 질문의 답변을 C-n 앵커 초안 → 렌즈 3검증자(opus 고정) 병렬 검증 → 2표 확정 반박만 반영하는 옵트인 답변 게이트."
 argument-hint: "<질문> — 검증해서 답할 중요한 질문"
 disable-model-invocation: true
 ---
 
-# /vet — 옵트인 답변 게이트
+# /fableus:vet — 옵트인 답변 게이트
 
 중요한 질문 하나에 대해: 세션이 전제를 실측한 C-n 초안을 만들고, 번들 엔진
 (`${CLAUDE_PLUGIN_ROOT}/skills/vet/engine.js`)이 렌즈가 다른 검증자 3명(opus

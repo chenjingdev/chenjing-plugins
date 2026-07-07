@@ -1,5 +1,5 @@
 {
   "name": "fableus",
-  "description": "Fable 없이 Opus만으로 알잘딱 spec을 만드는 하네스 — 인터뷰형 spec 작성(/spec) + 콜드 리드 실측 게이트(/spec-gate)",
+  "description": "Opus 전용 페이블 규율 하네스 — spec 지대(/fableus:spec, /fableus:spec-gate) + 일상 지대(/fableus:vet 답변 게이트, 상시 규율 훅)",
   "version": "0.1.0"
 }
