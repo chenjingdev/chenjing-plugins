@@ -18,11 +18,11 @@
 **정답 키**:
 | # | 핵심 사실 | 근거 |
 |---|---|---|
-| 1 | 리더에게 도구·저장소 접근을 주지 않고, spec 본문을 프롬프트에 직접 포함한다(파일 경로 금지) | plugins/fableus/skills/spec-gate/SKILL.md:41-47 |
-| 2a | 확정 집계의 "같은 지점" = 앵커 일치 AND 논지 일치 — 동일 앵커라도 논지가 다르면 별개 이슈로 분리 집계 | plugins/fableus/skills/spec-gate/SKILL.md:56-57 |
-| 2b | 확정 blocking = 같은 지점을 2인 이상이 제기한 것, 통과 = 확정 blocking 0건(1인 단독·discretionary는 정보성 표시만) | plugins/fableus/skills/spec-gate/SKILL.md:62-63,69 |
-| 3 | 라운드 상한은 없다 — 중단은 사용자 몫 | plugins/fableus/skills/spec-gate/SKILL.md:23-26 |
-| 4 | 집계에 별도 LLM 심판을 두지 않는다 | plugins/fableus/skills/spec-gate/SKILL.md:60-61 |
+| 1 | 리더에게 도구·저장소 접근을 주지 않고, spec 본문을 프롬프트에 직접 포함한다(파일 경로 금지) | plugins/fableus/skills/spec-gate/SKILL.md:53-60 |
+| 2a | 확정 집계의 "같은 지점" = 앵커 일치 AND 논지 일치 — 동일 앵커라도 논지가 다르면 별개 이슈로 분리 집계 | plugins/fableus/skills/spec-gate/SKILL.md:71-73 |
+| 2b | 확정 blocking = 같은 지점을 2인 이상이 제기한 것, 통과 = 확정 blocking 0건(1인 단독·discretionary는 정보성 표시만) | plugins/fableus/skills/spec-gate/SKILL.md:79-81,88 |
+| 3 | 라운드 상한은 없다 — 중단은 사용자 몫 | plugins/fableus/skills/spec-gate/SKILL.md:32-34 |
+| 4 | 집계에 별도 LLM 심판을 두지 않는다 | plugins/fableus/skills/spec-gate/SKILL.md:77-78 |
 
 ## Q2 (repo)
 **질문**: tiers 플러그인의 deep-research 엔진은 검증(Verify) 단계에서 주장 하나를 몇 표로 판정하고, 판정 결과는 몇 가지로 나뉘어?
@@ -41,10 +41,10 @@
 | # | 핵심 사실 | 근거 |
 |---|---|---|
 | 1 | 누적 점수 임계값 THRESHOLD=5 — 도달 시 profiler_trigger를 emit하고 점수를 0으로 리셋한다 | plugins/resume/scripts/episode-watcher.mjs:702-703,709,759 |
-| 2 | 에피소드 N개 증가 → +N, 새 회사/프로젝트 추가 → +3 | plugins/resume/scripts/episode-watcher.mjs:667-679 |
-| 3a | 빈 STAR(result) 증가 시 +2 | plugins/resume/scripts/episode-watcher.mjs:681-687 |
+| 2 | 에피소드 N개 증가 → +N, 새 프로젝트 이름 추가 → +3 (getProjectNames로 프로젝트 이름 집합만 비교 — "새 회사"를 독립적으로 감지하지는 않는다) | plugins/resume/scripts/episode-watcher.mjs:667-679 · 345-347 |
+| 3a | 빈 STAR 증가 시 +2 (countStarGaps는 situation/task/action/result 중 하나라도 비면 gap으로 센다 — result만이 아니다) | plugins/resume/scripts/episode-watcher.mjs:681-687 · 355-368 |
 | 3b | 역할 축소 키워드(도움/참여/지원/보조/서포트) 감지 시 +2 | plugins/resume/scripts/episode-watcher.mjs:689-691,371 |
-| 3c | meta(target_company/position) 변경(해시 불일치) 시 +2 | plugins/resume/scripts/episode-watcher.mjs:695-697 |
+| 3c | meta(target_company/position) 변경(해시 불일치) 시 +2 | plugins/resume/scripts/episode-watcher.mjs:695-697 · 349-352 |
 | 4 | AskUserQuestion 호출은 별도 핸들러에서 +1 (그 핸들러도 5점 도달 시 emit + 리셋) | plugins/resume/scripts/episode-watcher.mjs:240,252,259 |
 | 5 | 가산은 addProfilerScore 헬퍼가 하고 사유는 _score_reasons에 rolling(최근 10개) 누적 | plugins/resume/scripts/episode-watcher.mjs:483-492 |
 
@@ -54,9 +54,9 @@
 **정답 키**:
 | # | 핵심 사실 | 근거 |
 |---|---|---|
-| 1 | 방법론은 2층: Layer 1 메타 자세(전 단계 상시 적용) + Layer 2 전문 도구(매 LOD 진입 시 선택) | plugins/story-spec/skills/story-spec/methodologies/INDEX.md:3-8 |
+| 1 | 방법론은 2층: Layer 1 메타 자세(전 단계 상시 적용) + Layer 2 전문 도구(매 LOD 진입 시 선택) | plugins/story-spec/skills/story-spec/methodologies/INDEX.md:3-6 |
 | 2 | Layer 1은 5개(Clean Language·OARS·Yes-And·Bloom 게이지·System 1/2), 사용자에게 옵션으로 노출하지 않는다 | plugins/story-spec/skills/story-spec/methodologies/INDEX.md:12-22 |
-| 3 | Layer 2는 17개이며 매 LOD 진입 시 1-3순위 + "직접 입력"으로 제시, 1순위에 ⭐ | plugins/story-spec/skills/story-spec/methodologies/INDEX.md:26-28 |
+| 3 | Layer 2는 17개이며 매 LOD 진입 시 1-3순위 + "직접 입력"으로 제시, 1순위에 ⭐ | plugins/story-spec/skills/story-spec/methodologies/INDEX.md:26 · 6 · 67-69 |
 | 4 | LOD별 추천 1-3순위는 카테고리 가중치(category-weights.md)로 동적 조정된다 | plugins/story-spec/skills/story-spec/methodologies/INDEX.md:8 |
 | 5 | AI는 자기 판단으로 방법론을 멋대로 전환하지 않고, 사용자가 "다른 방법으로" 요청할 때만 전환 | plugins/story-spec/skills/story-spec/methodologies/INDEX.md:81 |
 
@@ -130,7 +130,7 @@
 **정답 키**:
 | # | 핵심 사실 | 근거 |
 |---|---|---|
-| 1 | 스코프별 경로: 사용자 ~/.claude/CLAUDE.md, 프로젝트 ./CLAUDE.md 또는 ./.claude/CLAUDE.md, 로컬 ./CLAUDE.local.md(gitignore), 관리 정책 macOS /Library/Application Support/ClaudeCode/CLAUDE.md | https://code.claude.com/docs/en/memory (Choose where to put CLAUDE.md) |
+| 1 | 스코프별 경로: 사용자 ~/.claude/CLAUDE.md, 프로젝트 ./CLAUDE.md 또는 ./.claude/CLAUDE.md, 로컬 ./CLAUDE.local.md(gitignore), 관리 정책 macOS /Library/Application Support/ClaudeCode/CLAUDE.md · Linux/WSL /etc/claude-code/CLAUDE.md · Windows C:\Program Files\ClaudeCode\CLAUDE.md | https://code.claude.com/docs/en/memory (Choose where to put CLAUDE.md) |
 | 2 | 발견된 CLAUDE.md들은 서로 덮어쓰지 않고 모두 context에 이어 붙는다(broad→specific 순서 로드) | https://code.claude.com/docs/en/memory (How CLAUDE.md files load) |
 | 3 | CLAUDE.md는 @path/to/import 문법으로 다른 파일을 임포트하며, 임포트된 파일은 launch 시 함께 로드된다 | https://code.claude.com/docs/en/memory (Import additional files) |
 | 4 | 임포트 재귀 최대 깊이는 4 hops이고, 상대 경로는 working directory가 아니라 임포트하는 파일 기준으로 해석 | https://code.claude.com/docs/en/memory (Import additional files) |
