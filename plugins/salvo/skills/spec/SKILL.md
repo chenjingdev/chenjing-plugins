@@ -16,12 +16,12 @@ reports — in the user's conversation language. Write the spec document itself
 (SPEC.md, produced from the templates) in English: it is a machine-facing
 contract consumed by cold readers and implementers.
 
-**First principle (제1원칙)**: the main session's jobs are conversation and
-orchestration. This skill is conversation by design — the interview is a
-back-and-forth with the user, so research, questioning, and authoring stay in
-the main session. The measurement that follows (/spec-gate) is orchestration:
-it runs as ONE Workflow (readers + code tally), never as main-session
-aggregation labor.
+**First principle (제1원칙)**: the main session converses and orchestrates.
+This skill is conversation by design — the interview is a back-and-forth with
+the user, so research, questioning, and authoring stay in the main session.
+The measurement that follows (/spec-gate) is orchestration: one Workflow call
+whose script does the reading fan-out and the counting, launched and relayed
+by the session.
 
 ## Procedure
 
@@ -118,11 +118,11 @@ understood.
 
 ### 5. Gate (automatic)
 - After reporting completion, **invoke /spec-gate yourself** via the Skill tool
-  (skill `salvo:spec-gate`, args = the new SPEC.md path) — do not wait for the
-  user to ask. Announce it in one line first ("게이트: /spec-gate 1라운드
-  시작") so the user can interrupt.
-- The gate owns its own round loop (feedback → reflect → next round) until it
-  passes; follow its procedure. Do not move on to the implementation phase
-  before the gate passes.
-- Skip the auto-run only if the user explicitly asked to stop after drafting
-  (e.g. "게이트는 나중에").
+  (skill `salvo:spec-gate`, args = the new SPEC.md path). Announce it in one
+  line first ("게이트: /spec-gate 1라운드 시작") — the announcement is what
+  gives the user their chance to interrupt, so it stands in for asking
+  permission.
+- The gate owns its round loop (feedback → reflect → next round) until it
+  passes; follow its procedure. Implementation starts from a passed spec.
+- If the user asked to stop after drafting (e.g. "게이트는 나중에"), honor
+  that and hand the spec over as-is.

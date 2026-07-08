@@ -15,12 +15,11 @@ Everything written into the documents (gate-report.md, and any edits the
 writing session makes to SPEC.md) is in English, as a machine-facing contract
 consumed by cold readers and implementers.
 
-**First principle (제1원칙)**: the invoking session orchestrates only. It
-launches the measurement workflow, transcribes the returned result into
-gate-report.md, and runs the user feedback loop. It never reads raw reader
-outputs to aggregate, summarize, or judge them — counting is the workflow
-script's code, and delegation happens via the Workflow tool, not bare
-subagent spawns.
+**First principle (제1원칙)**: the invoking session orchestrates only. Its
+three jobs here: launch the measurement workflow, transcribe the returned
+round result into gate-report.md, and run the user feedback loop. Counting
+lives in the workflow script's code — that division is what keeps the tally
+recountable and the session's context clean enough to stay a fair courier.
 
 ## Procedure
 
@@ -133,15 +132,14 @@ finished round result.
   Progress and Decision-log sections with this round's result — the user
   watches that page for live state.
 
-## Do NOT
-- Aggregate reader outputs by hand in the invoking session — the workflow
-  script's tally is the only tally (first principle).
-- Spawn readers as bare subagents outside the workflow — schema enforcement
-  and the code tally live in the workflow; bare spawns lose both.
-- Skip the gate verdict and declare a "rough pass" — for the confirmed-blocking
-  verdict, the reader outputs are authoritative.
-- Inflate the spec to resolve discretionary issues — leave them as
-  informational display (G-4). "Values" are the implementer's job.
-- Give readers file paths or repository access (G-2).
-- Hand aggregation to a separate LLM judge — the subjectivity we rejected would
-  creep back into the aggregation step (D-10).
+## What keeps the measurement honest
+- The verdict is read off the workflow's tally — zero confirmed blocking is
+  the only pass condition, so report exactly what the script returned.
+- Discretionary and solo items are information for the implementer; the spec
+  body grows only from the user's answers to confirmed blocking (G-4 —
+  "values" are the implementer's job, and a spec inflated to appease every
+  informational note stops being an axes contract).
+- Reader isolation (embedded body, no tools) and the code tally are what make
+  a round a measurement rather than an opinion poll. The workflow is the one
+  place both are enforced at once, which is why every round runs through it
+  (G-2 · D-10).
