@@ -1,5 +1,5 @@
 {
   "name": "salvo",
-  "description": "One pass is a guess; a salvo is a measurement — N independent passes fired in parallel, merged by pure rules: intersection (/salvo:spec-gate), union (/salvo:sweep), consensus (/salvo:vet), plus /salvo:spec and always-on discipline hooks",
-  "version": "0.3.0"
+  "description": "One pass is a guess; a salvo is a measurement — N independent passes fired in parallel, merged by pure rules: intersection (/salvo:spec-gate), union (/salvo:sweep), consensus (/salvo:vet), plus /salvo:spec and always-on discipline hooks, and /salvo:leg — a 3-4 task autonomous leg that stops at the user's preference fork with a plain-language handoff",
+  "version": "0.4.0"
 }
