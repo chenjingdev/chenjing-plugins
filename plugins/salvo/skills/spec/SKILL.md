@@ -16,6 +16,13 @@ reports — in the user's conversation language. Write the spec document itself
 (SPEC.md, produced from the templates) in English: it is a machine-facing
 contract consumed by cold readers and implementers.
 
+**First principle (제1원칙)**: the main session's jobs are conversation and
+orchestration. This skill is conversation by design — the interview is a
+back-and-forth with the user, so research, questioning, and authoring stay in
+the main session. The measurement that follows (/spec-gate) is orchestration:
+it runs as ONE Workflow (readers + code tally), never as main-session
+aggregation labor.
+
 ## Procedure
 
 ### 1. Mode selection

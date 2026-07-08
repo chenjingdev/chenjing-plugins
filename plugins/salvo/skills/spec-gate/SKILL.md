@@ -15,6 +15,13 @@ Everything written into the documents (gate-report.md, and any edits the
 writing session makes to SPEC.md) is in English, as a machine-facing contract
 consumed by cold readers and implementers.
 
+**First principle (제1원칙)**: the invoking session orchestrates only. It
+launches the measurement workflow, transcribes the returned result into
+gate-report.md, and runs the user feedback loop. It never reads raw reader
+outputs to aggregate, summarize, or judge them — counting is the workflow
+script's code, and delegation happens via the Workflow tool, not bare
+subagent spawns.
+
 ## Procedure
 
 ### 0. Input validation
@@ -50,39 +57,50 @@ the salvo spec template, and the required sections are those tagged
 - The lint is only a reproducible pre-filter; it does not substitute for the
   pass verdict — passing is always zero confirmed blocking.
 
-### 1. Cold read (full isolation, G-2 · N in parallel)
-- Read `references/reader-prompt.md` and substitute `{{SPEC_BODY}}` with the
-  entire spec body.
-- With the Agent tool, spawn `salvo:cold-reader`-type subagents **N in
-  parallel**: each reader's model = the --reader value, prompt = the full
-  substituted reader prompt. Do not pass a file path — embed the body directly
-  in the prompt (this guarantees isolation, G-2). Do not give readers tool or
-  repository access.
-- A round can take 5+ minutes. Run it in the background and wait for all of
-  them to finish.
-- **Require all to succeed** — if even one fails to spawn, abort the round,
-  report only the failure, and record no partial results (Edge Case). Stop.
+### 1. Cold read + mechanical tally (ONE Workflow, G-2 · D-10)
 
-### 2. Aggregate + write the report (the gate's only write, G-12)
-- Aggregate reader outputs **by anchor** (D-10 · D-12):
-  - Readers tag each issue with an anchor (the target FR number or section
-    name). Blocking issues raised against the same anchor are summed
-    mechanically.
-  - **"Same point" = anchor match AND thesis match**. Even on the same anchor,
-    if the thesis differs, count them as separate issues and record the basis
-    for the split in the report.
-  - Only issues where the anchors differ but the thesis is the same may the
-    writing session merge on a semantic basis, recording the basis for the
-    merge in the report.
-  - Do not put a separate LLM judge in the aggregation — the subjectivity we
-    rejected would creep back into the aggregation step (D-10).
-- **Confirmed blocking = the same point raised by 2 or more readers.** A solo
-  (single-reader) blocking and discretionary issues are shown as informational
-  only and do not block passing.
-- **Append** a round block to `gate-report.md` in the
-  `references/gate-report-template.md` format (preserving existing rounds).
-  Include a "votes" (e.g., 2/3) column in the issue table. Issue IDs are
-  `R{round}-{index}`.
+The whole measurement — N parallel cold reads AND the vote tally — runs as a
+single Workflow call. The invoking session launches it and receives a
+finished round result.
+
+- Read `references/reader-prompt.md` and substitute `{{SPEC_BODY}}` with the
+  entire spec body. Drop the prompt's "## Output format" section — the output
+  shape is enforced by the workflow schema instead; append one sentence
+  telling readers to return findings via the structured output tool.
+- Launch the Workflow tool with a script that:
+  1. Extracts the spec's clause-ID vocabulary in JS (regex over rule IDs and
+     headings: `M\d+`, `C\d+`, `S\d+`, `AC\d+`, `D-\d+`, `I-\d+`, `§[\d.]+`,
+     `^#{1,3} ` heading lines) — the closed anchor list.
+  2. Fires N readers in parallel via
+     `agent(readerPrompt, {agentType: 'salvo:cold-reader', model: READER, schema: FINDINGS})`,
+     where FINDINGS forces
+     `{blocking: [{anchor, category, title, ambiguous, why, proposals: [string]}], discretionary: [{anchor, category, title, resolution}], out_of_scope: [string], verdict: string}`
+     and `category` ∈ {question, decision, term, criteria}. The body is
+     embedded in the prompt — no file path, no tool access (G-2).
+  3. Requires all N to succeed — if any `agent()` returns null, the script
+     returns a failure object and records no partial results (Edge Case).
+  4. Tallies in JS — code, not judgment: **confirmed blocking = the same
+     `(anchor, category)` pair raised as blocking by ≥ 2 readers**; votes are
+     integer counts; anchors are validated against the extracted vocabulary
+     (an anchor outside it is flagged, never silently dropped or rewritten).
+  5. Returns the round object: `confirmed[]` (each with every contributing
+     reader's write-up verbatim), `solo[]`, `discretionary[]`,
+     `out_of_scope[]`, `verdicts[]`, `flags[]`.
+- A round can take 5+ minutes; wait for the workflow to complete.
+
+### 2. Transcribe the report (the gate's only write, G-12)
+- The invoking session **transcribes** the returned round object into
+  `gate-report.md`: append a round block in the
+  `references/gate-report-template.md` format (preserving existing rounds),
+  with a "votes" column and issue IDs `R{round}-{index}`. Transcription, not
+  aggregation — every number comes from the script.
+- Matching is mechanical `(anchor, category)` equality (D-10 · D-12). The old
+  "thesis match" sub-rule required semantic judgment and is retired; a coarse
+  merge (same clause, same category, different theses) stays visible because
+  each confirmed item reproduces every contributing reader's write-up
+  verbatim.
+- No LLM judge anywhere in the tally — the workflow script's code is the only
+  counter (D-10).
 
 ### 3. Verdict and feedback loop
 - **Zero confirmed blocking** → verdict `passed`. Report to the user and update
@@ -116,6 +134,10 @@ the salvo spec template, and the required sections are those tagged
   watches that page for live state.
 
 ## Do NOT
+- Aggregate reader outputs by hand in the invoking session — the workflow
+  script's tally is the only tally (first principle).
+- Spawn readers as bare subagents outside the workflow — schema enforcement
+  and the code tally live in the workflow; bare spawns lose both.
 - Skip the gate verdict and declare a "rough pass" — for the confirmed-blocking
   verdict, the reader outputs are authoritative.
 - Inflate the spec to resolve discretionary issues — leave them as

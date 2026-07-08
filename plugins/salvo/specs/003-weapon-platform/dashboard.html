@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="3">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>003 무기 플랫폼 — spec dashboard</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --ok: #16a34a; --warn: #d97706; --card: #f9fafb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --fg: #e5e7eb; --muted: #9ca3af; --line: #2a2f36;
+      --accent: #60a5fa; --ok: #4ade80; --warn: #fbbf24; --card: #1a1f26;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.5rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.6 -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    max-width: 900px; margin-inline: auto;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.05rem; margin: 2rem 0 .75rem; padding-bottom: .35rem;
+       border-bottom: 1px solid var(--line); }
+  .meta { color: var(--muted); font-size: .85rem; margin-bottom: 1rem; }
+  .status { display: inline-block; padding: .1rem .55rem; border-radius: 999px;
+            font-size: .8rem; border: 1px solid var(--line); background: var(--card); }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .8rem; }
+  .term { font-weight: 600; white-space: nowrap; }
+  .new { color: var(--warn); font-size: .75rem; margin-left: .3rem; }
+  .familiar { color: var(--muted); }
+  ol.steps { padding-left: 1.2rem; margin: 0; }
+  ol.steps li { margin: .25rem 0; color: var(--muted); }
+  ol.steps li.done { color: var(--fg); }
+  ol.steps li.done::marker { color: var(--ok); }
+  ol.steps li.now { color: var(--accent); font-weight: 600; }
+  ul.log { padding-left: 1.2rem; margin: 0; }
+  ul.log li { margin: .3rem 0; }
+  .log time { color: var(--muted); font-size: .8rem; margin-right: .4rem; }
+  .empty { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<h1>003 무기 플랫폼</h1>
+<div class="meta">
+  <span class="status" style="color: var(--ok); border-color: var(--ok);">게이트 통과</span> · 마지막 갱신 03:10 · 이 페이지는 3초마다 자동 새로고침됩니다
+</div>
+
+<h2>진행사항</h2>
+<ol class="steps">
+  <li class="done">사전 조사 — 위치 확정: plugins/salvo/specs/003-weapon-platform/</li>
+  <li class="done">보정 — 프로브 생략 (설계 대화를 함께 했으므로 수준 확립됨)</li>
+  <li class="done">인터뷰 — I-1~I-5 완료 (성공 기준 · 잔해 · 등록부 · 위임 · 기본값)</li>
+  <li class="done">초안 작성 (SPEC.md, 시스템 모드)</li>
+  <li class="done">자체 점검 — 3회 통과 (2회차에서 M2·AC2 모순 발견 → isolation 필드 승격, D-5)</li>
+  <li class="done">게이트 라운드 — 1R 차단 1건(접기 기질→I-6) · 2R 차단 1건(pick 평가→I-7) · <strong>3R 확정 차단 0건 = 통과</strong></li>
+</ol>
+
+<h2>결정 로그</h2>
+<ul class="log">
+  <li><time>03:10</time> 게이트 3라운드 (opus ×3): <strong>통과</strong> — 리더 1·2 차단 0("implementable" ×2), 리더 3만 1건(기계 pick의 자유 문장 해석, 1/3표 = 미확정·표시만). 명세 상태 passed. 다음: 003 구현 (제1원칙 반영: 메인 세션은 오케스트레이션만, spec-gate는 표결 무기로 재등록)</li>
+  <li><time>03:05</time> I-7 (R2-1 해소, 사용자 정정): <strong>세는 것만 기계, 고르는 것은 판단이어도 됨</strong> — 금지의 원래 범위는 겹침 개수(합집합·표결)였고 고르기엔 셀 것이 없음. pick 기준에 경로 선언: mechanical(코드 평가, 명시된 테스트 명령 실행 가능) / judged(굶긴 심판 에이전트가 후보 N개+기준 문장만 받고 선택, 보고서에 "판단 선택" 라벨). 정직성 라벨 4단계: 측정 / 기계 선택 / 판단 선택 / 한 발은 짐작. AC7 추가</li>
+  <li><time>02:53</time> 게이트 2라운드 (opus ×3): 확정 차단 1건 — <strong>R2-1 pick 접기의 기준 평가</strong> (자유 문장 기준을 코드가 어떻게 평가하나 + 테스트 명령 실행 권한 + v1 포함 여부, 2/3표). 단독 차단 3건·재량 6건은 표시만. 1라운드 반영분(schema·앵커 어휘·코드 접기)은 아무도 재지적 안 함 — 해소 확인</li>
+  <li><time>02:36</time> I-6 (R1-1 해소, 사용자 정정 2회): 형식은 schema로 강제(안 맞으면 재요청, 그래도 안 되면 그 발 실패), <strong>앵커 어휘도 상류에서 폐쇄</strong> — 대상에서 코드로 뽑은 목록을 schema에 내장하거나 원문 인용을 코드로 검증 → 짝짓기 에이전트 불필요, 접기 경로에 LLM 0명. 묶기·세기·고르기는 결정론적 코드 실행. 섞기(LLM 종합) 모드는 잔해에 수요가 쌓이면 승격</li>
+  <li><time>01:47</time> 게이트 1라운드 (opus ×3): 확정 차단 1건 — <strong>R1-1 "순수 코드 접기"의 실행 기질 미정</strong> (진짜 스크립트 실행이냐, LLM이 고정 규칙을 따르는 것이냐 + 사수 출력 스키마 부재). 재량 9건은 표시만(통과에 영향 없음). 리더 판정: implementable ×1, 차단 1건 ×2</li>
+  <li><time>01:25</time> D-5 (자체 점검에서): <strong>격리 수준을 명시 칸으로</strong> — 굶긴 사수(M2)와 위임(저장소 수정 필요)의 모순 해소. 사격 칸의 원형이 원래 문수/독립 쌍이었음. sealed(도구 없음·본문 내장) / tooled(도구 허용, 대화 맥락은 여전히 차단)</li>
+  <li><time>01:18</time> I-5 기본값 묶음 수용: ① 신고서 한 줄 공표 후 즉시 발사(중단 가능) ② 기본 3문·표결 임계 과반 ③ 부분 실패 = 사격 무효(전원 성공) ④ 잔해 보관소 = plugins/salvo/residue/ ⑤ 명세 모양 요청은 /spec 문으로 안내</li>
+  <li><time>01:14</time> I-4 비무기 요청: <strong>반려 아닌 위임</strong> — /salvo의 본질은 "일은 이 세션 밖에서"(사용자 정정). 무기 모양 아니면 1문 위임으로 접수, 위임도 신고서를 씀(사격=1·접기=없음, "한 발은 짐작" 라벨). 배정 판정 = 신고서 작성 시도(접기 칸 채워지면 측정, 안 채워지면 위임, 양식 불가면 반려). 기각: 전면 반려(위임 가치 버림), 무양식 위임(반복 위임 모양의 승격 경로 소실)</li>
+  <li><time>01:08</time> I-3 등록부: <strong>무기 = 신고서 달린 스킬</strong> — 별도 색인 없음, /salvo는 신고서 품은 스킬만 무기로 인정. 승격 = 보관된 신고서를 스킬로 만드는 커밋. 기각: 단일 색인 파일(실체와 이중화·부패 위험), v1 등록부 생략(승격 도착지 미정의)</li>
+  <li><time>01:05</time> I-2 잔해 처리: <strong>신고서만 남김</strong> — 벼린 무기는 1회용이되 신고서 파일은 보관. 승격 판단의 재료(어떤 모양이 반복 수요인가). 기각: 순수 1회용(승격 근거가 증발), 승격 포함(범위 재비대)</li>
+  <li><time>01:02</time> I-1 성공 기준: <strong>대장간 골격 먼저</strong> — /salvo 배정 + 대장간이 즉석 무기를 벼려 발사까지가 003의 범위. sweep·vet 재등록은 후속(승격 행위). 기각: 프리셋 먼저(양식이 실전 검증 없이 굳음), 전부 한 명세(비대·게이트 라운드 길어짐)</li>
+  <li><time>01:00</time> 상속 전제 (설계 대화에서): C안 — 계약 우선·존재론 사후 · 두 개의 문(/spec, /salvo) · 신고서 다섯 칸 + 정의 하나 + 잔여 밸브 · 되먹임은 엔진이 아니라 구동부 소관 · 프리셋은 승격된 즉석 무기</li>
+</ul>
+
+<h2>용어집</h2>
+<table>
+  <thead><tr><th>용어</th><th>뜻 (한 줄)</th><th>예시</th></tr></thead>
+  <tbody>
+    <tr class="familiar"><td class="term">신고서</td><td>무기가 등록될 때 채우는 계약 양식 — 접기·사격·지어냄·기준출처·닻 다섯 칸 + 무기 정의 + 잔여 밸브</td><td>sweep 재등록 시: 접기=합집합, 지어냄=금지</td></tr>
+    <tr class="familiar"><td class="term">접기</td><td>N발의 독립 산출을 하나로 모으는 순수 코드 규칙 — 합집합 / 표결 / 고르기</td><td>spec-gate의 "2표 이상 확정"은 표결 접기</td></tr>
+    <tr class="familiar"><td class="term">대장간</td><td>등록된 무기가 없을 때 신고서를 즉석에서 채워 1회용 무기를 벼려내는 곳</td><td>"이 문서에서 모순 찾아줘" → 즉석 색출 무기 제작</td></tr>
+    <tr class="familiar"><td class="term">단발 무기</td><td>한 번 쏘고 끝나는 무기 — 반복·되먹임은 무기 밖(구동부) 소관</td><td>sweep 1회 발사 = 탐색꾼 N명 병렬 + 합집합</td></tr>
+    <tr class="familiar"><td class="term">두 개의 문</td><td>사용자가 여는 입구는 /spec과 /salvo 둘뿐 — 나머지는 자동 배정</td><td>/spec → 게이트 자동, /salvo → 무기 또는 대장간</td></tr>
+  </tbody>
+</table>
+</body>
+</html>
