@@ -1,0 +1,619 @@
+<title>일제사격의 원소 — 4-모델 수렴 측정</title>
+<style>
+  :root {
+    --ground: #eceef1;
+    --panel: #f7f8fa;
+    --panel-2: #eef1f4;
+    --ink: #191d23;
+    --ink-soft: #55606c;
+    --ink-faint: #808b97;
+    --line: #d4d9df;
+    --line-soft: #e2e6ea;
+    --brass: #8f6626;
+    --brass-bright: #b8863b;
+    --steel: #35637e;
+    --confirmed: #4a7345;
+    --contested: #9a6a1c;
+    --boundary: #9c4b3b;
+    --shadow: 0 1px 2px rgba(20,30,40,.06), 0 8px 24px rgba(20,30,40,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #13161b;
+      --panel: #1a1f26;
+      --panel-2: #20262f;
+      --ink: #e4e8ed;
+      --ink-soft: #98a2ae;
+      --ink-faint: #6b7580;
+      --line: #2b323b;
+      --line-soft: #232a32;
+      --brass: #d4a24c;
+      --brass-bright: #e0b566;
+      --steel: #6fa3c0;
+      --confirmed: #86b078;
+      --contested: #d0a24e;
+      --boundary: #d68a78;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.28);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #eceef1; --panel: #f7f8fa; --panel-2: #eef1f4;
+    --ink: #191d23; --ink-soft: #55606c; --ink-faint: #808b97;
+    --line: #d4d9df; --line-soft: #e2e6ea;
+    --brass: #8f6626; --brass-bright: #b8863b; --steel: #35637e;
+    --confirmed: #4a7345; --contested: #9a6a1c; --boundary: #9c4b3b;
+    --shadow: 0 1px 2px rgba(20,30,40,.06), 0 8px 24px rgba(20,30,40,.05);
+  }
+  :root[data-theme="dark"] {
+    --ground: #13161b; --panel: #1a1f26; --panel-2: #20262f;
+    --ink: #e4e8ed; --ink-soft: #98a2ae; --ink-faint: #6b7580;
+    --line: #2b323b; --line-soft: #232a32;
+    --brass: #d4a24c; --brass-bright: #e0b566; --steel: #6fa3c0;
+    --confirmed: #86b078; --contested: #d0a24e; --boundary: #d68a78;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.28);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    letter-spacing: -0.003em;
+  }
+  .mono {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-feature-settings: "tnum" 1;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---- masthead ---- */
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+    padding: 64px 0 40px;
+    position: relative;
+  }
+  .eyebrow {
+    font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--brass);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 22px;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--line), transparent);
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.5vw, 3.4rem);
+    line-height: 1.04;
+    letter-spacing: -0.028em;
+    font-weight: 800;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  h1 .dim { color: var(--ink-faint); font-weight: 800; }
+  .thesis {
+    font-size: clamp(1.05rem, 2vw, 1.28rem);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 60ch;
+    margin: 0 0 30px;
+    text-wrap: pretty;
+  }
+  .thesis b { color: var(--ink); font-weight: 650; }
+
+  .volleys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .volley {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 13px 7px 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel);
+    font-size: 13px;
+  }
+  .volley .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--steel); align-self: center; }
+  .volley .who { font-weight: 640; letter-spacing: -0.01em; }
+  .volley .eng { color: var(--ink-faint); font-size: 11.5px; letter-spacing: 0.02em; }
+
+  /* ---- sections ---- */
+  section { padding: 52px 0; border-bottom: 1px solid var(--line-soft); }
+  .sec-head { margin-bottom: 26px; }
+  .sec-num {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    color: var(--brass);
+  }
+  h2 {
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    line-height: 1.12;
+    letter-spacing: -0.022em;
+    font-weight: 750;
+    margin: 8px 0 10px;
+    text-wrap: balance;
+  }
+  .sec-lede { color: var(--ink-soft); max-width: 66ch; margin: 0; font-size: 1.02rem; }
+  .sec-lede b { color: var(--ink); font-weight: 640; }
+
+  /* ---- convergence matrix ---- */
+  .matrix-scroll { overflow-x: auto; margin: 0 -24px; padding: 0 24px; }
+  table.matrix {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  table.matrix thead th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--ink-soft);
+    padding: 0 12px 12px;
+    border-bottom: 1.5px solid var(--line);
+    vertical-align: bottom;
+    white-space: nowrap;
+  }
+  table.matrix thead th .model-eng {
+    display: block;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    font-weight: 400;
+    margin-top: 2px;
+  }
+  table.matrix thead th.el-col { width: 34%; }
+  table.matrix thead th.mine { color: var(--brass); }
+  table.matrix tbody td {
+    padding: 13px 12px;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+  }
+  table.matrix tbody tr:last-child td { border-bottom: none; }
+  .el-cell { position: relative; }
+  .el-cell .stripe {
+    position: absolute; left: -0px; top: 10px; bottom: 10px; width: 3px; border-radius: 2px;
+  }
+  .st-confirmed { background: var(--confirmed); }
+  .st-contested { background: var(--contested); }
+  .st-correction { background: var(--brass-bright); }
+  .el-cell .el-inner { padding-left: 16px; }
+  .el-sym {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 20px;
+    font-weight: 500;
+    margin-right: 8px;
+    color: var(--ink);
+  }
+  .el-name { font-weight: 680; letter-spacing: -0.01em; }
+  .el-gloss { display: block; color: var(--ink-faint); font-size: 12px; margin-top: 3px; padding-left: 0; }
+
+  .name-cell { color: var(--ink); }
+  .name-cell .k { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12.5px; }
+  .fold { color: var(--ink-faint); font-style: normal; }
+  .miss { color: var(--boundary); font-weight: 600; }
+
+  .agree {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .verdict {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 640;
+    letter-spacing: 0.02em;
+    padding: 3px 9px;
+    border-radius: 5px;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .v-confirmed { color: var(--confirmed); border-color: color-mix(in oklab, var(--confirmed) 40%, transparent); background: color-mix(in oklab, var(--confirmed) 10%, transparent); }
+  .v-contested { color: var(--contested); border-color: color-mix(in oklab, var(--contested) 42%, transparent); background: color-mix(in oklab, var(--contested) 10%, transparent); }
+  .v-correction { color: var(--brass); border-color: color-mix(in oklab, var(--brass) 44%, transparent); background: color-mix(in oklab, var(--brass) 10%, transparent); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 20px; font-size: 12.5px; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+  /* ---- corrections ---- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 20px 20px 22px;
+    box-shadow: var(--shadow);
+  }
+  .card .tag {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin-bottom: 10px;
+    display: block;
+  }
+  .card h3 { font-size: 1.06rem; font-weight: 700; margin: 0 0 9px; letter-spacing: -0.015em; line-height: 1.3; }
+  .card p { margin: 0; font-size: 14px; color: var(--ink-soft); line-height: 1.58; }
+  .card p + p { margin-top: 9px; }
+  .card .was {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--boundary);
+  }
+  .card .now { color: var(--confirmed); font-weight: 640; }
+
+  /* ---- forks ---- */
+  .fork {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 20px;
+    padding: 22px 0;
+    border-bottom: 1px dashed var(--line);
+    align-items: start;
+  }
+  .fork:last-child { border-bottom: none; }
+  .fork-sym {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 30px;
+    font-weight: 500;
+    color: var(--brass);
+    width: 54px;
+    text-align: center;
+    line-height: 1;
+    padding-top: 4px;
+  }
+  .fork h3 { font-size: 1.12rem; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.015em; }
+  .fork p { margin: 0 0 12px; font-size: 14.5px; color: var(--ink-soft); }
+  .fork p:last-child { margin-bottom: 0; }
+  .side-by {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;
+  }
+  .pos {
+    flex: 1 1 220px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 12px 14px;
+    background: var(--panel-2);
+    font-size: 13.5px;
+  }
+  .pos .lbl {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11px; letter-spacing: 0.04em;
+    display: block; margin-bottom: 5px; font-weight: 600;
+  }
+  .pos.yes .lbl { color: var(--steel); }
+  .pos.no .lbl { color: var(--ink-faint); }
+  .pos b { color: var(--ink); font-weight: 640; }
+  .rec { font-size: 13.5px; color: var(--ink-soft); }
+  .rec b { color: var(--brass); font-weight: 680; }
+
+  /* ---- boundary law ---- */
+  .law {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--boundary);
+    border-radius: 12px;
+    padding: 26px 28px;
+    box-shadow: var(--shadow);
+  }
+  .law .unanimous {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--boundary); margin-bottom: 14px; display: block;
+  }
+  .law p { margin: 0 0 14px; font-size: 15px; line-height: 1.6; }
+  .law p:last-child { margin-bottom: 0; }
+  .law b { font-weight: 680; }
+  .versus {
+    display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: stretch;
+    margin: 20px 0;
+  }
+  .versus .term { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; background: var(--panel-2); }
+  .versus .term .h { font-weight: 720; font-size: 1.02rem; margin-bottom: 6px; letter-spacing: -0.01em; }
+  .versus .term.in .h { color: var(--confirmed); }
+  .versus .term.out .h { color: var(--boundary); }
+  .versus .term p { font-size: 13px; color: var(--ink-soft); margin: 0; }
+  .versus .vs {
+    align-self: center; font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    color: var(--ink-faint); font-size: 13px; letter-spacing: 0.1em;
+  }
+  .quotes { display: grid; gap: 8px; margin-top: 18px; }
+  .quotes .q {
+    font-size: 13px; color: var(--ink-soft);
+    padding-left: 14px; border-left: 2px solid var(--line);
+  }
+  .quotes .q b { color: var(--ink); font-weight: 640; }
+
+  footer {
+    padding: 40px 0 64px;
+    color: var(--ink-faint);
+    font-size: 12.5px;
+  }
+  footer .mono { color: var(--ink-soft); }
+
+  @media (max-width: 620px) {
+    .versus { grid-template-columns: 1fr; }
+    .versus .vs { justify-self: center; }
+    .fork { grid-template-columns: 1fr; gap: 10px; }
+    .fork-sym { text-align: left; width: auto; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .card, .volley { transition: border-color .2s ease, transform .2s ease; }
+    .card:hover { transform: translateY(-2px); border-color: color-mix(in oklab, var(--brass) 35%, var(--line)); }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">SALVO · 원소 측정 · 2026-07-08</div>
+    <h1>일제사격의 원소<span class="dim">, 넷이 따로 쏴서 겹친 것</span></h1>
+    <p class="thesis">
+      salvo의 미래 무기 수백 개가 딛고 설 <b>주기율표</b>를 정하기 전에, 네 모델에게
+      서로의 답을 <b>안 보여준 채</b> 각자 백지에서 원소를 도출하게 했다. 이 실험 자체가
+      salvo의 원리 — <b>한 발은 짐작, 일제사격은 측정</b> — 를 손으로 쏜 셈이다.
+      넷이 겹친 원소가 진짜 기저다.
+    </p>
+    <div class="volleys">
+      <span class="volley"><span class="dot"></span><span class="who">Fable</span> <span class="eng">기존 7원소·과녁</span></span>
+      <span class="volley"><span class="dot"></span><span class="who">Sonnet</span> <span class="eng">CLAUDE</span></span>
+      <span class="volley"><span class="dot"></span><span class="who">Opus</span> <span class="eng">CLAUDE</span></span>
+      <span class="volley"><span class="dot"></span><span class="who">Codex</span> <span class="eng">GPT · 외부 관점</span></span>
+      <span class="volley"><span class="dot"></span><span class="who">agy</span> <span class="eng">GEMINI · SCAN</span></span>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">01 — 수렴 행렬</div>
+      <h2>같은 원소를, 다섯이 뭐라 불렀나</h2>
+      <p class="sec-lede">행 = 후보 원소, 열 = 다섯 체계. 칸은 그 모델이 그 원소를 <b>독립 원소로 세웠는지</b>와 붙인 이름.
+        <span class="fold">회색 = 다른 원소에 융합</span>, <span class="miss">붉은색 = 아예 놓침</span>. 왼쪽 색띠가 최종 판정이다.</p>
+    </div>
+
+    <div class="matrix-scroll">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th class="el-col">후보 원소</th>
+            <th class="mine">Fable<span class="model-eng">기존</span></th>
+            <th>Sonnet<span class="model-eng">CLAUDE</span></th>
+            <th>Opus<span class="model-eng">CLAUDE</span></th>
+            <th>Codex<span class="model-eng">GPT</span></th>
+            <th>agy<span class="model-eng">GEMINI</span></th>
+            <th>합의</th>
+            <th>판정</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="el-cell"><span class="stripe st-confirmed"></span><span class="el-inner"><span class="el-sym mono">生</span><span class="el-name">생성</span><span class="el-gloss">입력에 없던 것을 새로 만든다 (발명)</span></span></td>
+            <td class="name-cell">낳기</td>
+            <td class="name-cell">창안</td>
+            <td class="name-cell">生</td>
+            <td class="name-cell">생성</td>
+            <td class="name-cell">Split</td>
+            <td class="agree">5/5</td>
+            <td><span class="verdict v-confirmed">확정 · 만장</span></td>
+          </tr>
+          <tr>
+            <td class="el-cell"><span class="stripe st-confirmed"></span><span class="el-inner"><span class="el-sym mono">索</span><span class="el-name">색출</span><span class="el-gloss">입력에 숨은, 개수 모르는 것을 찾는다 (발견·리콜)</span></span></td>
+            <td class="name-cell">찾기</td>
+            <td class="name-cell">색출</td>
+            <td class="name-cell fold">讀에 근접</td>
+            <td class="name-cell">채굴</td>
+            <td class="name-cell fold">Split에 융합</td>
+            <td class="agree">3/5</td>
+            <td><span class="verdict v-confirmed">확정</span></td>
+          </tr>
+          <tr>
+            <td class="el-cell"><span class="stripe st-confirmed"></span><span class="el-inner"><span class="el-sym mono">判</span><span class="el-name">판정</span><span class="el-gloss">주어진 대상을 기준에 대고 통과/실패로 잰다</span></span></td>
+            <td class="name-cell">가리기<span class="fold"> +따지기</span></td>
+            <td class="name-cell">판정</td>
+            <td class="name-cell">判</td>
+            <td class="name-cell">검정</td>
+            <td class="name-cell">Assertion</td>
+            <td class="agree">5/5</td>
+            <td><span class="verdict v-confirmed">확정 · 만장</span></td>
+          </tr>
+          <tr>
+            <td class="el-cell"><span class="stripe st-correction"></span><span class="el-inner"><span class="el-sym mono">換</span><span class="el-name">변환</span><span class="el-gloss">의미는 보존한 채 형식·독자 수준·스키마만 바꾼다</span></span></td>
+            <td class="name-cell miss">✗ 놓침</td>
+            <td class="name-cell">변형</td>
+            <td class="name-cell">讀</td>
+            <td class="name-cell">변환</td>
+            <td class="name-cell">Normalization</td>
+            <td class="agree">4/4 외부</td>
+            <td><span class="verdict v-correction">교정 · 내 누락</span></td>
+          </tr>
+          <tr>
+            <td class="el-cell"><span class="stripe st-contested"></span><span class="el-inner"><span class="el-sym mono">名</span><span class="el-name">판별</span><span class="el-gloss">정오가 아니라 "어느 계열로 보낼지" 라우팅 분류</span></span></td>
+            <td class="name-cell fold">가리기에 융합</td>
+            <td class="name-cell fold">판정에 융합</td>
+            <td class="name-cell">名</td>
+            <td class="name-cell">판별</td>
+            <td class="name-cell fold">Assertion에 융합</td>
+            <td class="agree">2/5</td>
+            <td><span class="verdict v-contested">갈림</span></td>
+          </tr>
+          <tr>
+            <td class="el-cell"><span class="stripe st-contested"></span><span class="el-inner"><span class="el-sym mono">分</span><span class="el-name">분할</span><span class="el-gloss">빠짐·겹침 없이 경계로 나눈다 (커버리지가 산출물)</span></span></td>
+            <td class="name-cell fold">낳기에 융합</td>
+            <td class="name-cell">분할</td>
+            <td class="name-cell fold">生 화합물</td>
+            <td class="name-cell">분절</td>
+            <td class="name-cell fold">Split에 융합</td>
+            <td class="agree">2/5</td>
+            <td><span class="verdict v-contested">갈림</span></td>
+          </tr>
+          <tr>
+            <td class="el-cell"><span class="stripe st-contested"></span><span class="el-inner"><span class="el-sym mono">計</span><span class="el-name">추적</span><span class="el-gloss">LLM 0. 사건열을 상태로 접는 순수 코드 (장부)</span></span></td>
+            <td class="name-cell">재기</td>
+            <td class="name-cell fold">표 밖·바닥</td>
+            <td class="name-cell">計</td>
+            <td class="name-cell">추적</td>
+            <td class="name-cell fold">코드층</td>
+            <td class="agree">3/5</td>
+            <td><span class="verdict v-contested">갈림 · 원소냐 바닥이냐</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="legend">
+      <span><i style="background:var(--confirmed)"></i> 확정 — 외부 다수가 독립 도출</span>
+      <span><i style="background:var(--contested)"></i> 갈림 — 다음 결정 지점</span>
+      <span><i style="background:var(--brass-bright)"></i> 교정 — 내 표의 오류</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">02 — 만장일치 교정</div>
+      <h2>외부 넷이 내 표의 오류 두 개를 지웠다</h2>
+      <p class="sec-lede">이게 이 실험의 값이다. 넷은 서로 못 봤는데 <b>같은 두 지점</b>에서 내 7원소 표를 고쳤다.</p>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <span class="tag">교정 A · 4/4 외부 합의</span>
+        <h3>집계 방식은 원소가 아니라 파라미터다</h3>
+        <p>나는 집계를 <span class="was">모으기·겹치기·고르기 = 3원소</span>로 쪼갰다.
+          넷 모두 그건 원소가 아니라 <b class="now">한 원소의 필드값</b>이라 봤다 —
+          union이냐 k표 합의냐 argmax냐는 "무기가 뭘 하나"가 아니라 "결과를 어떻게 접나".</p>
+        <p>결과: sweep = <span class="mono">索·∪</span>, vet = <span class="mono">判·⋂₂</span>.
+          같은 원소를 다른 집계로 쏜 것뿐. 축 하나를 셋으로 부풀린 게 내 최대 실수.</p>
+      </div>
+      <div class="card">
+        <span class="tag">교정 B · 4/4 외부 합의</span>
+        <h3>내가 통째로 빠뜨린 원소 — 변환(換)</h3>
+        <p>"의미는 그대로, 형식만 바꾼다"는 연산을 넷 모두 독립 원소로 세웠다
+          (讀 · 변형 · 변환 · Normalization). 나는 이걸 <span class="was">'낳기'에 뭉갰다</span>.</p>
+        <p>평문 재진술·요약·인계문 정형·출력 스키마 강제가 전부 이 원소다.
+          <b class="now">가장 자주 쓰이는데 내 눈에만 안 보였다.</b></p>
+      </div>
+      <div class="card">
+        <span class="tag">교정 C · 보너스</span>
+        <h3>판정을 판정/반박으로 쪼갤 이유 없음</h3>
+        <p>나는 <span class="was">가리기(판정) + 따지기(반박)</span>를 둘로 봤다.
+          아무도 안 따라왔다 — 반박은 <b class="now">판정에 적대적 렌즈를 씌운 것</b>,
+          즉 원소가 아니라 fanout 파라미터(같은 判을 다른 렌즈로).</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">03 — 갈리는 지점</div>
+      <h2>넷이 갈린 세 곳 = 003 스펙이 정할 것</h2>
+      <p class="sec-lede">확정 원소(생성·색출·판정·변환) 위에, 원소일 수도 화합물일 수도 있는 후보 셋이 남았다.
+        이게 인터뷰에서 당신이 정할 실제 결정이다.</p>
+    </div>
+
+    <div class="fork">
+      <div class="fork-sym">名</div>
+      <div>
+        <h3>판별을 판정에서 떼어낼까?</h3>
+        <p>"맞는가/틀린가"(判)와 "어느 계열로 보낼까"(名)는 같은 원소인가?
+          취향-갈림 감지가 대표 사례 — 정오 판단이 아니라 <b>다음 무기 선택을 바꾸는 라우팅</b>이다.</p>
+        <div class="side-by">
+          <div class="pos yes"><span class="lbl">떼어내자 — Opus · Codex</span><b>가장 신중한 분석 둘, 그리고 외부 관점(GPT)이 독립적으로 같은 분리를 했다.</b> 판별의 산출물은 정오가 아니라 라우팅 라벨이라 다음 흐름을 바꾼다.</div>
+          <div class="pos no"><span class="lbl">한 원소다 — Sonnet · agy · 나</span>판별도 "고정 라벨 붙이기"라 판정의 특수형으로 접힌다. 원소를 늘리면 타입 시스템만 무거워진다.</div>
+        </div>
+        <p class="rec"><b>추천:</b> 떼어낸다. 라우팅은 salvo의 계층 오케스트레이션(지휘관→하위)의 핵심 연산이라, 이 원소가 곧 배급·검문의 판단축이 된다.</p>
+      </div>
+    </div>
+
+    <div class="fork">
+      <div class="fork-sym">分</div>
+      <div>
+        <h3>분할을 생성에서 떼어낼까?</h3>
+        <p>task 쪼개기는 새 걸 만드는 '생성'인가, 아니면 별도 원소인가?
+          Sonnet·Codex는 <b>산출물이 내용이 아니라 경계(빠짐=0·겹침=0)</b>라서 별개라 본다 —
+          N≥2에서만 성립하는 커버리지 불변식을 갖기 때문.</p>
+        <div class="side-by">
+          <div class="pos yes"><span class="lbl">떼어내자 — Sonnet · Codex</span>"분할 적정성 검사"가 이미 계획 무기로 따로 존재한다는 사실이, 커버리지 계약이 생성의 계약과 다른 검증 대상임을 방증한다.</div>
+          <div class="pos no"><span class="lbl">생성+제약이다 — Opus · agy · 나</span>분할은 커버리지 제약을 건 생성일 뿐. 원소를 늘리기보다 生에 <b>coverage 플래그</b>를 다는 게 낫다.</div>
+        </div>
+        <p class="rec"><b>추천:</b> 보류 — leg의 task 분할이 003의 핵심 무기라, 실제로 분할 무기를 한 번 만들어 보고 커버리지 검증이 생성과 정말 다른 코드가 되는지로 판정한다.</p>
+      </div>
+    </div>
+
+    <div class="fork">
+      <div class="fork-sym">計</div>
+      <div>
+        <h3>LLM 0인 층 — 원소인가, 표가 딛고 선 바닥인가?</h3>
+        <p>장부(ledger)는 LLM 호출이 0이다. 나·Opus·Codex는 이걸 원소(재기·計·추적)로 세웠고,
+          Sonnet은 <b>"표의 정의역 밖 특이점"</b>, agy는 코드층이라 본다.</p>
+        <div class="side-by">
+          <div class="pos yes"><span class="lbl">원소다 — 나 · Opus · Codex</span>상태 기계도 무기 목록에 들어가야 배급·라우팅이 일관된다. manifest에 <span class="mono">llm=0</span>을 선언하면 그만.</div>
+          <div class="pos no"><span class="lbl">바닥이다 — Sonnet · agy</span>나머지 원소는 병렬 독립 인지행위인데 이것만 순서 의존이다. 원소로 끼우면 표의 "일제사격" 전제가 깨진다.</div>
+        </div>
+        <p class="rec"><b>추천:</b> 원소로 세우되 별종 표식을 준다 — <span class="mono">purity: {llm:0}</span>. 무기고 안에 두어 배급을 일관되게, 단 "순서 의존"이라 병렬 집계 검증에서 면제한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-num">04 — 경계 법칙</div>
+      <h2>넷이 똑같이 그은 선 — 이게 무기의 정의다</h2>
+    </div>
+    <div class="law">
+      <span class="unanimous">4/4 만장일치 + 이틀 전 실측 재확인</span>
+      <p>"이 표가 못 담는 무기는?"에 <b>넷 모두 같은 답</b>을 냈다:
+        호출 k가 호출 k−1의 결과를 읽어야 하는 <b>순차·의존·상태유지·폐루프</b> 무기.
+        쏘고 → 관측하고 → 조준 고쳐 다시 쏘는 것.</p>
+      <div class="versus">
+        <div class="term in">
+          <div class="h">일제사격 = 무기</div>
+          <p>N발을 동시에 독립으로 쏘고 코드가 사후 집계. 되먹임 없음. 표 안에 완전히 담긴다.</p>
+        </div>
+        <div class="vs">VS</div>
+        <div class="term out">
+          <div class="h">탄착수정사격 = 오케스트레이션</div>
+          <p>쏘고 보고 조준 고쳐 다시 쏨. 회차 간 의존. 무기가 아니라 <b>지휘 엔진</b>의 영역.</p>
+        </div>
+      </div>
+      <p>이건 메울 구멍이 아니라 <b>무기가 무엇인지 정의하는 선</b>이다. 그리고 이 선은
+        이틀 전 실측 — 서브에이전트도 워크플로우 속 에이전트도 무기 엔진(Workflow)을
+        직접 못 쏜다 — 과 정확히 맞물린다. <b>되먹임 루프는 코드(엔진)에만 살 수 있다.</b>
+        네 모델이 철학으로 도달한 선을, 런타임 물리학이 이미 강제하고 있었다.</p>
+      <div class="quotes">
+        <div class="q"><b>Sonnet</b> — "일제사격이 아니라 탄착수정사격이다. 표는 화합물까지만 설명하고, 누가 언제 몇 번 반복하는가는 설명하지 못한다."</div>
+        <div class="q"><b>Opus</b> — "이 체계는 잎(단발 병렬)에 완전하고 가지(의존 조합)에 침묵한다. forge는 분자가 아니라 표를 쓰는 컴파일러다."</div>
+        <div class="q"><b>Codex·GPT</b> — "외부에 작용하고 반응으로 다음을 고르는 폐루프는 '행동/실험' 원소를 요구하는데, 그건 'LLM은 흐름을 쥐지 않는다'와 충돌하므로 의도적으로 밖에 둔다."</div>
+        <div class="q"><b>agy·Gemini</b> — "대화형·상태 유지는 SCAN의 정적 그래프로 명시할 수 없다. 무기가 아니라 지휘 엔진의 영역이다."</div>
+      </div>
+    </div>
+    <p class="sec-lede" style="margin-top:22px">
+      곁가지 한 줄: Opus·Sonnet이 둘 다 짚은 실금 — "같은 지적인지" 판정하는 dedup이
+      실은 약한 의미 판단을 요구해서, '순수 코드 집계'라는 전제에 미세한 균열이 있다.
+      vet·spec-gate 엔진을 실제로 짤 때 걸릴 구체적 함정이다.
+    </p>
+  </section>
+
+  <footer class="wrap">
+    <p class="mono">salvo/docs/element-convergence.html — 4-모델 독립 원소 도출의 수렴 측정</p>
+    <p>확정 기저 4 (生·索·判·換) + 갈림 후보 3 (名·分·計) + 경계 법칙 1. 다음 걸음: 이 표를 003-weapon-platform 스펙의 도메인 모델 뼈대로 박고, 세 갈림을 /spec 인터뷰의 결정 항목으로 올린다.</p>
+  </footer>
+
+</div>
