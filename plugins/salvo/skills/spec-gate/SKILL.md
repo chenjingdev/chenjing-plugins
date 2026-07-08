@@ -1,6 +1,6 @@
 ---
 name: spec-gate
-description: "A gate that measures a spec by having N independent execution-model readers (default 3) cold-read it in parallel and surface what an implementer cannot decide on their own (blocking). It loops the interview back until zero confirmed blocking issues remain — confirmed = raised by 2 or more readers. Use this after /spec produces a SPEC.md, or whenever the user wants to validate or harden a spec before implementation. Usage: /spec-gate <path to SPEC.md> [--reader <model>] [--readers <N>]"
+description: "A gate that measures a spec by having N independent execution-model readers (default 3) cold-read it in parallel and surface what an implementer cannot decide on their own (blocking). It loops the interview back until zero confirmed blocking issues remain — confirmed = raised by 2 or more readers. Fires automatically as /spec's final step; also invoke it directly whenever the user wants to validate or harden an existing spec before implementation. Usage: /spec-gate <path to SPEC.md> [--reader <model>] [--readers <N>]"
 ---
 
 # /spec-gate — Cold-read measurement gate
@@ -107,7 +107,10 @@ the salvo spec template, and the required sections are those tagged
   - Any other answer: reflect the content into the spec body (the relevant
     section). The reflection is an edit by the writing session, grounded only
     in the user's answer — do not silently adopt a reader's guess (G-6).
-- Once reflection is done, propose re-running (the next round).
+- Once reflection is done, **start the next round yourself** — announce it in
+  one line ("게이트: N라운드 시작") so the user can interrupt. The loop ends
+  only at zero confirmed blocking, or when the user says stop (there is no
+  round cap — divergence is the user's call, G-8 · D-9).
 - If a `dashboard.html` exists next to the spec (created by /spec), update its
   Progress and Decision-log sections with this round's result — the user
   watches that page for live state.

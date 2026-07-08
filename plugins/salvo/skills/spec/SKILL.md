@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "Turn a raw idea into a spec an execution model can implement from the document alone, via a structured interview. Use this whenever the user describes a feature idea, wants a design or spec document, says 'I want to build X', or asks to scope or plan a system before coding. For a brand-new system it produces a system-level implementation contract (architecture, state, boundaries, contracts, error taxonomy); for a change to an existing codebase it produces a feature spec. Usage: /spec <idea description>. After drafting, validate with /spec-gate."
+description: "Turn a raw idea into a spec an execution model can implement from the document alone, via a structured interview. Use this whenever the user describes a feature idea, wants a design or spec document, says 'I want to build X', or asks to scope or plan a system before coding. For a brand-new system it produces a system-level implementation contract (architecture, state, boundaries, contracts, error taxonomy); for a change to an existing codebase it produces a feature spec. Usage: /spec <idea description>. After drafting, /spec-gate fires automatically as the final step."
 ---
 
 # /spec — Interview-driven spec authoring
@@ -109,6 +109,13 @@ understood.
 - If any markers remain, resolve each one with AskUserQuestion (proposed
   answers A/B/C + free-form input) and reflect it into the body.
 
-### 5. Handoff
-- After reporting completion, **propose running /spec-gate**. Do not move on to
-  the implementation phase before the gate passes.
+### 5. Gate (automatic)
+- After reporting completion, **invoke /spec-gate yourself** via the Skill tool
+  (skill `salvo:spec-gate`, args = the new SPEC.md path) — do not wait for the
+  user to ask. Announce it in one line first ("게이트: /spec-gate 1라운드
+  시작") so the user can interrupt.
+- The gate owns its own round loop (feedback → reflect → next round) until it
+  passes; follow its procedure. Do not move on to the implementation phase
+  before the gate passes.
+- Skip the auto-run only if the user explicitly asked to stop after drafting
+  (e.g. "게이트는 나중에").
