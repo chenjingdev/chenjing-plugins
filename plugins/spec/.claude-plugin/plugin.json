@@ -1,5 +1,5 @@
 {
   "name": "spec",
   "description": "러프한 아이디어를 인터뷰로 구현 가능한 명세(SPEC.md)로 만들고(/spec:spec), 독립 콜드 리더 N명의 병렬 읽기 + 2표 이상 합의 집계로 명세를 측정하는 관문(/spec:spec-gate). 작성이 끝나면 관문이 자동 발동.",
-  "version": "0.1.0"
+  "version": "0.1.1"
 }
