@@ -397,12 +397,12 @@ classified in §5.
 
 - A1: The user-facing door is spelled `/salvo`; the harness-level skill
   naming needed to achieve that invocation path is implementation-defined.
-- A2: Referrals (`referred_to_spec`) leave no run record: no form was drafted,
-  so there is nothing to archive.
+- A2: *(withdrawn by D-10 — the spec-referral branch was removed; no referral
+  exists to record.)*
 - A3: The run record `outcome` update after a dispatch is the only permitted
   mutation of a run record file.
-- A4: A "spec-shaped request" is one whose asked-for deliverable is a design
-  or specification document, judged by the router from the request text.
+- A4: *(withdrawn by D-10 — spec-shaped requests are no longer special-cased
+  in routing.)*
 - A5: Run model/effort selection follows the harness defaults unless the
   user names a tier in the request.
 - A6: The announcement line is in the user's conversation language; the
