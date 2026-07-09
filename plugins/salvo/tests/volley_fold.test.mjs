@@ -122,3 +122,11 @@ test('model override rides through to every agent call (A5)', async () => {
     () => ({ findings: [{ anchor: 'A', content: 'x' }] }))
   for (const c of calls) assert.equal(c.opts.model, 'haiku')
 })
+
+test('args delivered as a JSON string are normalized before firing', async () => {
+  const { result } = await runVolley(
+    JSON.stringify({ form: unionForm(), shooterPrompt: 'P', target: null, model: null }),
+    () => ({ findings: [{ anchor: 'A', content: 'x' }] }))
+  assert.equal(result.kind, 'folded')
+  assert.equal(result.items[0].anchor, 'A')
+})

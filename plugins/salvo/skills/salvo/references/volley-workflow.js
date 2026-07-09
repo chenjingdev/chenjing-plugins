@@ -17,7 +17,12 @@ export const meta = {
 //   {kind:'single', result} | {kind:'folded', ...} | {kind:'picked', ...}
 //   | {kind:'candidates', ...} | {kind:'void', reason}
 
-const form = args.form
+// args may arrive as a JSON string depending on the caller's serialization
+// path — normalize before reading anything (stringified args would otherwise
+// crash the volley before a single shooter fires; caught by the v0.6.0 smoke).
+const input = typeof args === 'string' ? JSON.parse(args) : args
+
+const form = input.form
 const N = form.volley
 const sealed = form.isolation === 'sealed'
 
@@ -27,7 +32,7 @@ const sealed = form.isolation === 'sealed'
 const agentOpts = () => {
   const o = {}
   if (sealed) o.agentType = 'salvo:shooter'
-  if (args.model) o.model = args.model
+  if (input.model) o.model = input.model
   return o
 }
 
@@ -39,7 +44,7 @@ phase('Fire')
 
 // ---- fold: none (volley 1 — delegation / single shot) ----------------------
 if (form.fold === 'none') {
-  const result = await agent(args.shooterPrompt, { ...agentOpts(), label: 'shot:1', phase: 'Fire' })
+  const result = await agent(input.shooterPrompt, { ...agentOpts(), label: 'shot:1', phase: 'Fire' })
   if (result === null) return { kind: 'void', reason: 'the single shooter failed to complete' }
   return { kind: 'single', result }
 }
@@ -71,10 +76,10 @@ if (form.fold === 'union' || form.fold === 'vote') {
   }
 
   const quoteInvalid = findings =>
-    findings.filter(f => !args.target.includes(f.anchor)).map(f => f.anchor)
+    findings.filter(f => !input.target.includes(f.anchor)).map(f => f.anchor)
 
   const fireOne = async i => {
-    let prompt = args.shooterPrompt
+    let prompt = input.shooterPrompt
     for (let attempt = 0; attempt <= RE_REQUESTS; attempt++) {
       const out = await agent(prompt, { ...agentOpts(), schema: FINDINGS, label: `shot:${i + 1}`, phase: 'Fire' })
       if (out === null) return null // shooter failed — no retry (M8)
@@ -82,7 +87,7 @@ if (form.fold === 'union' || form.fold === 'vote') {
       const bad = quoteInvalid(out.findings)
       if (bad.length === 0) return out.findings
       log(`shot:${i + 1} returned ${bad.length} non-verbatim anchor(s); re-requesting (${attempt + 1}/${RE_REQUESTS})`)
-      prompt = args.shooterPrompt +
+      prompt = input.shooterPrompt +
         `\n\nYour previous output was rejected: these anchor values are not verbatim substrings of the target: ${JSON.stringify(bad)}. Every anchor must be copied character-for-character from the target text.`
     }
     return null // still non-conforming after re-requests → counts as failed (M11)
@@ -98,7 +103,7 @@ if (form.fold === 'union' || form.fold === 'vote') {
   // Anchor identity: exact equality for closed lists; exact equality or span
   // overlap for quotes (both anchors are verified substrings by now).
   const span = anchor => {
-    const start = args.target.indexOf(anchor)
+    const start = input.target.indexOf(anchor)
     return [start, start + anchor.length]
   }
   const sameAnchor = (a, b) => {
@@ -145,7 +150,7 @@ const CANDIDATE = {
   properties: { candidate: { type: 'string', minLength: 1 } },
 }
 const shots = await parallel(Array.from({ length: N }, (_, i) => () =>
-  agent(args.shooterPrompt, { ...agentOpts(), schema: CANDIDATE, label: `shot:${i + 1}`, phase: 'Fire' })))
+  agent(input.shooterPrompt, { ...agentOpts(), schema: CANDIDATE, label: `shot:${i + 1}`, phase: 'Fire' })))
 const failedShots = shots.map((r, i) => (r === null ? i + 1 : null)).filter(x => x !== null)
 if (failedShots.length > 0) {
   return { kind: 'void', reason: `shooter(s) ${failedShots.join(', ')} failed — no partial fold` }
@@ -181,7 +186,7 @@ const judgePrompt = [
   `Return the chosen candidate's number (1-${N}) and one sentence of grounds.`,
 ].join('\n')
 const judgeOpts = { agentType: 'salvo:shooter', label: 'judge', phase: 'Fold' }
-if (args.model) judgeOpts.model = args.model
+if (input.model) judgeOpts.model = input.model
 const verdict = await agent(judgePrompt, {
   ...judgeOpts,
   schema: {
