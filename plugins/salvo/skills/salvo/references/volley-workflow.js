@@ -137,4 +137,62 @@ if (form.fold === 'union' || form.fold === 'vote') {
 }
 
 // ---- fold: pick -------------------------------------------------------------
-throw new Error('pick: implemented in the next commit')
+// Each shooter returns one complete candidate artifact (§2.3).
+const CANDIDATE = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['candidate'],
+  properties: { candidate: { type: 'string', minLength: 1 } },
+}
+const shots = await parallel(Array.from({ length: N }, (_, i) => () =>
+  agent(args.shooterPrompt, { ...agentOpts(), schema: CANDIDATE, label: `shot:${i + 1}`, phase: 'Fire' })))
+const failedShots = shots.map((r, i) => (r === null ? i + 1 : null)).filter(x => x !== null)
+if (failedShots.length > 0) {
+  return { kind: 'void', reason: `shooter(s) ${failedShots.join(', ')} failed — no partial fold` }
+}
+const candidates = shots.map(s => s.candidate)
+
+phase('Fold')
+const pick = form.pick
+if (pick.route === 'mechanical') {
+  if (pick.program.kind === 'shortest' || pick.program.kind === 'longest') {
+    let choice = 0
+    for (let i = 1; i < candidates.length; i++) {
+      const better = pick.program.kind === 'shortest'
+        ? candidates[i].length < candidates[choice].length
+        : candidates[i].length > candidates[choice].length
+      if (better) choice = i
+    }
+    return { kind: 'picked', route: 'mechanical', program: pick.program.kind, choice, candidates }
+  }
+  // kind === 'command': the stated test command must run outside this sandbox —
+  // hand the conforming candidates back for scripts/pick_command.mjs.
+  return { kind: 'candidates', route: 'mechanical', program: 'command', candidates }
+}
+
+// route === 'judged': ONE starved judge — candidates + criterion text only (M2).
+// A judge failure voids the volley like a shooter failure (§4 step 10).
+const judgePrompt = [
+  'You are the judge of a salvo pick. Select exactly one candidate by this criterion:',
+  pick.criterion,
+  '',
+  ...candidates.map((c, i) => `--- CANDIDATE ${i + 1} ---\n${c}`),
+  '',
+  `Return the chosen candidate's number (1-${N}) and one sentence of grounds.`,
+].join('\n')
+const judgeOpts = { agentType: 'salvo:shooter', label: 'judge', phase: 'Fold' }
+if (args.model) judgeOpts.model = args.model
+const verdict = await agent(judgePrompt, {
+  ...judgeOpts,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['choice', 'grounds'],
+    properties: {
+      choice: { type: 'integer', minimum: 1, maximum: N },
+      grounds: { type: 'string' },
+    },
+  },
+})
+if (verdict === null) return { kind: 'void', reason: 'the pick judge failed — no selection' }
+return { kind: 'picked', route: 'judged', choice: verdict.choice - 1, grounds: verdict.grounds, candidates }
