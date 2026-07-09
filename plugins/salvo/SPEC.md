@@ -2,7 +2,7 @@
 
 **Created**: 2026-07-09
 **Status**: Draft
-**Gate**: passed
+**Gate**: not-run (D-12 revision; prior pass evidence: docs/003-gate-report.md)
 
 <!-- A system-level implementation contract.
      Principle: nail down all the "axes" (state, boundaries, contracts, error
@@ -11,15 +11,23 @@
 
 ## 1. Purpose & Scope
 
-The salvo plugin's founding claim is: **one LLM pass is a guess; a salvo — N
-independent passes merged by pure code — is a measurement.** This spec defines
-the platform that turns that claim into a single user-facing door, the
-`/salvo` command: the user states work in plain language, and the platform
-routes it to a registered preset, fills an ad-hoc intake form, dispatches it
-as a single-run delegation, or rejects it — all decided by one mechanism, the
-**intake form**. All actual work runs **outside the invoking
-session** (in subagent/workflow sessions); the invoking session only routes,
-announces, merges, reports, and archives.
+salvo is a **routing door**: one registered command, `/salvo`, in front of a
+growing set of sub-skills bundled with the plugin. The user states work in
+plain language without knowing what sub-skills exist; the door discovers them
+from disk at request time and routes to the one whose routing card matches.
+This is the context-economy design the plugin is built around: no matter how
+many sub-skills ship, the only thing standing in session context is the
+door's own description — the inventory is never loaded wholesale, and the
+user never needs to memorize it (D-12).
+
+Behind the routing layer sits the built-in **engine**, and its founding
+claim: **one LLM pass is a guess; a salvo — N independent passes merged by
+pure code — is a measurement.** When no routing card matches, the door fills
+an ad-hoc intake form and the engine dispatches it as a run set (measurement)
+or a single-run delegation, or rejects it — all decided by one mechanism, the
+**intake form**. All actual work runs **outside the invoking session** (in
+subagent/workflow sessions); the invoking session only routes, announces,
+merges, reports, and archives.
 
 Vocabulary used throughout (each defined in §2):
 
@@ -37,17 +45,24 @@ Vocabulary used throughout (each defined in §2):
   work that has value outside the session but cannot be merged.
 - **Run record**: the archived intake form left after every dispatch; the raw
   material for later promotion of ad-hoc forms into presets.
+- **Sub-skill**: a directory bundled with the plugin, next to the door,
+  carrying a routing card plus its implementation — a **run preset** (an
+  intake form the engine executes) or a **procedural sub-skill** (an
+  instruction document the door follows). Bundled-only: authored in the
+  plugin repository and shipped with releases, never created at runtime.
+- **Routing card**: the one-short-paragraph "route here when …" statement
+  every sub-skill carries; the door's matching material.
 
 **In scope (v1)**
 
-1. The `/salvo` routing surface (single door).
+1. The `/salvo` routing surface (single door) and the live routing-card scan.
 2. The intake form schema and its coherence rules.
 3. The form-filling procedure (ad-hoc forms).
 4. Delegation (single-run dispatch) under the same form.
 5. Rejection and referral behavior.
 6. Run-record archiving.
-7. The preset discovery contract (so promoted forms have a defined landing
-   place), even though v1 ships with zero presets.
+7. The sub-skill discovery contract — routing cards — so promoted forms have
+   a defined landing place, even though v1 ships with zero sub-skills.
 
 **Out of scope (v1)**
 
@@ -57,7 +72,8 @@ Vocabulary used throughout (each defined in §2):
 - Any engine, ledger state machine, or self-running loop: **the platform never
   auto-repeats a run set.** Re-running is an explicit user (or driving-session)
   act.
-- The `/spec` door and its gate (already shipped separately, v0.5.1).
+- The `/spec` plugin (a separate product since the D-8 split; fully decoupled
+  per D-10).
 - Cost accounting, token budgeting, benchmarking harnesses.
 
 ## 2. Domain Model
@@ -97,7 +113,7 @@ is forbidden):
 
 | Field | Reader |
 |---|---|
-| `definition` | Router (preset matching), runner prompt construction, report header |
+| `definition` | Runner prompt construction, report header (routing matches on routing cards, not this field — D-12) |
 | `merge` (+ `vote_threshold`, `pick_criterion` + route) | Merge step (selects the rule; evaluates mechanical pick); judge-agent dispatch (judged pick); router (merge = `none` ⇒ delegation path) |
 | `runs` | Dispatch step (how many runs to spawn) |
 | `isolation` | Dispatch step (grants or withholds tools/repository access per run) |
@@ -106,12 +122,20 @@ is forbidden):
 | `anchors` | Merge step (dedup / vote matching key) |
 | `notes` | Form-filling (applies it as a runner-prompt or merge constraint); human review of run records (form-evolution signal) |
 
-### 2.2 Preset and ad-hoc forms
+### 2.2 Sub-skills, presets, and ad-hoc forms
 
-- **Preset** (persistent): a skill directory that contains an intake form
-  file. The set of skills carrying an intake form file **is** the registry —
-  there is no separate index file. v1 ships zero presets; the contract exists
-  so promotion has a landing place.
+- **Sub-skill** (persistent, bundled-only): a sibling directory carrying a
+  routing card file that states in one short paragraph when requests route
+  here. Two kinds: a **run preset** additionally carries an intake form file,
+  which the engine executes as-is; a **procedural sub-skill** additionally
+  carries an instruction document the door follows after routing. The set of
+  directories carrying a routing card **is** the registry — there is no
+  separate index file. Sub-skills are never registered as top-level skills
+  (M12): only the door is registered, and the card scan happens live at
+  request time. Creation is an authoring act in the plugin repository —
+  designed, tested, versioned, shipped; the runtime never creates one (M13;
+  the read-only install cache also makes it physically impossible). v1 ships
+  zero sub-skills; the contract exists so promotion has a landing place.
 - **Ad-hoc form** (ephemeral): an intake form filled for one dispatch, plus
   the runner prompt built from it. It lives for one run set; only its form
   survives (as a run record).
@@ -165,7 +189,8 @@ States of one /salvo invocation:
 | State | Entered when | Left when |
 |---|---|---|
 | `RECEIVED` | `/salvo <request>` invoked | Always → `ROUTING` |
-| `ROUTING` | From `RECEIVED` | A preset's `definition` matches → `ARMED` (using the preset's form); otherwise → `DRAFTING` |
+| `ROUTING` | From `RECEIVED` | A run preset's routing card matches → `ARMED` (using the preset's bundled form); a procedural sub-skill's routing card matches → `ROUTED`; no card matches → `DRAFTING` |
+| `ROUTED` | A procedural sub-skill's routing card matched | Terminal for the door: one announcement line names the sub-skill, then control passes to that sub-skill's own instructions (if those instructions dispatch runs, they do so through the engine, whose states apply to that dispatch) |
 | `DRAFTING` | Form-filling starts filling a form | Form complete and coherent (C1–C6) → `ARMED`; form cannot be completed (see §5) → `REJECTED`; one coherence failure triggers one silent re-draft, a second → `REJECTED` |
 | `REJECTED` | Form impossible or incoherent twice | Terminal: reason reported (which aspect was unfillable), no dispatch, no run record |
 | `ARMED` | Form complete (preset or filled) | RunRecord written (`outcome: pending`) → `ANNOUNCED` |
@@ -185,11 +210,13 @@ any earlier state.
 Primary flow — ad-hoc measurement (v1's main path, zero presets):
 
 1. User invokes `/salvo <request>`.
-2. Router scans skills for intake form files (presets). For each, it compares
-   the request against the preset's `definition`. On a match, that form is
-   used (skip to step 4). With zero presets this always falls through. Routing
-   comparisons are the routing session's judgment — the mechanical-only
-   constraint (M1) binds the merge step, not routing.
+2. Router scans sibling directories for routing cards and compares the
+   request against each card. A run preset's match → its bundled form is used
+   (skip to step 4). A procedural sub-skill's match → one announcement line
+   names the sub-skill, then the door follows that sub-skill's instructions
+   and its own flow ends (`ROUTED`). With zero sub-skills this always falls
+   through. Routing comparisons are the routing session's judgment — the
+   mechanical-only constraint (M1) binds the merge step, not routing.
 3. The form-filling step drafts an IntakeForm from the request. Filling logic:
    the `definition` is derived from the request's target and asked-for output
    shape; `merge` is chosen by what the outputs can be mechanically merged on;
@@ -276,8 +303,11 @@ classified in §5.
 - M8 **Single-run**: the platform never auto-repeats or auto-retries a
   run set (individual runs are not retried either — a failed run voids the
   run set per §5).
-- M9 **One form for everything**: measurement, delegation — every dispatch
-  passes through the same IntakeForm; there is no form-less path.
+- M9 **One form for everything the engine runs**: measurement, delegation —
+  every engine dispatch passes through the same IntakeForm; there is no
+  form-less engine path. A procedural sub-skill owns its behavior after
+  routing; when it dispatches runs, it does so through the engine and under
+  this rule.
 - M10 **Format identity**: RunRecord serialization ≡ preset intake form
   serialization (§2.4).
 - M11 **Schema-enforced run outputs**: for `merge` ∈ {`union`, `vote`},
@@ -285,6 +315,14 @@ classified in §5.
   at the dispatch layer (validation + re-request). Non-conforming output is
   never repaired after the fact by an LLM rewriting it — it either becomes
   conforming at the source or the run counts as failed.
+- M12 **Door-only registration**: sub-skills are never registered as
+  top-level skills; the door is the only registered surface, and discovery is
+  the live routing-card scan. Session context carries one skill description
+  regardless of how many sub-skills ship.
+- M13 **Bundled-only sub-skills**: the runtime never creates, edits, or
+  persists a sub-skill. Runtime artifacts are ad-hoc forms and run records
+  only; sub-skill creation is plugin-repo authoring (promotion = the
+  developer's loop over the records pile).
 
 **SHOULD**
 
@@ -304,8 +342,8 @@ classified in §5.
 - The concrete serialization syntax for forms/run records (subject to M10).
 - Runner prompt wording, report layout, span-overlap details for
   quote-vocabulary anchors.
-- Preset tie-breaking when two presets' definitions both match (v1 has zero
-  presets; revisit at first promotion).
+- The routing-card file name/format, and card tie-breaking when two cards
+  both match (v1 has zero sub-skills; revisit at first promotion).
 - Updating the run record `outcome` field as a second write vs a rename.
 
 ## 7. Acceptance Criteria
@@ -333,10 +371,11 @@ classified in §5.
   generation work (typically a `pick` run over N candidate drafts, or a
   `runs`-1 delegation); the door does not invoke or name another plugin's
   skill.
-- **AC5 — preset priority.** Given a skill directory containing an intake
-  form whose `definition` matches the request, when the user runs a matching
-  `/salvo` request, then that preset's form is used and no new form is
-  drafted (observable: the announcement names the preset).
+- **AC5 — routing priority.** Given a bundled sub-skill whose routing card
+  matches the request: a run preset's bundled form is used with no new form
+  drafted; a procedural sub-skill is followed without any form being filled.
+  In both cases the announcement names the sub-skill (observable routing),
+  and a non-matching request still falls through to the ad-hoc engine.
 - **AC6 — void run set.** Given a measurement dispatch of 3 where one run
   fails to complete, then the report contains no partial findings, states the
   failure, and the run record `outcome` is `void`.
@@ -369,6 +408,7 @@ classified in §5.
 | D-9 | Handoff clarification (2026-07-09, amends D-8's referral clause): the split decouples packaging/activation only — at runtime the door does auto-invoke `/spec:spec`: announce the handoff in one line, then invoke the `spec:spec` skill with the user's request (name it instead only when the spec plugin is absent). Within-plugin auto-chaining is pre-approved: `spec` → `spec-gate` inside the spec plugin, and this door → its own sub-skills, including future promoted presets (create-then-invoke included). Cross-plugin package bundling remains rejected | User clarification: the split targeted activation coupling, not runtime routing; announce-and-stop made the user re-type a request the door already held | Announce-and-stop referral (D-8's first reading — a re-typing tax); re-merging the plugins (reverses D-8) |
 | D-10 | Spec decoupling, final (2026-07-09, supersedes D-8's referral clause and all of D-9): salvo and spec are separate products — the door neither invokes nor names the spec plugin. The spec-shaped-request branch is removed from routing (state `REFERRED` and error `referred_to_spec` deleted): a request for a spec/design document flows through the ordinary form like any work (typically `pick` over N candidate drafts, or a `runs`-1 delegation); interview-style co-editing still hits `rejected_unfillable`. Each skill auto-triggers independently from plain language via its own description | User clarification: using salvo must not funnel anyone into the spec interview — they may not want a spec at all; D-9's auto-invoke was the session's misreading of that instruction | D-9 auto-invoke (funnels the user into a product they did not choose); D-8 announce-and-stop referral (still steers); a soft mention without invocation (still couples the products) |
 | D-11 | Spec relocation (2026-07-09): this document dogfoods the spec plugin's 0.2.0 location contract — the living spec moves from `specs/003-parallel-run-platform/SPEC.md` to `SPEC.md` at the plugin root (the plugin, not the multi-plugin repo, is the project unit), and the numbered `specs/` directory is retired. The gate artifacts move verbatim to `docs/003-gate-report.md` / `docs/003-dashboard.html` as frozen history: they predate the uncommitted-`.spec/` rule and stay committed as the pass evidence. Future revisions amend this document via ledger rows, never a new numbered spec | User consistency push (2026-07-09): the repo kept the numbered layout the 0.2.0 contract had just abolished; the "it's historical" defense was already rejected once for this directory's own name | Leaving the numbered dir as history (same excuse rejected for `003-weapon-platform`); repo-root SPEC.md (wrong project unit — this repo hosts several plugins); moving gate artifacts into `.spec/` (that dir is uncommitted by contract, but the pass evidence must stay committed) |
+| D-12 | Router identity (2026-07-09): `/salvo` is redefined as the **routing door** over bundled sub-skills — routing is the product; the parallel-run platform is the built-in engine behind it. Adds the routing-card contract (§2.2): every sub-skill carries a card ("route here when …") the door scans live at request time; run presets carry a form the engine executes, procedural sub-skills carry instructions the door follows. Sub-skills are bundled-only (M13) — the runtime never creates one; the user-side exception path is the ad-hoc engine (form → run → record), and promotion stays a developer-side authoring loop over the records pile. Only the door is registered (M12), so session context carries one description no matter how many sub-skills ship | User correction (2026-07-09): salvo's founding intent is routing — skills will multiply, they cannot all sit in context, and users cannot be expected to know the inventory; the spec's platform-first framing made the engine look like the product (the author's second identity misreading, after D-9) | Runtime user-created sub-skills (read-only install cache; no versioning, no gate, quality drift; would need a second scan root in the data dir — deferred until records show demand); pre-building presets for every anticipated situation (speculative design, re-rejected per D-4 — the ad-hoc engine already floors every case); registering sub-skills as top-level skills (context cost grows per skill — defeats the door's purpose) |
 
 **D-7 rename table (normative old → new mapping):**
 
