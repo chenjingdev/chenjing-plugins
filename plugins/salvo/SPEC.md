@@ -1,4 +1,4 @@
-# System Specification: salvo — parallel-run platform (/salvo door)
+# System Specification: salvo — routing door (/salvo) with a parallel-run engine
 
 **Created**: 2026-07-09
 **Status**: Draft
