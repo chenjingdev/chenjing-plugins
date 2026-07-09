@@ -1,18 +1,25 @@
 ---
 name: salvo
-description: "Parallel-run platform — state work in plain language and the skill routes it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable. It also delegates single-run work to another session. Use this whenever the user invokes /salvo, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
+description: "Routing door over sub-skills bundled with the plugin — state work in plain language and it routes to the right sub-skill via a live routing-card scan; you never need to know what sub-skills exist. When no card matches, the built-in engine handles it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable — it also delegates single-run work to another session. Use this whenever the user invokes /salvo, wants work routed to the right bundled sub-skill, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
 ---
 
-# /salvo — N independent runs, merged by code
+# /salvo — a routing door over bundled sub-skills
 
-One pass is a guess; several independent passes merged by code are a
-measurement — that is the salvo. This skill is the single door: every request
-becomes an intake form, and filling that form is itself the routing decision.
+/salvo is a routing door: state work in plain language and it routes to the
+sub-skill whose routing card matches, discovered live from disk at request
+time. You never need to know what sub-skills ship — no matter how many there
+are, the only thing standing in session context is this door's own description;
+the inventory is never loaded wholesale (M12).
 
-This session only routes, announces, transcribes, and archives. The runs
-happen in one Workflow call and every count comes out of code — the workflow
-script and the bundled scripts — which is what keeps each number recountable
-and this session's context clean enough to stay a fair courier.
+Behind the door sits the built-in engine, and its founding claim: one pass is a
+guess; several independent passes merged by code are a measurement — that is
+the salvo. When no routing card matches, the door fills an intake form and the
+engine runs it — filling that form is itself the routing decision (measurement,
+delegation, or reject). This session only routes, announces, transcribes, and
+archives; the runs happen in one Workflow call and every count comes out of
+code — the workflow script and the bundled scripts — which is what keeps each
+number recountable and this session's context clean enough to stay a fair
+courier.
 
 The numbered codes below (M1…, S1…, C1…, A6, D-6…) cite invariants in the
 platform spec at `plugins/salvo/SPEC.md` (plugin repo). They are
@@ -29,15 +36,24 @@ Paths: `<base>` = this skill's base directory. Run records live at
 
 Decide in this order:
 
-1. **Preset scan** — list sibling skills carrying a form:
-   `ls <base>/../*/intake-form.json`. Read each file's `.form.definition` and
-   compare it against the request (this comparison is routing judgment — the
-   code-only rule M1 binds the merge, not routing). On a match, use that form
-   as-is and continue at §4; the announcement names the preset — that is how
-   the user sees preset priority. The scan is live (not a hard-coded list) so
-   the first promoted preset changes routing without editing this skill. (v1
-   ships zero presets, so today this falls through.)
-2. Otherwise — **fill the form** for an ad-hoc run (§2).
+1. **Card scan** — list the routing card of every sibling sub-skill:
+   `ls <base>/../*/card.md`. Read each card (one short paragraph starting
+   `Route here when …`) and compare it against the request (this comparison is
+   routing judgment — the code-only rule M1 binds the merge, not routing). On a
+   match, look at what the matched sub-skill directory carries:
+   - **run preset** (carries `intake-form.json`) → read that file and continue
+     at §4 (record) with its form as-is, no new form drafted; the announcement
+     (§5) names the sub-skill — that is how the user sees routing (AC5).
+   - **procedural sub-skill** (carries `instructions.md`) → print one
+     announcement line naming the sub-skill, then read and follow its
+     `instructions.md`; this door's own flow ends here (ROUTED). If those
+     instructions dispatch runs, they do so through the engine below.
+   The scan is live (not a hard-coded list) so shipping a new sub-skill changes
+   routing without editing this skill. Sub-skills are bundled-only (M13) — the
+   runtime never creates one; the only things this session writes are ad-hoc
+   forms and run records. (v1 ships zero sub-skills, so today this always falls
+   through.)
+2. No card matches — **fill the form** for an ad-hoc run (§2).
 
 A request for a spec or design document is not special-cased (D-10): it flows
 through the form like any other work — typically a `pick` run over N candidate
@@ -160,7 +176,7 @@ trace.
 ## 5. Announce, then run (M7)
 
 Print exactly one line in the user's language — definition digest, run count,
-merge rule; name the preset if one matched. Then start immediately: the
+merge rule; name the sub-skill if one matched. Then start immediately: the
 announcement is the user's chance to interrupt, so it stands in for asking
 permission.
 
