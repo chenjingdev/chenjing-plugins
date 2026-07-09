@@ -2,7 +2,7 @@
 
 **Created**: 2026-07-09
 **Status**: Draft
-**Gate**: passed (D-12 revision, round 1, 2026-07-09 — 0 confirmed blocking, readers opus ×3; report in `.spec/gate-report.md`, prior cycle frozen at docs/003-gate-report.md)
+**Gate**: not-run (D-14 revision; D-12 round-1 pass in `.spec/gate-report.md`, prior cycle frozen at docs/003-gate-report.md)
 
 <!-- A system-level implementation contract.
      Principle: nail down all the "axes" (state, boundaries, contracts, error
@@ -19,6 +19,11 @@ This is the context-economy design the plugin is built around: no matter how
 many sub-skills ship, the only thing standing in session context is the
 door's own description — the inventory is never loaded wholesale, and the
 user never needs to memorize it (D-12).
+
+The routing decision itself is mechanical (D-14): an isolated classifier
+agent reduces the request to a schema-enforced switch vector (§2.5), and a
+code table over that vector — not an LLM's direct pick — selects the
+destination: a sub-skill, or the engine.
 
 Behind the routing layer sits the built-in **engine**, and its founding
 claim: **one LLM pass is a guess; a salvo — N independent passes merged by
@@ -51,8 +56,14 @@ Vocabulary used throughout (each defined in §2):
   intake form the engine executes) or a **procedural sub-skill** (an
   instruction document the door follows). Bundled-only: authored in the
   plugin repository and shipped with releases, never created at runtime.
-- **Routing card**: the one-short-paragraph "route here when …" statement
-  every sub-skill carries; the door's matching material.
+- **Routing card**: what every sub-skill carries for routing — a
+  one-short-paragraph human statement ("route here when …") plus a
+  machine-readable condition over switch names (§2.5); the condition is what
+  the routing table evaluates.
+- **Switch vector**: the schema-enforced set of request features (§2.5) the
+  classifier extracts; the routing table's only input (D-14).
+- **Classifier**: the isolated agent that produces the switch vector —
+  sealed, it sees the request text and the switch schema, nothing else.
 
 **In scope (v1)**
 
@@ -64,6 +75,7 @@ Vocabulary used throughout (each defined in §2):
 6. Run-record archiving.
 7. The sub-skill discovery contract — routing cards — so promoted forms have
    a defined landing place, even though v1 ships with zero sub-skills.
+8. The switch-vector classification and the mechanical routing table (D-14).
 
 **Out of scope (v1)**
 
@@ -126,8 +138,9 @@ is forbidden):
 ### 2.2 Sub-skills, presets, and ad-hoc forms
 
 - **Sub-skill** (persistent, bundled-only): a sibling directory carrying a
-  routing card file that states in one short paragraph when requests route
-  here. Two kinds: a **run preset** additionally carries an intake form file,
+  routing card — a one-short-paragraph human statement of when requests route
+  here, plus a machine-readable condition over switch names (§2.5) that the
+  routing table evaluates. Two kinds: a **run preset** additionally carries an intake form file,
   which the engine executes as-is; a **procedural sub-skill** additionally
   carries an instruction document the door follows after routing. The set of
   directories carrying a routing card **is** the registry — there is no
@@ -167,21 +180,56 @@ is forbidden):
 
 ### 2.4 RunRecord
 
-Persistent. One file per dispatch under the salvo data directory
+Persistent. One file per routed or dispatched invocation under the salvo
+data directory
 `~/.claude/plugins/data/salvo-chenjing-plugins/records/` (user-level, outside
 the plugin install — the install cache is read-only and replaced wholesale on
 every update; run records must survive updates and accumulate across projects,
-D-6; directory renamed from `residue/` to `records/` by D-7), written when
-the form is complete (before dispatch). Contains: every IntakeForm field, a
-timestamp, a 1-sentence digest of the originating request, and an `outcome`
-field (`pending` at write time; updated to `merged` \| `void` \| `delegated`
-after the dispatch — the update is the only mutation).
+D-6; directory renamed from `residue/` to `records/` by D-7), written before
+dispatch (engine) or before the sub-skill's instructions are followed
+(routed, D-14). Contains: the routing block — switch vector, destination,
+matched condition (D-14) — a timestamp, and a 1-sentence digest of the
+originating request; an engine dispatch additionally stores every IntakeForm
+field and an `outcome` field (`pending` at write time; updated to `merged`
+\| `void` \| `delegated` after the dispatch — the update is the only
+mutation). A sub-skill handoff writes `outcome: routed` at write time and is
+never mutated.
 
 **Format identity (interop contract)**: the serialization format of a
 RunRecord and of a preset's intake form file MUST be identical, so that
 promotion is a file copy plus a skill wrapper. The concrete syntax
 (YAML/JSON/Markdown) is implementation-defined but single: one format
 everywhere.
+
+### 2.5 SwitchVector
+
+The routing contract type (D-14): a small, closed set of request features the
+classifier extracts under a schema; the routing table and the form-filling
+prior are its only consumers. Every switch has a reader (M3 applies):
+
+| Switch | Type | Reader |
+|---|---|---|
+| `enumerable_findings` | bool | merge prior (`union`/`vote` territory); sub-skill conditions |
+| `wants_confidence` | bool | merge prior (`vote` over `union`) |
+| `candidate_selection` | bool | merge prior (`pick`) |
+| `unattended_ok` | bool | reject prior (false ⇒ the work likely needs the user mid-execution) |
+| `touches_environment` | bool | isolation prior (`tooled` vs `sealed`); sub-skill conditions |
+| `target_kind` | enum `document` \| `repository` \| `conversation` \| `none` | criteria/embedding prior; sub-skill conditions |
+
+- The switches restate the intake form's own decision axes — they are not a
+  new ontology (the D-1 concern); the form's axes already survived gate
+  rounds and live dispatches.
+- The vector is consumed twice: (1) the routing table matches each
+  sub-skill's condition against it — the most specific satisfied condition
+  (largest number of matched clauses) wins, ties break lexicographically by
+  sub-skill name, no satisfied condition ⇒ engine; (2) the form-filling step
+  starts from the switch prior (S6).
+- The vector, the chosen destination, and the matched condition are recorded
+  in the run record (§2.4): routing is recountable — re-evaluating the table
+  on the recorded vector must reproduce the destination (AC8).
+- Amending the switch list is a ledger act, like a form-field change; the
+  evidence is the records pile (recorded vectors vs realized forms show
+  which switches discriminate and which are dead).
 
 ## 3. State Model
 
@@ -190,8 +238,8 @@ States of one /salvo invocation:
 | State | Entered when | Left when |
 |---|---|---|
 | `RECEIVED` | `/salvo <request>` invoked | Always → `ROUTING` |
-| `ROUTING` | From `RECEIVED` | A run preset's routing card matches → `ARMED` (using the preset's bundled form); a procedural sub-skill's routing card matches → `ROUTED`; no card matches → `DRAFTING` |
-| `ROUTED` | A procedural sub-skill's routing card matched | Terminal for the door: one announcement line names the sub-skill, then control passes to that sub-skill's own instructions (if those instructions dispatch runs, they do so through the engine, whose states apply to that dispatch) |
+| `ROUTING` | From `RECEIVED` | The routing workflow returns the switch vector and the table's pick (code, D-14): a run preset wins → `ARMED` (using its bundled form); a procedural sub-skill wins → `ROUTED`; no condition satisfied, or classifier failure (engine fallback, noted in the record) → `DRAFTING` |
+| `ROUTED` | A procedural sub-skill won the routing table | Terminal for the door: run record written (`outcome: routed`), one announcement line names the sub-skill, then control passes to that sub-skill's own instructions (if those instructions dispatch runs, they do so through the engine, whose states apply to that dispatch) |
 | `DRAFTING` | Form-filling starts filling a form | Form complete and coherent (C1–C6) → `ARMED`; form cannot be completed (see §5) → `REJECTED`; one coherence failure triggers one silent re-draft, a second → `REJECTED` |
 | `REJECTED` | Form impossible or incoherent twice | Terminal: reason reported (which aspect was unfillable), no dispatch, no run record |
 | `ARMED` | Form complete (preset or filled) | RunRecord written (`outcome: pending`) → `ANNOUNCED` |
@@ -211,17 +259,30 @@ any earlier state.
 Primary flow — ad-hoc measurement (v1's main path, zero presets):
 
 1. User invokes `/salvo <request>`.
-2. Router scans sibling directories for routing cards and compares the
-   request against each card. A run preset's match → its bundled form is used
-   (skip to step 4). A procedural sub-skill's match → one announcement line
-   names the sub-skill, then the door follows that sub-skill's instructions
-   and its own flow ends (`ROUTED`). With zero sub-skills this always falls
-   through. Routing comparisons are the routing session's judgment — the
-   mechanical-only constraint (M1) binds the merge step, not routing.
+2. The door collects the routing conditions of the bundled sub-skills (from
+   their card files) and launches the routing workflow: an isolated
+   classifier agent reduces the request to the switch vector (§2.5), then the
+   script's code evaluates the conditions against the vector — the most
+   specific satisfied condition wins, ties break lexicographically, no match
+   ⇒ engine. A run preset win → its bundled form is used (skip to step 4). A
+   procedural win → run record written (`outcome: routed`), one announcement
+   line names the sub-skill, then the door follows that sub-skill's
+   instructions and its own flow ends (`ROUTED`). Engine — including the
+   classifier-failure fallback, which the record notes — → step 3. With zero
+   sub-skills the table holds no conditions and always yields engine. The
+   LLM's only routing role is flipping switches inside a schema; the
+   destination pick is code (M15).
 3. The form-filling step drafts an IntakeForm from the request. Filling logic:
    the `definition` is derived from the request's target and asked-for output
    shape; `merge` is chosen by what the outputs can be mechanically merged on;
-   the remaining fields follow. **The routing decision is the form itself**:
+   the remaining fields follow. Form-filling starts from the switch prior
+   (S6): `candidate_selection` ⇒ `pick`; `enumerable_findings` +
+   `wants_confidence` ⇒ `vote`; `enumerable_findings` ⇒ `union`;
+   `unattended_ok` false ⇒ probe the reject branch; `touches_environment` ⇒
+   `tooled`. The prior is a default, not a cage — the form may diverge where
+   the request contradicts it; the vector and the final form land in the same
+   record, so divergence is visible evidence. **The engine-shape decision is
+   the form itself**:
    - `merge` fillable with `union`/`vote`/`pick` → measurement (runs ≥ 2).
    - No merge possible but the work can run unattended in another session →
      delegation (`runs` = 1, `merge` = `none`).
@@ -229,7 +290,7 @@ Primary flow — ad-hoc measurement (v1's main path, zero presets):
      → `REJECTED` with the unfillable aspect named.
 4. Coherence check C1–C6 (pure code / mechanical). One failure → one silent
    re-draft; second failure → `REJECTED`.
-5. RunRecord written (`outcome: pending`).
+5. RunRecord written (`outcome: pending`; includes the routing block, D-14).
 6. One announcement line: definition digest, runs count, merge rule. No
    confirmation wait.
 7. Dispatch `runs` runs in parallel, each isolated (runner prompt only;
@@ -267,6 +328,7 @@ classified in §5.
 | `rejected_unfillable` | The form cannot be filled because the work needs the user in the loop mid-execution (interactive co-editing, mid-course decisions only the user can make) | Report which form aspect is unfillable and suggest a plain session; stop. No dispatch, no run record. |
 | `rejected_incoherent` | Form-filling output violates C1–C6 twice in a row | Report the violated rule; stop. No dispatch, no run record. |
 | `rejected_missing_target` | `criteria_from` = `document` but the referenced document does not exist (C5) | Report the missing reference; stop before dispatch. |
+| `routing_fallback` | The routing workflow fails: classifier error, or a vector still non-conforming after the dispatch layer's re-requests | Non-fatal: the destination defaults to the engine; the run record and the announcement note the fallback. Sub-skill routing is skipped for this invocation. |
 | `run_void` | ≥ 1 run fails to complete after dispatch (error, no result, or output still non-conforming — structure or anchor vocabulary — after the dispatch layer's schema re-requests), or the `pick` judge agent fails | No partial merge. Report the failure, set run record `outcome: void`. Re-running is the user's explicit choice. |
 
 ## 6. Invariants (MUST) / Defaults (SHOULD) / Choices (MAY)
@@ -292,7 +354,8 @@ classified in §5.
   run in separate sessions. The invoking session routes, announces, merges,
   reports, archives — it never executes the work itself.
 - M5 **Run record before dispatch**: the RunRecord is written when the form
-  completes, before any run is spawned.
+  completes, before any run is spawned. A routed invocation writes its record
+  (`outcome: routed`) before the sub-skill's instructions are followed.
 - M6 **Honest reporting**: every report declares the kind of claim it makes.
   `union`/`vote` reports state N and the merge rule (measured, recountable).
   `pick` reports state the route with the criterion text: "기계 선택"
@@ -324,13 +387,19 @@ classified in §5.
   persists a sub-skill. Runtime artifacts are ad-hoc forms and run records
   only; sub-skill creation is plugin-repo authoring (promotion = the
   developer's loop over the records pile).
-- M14 **Workflow dispatch** (D-13): every engine dispatch — run sets,
-  delegations, and the pick judge — is exactly ONE Workflow-tool call; runs
-  are agents spawned inside that call by the workflow script's code. The
-  invoking session never dispatches a run through the Agent tool directly:
-  the Workflow layer is where M11's schema enforcement and M1's code merge
-  live, and its code-driven control flow keeps run outputs out of the
-  invoking session's context.
+- M14 **Workflow dispatch** (D-13): the routing classification (D-14) and
+  every engine dispatch — run sets, delegations, and the pick judge — each
+  run as exactly ONE Workflow-tool call; runs are agents spawned inside those
+  calls by the workflow scripts' code. The invoking session never dispatches
+  a run through the Agent tool directly: the Workflow layer is where M11's
+  schema enforcement and M1's code merge live, and its code-driven control
+  flow keeps run outputs out of the invoking session's context.
+- M15 **Mechanical routing** (D-14): the destination — sub-skill vs engine —
+  is selected by code evaluating sub-skill conditions against the
+  classifier's schema-enforced switch vector. No LLM, invoking session or
+  agent, picks the destination directly; the classifier's entire role is the
+  vector. Vector, destination, and matched condition are recorded
+  (recountable routing, AC8).
 
 **SHOULD**
 
@@ -342,6 +411,9 @@ classified in §5.
 - S5 Prefer `isolation` = `sealed` whenever the target content can be embedded
   in the runner prompt; use `tooled` only when the work requires touching the
   environment (repository search, file edits).
+- S6 Form-filling starts from the switch prior (§4 step 3); divergence is
+  permitted and needs no ceremony — the vector and the final form share one
+  record, which is the divergence evidence.
 
 **MAY** (implementation-defined)
 
@@ -379,11 +451,13 @@ classified in §5.
   generation work (typically a `pick` run over N candidate drafts, or a
   `runs`-1 delegation); the door does not invoke or name another plugin's
   skill.
-- **AC5 — routing priority.** Given a bundled sub-skill whose routing card
-  matches the request: a run preset's bundled form is used with no new form
-  drafted; a procedural sub-skill is followed without any form being filled.
-  In both cases the announcement names the sub-skill (observable routing),
-  and a non-matching request still falls through to the ad-hoc engine.
+- **AC5 — routing priority.** Given a bundled sub-skill whose routing
+  condition is satisfied by the request's switch vector: a run preset's
+  bundled form is used with no new form drafted; a procedural sub-skill is
+  followed without any form being filled. In both cases the announcement
+  names the sub-skill and the run record's routing block names the matched
+  condition; a request satisfying no condition still falls through to the
+  ad-hoc engine.
 - **AC6 — void run set.** Given a measurement dispatch of 3 where one run
   fails to complete, then the report contains no partial findings, states the
   failure, and the run record `outcome` is `void`.
@@ -393,6 +467,11 @@ classified in §5.
   agent runs, receiving only the 3 candidates and the criterion text; the
   report names the selected candidate and carries the label "판단 선택" with
   the criterion text.
+- **AC8 — recountable routing.** For any /salvo invocation that routes (to a
+  sub-skill or the engine), the run record contains the switch vector, the
+  destination, and the matched condition (or the engine/fallback marker);
+  re-evaluating the routing table on the recorded vector reproduces the
+  recorded destination.
 
 ## Decision Ledger *(mandatory)*
 
@@ -418,6 +497,7 @@ classified in §5.
 | D-11 | Spec relocation (2026-07-09): this document dogfoods the spec plugin's 0.2.0 location contract — the living spec moves from `specs/003-parallel-run-platform/SPEC.md` to `SPEC.md` at the plugin root (the plugin, not the multi-plugin repo, is the project unit), and the numbered `specs/` directory is retired. The gate artifacts move verbatim to `docs/003-gate-report.md` / `docs/003-dashboard.html` as frozen history: they predate the uncommitted-`.spec/` rule and stay committed as the pass evidence. Future revisions amend this document via ledger rows, never a new numbered spec | User consistency push (2026-07-09): the repo kept the numbered layout the 0.2.0 contract had just abolished; the "it's historical" defense was already rejected once for this directory's own name | Leaving the numbered dir as history (same excuse rejected for `003-weapon-platform`); repo-root SPEC.md (wrong project unit — this repo hosts several plugins); moving gate artifacts into `.spec/` (that dir is uncommitted by contract, but the pass evidence must stay committed) |
 | D-12 | Router identity (2026-07-09): `/salvo` is redefined as the **routing door** over bundled sub-skills — routing is the product; the parallel-run platform is the built-in engine behind it. Adds the routing-card contract (§2.2): every sub-skill carries a card ("route here when …") the door scans live at request time; run presets carry a form the engine executes, procedural sub-skills carry instructions the door follows. Sub-skills are bundled-only (M13) — the runtime never creates one; the user-side exception path is the ad-hoc engine (form → run → record), and promotion stays a developer-side authoring loop over the records pile. Only the door is registered (M12), so session context carries one description no matter how many sub-skills ship | User correction (2026-07-09): salvo's founding intent is routing — skills will multiply, they cannot all sit in context, and users cannot be expected to know the inventory; the spec's platform-first framing made the engine look like the product (the author's second identity misreading, after D-9) | Runtime user-created sub-skills (read-only install cache; no versioning, no gate, quality drift; would need a second scan root in the data dir — deferred until records show demand); pre-building presets for every anticipated situation (speculative design, re-rejected per D-4 — the ad-hoc engine already floors every case); registering sub-skills as top-level skills (context cost grows per skill — defeats the door's purpose) |
 | D-13 | Dispatch API fixed to the Workflow tool (2026-07-09, post-gate amendment like D-6): the MAY hedge "Agent tool vs Workflow tool" is retired and M14 added — every engine dispatch is one Workflow call whose script spawns the runs; the vocabulary drops the "subagent/workflow" phrasing. No implementation change: the engine has been Workflow-only since v1 (`run-workflow.js`, M4's one-call rule) | User reading (2026-07-09): the hedged wording made a Workflow-based system read as subagent-based — a reader confusion is a spec defect; the Workflow layer is also load-bearing (M11 schema enforcement at the `agent()` dispatch, M1 merge as script code, run outputs never entering the invoking session's context), so the freedom was never real | Keeping the hedge (misleads readers; the implementation could not actually switch to bare Agent-tool dispatch without losing M11's dispatch-layer schema enforcement); dispatching runs via the Agent tool from the invoking session (no schema parameter, control flow returns to the LLM between runs, outputs land in session context) |
+| D-14 | Mechanical switch routing (2026-07-09): routing is mechanized now, not at first promotion. An isolated classifier agent (sealed: request text + switch schema only) reduces the request to a schema-enforced switch vector (§2.5 — 6 switches restating the intake form's own axes), and a code table evaluates sub-skill conditions against it (most-specific wins, lexicographic tie-break, no match ⇒ engine; classifier failure ⇒ engine fallback, noted — `routing_fallback`). The vector doubles as the form-filling prior (S6); every routed or dispatched invocation records vector + destination + matched condition (AC8; outcome `routed` added); routing cards gain a machine condition beside the prose; classification runs as its own Workflow call (M14 extended); M15 added | User decision (2026-07-09), overriding the author's wait-for-first-promotion recommendation: take the mechanism's guarantees now — recountable, testable routing plus a mechanical union/vote/pick prior (the exact spot all three D-12 gate readers independently flagged as vaguest). The D-1 ontology risk is contained: the switches restate the form's shipped axes rather than invent new ones, and recorded vectors make the vocabulary itself evidence-refinable | Waiting for the first promotion (author's recommendation — rejected: the prior and the recording pay rent even with one destination); LLM-direct card matching (unrecountable, untestable, misroutes invisible); a full pre-form ontology (D-1's rejected 6-axis shape — switches deliberately stop at destination + prior and never fill the form) |
 
 **D-7 rename table (normative old → new mapping):**
 
