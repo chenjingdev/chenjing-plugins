@@ -18,7 +18,13 @@ if (!file || !mode) {
   process.exit(2)
 }
 
-const text = readFileSync(file, 'utf8')
+let text
+try {
+  text = readFileSync(file, 'utf8')
+} catch {
+  console.error(`cannot read target: ${file}`)
+  process.exit(2)
+}
 let matches = []
 if (mode === 'headings') {
   matches = [...text.matchAll(/^#{1,6}\s+(.+?)\s*$/gm)].map(m => m[1])
@@ -28,7 +34,14 @@ if (mode === 'headings') {
     console.error('regex mode requires --pattern')
     process.exit(2)
   }
-  matches = [...text.matchAll(new RegExp(pattern, 'gm'))].map(m => m[0])
+  let re
+  try {
+    re = new RegExp(pattern, 'gm')
+  } catch {
+    console.error(`invalid --pattern: ${pattern}`)
+    process.exit(2)
+  }
+  matches = [...text.matchAll(re)].map(m => m[0])
 } else {
   console.error(`unknown mode: ${mode}`)
   process.exit(2)

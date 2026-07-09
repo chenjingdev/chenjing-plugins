@@ -43,3 +43,32 @@ test('regex mode without --pattern exits 2', () => {
   const r = run('anything', ['--mode', 'regex'])
   assert.equal(r.code, 2)
 })
+
+test('invalid regex pattern exits 2 without a stack trace', () => {
+  const r = run('anything', ['--mode', 'regex', '--pattern', '('])
+  assert.equal(r.code, 2)
+  assert.match(r.out, /invalid --pattern/)
+  assert.doesNotMatch(r.out, /at .+:\d+:\d+/)
+})
+
+test('missing target file exits 2 without a stack trace', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-anchors-'))
+  const missing = path.join(dir, 'does-not-exist.md')
+  let code, out
+  try {
+    out = execFileSync('node', [SCRIPT, missing, '--mode', 'headings'], { encoding: 'utf8' })
+    code = 0
+  } catch (e) {
+    code = e.status
+    out = `${e.stdout ?? ''}${e.stderr ?? ''}`
+  }
+  assert.equal(code, 2)
+  assert.match(out, /cannot read target/)
+  assert.doesNotMatch(out, /at .+:\d+:\d+/)
+})
+
+test('unknown mode exits 2', () => {
+  const r = run('# Title\n', ['--mode', 'bogus'])
+  assert.equal(r.code, 2)
+  assert.match(r.out, /unknown mode/)
+})
