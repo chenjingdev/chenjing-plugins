@@ -23,9 +23,10 @@
     },
     {
       "name": "salvo",
-      "description": "한 발은 짐작, 일제사격은 측정. 재조립 중 — 현재 무기: /salvo:spec (인터뷰 기반 명세 작성, 끝나면 관문 자동 발동), /salvo:spec-gate (콜드 리더 N명 워크플로우 발사, 표 세기는 코드, 2표 합의 관문).",
+      "description": "한 발은 짐작, 일제사격은 측정. /salvo:salvo (무기 플랫폼 단일 문 — 라우팅·대장간·코드 접기·잔해) + /salvo:spec (인터뷰 명세) + /salvo:spec-gate (콜드 리더 관문).",
       "source": "./plugins/salvo",
       "skills": [
+        "./skills/salvo",
         "./skills/spec",
         "./skills/spec-gate"
       ]
