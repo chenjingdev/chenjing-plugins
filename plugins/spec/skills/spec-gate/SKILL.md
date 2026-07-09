@@ -11,13 +11,13 @@ The gate itself is read-only: it never edits the SPEC.md body (G-5).
 
 **Language**: Run the gate's user-facing interaction — the AskUserQuestion
 feedback and the report to the user — in the user's conversation language.
-Everything written into the documents (gate-report.md, and any edits the
-writing session makes to SPEC.md) is in English, as a machine-facing contract
+Everything written into the documents (`.spec/gate-report.md`, and any edits
+the writing session makes to SPEC.md) is in English, as a machine-facing contract
 consumed by cold readers and implementers.
 
 **First principle (제1원칙)**: the invoking session orchestrates only. Its
 three jobs here: launch the measurement workflow, transcribe the returned
-round result into gate-report.md, and run the user feedback loop. Counting
+round result into `.spec/gate-report.md`, and run the user feedback loop. Counting
 lives in the workflow script's code — that division is what keeps the tally
 recountable and the session's context clean enough to stay a fair courier.
 
@@ -34,8 +34,10 @@ recountable and the session's context clean enough to stay a fair courier.
   here.
 - If the file exceeds 30,000 words: reject and recommend shrinking the
   document. Stop here.
-- Read `gate-report.md` in the same directory as the spec to determine the
-  round number: last round number + 1 (or 1 if there is no report). **There is
+- Read `.spec/gate-report.md` in the target project (the `.spec/` directory
+  sits at the project root, beside the SPEC.md the path argument points at) to
+  determine the round number: last round number + 1 (or 1 if there is no
+  report). **There is
   no round cap** — since every round ends with user feedback, judging
   divergence and deciding to stop is the user's call at that point (G-8 · D-9).
 
@@ -89,10 +91,13 @@ finished round result.
 
 ### 2. Transcribe the report (the gate's only write, G-12)
 - The invoking session **transcribes** the returned round object into
-  `gate-report.md`: append a round block in the
+  `.spec/gate-report.md` at the project root: append a round block in the
   `references/gate-report-template.md` format (preserving existing rounds),
   with a "votes" column and issue IDs `R{round}-{index}`. Transcription, not
-  aggregation — every number comes from the script.
+  aggregation — every number comes from the script. If `.spec/` does not exist
+  yet (a direct /spec-gate run on a hand-written spec, without /spec having run
+  first), create it and write `.spec/.gitignore` containing exactly `*` (one
+  line) so the directory ignores itself before appending.
 - Matching is mechanical `(anchor, category)` equality (D-10 · D-12). The old
   "thesis match" sub-rule required semantic judgment and is retired; a coarse
   merge (same clause, same category, different theses) stays visible because
@@ -128,9 +133,9 @@ finished round result.
   one line ("게이트: N라운드 시작") so the user can interrupt. The loop ends
   only at zero confirmed blocking, or when the user says stop (there is no
   round cap — divergence is the user's call, G-8 · D-9).
-- If a `dashboard.html` exists next to the spec (created by /spec), update its
-  Progress and Decision-log sections with this round's result — the user
-  watches that page for live state.
+- If a dashboard exists at `.spec/dashboard.html` in the project (created by
+  /spec), update its Progress and Decision-log sections with this round's
+  result — the user watches that page for live state.
 
 ## What keeps the measurement honest
 - The verdict is read off the workflow's tally — zero confirmed blocking is

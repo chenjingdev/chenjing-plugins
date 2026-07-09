@@ -70,9 +70,12 @@ understood.
 
 **Dashboard (create at interview start, keep current as you go)**
 - Copy `assets/dashboard-template.html` (bundled with this skill) to
-  `specs/NNN-slug/dashboard.html` and open it for the user (`open <path>`).
-  The template auto-refreshes every 3 seconds, so rewriting the file is all
-  that "live" takes.
+  `.spec/dashboard.html` at the project root and open it for the user
+  (`open <path>`). Create the `.spec/` directory first if it does not exist,
+  and write `.spec/.gitignore` containing exactly `*` (one line) so the
+  directory ignores itself — nothing under `.spec/` is ever committed. The
+  template auto-refreshes every 3 seconds, so rewriting the file is all that
+  "live" takes.
 - Fill the placeholders in the user's conversation language and keep three
   sections current:
   - **Progress**: the pipeline steps (research → calibration → interview →
@@ -105,9 +108,23 @@ understood.
   the rest with defaults + Assumptions.
 
 ### 4. Writing and self-verification
-- Create `specs/NNN-slug/SPEC.md` as the next entry under `specs/`
-  (NNN = the next 3-digit number after scanning existing directories,
-  slug = 2-4 word kebab-case).
+- The spec is the project's own document, so it lands in the project: write
+  `SPEC.md` at the project root (the directory the session is working in; for a
+  monorepo sub-project, the subdirectory you ran /spec from). It is the single,
+  visible source of truth and the only committed artifact — there are no
+  numbered `specs/NNN-slug/` directories. (Contrast: plugin-owned data would
+  live in a plugin data dir; this document belongs to the user's project.)
+- **A pre-existing `SPEC.md` is input, not a collision.** If the project root
+  already has a SPEC.md when /spec starts, ask ONE AskUserQuestion before
+  writing anything — there is no silent overwrite path:
+  - **Revise it** ("이 문서를 기반으로 개정") — read it, treat its content as the
+    draft, fill the missing axes through the interview, then gate.
+  - **Start fresh** ("무시하고 새로 작성") — write the new document only after the
+    user's explicit confirmation in that same answer; the old content is
+    replaced only on this explicitly chosen path.
+- **One living spec per project.** A project has a single SPEC.md; later /spec
+  runs on the same project revise it in place (new Decision Ledger rows + body
+  edits), never create SPEC-2.md or numbered siblings.
 - Write it while keeping the template structure. Frontmatter `**Gate**: not-run`.
 - Self-verify (up to 3 revision passes): any vague adjectives left? are
   acceptance criteria observable? is every decision in the Ledger? zero markers
