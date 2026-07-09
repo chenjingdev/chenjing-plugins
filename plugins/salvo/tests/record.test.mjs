@@ -7,24 +7,24 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)),
-  '../skills/salvo/scripts/residue.mjs')
+  '../skills/salvo/scripts/record.mjs')
 
 const FORM = {
   definition: 'Enumerates contradictions in plan.md, one finding per section.',
-  fold: 'union',
-  volley: 3,
+  merge: 'union',
+  runs: 3,
   isolation: 'sealed',
   invention: 'forbidden',
   criteria_from: 'request',
   anchors: { kind: 'closed_list', values: ['One', 'Two'], source: 'headings' },
-  residual: '',
+  notes: '',
 }
 
 function setup() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-residue-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-record-'))
   const formFile = path.join(dir, 'form.json')
   writeFileSync(formFile, JSON.stringify(FORM))
-  const root = path.join(dir, 'residue')
+  const root = path.join(dir, 'records')
   return { formFile, root }
 }
 
@@ -48,18 +48,18 @@ test('new writes a pending record with a sortable filename and prints the path',
   assert.deepEqual(record.form, FORM)
   assert.equal(record.outcome, 'pending')
   assert.equal(record.digest, 'Find contradictions in plan.md')
-  assert.ok(!Number.isNaN(Date.parse(record.fired_at)))
+  assert.ok(!Number.isNaN(Date.parse(record.started_at)))
   assert.equal(readdirSync(root).length, 1)
 })
 
-test('outcome updates pending -> folded and changes nothing else', () => {
+test('outcome updates pending -> merged and changes nothing else', () => {
   const { formFile, root } = setup()
   const file = run(['new', '--form', formFile, '--digest', 'd', '--root', root]).out.trim()
   const before = JSON.parse(readFileSync(file, 'utf8'))
-  const r = run(['outcome', file, 'folded'])
+  const r = run(['outcome', file, 'merged'])
   assert.equal(r.code, 0)
   const after = JSON.parse(readFileSync(file, 'utf8'))
-  assert.equal(after.outcome, 'folded')
+  assert.equal(after.outcome, 'merged')
   assert.deepEqual({ ...after, outcome: 'pending' }, before)
 })
 
@@ -67,7 +67,7 @@ test('outcome refuses a second update (A3: single mutation)', () => {
   const { formFile, root } = setup()
   const file = run(['new', '--form', formFile, '--digest', 'd', '--root', root]).out.trim()
   run(['outcome', file, 'void'])
-  const r = run(['outcome', file, 'folded'])
+  const r = run(['outcome', file, 'merged'])
   assert.equal(r.code, 1)
 })
 

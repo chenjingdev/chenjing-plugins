@@ -23,13 +23,13 @@ function run(doc) {
 
 const base = () => ({
   definition: 'Enumerates contradictions in a given document, one finding per section.',
-  fold: 'union',
-  volley: 3,
+  merge: 'union',
+  runs: 3,
   isolation: 'sealed',
   invention: 'forbidden',
   criteria_from: 'request',
   anchors: { kind: 'closed_list', values: ['## A', '## B'], source: 'headings' },
-  residual: '',
+  notes: '',
 })
 
 test('valid union form passes', () => {
@@ -39,26 +39,26 @@ test('valid union form passes', () => {
 })
 
 test('envelope with .form is unwrapped', () => {
-  const r = run({ form: base(), fired_at: 'x', digest: 'd', outcome: 'pending' })
+  const r = run({ form: base(), started_at: 'x', digest: 'd', outcome: 'pending' })
   assert.equal(r.code, 0)
 })
 
-test('C1: volley 1 with fold union fails', () => {
-  const r = run({ ...base(), volley: 1 })
+test('C1: runs 1 with merge union fails', () => {
+  const r = run({ ...base(), runs: 1 })
   assert.equal(r.code, 1)
   assert.match(r.out, /C1/)
 })
 
-test('C1: fold none with volley 3 fails', () => {
+test('C1: merge none with runs 3 fails', () => {
   const f = base(); delete f.anchors
-  const r = run({ ...f, fold: 'none' })
+  const r = run({ ...f, merge: 'none' })
   assert.equal(r.code, 1)
   assert.match(r.out, /C1/)
 })
 
-test('delegation form (volley 1, fold none, tooled) passes', () => {
+test('delegation form (runs 1, merge none, tooled) passes', () => {
   const f = base(); delete f.anchors
-  const r = run({ ...f, fold: 'none', volley: 1, isolation: 'tooled', invention: 'allowed' })
+  const r = run({ ...f, merge: 'none', runs: 1, isolation: 'tooled', invention: 'allowed' })
   assert.equal(r.code, 0)
 })
 
@@ -69,24 +69,24 @@ test('C2: union without anchors fails', () => {
   assert.match(r.out, /C2/)
 })
 
-test('C2: anchors present on a pick fold fails', () => {
-  const r = run({ ...base(), fold: 'pick', pick: { criterion: 'clearest intro', route: 'judged' } })
+test('C2: anchors present on a pick merge fails', () => {
+  const r = run({ ...base(), merge: 'pick', pick: { criterion: 'clearest intro', route: 'judged' } })
   assert.equal(r.code, 1)
   assert.match(r.out, /C2/)
 })
 
-test('C3: vote threshold above volley fails', () => {
-  const r = run({ ...base(), fold: 'vote', vote_threshold: 4 })
+test('C3: vote threshold above runs fails', () => {
+  const r = run({ ...base(), merge: 'vote', vote_threshold: 4 })
   assert.equal(r.code, 1)
   assert.match(r.out, /C3/)
 })
 
 test('C3: valid vote form passes', () => {
-  const r = run({ ...base(), fold: 'vote', vote_threshold: 2 })
+  const r = run({ ...base(), merge: 'vote', vote_threshold: 2 })
   assert.equal(r.code, 0)
 })
 
-test('C3: vote_threshold outside vote fold fails', () => {
+test('C3: vote_threshold outside vote merge fails', () => {
   const r = run({ ...base(), vote_threshold: 2 })
   assert.equal(r.code, 1)
   assert.match(r.out, /C3/)
@@ -94,20 +94,20 @@ test('C3: vote_threshold outside vote fold fails', () => {
 
 test('C4: pick without route fails', () => {
   const f = base(); delete f.anchors
-  const r = run({ ...f, fold: 'pick', pick: { criterion: 'clearest' } })
+  const r = run({ ...f, merge: 'pick', pick: { criterion: 'clearest' } })
   assert.equal(r.code, 1)
   assert.match(r.out, /C4/)
 })
 
 test('C4: mechanical pick with command program passes', () => {
   const f = base(); delete f.anchors
-  const r = run({ ...f, fold: 'pick', pick: { criterion: 'passes the check', route: 'mechanical', program: { kind: 'command', command: 'node --check {candidate}' } } })
+  const r = run({ ...f, merge: 'pick', pick: { criterion: 'passes the check', route: 'mechanical', program: { kind: 'command', command: 'node --check {candidate}' } } })
   assert.equal(r.code, 0)
 })
 
 test('C4: mechanical pick without program fails', () => {
   const f = base(); delete f.anchors
-  const r = run({ ...f, fold: 'pick', pick: { criterion: 'shortest', route: 'mechanical' } })
+  const r = run({ ...f, merge: 'pick', pick: { criterion: 'shortest', route: 'mechanical' } })
   assert.equal(r.code, 1)
   assert.match(r.out, /C4/)
 })
@@ -144,8 +144,8 @@ test('M3: unknown field is rejected (no reader-less fields)', () => {
   assert.match(r.out, /M3/)
 })
 
-test('F: missing residual key fails', () => {
-  const f = base(); delete f.residual
+test('F: missing notes key fails', () => {
+  const f = base(); delete f.notes
   const r = run(f)
   assert.equal(r.code, 1)
   assert.match(r.out, /F/)

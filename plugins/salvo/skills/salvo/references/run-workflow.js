@@ -1,56 +1,65 @@
+// run-workflow.js — a Workflow-tool sandbox script, NOT a node module.
+// It runs inside the Workflow tool's sandbox and relies on sandbox features a
+// plain `node` run does not provide: top-level `return`, the injected globals
+// (agent / parallel / log / phase / args / budget), and a pure-literal
+// `export const meta`. That is why it lives under references/ and not scripts/:
+// putting it in scripts/ would wrongly imply `node` can execute it. The test
+// harness reads this exact file, strips the `export ` keyword, and wraps the
+// body in an AsyncFunction so the merge logic is tested as it ships.
+
 export const meta = {
-  name: 'salvo-volley',
-  description: 'Fire N starved shooters in parallel and fold their outputs by code',
+  name: 'salvo-run',
+  description: 'Run N independent isolated agents in parallel and merge their outputs by code',
   phases: [
-    { title: 'Fire', detail: 'N starved shooters in parallel' },
-    { title: 'Fold', detail: 'code tally / judge pick' },
+    { title: 'Run', detail: 'N isolated runners in parallel' },
+    { title: 'Merge', detail: 'code tally / judge pick' },
   ],
 }
 
 // args (built by the /salvo door from the intake form):
 //   form: IntakeForm            — the completed form, verbatim
-//   shooterPrompt: string       — the ONLY thing a shooter ever sees (M2)
+//   runnerPrompt: string        — the ONLY thing a runner ever sees (M2)
 //   target: string|null         — target text; required when anchors.kind === 'quote'
 //   model: string|null          — tier override only when the user named one (A5)
 //
 // Returns exactly one of (see SKILL.md §6):
-//   {kind:'single', result} | {kind:'folded', ...} | {kind:'picked', ...}
+//   {kind:'single', result} | {kind:'merged', ...} | {kind:'picked', ...}
 //   | {kind:'candidates', ...} | {kind:'void', reason}
 
 // args may arrive as a JSON string depending on the caller's serialization
 // path — normalize before reading anything (stringified args would otherwise
-// crash the volley before a single shooter fires; caught by the v0.6.0 smoke).
+// crash the run before a single runner starts; caught by the v0.6.0 smoke).
 const input = typeof args === 'string' ? JSON.parse(args) : args
 
 const form = input.form
-const N = form.volley
+const N = form.runs
 const sealed = form.isolation === 'sealed'
 
-// Sealed shooters run as the no-tools salvo:shooter agent; tooled shooters use
-// the default workflow agent. Both are starved of conversation history by
-// construction — the prompt is all they get (M2).
+// Sealed runs use the no-tools salvo:runner agent; tooled runs use the default
+// workflow agent. Both are isolated from conversation history by construction —
+// the prompt is all they get (M2).
 const agentOpts = () => {
   const o = {}
-  if (sealed) o.agentType = 'salvo:shooter'
+  if (sealed) o.agentType = 'salvo:runner'
   if (input.model) o.model = input.model
   return o
 }
 
 // Dispatch-layer conformance re-requests (M11). Never a retry of a *failed*
-// shooter (M8) — only a rejection of non-conforming output at the source.
+// run (M8) — only a rejection of non-conforming output at the source.
 const RE_REQUESTS = 2
 
-phase('Fire')
+phase('Run')
 
-// ---- fold: none (volley 1 — delegation / single shot) ----------------------
-if (form.fold === 'none') {
-  const result = await agent(input.shooterPrompt, { ...agentOpts(), label: 'shot:1', phase: 'Fire' })
-  if (result === null) return { kind: 'void', reason: 'the single shooter failed to complete' }
+// ---- merge: none (runs 1 — delegation / single run) ------------------------
+if (form.merge === 'none') {
+  const result = await agent(input.runnerPrompt, { ...agentOpts(), label: 'run:1', phase: 'Run' })
+  if (result === null) return { kind: 'void', reason: 'the single run failed to complete' }
   return { kind: 'single', result }
 }
 
-// ---- fold: union / vote (counting — pure code, M1) --------------------------
-if (form.fold === 'union' || form.fold === 'vote') {
+// ---- merge: union / vote (counting — pure code, M1) ------------------------
+if (form.merge === 'union' || form.merge === 'vote') {
   const FINDINGS = {
     type: 'object',
     additionalProperties: false,
@@ -78,28 +87,28 @@ if (form.fold === 'union' || form.fold === 'vote') {
   const quoteInvalid = findings =>
     findings.filter(f => !input.target.includes(f.anchor)).map(f => f.anchor)
 
-  const fireOne = async i => {
-    let prompt = input.shooterPrompt
+  const runOne = async i => {
+    let prompt = input.runnerPrompt
     for (let attempt = 0; attempt <= RE_REQUESTS; attempt++) {
-      const out = await agent(prompt, { ...agentOpts(), schema: FINDINGS, label: `shot:${i + 1}`, phase: 'Fire' })
-      if (out === null) return null // shooter failed — no retry (M8)
+      const out = await agent(prompt, { ...agentOpts(), schema: FINDINGS, label: `run:${i + 1}`, phase: 'Run' })
+      if (out === null) return null // run failed — no retry (M8)
       if (form.anchors.kind === 'closed_list') return out.findings
       const bad = quoteInvalid(out.findings)
       if (bad.length === 0) return out.findings
-      log(`shot:${i + 1} returned ${bad.length} non-verbatim anchor(s); re-requesting (${attempt + 1}/${RE_REQUESTS})`)
-      prompt = input.shooterPrompt +
+      log(`run:${i + 1} returned ${bad.length} non-verbatim anchor(s); re-requesting (${attempt + 1}/${RE_REQUESTS})`)
+      prompt = input.runnerPrompt +
         `\n\nYour previous output was rejected: these anchor values are not verbatim substrings of the target: ${JSON.stringify(bad)}. Every anchor must be copied character-for-character from the target text.`
     }
     return null // still non-conforming after re-requests → counts as failed (M11)
   }
 
-  const perShooter = await parallel(Array.from({ length: N }, (_, i) => () => fireOne(i)))
-  const failed = perShooter.map((r, i) => (r === null ? i + 1 : null)).filter(x => x !== null)
+  const perRun = await parallel(Array.from({ length: N }, (_, i) => () => runOne(i)))
+  const failed = perRun.map((r, i) => (r === null ? i + 1 : null)).filter(x => x !== null)
   if (failed.length > 0) {
-    return { kind: 'void', reason: `shooter(s) ${failed.join(', ')} failed or stayed non-conforming — no partial fold` }
+    return { kind: 'void', reason: `run(s) ${failed.join(', ')} failed or stayed non-conforming — no partial merge` }
   }
 
-  phase('Fold')
+  phase('Merge')
   // Anchor identity: exact equality for closed lists; exact equality or span
   // overlap for quotes (both anchors are verified substrings by now).
   const span = anchor => {
@@ -114,50 +123,50 @@ if (form.fold === 'union' || form.fold === 'vote') {
     return s1 < e2 && s2 < e1
   }
   const groups = []
-  perShooter.forEach((findings, shooter) => {
+  perRun.forEach((findings, runIdx) => {
     for (const f of findings) {
       const g = groups.find(g => sameAnchor(g.anchor, f.anchor))
       if (g) {
         if (f.anchor.length > g.anchor.length) g.anchor = f.anchor // longest member represents the group
-        g.entries.push({ shooter: shooter + 1, anchor: f.anchor, content: f.content })
+        g.entries.push({ run: runIdx + 1, anchor: f.anchor, content: f.content })
       } else {
-        groups.push({ anchor: f.anchor, entries: [{ shooter: shooter + 1, anchor: f.anchor, content: f.content }] })
+        groups.push({ anchor: f.anchor, entries: [{ run: runIdx + 1, anchor: f.anchor, content: f.content }] })
       }
     }
   })
-  for (const g of groups) g.count = new Set(g.entries.map(e => e.shooter)).size
+  for (const g of groups) g.count = new Set(g.entries.map(e => e.run)).size
 
-  if (form.fold === 'union') {
+  if (form.merge === 'union') {
     return {
-      kind: 'folded', fold: 'union', volley: N,
+      kind: 'merged', merge: 'union', runs: N,
       items: groups.map(g => ({ anchor: g.anchor, count: g.count, entries: g.entries })),
     }
   }
   const kept = groups.filter(g => g.count >= form.vote_threshold)
   return {
-    kind: 'folded', fold: 'vote', volley: N, threshold: form.vote_threshold,
+    kind: 'merged', merge: 'vote', runs: N, threshold: form.vote_threshold,
     items: kept.map(g => ({ anchor: g.anchor, count: g.count, entries: g.entries })),
     dropped: groups.length - kept.length,
   }
 }
 
-// ---- fold: pick -------------------------------------------------------------
-// Each shooter returns one complete candidate artifact (§2.3).
+// ---- merge: pick -----------------------------------------------------------
+// Each run returns one complete candidate artifact (§2.3).
 const CANDIDATE = {
   type: 'object',
   additionalProperties: false,
   required: ['candidate'],
   properties: { candidate: { type: 'string', minLength: 1 } },
 }
-const shots = await parallel(Array.from({ length: N }, (_, i) => () =>
-  agent(input.shooterPrompt, { ...agentOpts(), schema: CANDIDATE, label: `shot:${i + 1}`, phase: 'Fire' })))
-const failedShots = shots.map((r, i) => (r === null ? i + 1 : null)).filter(x => x !== null)
-if (failedShots.length > 0) {
-  return { kind: 'void', reason: `shooter(s) ${failedShots.join(', ')} failed — no partial fold` }
+const outputs = await parallel(Array.from({ length: N }, (_, i) => () =>
+  agent(input.runnerPrompt, { ...agentOpts(), schema: CANDIDATE, label: `run:${i + 1}`, phase: 'Run' })))
+const failedRuns = outputs.map((r, i) => (r === null ? i + 1 : null)).filter(x => x !== null)
+if (failedRuns.length > 0) {
+  return { kind: 'void', reason: `run(s) ${failedRuns.join(', ')} failed — no partial merge` }
 }
-const candidates = shots.map(s => s.candidate)
+const candidates = outputs.map(s => s.candidate)
 
-phase('Fold')
+phase('Merge')
 const pick = form.pick
 if (pick.route === 'mechanical') {
   if (pick.program.kind === 'shortest' || pick.program.kind === 'longest') {
@@ -175,8 +184,8 @@ if (pick.route === 'mechanical') {
   return { kind: 'candidates', route: 'mechanical', program: 'command', candidates }
 }
 
-// route === 'judged': ONE starved judge — candidates + criterion text only (M2).
-// A judge failure voids the volley like a shooter failure (§4 step 10).
+// route === 'judged': ONE isolated judge — candidates + criterion text only (M2).
+// A judge failure voids the run like a runner failure (§4 step 10).
 const judgePrompt = [
   'You are the judge of a salvo pick. Select exactly one candidate by this criterion:',
   pick.criterion,
@@ -185,7 +194,7 @@ const judgePrompt = [
   '',
   `Return the chosen candidate's number (1-${N}) and one sentence of grounds.`,
 ].join('\n')
-const judgeOpts = { agentType: 'salvo:shooter', label: 'judge', phase: 'Fold' }
+const judgeOpts = { agentType: 'salvo:runner', label: 'judge', phase: 'Merge' }
 if (input.model) judgeOpts.model = input.model
 const verdict = await agent(judgePrompt, {
   ...judgeOpts,

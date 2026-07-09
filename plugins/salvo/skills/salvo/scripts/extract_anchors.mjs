@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Extracts a closed anchor vocabulary from a target file at form time
 // (SPEC 003 §2.1 anchors, kind closed_list). The printed array is embedded in
-// the shooter output schema as the allowed anchor values, which is what makes
-// fold matching pure code (C6, I-6).
+// the runner output schema as the allowed anchor values, which is what makes
+// merge matching pure code (C6, I-6).
 // usage: extract_anchors.mjs <target> --mode headings|regex [--pattern <re>]
 // Prints a JSON array (unique, document order); exit 2 on an empty vocabulary.
 import { readFileSync } from 'node:fs'

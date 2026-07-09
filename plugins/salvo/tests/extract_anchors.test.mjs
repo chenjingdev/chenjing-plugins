@@ -28,7 +28,7 @@ test('headings mode extracts markdown headings in order, deduped', () => {
 })
 
 test('regex mode extracts unique whole matches in order', () => {
-  const r = run('M1 guards counting. M2 starves shooters. M1 again.',
+  const r = run('M1 guards counting. M2 isolates runners. M1 again.',
     ['--mode', 'regex', '--pattern', 'M\\d+'])
   assert.equal(r.code, 0)
   assert.deepEqual(JSON.parse(r.out), ['M1', 'M2'])
