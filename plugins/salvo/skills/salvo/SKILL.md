@@ -15,7 +15,7 @@ script and the bundled scripts — which is what keeps each number recountable
 and this session's context clean enough to stay a fair courier.
 
 The numbered codes below (M1…, S1…, C1…, A6, D-6…) cite invariants in the
-platform spec at `plugins/salvo/specs/003-weapon-platform/SPEC.md` (plugin
+platform spec at `plugins/salvo/specs/003-parallel-run-platform/SPEC.md` (plugin
 repo). They are traceability tags — this skill is executable without reading
 the spec.
 
