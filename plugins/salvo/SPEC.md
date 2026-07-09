@@ -25,13 +25,14 @@ claim: **one LLM pass is a guess; a salvo — N independent passes merged by
 pure code — is a measurement.** When no routing card matches, the door fills
 an ad-hoc intake form and the engine dispatches it as a run set (measurement)
 or a single-run delegation, or rejects it — all decided by one mechanism, the
-**intake form**. All actual work runs **outside the invoking session** (in
-subagent/workflow sessions); the invoking session only routes, announces,
-merges, reports, and archives.
+**intake form**. All actual work runs **outside the invoking session** —
+inside one Workflow-tool call per dispatch (M14); the invoking session only
+routes, announces, merges, reports, and archives.
 
 Vocabulary used throughout (each defined in §2):
 
-- **Run**: one execution — an independent subagent/workflow run of the task.
+- **Run**: one isolated execution of the task — an agent spawned inside the
+  dispatch Workflow call by the workflow script's code (M14).
 - **Run set**: the N independent runs fired in parallel plus a declared merge
   rule.
 - **Intake form**: the typed form every piece of /salvo work fills before
@@ -142,10 +143,10 @@ is forbidden):
 
 ### 2.3 Run set, Run, Report
 
-- **Run** (ephemeral): one subagent/workflow execution. Receives ONLY the
-  runner prompt built from the form (plus embedded target content per
-  `criteria_from`). Receives no conversation history and no sibling output
-  (isolated).
+- **Run** (ephemeral): one agent execution spawned inside the dispatch
+  Workflow call (M14). Receives ONLY the runner prompt built from the form
+  (plus embedded target content per `criteria_from`). Receives no
+  conversation history and no sibling output (isolated).
 - **Run output contract**: when `merge` ∈ {`union`, `vote`}, every run MUST
   return a machine-parseable list of `{anchor, content}` records. This is
   enforced by an output schema at the dispatch layer: non-conforming output is
@@ -323,6 +324,13 @@ classified in §5.
   persists a sub-skill. Runtime artifacts are ad-hoc forms and run records
   only; sub-skill creation is plugin-repo authoring (promotion = the
   developer's loop over the records pile).
+- M14 **Workflow dispatch** (D-13): every engine dispatch — run sets,
+  delegations, and the pick judge — is exactly ONE Workflow-tool call; runs
+  are agents spawned inside that call by the workflow script's code. The
+  invoking session never dispatches a run through the Agent tool directly:
+  the Workflow layer is where M11's schema enforcement and M1's code merge
+  live, and its code-driven control flow keeps run outputs out of the
+  invoking session's context.
 
 **SHOULD**
 
@@ -337,8 +345,8 @@ classified in §5.
 
 **MAY** (implementation-defined)
 
-- The dispatch API (Agent tool vs Workflow tool) and run model choice,
-  provided the chosen API can enforce the run output schema (§2.3, M11).
+- Run model/effort choice per dispatch (the dispatch API itself is fixed to
+  the Workflow tool by M14/D-13).
 - The concrete serialization syntax for forms/run records (subject to M10).
 - Runner prompt wording, report layout, span-overlap details for
   quote-vocabulary anchors.
@@ -409,6 +417,7 @@ classified in §5.
 | D-10 | Spec decoupling, final (2026-07-09, supersedes D-8's referral clause and all of D-9): salvo and spec are separate products — the door neither invokes nor names the spec plugin. The spec-shaped-request branch is removed from routing (state `REFERRED` and error `referred_to_spec` deleted): a request for a spec/design document flows through the ordinary form like any work (typically `pick` over N candidate drafts, or a `runs`-1 delegation); interview-style co-editing still hits `rejected_unfillable`. Each skill auto-triggers independently from plain language via its own description | User clarification: using salvo must not funnel anyone into the spec interview — they may not want a spec at all; D-9's auto-invoke was the session's misreading of that instruction | D-9 auto-invoke (funnels the user into a product they did not choose); D-8 announce-and-stop referral (still steers); a soft mention without invocation (still couples the products) |
 | D-11 | Spec relocation (2026-07-09): this document dogfoods the spec plugin's 0.2.0 location contract — the living spec moves from `specs/003-parallel-run-platform/SPEC.md` to `SPEC.md` at the plugin root (the plugin, not the multi-plugin repo, is the project unit), and the numbered `specs/` directory is retired. The gate artifacts move verbatim to `docs/003-gate-report.md` / `docs/003-dashboard.html` as frozen history: they predate the uncommitted-`.spec/` rule and stay committed as the pass evidence. Future revisions amend this document via ledger rows, never a new numbered spec | User consistency push (2026-07-09): the repo kept the numbered layout the 0.2.0 contract had just abolished; the "it's historical" defense was already rejected once for this directory's own name | Leaving the numbered dir as history (same excuse rejected for `003-weapon-platform`); repo-root SPEC.md (wrong project unit — this repo hosts several plugins); moving gate artifacts into `.spec/` (that dir is uncommitted by contract, but the pass evidence must stay committed) |
 | D-12 | Router identity (2026-07-09): `/salvo` is redefined as the **routing door** over bundled sub-skills — routing is the product; the parallel-run platform is the built-in engine behind it. Adds the routing-card contract (§2.2): every sub-skill carries a card ("route here when …") the door scans live at request time; run presets carry a form the engine executes, procedural sub-skills carry instructions the door follows. Sub-skills are bundled-only (M13) — the runtime never creates one; the user-side exception path is the ad-hoc engine (form → run → record), and promotion stays a developer-side authoring loop over the records pile. Only the door is registered (M12), so session context carries one description no matter how many sub-skills ship | User correction (2026-07-09): salvo's founding intent is routing — skills will multiply, they cannot all sit in context, and users cannot be expected to know the inventory; the spec's platform-first framing made the engine look like the product (the author's second identity misreading, after D-9) | Runtime user-created sub-skills (read-only install cache; no versioning, no gate, quality drift; would need a second scan root in the data dir — deferred until records show demand); pre-building presets for every anticipated situation (speculative design, re-rejected per D-4 — the ad-hoc engine already floors every case); registering sub-skills as top-level skills (context cost grows per skill — defeats the door's purpose) |
+| D-13 | Dispatch API fixed to the Workflow tool (2026-07-09, post-gate amendment like D-6): the MAY hedge "Agent tool vs Workflow tool" is retired and M14 added — every engine dispatch is one Workflow call whose script spawns the runs; the vocabulary drops the "subagent/workflow" phrasing. No implementation change: the engine has been Workflow-only since v1 (`run-workflow.js`, M4's one-call rule) | User reading (2026-07-09): the hedged wording made a Workflow-based system read as subagent-based — a reader confusion is a spec defect; the Workflow layer is also load-bearing (M11 schema enforcement at the `agent()` dispatch, M1 merge as script code, run outputs never entering the invoking session's context), so the freedom was never real | Keeping the hedge (misleads readers; the implementation could not actually switch to bare Agent-tool dispatch without losing M11's dispatch-layer schema enforcement); dispatching runs via the Agent tool from the invoking session (no schema parameter, control flow returns to the LLM between runs, outputs land in session context) |
 
 **D-7 rename table (normative old → new mapping):**
 
