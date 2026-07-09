@@ -165,8 +165,7 @@ States of one /salvo invocation:
 | State | Entered when | Left when |
 |---|---|---|
 | `RECEIVED` | `/salvo <request>` invoked | Always → `ROUTING` |
-| `ROUTING` | From `RECEIVED` | Spec-shaped request → `REFERRED`; a preset's `definition` matches → `ARMED` (using the preset's form); otherwise → `DRAFTING` |
-| `REFERRED` | Request is a spec/design authoring request | Terminal for this platform: announced in one line, then handed off to `/spec:spec` by invoking it with the request (named only if the spec plugin is absent); nothing ran here, no run record |
+| `ROUTING` | From `RECEIVED` | A preset's `definition` matches → `ARMED` (using the preset's form); otherwise → `DRAFTING` |
 | `DRAFTING` | Form-filling starts filling a form | Form complete and coherent (C1–C6) → `ARMED`; form cannot be completed (see §5) → `REJECTED`; one coherence failure triggers one silent re-draft, a second → `REJECTED` |
 | `REJECTED` | Form impossible or incoherent twice | Terminal: reason reported (which aspect was unfillable), no dispatch, no run record |
 | `ARMED` | Form complete (preset or filled) | RunRecord written (`outcome: pending`) → `ANNOUNCED` |
@@ -186,15 +185,12 @@ any earlier state.
 Primary flow — ad-hoc measurement (v1's main path, zero presets):
 
 1. User invokes `/salvo <request>`.
-2. Router checks: is this a spec/design authoring request? If yes → announce
-   the handoff in one line, invoke the `spec:spec` skill with the request,
-   stop (no form, no run record).
-3. Router scans skills for intake form files (presets). For each, it compares
+2. Router scans skills for intake form files (presets). For each, it compares
    the request against the preset's `definition`. On a match, that form is
-   used (skip to step 5). With zero presets this always falls through. Routing
+   used (skip to step 4). With zero presets this always falls through. Routing
    comparisons are the routing session's judgment — the mechanical-only
    constraint (M1) binds the merge step, not routing.
-4. The form-filling step drafts an IntakeForm from the request. Filling logic:
+3. The form-filling step drafts an IntakeForm from the request. Filling logic:
    the `definition` is derived from the request's target and asked-for output
    shape; `merge` is chosen by what the outputs can be mechanically merged on;
    the remaining fields follow. **The routing decision is the form itself**:
@@ -203,22 +199,22 @@ Primary flow — ad-hoc measurement (v1's main path, zero presets):
      delegation (`runs` = 1, `merge` = `none`).
    - The work requires the user's input mid-execution → cannot fill the form
      → `REJECTED` with the unfillable aspect named.
-5. Coherence check C1–C6 (pure code / mechanical). One failure → one silent
+4. Coherence check C1–C6 (pure code / mechanical). One failure → one silent
    re-draft; second failure → `REJECTED`.
-6. RunRecord written (`outcome: pending`).
-7. One announcement line: definition digest, runs count, merge rule. No
+5. RunRecord written (`outcome: pending`).
+6. One announcement line: definition digest, runs count, merge rule. No
    confirmation wait.
-8. Dispatch `runs` runs in parallel, each isolated (runner prompt only;
+7. Dispatch `runs` runs in parallel, each isolated (runner prompt only;
    target content embedded per `criteria_from`; no conversation history; no
    sibling visibility). For `merge` ∈ {`union`, `vote`}, each run's output
    is validated against the `{anchor, content}`-list schema at the dispatch
    layer, which re-requests non-conforming output; only conforming output
    leaves this step.
-9. On any run failure — an error, no result, or output still non-conforming
+8. On any run failure — an error, no result, or output still non-conforming
    (structure or anchor vocabulary) after the dispatch layer's re-requests:
    run set void — report the failure only, update run record `outcome: void`,
    stop. No partial merge.
-10. Merge. `union`/`vote`: executed as code — a deterministic program (not an
+9. Merge. `union`/`vote`: executed as code — a deterministic program (not an
     LLM following instructions) matches records by anchor (exact equality for
     closed-list vocabularies; exact equality or span overlap for quote
     vocabularies), then dedups (union) or tallies against `vote_threshold`
@@ -229,18 +225,17 @@ Primary flow — ad-hoc measurement (v1's main path, zero presets):
     judge agent — isolated like a run; input is solely the N candidate
     artifacts and the criterion text — selects one candidate. A judge failure
     voids the run set like a run failure.
-11. Report: merged result + runs count + merge rule, each item shown with
+10. Report: merged result + runs count + merge rule, each item shown with
     its anchor and (for vote) its tally — or, for `runs` = 1, the raw
     result + the single-run label. Update run record `outcome`.
 
-Failure behavior is inlined above (steps 4, 5, 9); the error types are
+Failure behavior is inlined above (steps 3, 4, 8); the error types are
 classified in §5.
 
 ## 5. Error Taxonomy
 
 | Error | Condition | Handling |
 |---|---|---|
-| `referred_to_spec` | Request asks for a spec/design document | Announce, then invoke the `/spec:spec` door with the request; stop (name it instead if the spec plugin is absent). No form, no run record. Not counted as a failure. |
 | `rejected_unfillable` | The form cannot be filled because the work needs the user in the loop mid-execution (interactive co-editing, mid-course decisions only the user can make) | Report which form aspect is unfillable and suggest a plain session; stop. No dispatch, no run record. |
 | `rejected_incoherent` | Form-filling output violates C1–C6 twice in a row | Report the violated rule; stop. No dispatch, no run record. |
 | `rejected_missing_target` | `criteria_from` = `document` but the referenced document does not exist (C5) | Report the missing reference; stop before dispatch. |
@@ -333,9 +328,11 @@ classified in §5.
   together and decide as we go`, then no run is spawned, no run record is
   written, and the reply names the unfillable aspect (user needed in the
   loop) and suggests a plain session.
-- **AC4 — handoff.** When the user runs `/salvo write a spec for feature X`,
-  then no form is drafted, no run record is written, and the door announces
-  the handoff in one line and invokes `/spec:spec` with the request.
+- **AC4 — no spec special-casing.** When the user runs `/salvo write a spec
+  for feature X`, the request flows through the ordinary form like any other
+  generation work (typically a `pick` run over N candidate drafts, or a
+  `runs`-1 delegation); the door does not invoke or name another plugin's
+  skill.
 - **AC5 — preset priority.** Given a skill directory containing an intake
   form whose `definition` matches the request, when the user runs a matching
   `/salvo` request, then that preset's form is used and no new form is
@@ -370,6 +367,7 @@ classified in §5.
 | D-7 | Full vocabulary de-metaphorization (2026-07-09): strip the military metaphor from the entire plugin, keeping only the plugin name `salvo`. User decision after a measured inspection (a /salvo union run over the SKILL.md) flagged jargon and label defects. The normative old→new mapping is the table below; all body identifiers (fields, files, agent name, outcome/kind values, M6 labels) move to it; historical ledger rows D-1…D-6 and I-1…I-7 are left verbatim as history and still use the old words | The metaphor added a decoding tax on every read without buying meaning; a measured inspection (not taste) surfaced the label defects; the name `salvo` alone carries the one idea worth keeping — several independent passes merged by code are a measurement | Renaming the plugin too (loses the one-line rationale the name earns); leaving the metaphor (the inspection's findings stand); a partial rename (leaves the contract internally inconsistent between fields and prose) |
 | D-8 | spec/spec-gate split into a standalone `spec` plugin (2026-07-09): the interview-driven authoring pair (`/spec:spec` + `/spec:spec-gate`, agent `cold-reader`) moves out of the salvo plugin into its own `spec` plugin; this door's spec-referral target is renamed `/salvo:spec` → `/spec:spec` (the door still refers spec-shaped requests, but announce-and-stop with no auto-invoke, because the destination is now a separate product) | User decision (2026-07-09): interactive spec authoring and code-merged parallel measurement are different products; bundling them in one plugin coupled unrelated release cadences and mislabeled the platform as a spec tool | Keeping both in one plugin (couples two unrelated products, mutual breaking-version churn); auto-invoking `/spec:spec` from the referral (a cross-product jump the user never asked for) |
 | D-9 | Handoff clarification (2026-07-09, amends D-8's referral clause): the split decouples packaging/activation only — at runtime the door does auto-invoke `/spec:spec`: announce the handoff in one line, then invoke the `spec:spec` skill with the user's request (name it instead only when the spec plugin is absent). Within-plugin auto-chaining is pre-approved: `spec` → `spec-gate` inside the spec plugin, and this door → its own sub-skills, including future promoted presets (create-then-invoke included). Cross-plugin package bundling remains rejected | User clarification: the split targeted activation coupling, not runtime routing; announce-and-stop made the user re-type a request the door already held | Announce-and-stop referral (D-8's first reading — a re-typing tax); re-merging the plugins (reverses D-8) |
+| D-10 | Spec decoupling, final (2026-07-09, supersedes D-8's referral clause and all of D-9): salvo and spec are separate products — the door neither invokes nor names the spec plugin. The spec-shaped-request branch is removed from routing (state `REFERRED` and error `referred_to_spec` deleted): a request for a spec/design document flows through the ordinary form like any work (typically `pick` over N candidate drafts, or a `runs`-1 delegation); interview-style co-editing still hits `rejected_unfillable`. Each skill auto-triggers independently from plain language via its own description | User clarification: using salvo must not funnel anyone into the spec interview — they may not want a spec at all; D-9's auto-invoke was the session's misreading of that instruction | D-9 auto-invoke (funnels the user into a product they did not choose); D-8 announce-and-stop referral (still steers); a soft mention without invocation (still couples the products) |
 
 **D-7 rename table (normative old → new mapping):**
 

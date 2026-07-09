@@ -1,6 +1,6 @@
 ---
 name: salvo
-description: "Parallel-run platform — state work in plain language and the skill routes it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable. It also delegates single-run work to another session, and hands spec-shaped work off to /spec:spec (announced in one line, then invoked automatically). Use this whenever the user invokes /salvo, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
+description: "Parallel-run platform — state work in plain language and the skill routes it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable. It also delegates single-run work to another session. Use this whenever the user invokes /salvo, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
 ---
 
 # /salvo — N independent runs, merged by code
@@ -30,14 +30,7 @@ Paths: `<base>` = this skill's base directory. Run records live at
 
 Decide in this order:
 
-1. **Spec-shaped request** — the asked-for deliverable is a design or spec
-   document → announce the handoff in one line (`스펙형 요청 — /spec:spec
-   인터뷰로 넘깁니다` / `Spec-shaped — handing off to /spec:spec`), then
-   invoke the `spec:spec` skill via the Skill tool with the user's request as
-   its argument, and stop here. No form, no record — this is a handoff, not a
-   run (D-9). If the spec plugin is not installed, name `/spec:spec` as the
-   destination instead.
-2. **Preset scan** — list sibling skills carrying a form:
+1. **Preset scan** — list sibling skills carrying a form:
    `ls <base>/../*/intake-form.json`. Read each file's `.form.definition` and
    compare it against the request (this comparison is routing judgment — the
    code-only rule M1 binds the merge, not routing). On a match, use that form
@@ -45,7 +38,12 @@ Decide in this order:
    the user sees preset priority. The scan is live (not a hard-coded list) so
    the first promoted preset changes routing without editing this skill. (v1
    ships zero presets, so today this falls through.)
-3. Otherwise — **fill the form** for an ad-hoc run (§2).
+2. Otherwise — **fill the form** for an ad-hoc run (§2).
+
+A request for a spec or design document is not special-cased (D-10): it flows
+through the form like any other work — typically a `pick` run over N candidate
+drafts, or a single-run delegation. This skill never invokes or names another
+plugin's skill.
 
 ## 2. Fill the form
 
