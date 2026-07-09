@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 // Run record I/O (SPEC 003 §2.4). ONE JSON shape everywhere (M10):
-// {form, started_at, digest, outcome} — a preset's intake-form.json is the
-// same shape, so promotion is a file copy plus a skill wrapper.
-//   new     --form <form.json> --digest "<sentence>" [--root <dir>]
+// {routing?, form?, started_at, digest, outcome} — a preset's intake-form.json
+// is the same `form` shape, so promotion is a file copy plus a skill wrapper.
+// The optional `routing` block (route-workflow's return object) makes routing
+// recountable (AC8, D-14).
+//   new     --form <form.json> --digest "<sentence>" [--routing <route.json>] [--root <dir>]
+//   new     --routing <route.json> --digest "<sentence>" --outcome routed [--root <dir>]   (sub-skill handoff, no form)
 //   outcome <record.json> <merged|void|delegated>
-// The outcome update is the only permitted mutation of a run record (A3).
+// The outcome update is the only permitted mutation of a run record (A3); a
+// routed handoff writes `outcome: routed` at write time and is never mutated.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -22,11 +26,22 @@ const opt = name => {
 if (cmd === 'new') {
   const formPath = opt('--form')
   const digest = opt('--digest')
-  if (!formPath || !digest) {
-    console.error('usage: record.mjs new --form <form.json> --digest "<sentence>" [--root <dir>]')
+  const routingPath = opt('--routing')
+  const outcomeArg = opt('--outcome')
+  // --outcome is only legal as `routed` (the sub-skill handoff); everything
+  // else defaults to `pending` and is updated after dispatch (§2.4/A3).
+  if (outcomeArg !== null && outcomeArg !== 'routed') {
+    console.error('usage: --outcome is only legal with the value "routed" (default: pending)')
     process.exit(2)
   }
-  const form = JSON.parse(readFileSync(formPath, 'utf8'))
+  const routed = outcomeArg === 'routed'
+  // A routed handoff carries the routing block but no form; an engine dispatch
+  // carries a form (routing optional for backward compatibility).
+  if (!digest || (routed ? !routingPath : !formPath)) {
+    console.error('usage: record.mjs new --form <form.json> --digest "<sentence>" [--routing <route.json>] [--root <dir>]')
+    console.error('   or: record.mjs new --routing <route.json> --digest "<sentence>" --outcome routed [--root <dir>]')
+    process.exit(2)
+  }
   const root = opt('--root') ?? DEFAULT_ROOT
   const started_at = new Date().toISOString()
   const stamp = started_at.replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z') // sortable (S3)
@@ -38,7 +53,13 @@ if (cmd === 'new') {
     console.error(`refusing to overwrite ${file}`)
     process.exit(1)
   }
-  writeFileSync(file, JSON.stringify({ form, started_at, digest, outcome: 'pending' }, null, 2) + '\n')
+  const record = {}
+  if (routingPath) record.routing = JSON.parse(readFileSync(routingPath, 'utf8'))
+  if (!routed) record.form = JSON.parse(readFileSync(formPath, 'utf8'))
+  record.started_at = started_at
+  record.digest = digest
+  record.outcome = routed ? 'routed' : 'pending'
+  writeFileSync(file, JSON.stringify(record, null, 2) + '\n')
   console.log(file)
 } else if (cmd === 'outcome') {
   const [file, value] = rest

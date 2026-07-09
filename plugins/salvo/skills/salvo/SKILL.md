@@ -1,6 +1,6 @@
 ---
 name: salvo
-description: "Routing door over sub-skills bundled with the plugin — state work in plain language and it routes to the right sub-skill via a live routing-card scan; you never need to know what sub-skills exist. When no card matches, the built-in engine handles it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable — it also delegates single-run work to another session. Use this whenever the user invokes /salvo, wants work routed to the right bundled sub-skill, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
+description: "Routing door over sub-skills bundled with the plugin — state work in plain language and it routes to the right sub-skill via a live routing-card scan; the routing decision is mechanical (an isolated classifier reduces the request to a switch vector, a code table picks the destination — not the model); you never need to know what sub-skills exist. When no card matches, the built-in engine handles it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable — it also delegates single-run work to another session. Use this whenever the user invokes /salvo, wants work routed to the right bundled sub-skill, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
 ---
 
 # /salvo — a routing door over bundled sub-skills
@@ -34,31 +34,73 @@ Paths: `<base>` = this skill's base directory. Run records live at
 
 ## 1. Route
 
-Decide in this order:
+Routing is mechanical (D-14/M15): an isolated classifier reduces the request to
+a schema-enforced switch vector, and a code table over that vector — not this
+session's judgment — picks the destination. This session only gathers the
+conditions, calls the workflow, and transcribes what it returns.
 
-1. **Card scan** — list the routing card of every sibling sub-skill:
-   `ls <base>/../*/card.md`. Read each card (one short paragraph starting
-   `Route here when …`) and compare it against the request (this comparison is
-   routing judgment — the code-only rule M1 binds the merge, not routing). On a
-   match, look at what the matched sub-skill directory carries:
-   - **run preset** (carries `intake-form.json`) → read that file and continue
-     at §4 (record) with its form as-is, no new form drafted; the announcement
-     (§5) names the sub-skill — that is how the user sees routing (AC5).
-   - **procedural sub-skill** (carries `instructions.md`) → print one
-     announcement line naming the sub-skill, then read and follow its
-     `instructions.md`; this door's own flow ends here (ROUTED). If those
-     instructions dispatch runs, they do so through the engine below.
-   The scan is live (not a hard-coded list) so shipping a new sub-skill changes
-   routing without editing this skill. Sub-skills are bundled-only (M13) — the
-   runtime never creates one; the only things this session writes are ad-hoc
-   forms and run records. (v1 ships zero sub-skills, so today this always falls
-   through.)
-2. No card matches — **fill the form** for an ad-hoc run (§2).
+1. **Collect conditions.** List every sibling sub-skill's routing card:
+   `ls <base>/../*/card.md`. Build one condition object per sub-skill directory:
+   - `name` = the directory name (this is the destination the table returns).
+   - `requires` = read that dir's `condition.json` — the machine condition
+     `{ "requires": { "<switch>": <value>, … } }` that sits beside the card's
+     human prose.
+   - `kind` = `preset` if the dir carries `intake-form.json`, `procedural` if it
+     carries `instructions.md`.
+   Collect these into an array. A sub-skill directory is therefore `card.md`
+   (human "route here when …" prose) + `condition.json` (the machine condition
+   the table evaluates) + `intake-form.json` (run preset) | `instructions.md`
+   (procedural sub-skill). Sub-skills are bundled-only (M13) — this session
+   never creates one; the only things it writes are ad-hoc forms and run
+   records. (v1 ships zero sub-skills, so the array is empty — still run the
+   workflow: the classifier's vector is both the form-filling prior (S6) and the
+   record's routing block even with nothing to match.)
+
+2. **Call the routing workflow.** Call the Workflow tool with:
+   - `scriptPath`: `<base>/references/route-workflow.js`
+   - `args`: `{ "request": "<the user's request text>", "conditions": <the
+     array>, "model": null }`
+   The classifier only flips switches inside a schema; the code table picks the
+   destination (M15) — never choose it yourself. Write the returned object to a
+   temp file (same temp-dir rule as §2): it is the routing block every record
+   below carries (`--routing`), which is what makes routing recountable (AC8).
+
+3. **Act on the returned `destination`** — transcribe the object, do not
+   second-guess it:
+   - **a run preset's name** (`destination_kind: "preset"`) → read that dir's
+     `intake-form.json` and continue at §4 (record) with its form as-is, no new
+     form drafted; pass `--routing` (step 2's file); the announcement (§5) names
+     the sub-skill — that is how the user sees routing (AC5).
+   - **a procedural sub-skill's name** (`destination_kind: "procedural"`) →
+     write the routed record first (M5):
+     `node <base>/scripts/record.mjs new --routing <routing.json> --digest
+     "<one-sentence digest>" --outcome routed`; print one announcement line
+     naming the sub-skill; then read and follow its `instructions.md`. This
+     door's own flow ends here (ROUTED). If those instructions dispatch runs,
+     they do so through the engine below.
+   - **`engine`** → **fill the form (§2), starting from the switch prior (S6)**:
+     `candidate_selection` ⇒ `pick`; `enumerable_findings` + `wants_confidence`
+     ⇒ `vote`; `enumerable_findings` alone ⇒ `union`; `unattended_ok: false` ⇒
+     probe the reject branch (the work likely needs the user mid-execution);
+     `touches_environment` ⇒ `tooled`; `target_kind` hints criteria/embedding (a
+     `document`/`repository` target is embedded or searched; `none` is pure
+     generation). The prior is a default, not a cage — diverge where the request
+     contradicts it; the vector and the final form land in one record, so the
+     divergence is visible evidence.
+   - **`fallback: true`** (the classifier failed — `routing_fallback`,
+     non-fatal) → take the `engine` path, and the announcement (§5) additionally
+     notes "라우팅 분류 실패 — 엔진 기본 경로" (meaning-fixed, rendered in the
+     user's language).
 
 A request for a spec or design document is not special-cased (D-10): it flows
 through the form like any other work — typically a `pick` run over N candidate
 drafts, or a single-run delegation. This skill never invokes or names another
 plugin's skill.
+
+`target_kind: conversation` has no sealed-embedding channel: when the target is
+this session's own discussion, fold the relevant conversation text into the
+request/target content yourself before classification (`criteria_from` stays
+`request`) — a runner is never handed conversation history (M2).
 
 ## 2. Fill the form
 
@@ -163,15 +205,17 @@ request itself does not cohere, which only the user can resolve.
 
 ## 4. Record before dispatch (M5)
 
-Run:
+Run (an engine dispatch always carries the §1 routing block too):
 
 ```
-node <base>/scripts/record.mjs new --form <form.json> --digest "<one-sentence digest of the request>"
+node <base>/scripts/record.mjs new --form <form.json> --routing <routing.json> --digest "<one-sentence digest of the request>"
 ```
 
-It prints the record path — keep it for the outcome update (§7). The record is
-on disk before any run exists, so even an interrupted dispatch leaves its
-trace.
+`<routing.json>` is §1 step 2's file (the route-workflow return object), so the
+record stores the switch vector, destination, and matched condition (D-14) and
+routing is recountable (AC8). It prints the record path — keep it for the
+outcome update (§7). The record is on disk before any run exists, so even an
+interrupted dispatch leaves its trace.
 
 ## 5. Announce, then run (M7)
 
