@@ -71,7 +71,7 @@ finished round result.
      headings: `M\d+`, `C\d+`, `S\d+`, `AC\d+`, `D-\d+`, `I-\d+`, `§[\d.]+`,
      `^#{1,3} ` heading lines) — the closed anchor list.
   2. Fires N readers in parallel via
-     `agent(readerPrompt, {agentType: 'salvo:cold-reader', model: READER, schema: FINDINGS})`,
+     `agent(readerPrompt, {agentType: 'spec:cold-reader', model: READER, schema: FINDINGS})`,
      where FINDINGS forces
      `{blocking: [{anchor, category, title, ambiguous, why, proposals: [string]}], discretionary: [{anchor, category, title, resolution}], out_of_scope: [string], verdict: string}`
      and `category` ∈ {question, decision, term, criteria}. The body is

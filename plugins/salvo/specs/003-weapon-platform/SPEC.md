@@ -166,7 +166,7 @@ States of one /salvo invocation:
 |---|---|---|
 | `RECEIVED` | `/salvo <request>` invoked | Always → `ROUTING` |
 | `ROUTING` | From `RECEIVED` | Spec-shaped request → `REFERRED`; a preset's `definition` matches → `ARMED` (using the preset's form); otherwise → `DRAFTING` |
-| `REFERRED` | Request is a spec/design authoring request | Terminal: user pointed to `/spec`, nothing ran, no run record |
+| `REFERRED` | Request is a spec/design authoring request | Terminal: user pointed to `/spec:spec`, nothing ran, no run record |
 | `DRAFTING` | Form-filling starts filling a form | Form complete and coherent (C1–C6) → `ARMED`; form cannot be completed (see §5) → `REJECTED`; one coherence failure triggers one silent re-draft, a second → `REJECTED` |
 | `REJECTED` | Form impossible or incoherent twice | Terminal: reason reported (which aspect was unfillable), no dispatch, no run record |
 | `ARMED` | Form complete (preset or filled) | RunRecord written (`outcome: pending`) → `ANNOUNCED` |
@@ -187,7 +187,7 @@ Primary flow — ad-hoc measurement (v1's main path, zero presets):
 
 1. User invokes `/salvo <request>`.
 2. Router checks: is this a spec/design authoring request? If yes → refer to
-   `/spec`, stop (no form, no run record).
+   `/spec:spec`, stop (no form, no run record).
 3. Router scans skills for intake form files (presets). For each, it compares
    the request against the preset's `definition`. On a match, that form is
    used (skip to step 5). With zero presets this always falls through. Routing
@@ -239,7 +239,7 @@ classified in §5.
 
 | Error | Condition | Handling |
 |---|---|---|
-| `referred_to_spec` | Request asks for a spec/design document | Point the user to the `/spec` door; stop. No form, no run record. Not counted as a failure. |
+| `referred_to_spec` | Request asks for a spec/design document | Point the user to the `/spec:spec` door; stop. No form, no run record. Not counted as a failure. |
 | `rejected_unfillable` | The form cannot be filled because the work needs the user in the loop mid-execution (interactive co-editing, mid-course decisions only the user can make) | Report which form aspect is unfillable and suggest a plain session; stop. No dispatch, no run record. |
 | `rejected_incoherent` | Form-filling output violates C1–C6 twice in a row | Report the violated rule; stop. No dispatch, no run record. |
 | `rejected_missing_target` | `criteria_from` = `document` but the referenced document does not exist (C5) | Report the missing reference; stop before dispatch. |
@@ -334,7 +334,7 @@ classified in §5.
   loop) and suggests a plain session.
 - **AC4 — referral.** When the user runs `/salvo write a spec for feature X`,
   then no form is drafted, no run record is written, and the reply points to
-  `/spec`.
+  `/spec:spec`.
 - **AC5 — preset priority.** Given a skill directory containing an intake
   form whose `definition` matches the request, when the user runs a matching
   `/salvo` request, then that preset's form is used and no new form is
@@ -367,6 +367,7 @@ classified in §5.
 | I-6 | Fold substrate (resolves gate R1-1): shooter outputs are schema-enforced `{anchor, content}` lists with dispatch-layer re-request; the anchor vocabulary is closed at form time (closed list extracted from the target by code, or verbatim quotes code-validated as substrings); anchor matching, dedup, tally run as deterministic code — zero LLM presence in the counting path (pick clause amended by I-7) | User decision in gate round 1 (two corrections by the author's interviewer): format divergence is killed upstream by schema enforcement, and anchor-vocabulary divergence is killed upstream the same way, so no semantic matching remains for any LLM to do; the overlap count — the platform's sole added information over a single pass — stays recountable | Invoking-session hand-aggregation (conditioned context, unverifiable); a full LLM aggregator producing merged results and counts (the count becomes one LLM's statement — the guarantee the platform sells disappears); a starved normalizer agent emitting an anchor-equivalence table (unnecessary once the vocabulary is closed upstream); adding an LLM-synthesis ("blend") fold mode now (such requests run as delegation; a fifth mode is promoted only if residue shows repeated demand) |
 | I-7 | Pick evaluation (resolves gate R2-1): `pick_criterion` carries a declared route — `mechanical` (evaluated by code, which may run a stated test command against candidates) or `judged` (a starved judge agent receives only the N candidates + the criterion text and selects one; the report carries the "판단 선택" label). M1 narrowed to counting: the no-LLM rule guards the overlap count (union/vote), the platform's measured product; pick has no count to protect | User correction in gate round 2: the counting ban was never meant to cover selection — "all folds mechanical" was the author's over-extension and produced R2-1; honesty is per-fold-mode labeling (measured / mechanical pick / judged pick / single-shot guess), the same treatment LLM synthesis gets in deep-research-style tools | Deferring pick from v1 (unnecessary once the judged route exists — no build burden); restricting criteria to a closed comparator grammar (guts useful free-text criteria); keeping one uniform mechanical-only rule for every fold mode |
 | D-7 | Full vocabulary de-metaphorization (2026-07-09): strip the military metaphor from the entire plugin, keeping only the plugin name `salvo`. User decision after a measured inspection (a /salvo union run over the SKILL.md) flagged jargon and label defects. The normative old→new mapping is the table below; all body identifiers (fields, files, agent name, outcome/kind values, M6 labels) move to it; historical ledger rows D-1…D-6 and I-1…I-7 are left verbatim as history and still use the old words | The metaphor added a decoding tax on every read without buying meaning; a measured inspection (not taste) surfaced the label defects; the name `salvo` alone carries the one idea worth keeping — several independent passes merged by code are a measurement | Renaming the plugin too (loses the one-line rationale the name earns); leaving the metaphor (the inspection's findings stand); a partial rename (leaves the contract internally inconsistent between fields and prose) |
+| D-8 | spec/spec-gate split into a standalone `spec` plugin (2026-07-09): the interview-driven authoring pair (`/spec:spec` + `/spec:spec-gate`, agent `cold-reader`) moves out of the salvo plugin into its own `spec` plugin; this door's spec-referral target is renamed `/salvo:spec` → `/spec:spec` (the door still refers spec-shaped requests, but announce-and-stop with no auto-invoke, because the destination is now a separate product) | User decision (2026-07-09): interactive spec authoring and code-merged parallel measurement are different products; bundling them in one plugin coupled unrelated release cadences and mislabeled the platform as a spec tool | Keeping both in one plugin (couples two unrelated products, mutual breaking-version churn); auto-invoking `/spec:spec` from the referral (a cross-product jump the user never asked for) |
 
 **D-7 rename table (normative old → new mapping):**
 

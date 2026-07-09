@@ -1,6 +1,6 @@
 ---
 name: salvo
-description: "Parallel-run platform — state work in plain language and the skill routes it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable. It also delegates single-run work to another session, or routes spec-shaped work to /salvo:spec. Use this whenever the user invokes /salvo, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
+description: "Parallel-run platform — state work in plain language and the skill routes it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable. It also delegates single-run work to another session, or routes spec-shaped work to /spec:spec (the spec plugin). Use this whenever the user invokes /salvo, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
 ---
 
 # /salvo — N independent runs, merged by code
@@ -31,7 +31,7 @@ Paths: `<base>` = this skill's base directory. Run records live at
 Decide in this order:
 
 1. **Spec-shaped request** — the asked-for deliverable is a design or spec
-   document → point the user to `/salvo:spec` and stop. No form, no record.
+   document → point the user to `/spec:spec` (the spec plugin) and stop. No form, no record.
 2. **Preset scan** — list sibling skills carrying a form:
    `ls <base>/../*/intake-form.json`. Read each file's `.form.definition` and
    compare it against the request (this comparison is routing judgment — the

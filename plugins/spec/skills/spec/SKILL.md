@@ -118,7 +118,7 @@ understood.
 
 ### 5. Gate (automatic)
 - After reporting completion, **invoke /spec-gate yourself** via the Skill tool
-  (skill `salvo:spec-gate`, args = the new SPEC.md path). Announce it in one
+  (skill `spec:spec-gate`, args = the new SPEC.md path). Announce it in one
   line first ("게이트: /spec-gate 1라운드 시작") — the announcement is what
   gives the user their chance to interrupt, so it stands in for asking
   permission.

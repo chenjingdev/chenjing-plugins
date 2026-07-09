@@ -1,5 +1,5 @@
 {
   "name": "salvo",
-  "description": "한 번의 실행은 짐작, 여러 독립 실행을 코드로 병합하면 측정. /salvo:salvo — 단일 문: 요청을 신고서(intake form)로 라우팅(즉석 폼 작성 · 위임 · 반려 · /salvo:spec 회부), N개 독립 실행을 워크플로우 하나로 실행, union/vote 병합은 코드가 셈, 실행 기록은 데이터 디렉토리에 축적. /salvo:spec + /salvo:spec-gate 포함. 메인 세션은 라우팅·집계·판독만, 실제 작업은 세션 밖에서.",
-  "version": "0.7.0"
+  "description": "한 번의 실행은 짐작, 여러 독립 실행을 코드로 병합하면 측정. /salvo:salvo — 단일 문: 요청을 신고서(intake form)로 라우팅(즉석 폼 작성 · 위임 · 반려 · /spec:spec 회부), N개 독립 실행을 워크플로우 하나로 실행, union/vote 병합은 코드가 셈, 실행 기록은 데이터 디렉토리에 축적. 메인 세션은 라우팅·집계·판독만, 실제 작업은 세션 밖에서.",
+  "version": "0.8.0"
 }

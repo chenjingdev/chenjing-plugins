@@ -23,10 +23,17 @@
     },
     {
       "name": "salvo",
-      "description": "한 번의 실행은 짐작, 여러 독립 실행을 코드로 병합하면 측정. /salvo:salvo (병렬 실행 플랫폼 단일 문 — 라우팅·폼 작성·코드 병합·기록) + /salvo:spec (인터뷰 명세) + /salvo:spec-gate (콜드 리더 관문).",
+      "description": "한 번의 실행은 짐작, 여러 독립 실행을 코드로 병합하면 측정. /salvo:salvo — 병렬 실행 플랫폼 단일 문: 라우팅·폼 작성·코드 병합·기록.",
       "source": "./plugins/salvo",
       "skills": [
-        "./skills/salvo",
+        "./skills/salvo"
+      ]
+    },
+    {
+      "name": "spec",
+      "description": "러프한 아이디어를 인터뷰로 구현 가능한 명세(SPEC.md)로 만들고(/spec:spec), 독립 콜드 리더 N명의 병렬 읽기 + 2표 이상 합의 집계로 명세를 측정하는 관문(/spec:spec-gate). 작성이 끝나면 관문이 자동 발동.",
+      "source": "./plugins/spec",
+      "skills": [
         "./skills/spec",
         "./skills/spec-gate"
       ]
