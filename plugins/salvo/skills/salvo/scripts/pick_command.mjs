@@ -18,7 +18,8 @@ if (!command || files.length === 0) {
 const passed = []
 for (let j = 0; j < files.length; j++) {
   try {
-    execSync(command.replaceAll('{candidate}', files[j]), { stdio: 'pipe', timeout: 120000 })
+    const quoted = "'" + files[j].replaceAll("'", "'\\''") + "'"
+    execSync(command.replaceAll('{candidate}', quoted), { stdio: 'pipe', timeout: 120000 })
     passed.push(j)
   } catch {
     // non-zero exit = this candidate fails the criterion

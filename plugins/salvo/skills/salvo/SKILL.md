@@ -87,7 +87,9 @@ order.
    into the shooter prompt's Rules block and stays in the residue as the
    form-evolution signal.
 
-Write the finished form as JSON to a temp file (shape below — the same shape
+Write the finished form as JSON to a temp file in the session temp dir
+(`$CLAUDE_JOB_DIR/tmp` when set, else the OS temp dir — never inside the
+skill directory, which is a read-only cache) (shape below — the same shape
 `check_form.mjs` validates):
 
 ```json
@@ -150,8 +152,8 @@ permission. Example: `발사: "plan.md의 모순 열거" — 3발, union 접기`
 3. Act on the returned object's `kind`:
    - `folded` / `single` / `picked` → report (§7).
    - `candidates` (mechanical pick, command program) → write each candidate to
-     a temp file and run
-     `node <base>/scripts/pick_command.mjs --command '<the stated command>' <files…>`;
+     a temp file (same temp-dir rule as §2) and run
+     `node <base>/scripts/pick_command.mjs --command '<the stated command, from form.pick.program.command>' <files…>`;
      the printed `choice` names the winner. Report as a mechanical pick.
    - `void` → report the failure only (§7).
 
