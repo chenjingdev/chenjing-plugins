@@ -2,7 +2,7 @@
 
 **Created**: 2026-07-09
 **Status**: Draft
-**Gate**: not-run (D-12 revision; prior pass evidence: docs/003-gate-report.md)
+**Gate**: passed (D-12 revision, round 1, 2026-07-09 — 0 confirmed blocking, readers opus ×3; report in `.spec/gate-report.md`, prior cycle frozen at docs/003-gate-report.md)
 
 <!-- A system-level implementation contract.
      Principle: nail down all the "axes" (state, boundaries, contracts, error
