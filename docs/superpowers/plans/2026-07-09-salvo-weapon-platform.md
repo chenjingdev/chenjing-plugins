@@ -1550,7 +1550,8 @@ order.
 2. **fold** — ask what the shooter outputs can be merged on:
    - Findings matchable on an identity key → `union` (enumerate everything
      found) or `vote` (keep what ≥ threshold shooters independently agree
-     on — choose vote when the user asks for confidence over coverage).
+     on — choose vote when the user asks for confidence over coverage;
+     default `vote_threshold` = majority, floor(volley/2) + 1, S1).
    - N complete artifacts of which one should survive → `pick`, plus
      `pick.criterion` and its route: `mechanical` when the criterion maps to
      a program — set `pick.program` to `{"kind":"shortest"}`,
