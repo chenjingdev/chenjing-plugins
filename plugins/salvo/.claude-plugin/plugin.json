@@ -1,5 +1,5 @@
 {
   "name": "salvo",
   "description": "한 발은 짐작, 일제사격은 측정. /salvo:salvo — 단일 문: 요청을 신고서로 라우팅(즉석 무기 대장간 · 위임 · 반려 · /spec 회부), 사수 N명을 워크플로우 하나로 발사, union/vote 접기는 코드가 셈, 잔해는 데이터 디렉토리에 축적. /salvo:spec + /salvo:spec-gate 포함. 제1원칙: 메인 세션은 오케스트레이션만 한다.",
-  "version": "0.6.0"
+  "version": "0.6.1"
 }
