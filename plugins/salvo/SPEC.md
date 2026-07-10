@@ -4,6 +4,14 @@
 **Status**: Draft
 **Gate**: passed (D-14 revision, round 2, 2026-07-09 — 0 confirmed blocking, readers opus ×3; report in `.spec/gate-report.md`, prior cycle frozen at docs/003-gate-report.md)
 
+> **v0.11 scope note (2026-07-10):** this specification governs the legacy
+> `/salvo:salvo` routing-door experiment only. The new cross-host
+> Leg (`$leg` in Codex, `/salvo:leg` in Claude Code) is an independent
+> user-facing runner with its own executable contract in `skills/leg/`; it is
+> not a sub-skill routed by this door. The
+> routing-door module is expected to move to the future behavior layer rather
+> than define Salvo's user-facing identity.
+
 <!-- A system-level implementation contract.
      Principle: nail down all the "axes" (state, boundaries, contracts, error
      taxonomy) and delegate the "values" (algorithm details, field names,

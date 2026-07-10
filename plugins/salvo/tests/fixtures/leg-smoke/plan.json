@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "objective": "Create one exact artifact and prove it with an external verifier.",
+  "root": ".",
+  "protected": ["plan.json", "verify.mjs"],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Create the smoke-test artifact",
+      "instructions": "Create answer.txt in the project root. Its complete contents must be exactly SALVO LEG OK followed by one newline. Do not change plan.json or verify.mjs.",
+      "acceptance": [
+        "answer.txt exists.",
+        "The external verifier accepts its exact contents."
+      ],
+      "artifacts": ["answer.txt"],
+      "verify": [
+        {
+          "name": "exact artifact contents",
+          "argv": ["node", "verify.mjs"],
+          "cwd": ".",
+          "timeout_ms": 30000
+        }
+      ],
+      "require_change": true,
+      "max_attempts": 2
+    }
+  ],
+  "final_verify": [
+    {
+      "name": "final exact artifact contents",
+      "argv": ["node", "verify.mjs"],
+      "cwd": ".",
+      "timeout_ms": 30000
+    }
+  ]
+}

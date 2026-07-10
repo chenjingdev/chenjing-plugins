@@ -1,0 +1,4 @@
+interface:
+  display_name: "Salvo Leg"
+  short_description: "검증 증거로만 다음 작업을 여는 크로스호스트 실행기"
+  default_prompt: "Use $leg to execute tasks 3 through 6 with external verification before advancing."

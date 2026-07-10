@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "objective": "라우터의 잘못된 완료 판정을 막고 회귀 검증까지 통과시킨다.",
+  "root": "../../..",
+  "protected": ["tests/acceptance/runner.contract.test.mjs"],
+  "tasks": [
+    {
+      "id": 1,
+      "title": "실패 사례를 테스트로 고정",
+      "instructions": "검증 없이 완료 처리되는 실패 사례를 재현하는 테스트를 추가한다.",
+      "acceptance": [
+        "새 테스트가 기존의 거짓 완료 동작에서는 실패한다.",
+        "전체 테스트 실행이 가능하다."
+      ],
+      "artifacts": ["tests/runner.test.mjs"],
+      "verify": [
+        {
+          "name": "runner tests",
+          "argv": ["node", "--test", "tests/runner.test.mjs"],
+          "cwd": ".",
+          "timeout_ms": 120000
+        }
+      ],
+      "require_change": true,
+      "max_attempts": 3
+    },
+    {
+      "id": 2,
+      "title": "완료 게이트 구현",
+      "instructions": "실제 검증 명령이 성공했을 때만 task를 passed로 바꾸는 게이트를 구현한다.",
+      "acceptance": [
+        "작업자의 완료 문구만으로는 passed가 되지 않는다.",
+        "검증 실패 로그가 다음 시도에 전달된다."
+      ],
+      "artifacts": ["src/runner.mjs", "tests/runner.test.mjs"],
+      "verify": [
+        {
+          "name": "runner tests",
+          "argv": ["node", "--test", "tests/runner.test.mjs"],
+          "cwd": ".",
+          "timeout_ms": 120000
+        }
+      ],
+      "require_change": true,
+      "max_attempts": 3
+    }
+  ],
+  "final_verify": [
+    {
+      "name": "full regression",
+      "argv": ["node", "--test"],
+      "cwd": ".",
+      "timeout_ms": 180000
+    }
+  ]
+}

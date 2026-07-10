@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "changed_files", "checks_run", "needs_user"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["candidate", "blocked"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "changed_files": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "checks_run": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "needs_user": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

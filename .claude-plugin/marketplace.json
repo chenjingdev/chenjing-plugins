@@ -23,10 +23,11 @@
     },
     {
       "name": "salvo",
-      "description": "한 번의 실행은 짐작, 여러 독립 실행을 코드로 병합하면 측정. /salvo:salvo — 병렬 실행 플랫폼 단일 문: 라우팅·폼 작성·코드 병합·기록.",
+      "description": "Codex·Claude Code 공통 실행기. Leg($leg / /salvo:leg)는 번호가 고정된 task 구간을 외부 검증 증거로만 전진시키고, /salvo:salvo는 기존 병렬 라우팅 엔진을 제공.",
       "source": "./plugins/salvo",
       "skills": [
-        "./skills/salvo"
+        "./skills/salvo",
+        "./skills/leg"
       ]
     },
     {
