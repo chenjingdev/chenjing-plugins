@@ -7,10 +7,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)),
-  '../skills/salvo/scripts/pick_command.mjs')
+  '../skills/psepha/scripts/pick_command.mjs')
 
 function setup(contents) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-pick-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'psepha-pick-'))
   return contents.map((c, i) => {
     const f = path.join(dir, `cand-${i}.js`)
     writeFileSync(f, c)

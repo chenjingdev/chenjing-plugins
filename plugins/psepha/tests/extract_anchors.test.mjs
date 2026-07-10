@@ -7,10 +7,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)),
-  '../skills/salvo/scripts/extract_anchors.mjs')
+  '../skills/psepha/scripts/extract_anchors.mjs')
 
 function run(content, args) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-anchors-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'psepha-anchors-'))
   const file = path.join(dir, 'target.md')
   writeFileSync(file, content)
   try {
@@ -52,7 +52,7 @@ test('invalid regex pattern exits 2 without a stack trace', () => {
 })
 
 test('missing target file exits 2 without a stack trace', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-anchors-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'psepha-anchors-'))
   const missing = path.join(dir, 'does-not-exist.md')
   let code, out
   try {

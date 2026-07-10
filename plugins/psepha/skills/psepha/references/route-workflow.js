@@ -8,7 +8,7 @@
 // AsyncFunction so the routing table is tested exactly as it ships.
 
 export const meta = {
-  name: 'salvo-route',
+  name: 'psepha-route',
   description: 'Classify a request into a switch vector, then pick the destination by a code table (D-14)',
   phases: [
     { title: 'Classify', detail: 'one isolated classifier → schema-enforced switch vector' },
@@ -16,7 +16,7 @@ export const meta = {
   ],
 }
 
-// args (built by the /salvo door):
+// args (built by the /psepha door):
 //   request: string            — the user's request text; the ONLY thing the classifier sees (M2)
 //   conditions: Array<{        — one per bundled sub-skill (empty in v1)
 //     name: string,            — sub-skill directory name (the destination)
@@ -55,7 +55,7 @@ const SWITCHES = {
 }
 
 // The classifier prompt is versioned WITH the code — these definitions ARE the
-// routing quality. The classifier is the isolated salvo:runner: it sees the
+// routing quality. The classifier is the isolated psepha:runner: it sees the
 // request text and this schema, nothing else — no conversation context, no
 // tools (M2).
 const classifierPrompt = [
@@ -75,7 +75,7 @@ const classifierPrompt = [
 
 phase('Classify')
 
-const classifyOpts = { agentType: 'salvo:runner', schema: SWITCHES, label: 'classify', phase: 'Classify' }
+const classifyOpts = { agentType: 'psepha:runner', schema: SWITCHES, label: 'classify', phase: 'Classify' }
 classifyOpts.model = input.model || 'haiku'
 const switches = await agent(classifierPrompt, classifyOpts)
 

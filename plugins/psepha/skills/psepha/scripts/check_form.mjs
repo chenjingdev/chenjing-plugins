@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mechanical validation of a salvo IntakeForm (SPEC 003 §2.1): field types,
+// Mechanical validation of a psepha IntakeForm (SPEC 003 §2.1): field types,
 // enums, required-iff presence, and coherence rules C1-C6 — checkable without
 // an LLM by design. Accepts a bare form or a record envelope ({form, ...}).
 // Prints one violation per line as "<rule>: <message>"; exit 1 on any.

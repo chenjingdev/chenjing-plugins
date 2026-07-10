@@ -1,11 +1,11 @@
 ---
-name: salvo
-description: "Routing door over sub-skills bundled with the plugin — state work in plain language and it routes to the right sub-skill via a live routing-card scan; the routing decision is mechanical (an isolated classifier reduces the request to a switch vector, a code table picks the destination — not the model); you never need to know what sub-skills exist. When no card matches, the built-in engine handles it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable — it also delegates single-run work to another session. Use this whenever the user invokes /salvo, wants work routed to the right bundled sub-skill, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /salvo <request>"
+name: psepha
+description: "Routing door over sub-skills bundled with the plugin — state work in plain language and it routes to the right sub-skill via a live routing-card scan; the routing decision is mechanical (an isolated classifier reduces the request to a switch vector, a code table picks the destination — not the model); you never need to know what sub-skills exist. When no card matches, the built-in engine handles it: it fills a standard intake form, runs N independent isolated agents in ONE Workflow call, and merges their outputs with code so every count is recountable — it also delegates single-run work to another session. Use this whenever the user invokes /psepha, wants work routed to the right bundled sub-skill, wants work fanned out to several independent agents and merged, wants a measured (recountable) result instead of one model's opinion, or wants work done outside the current session. Usage: /psepha <request>"
 ---
 
-# /salvo — a routing door over bundled sub-skills
+# /psepha — a routing door over bundled sub-skills
 
-/salvo is a routing door: state work in plain language and it routes to the
+/psepha is a routing door: state work in plain language and it routes to the
 sub-skill whose routing card matches, discovered live from disk at request
 time. You never need to know what sub-skills ship — no matter how many there
 are, the only thing standing in session context is this door's own description;
@@ -13,7 +13,7 @@ the inventory is never loaded wholesale (M12).
 
 Behind the door sits the built-in engine, and its founding claim: one pass is a
 guess; several independent passes merged by code are a measurement — that is
-the salvo. When no routing card matches, the door fills an intake form and the
+the psepha. When no routing card matches, the door fills an intake form and the
 engine runs it — filling that form is itself the routing decision (measurement,
 delegation, or reject). This session only routes, announces, transcribes, and
 archives; the runs happen in one Workflow call and every count comes out of
@@ -22,14 +22,14 @@ number recountable and this session's context clean enough to stay a fair
 courier.
 
 The numbered codes below (M1…, S1…, C1…, A6, D-6…) cite invariants in the
-platform spec at `plugins/salvo/SPEC.md` (plugin repo). They are
+platform spec at `plugins/psepha/SPEC.md` (plugin repo). They are
 traceability tags — this skill is executable without reading the spec.
 
 **Language**: announcement and report in the user's conversation language;
 the form and run records in English (machine-facing, A6).
 
 Paths: `<base>` = this skill's base directory. Run records live at
-`~/.claude/plugins/data/salvo-chenjing-plugins/records/` (D-6; the default of
+`~/.claude/plugins/data/psepha-chenjing-plugins/records/` (D-6; the default of
 `record.mjs`).
 
 ## 1. Route
@@ -241,7 +241,7 @@ Everything below happens in exactly one Workflow call.
    - `args`: `{ "form": <the form>, "runnerPrompt": "<the prompt>",
      "target": <target text when anchors.kind is "quote", else null>,
      "model": <tier name only when the user named one, else null> }`
-   The script runs N runners in parallel (sealed → the no-tools `salvo:runner`
+   The script runs N runners in parallel (sealed → the no-tools `psepha:runner`
    agent; tooled → the default agent), enforces the output schema at the
    dispatch layer (closed-list anchors as a schema enum; quote anchors
    substring-validated with up to 2 conformance re-requests), requires all N

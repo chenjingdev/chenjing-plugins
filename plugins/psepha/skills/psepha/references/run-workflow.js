@@ -8,7 +8,7 @@
 // body in an AsyncFunction so the merge logic is tested as it ships.
 
 export const meta = {
-  name: 'salvo-run',
+  name: 'psepha-run',
   description: 'Run N independent isolated agents in parallel and merge their outputs by code',
   phases: [
     { title: 'Run', detail: 'N isolated runners in parallel' },
@@ -16,7 +16,7 @@ export const meta = {
   ],
 }
 
-// args (built by the /salvo door from the intake form):
+// args (built by the /psepha door from the intake form):
 //   form: IntakeForm            — the completed form, verbatim
 //   runnerPrompt: string        — the ONLY thing a runner ever sees (M2)
 //   target: string|null         — target text; required when anchors.kind === 'quote'
@@ -35,12 +35,12 @@ const form = input.form
 const N = form.runs
 const sealed = form.isolation === 'sealed'
 
-// Sealed runs use the no-tools salvo:runner agent; tooled runs use the default
+// Sealed runs use the no-tools psepha:runner agent; tooled runs use the default
 // workflow agent. Both are isolated from conversation history by construction —
 // the prompt is all they get (M2).
 const agentOpts = () => {
   const o = {}
-  if (sealed) o.agentType = 'salvo:runner'
+  if (sealed) o.agentType = 'psepha:runner'
   if (input.model) o.model = input.model
   return o
 }
@@ -187,14 +187,14 @@ if (pick.route === 'mechanical') {
 // route === 'judged': ONE isolated judge — candidates + criterion text only (M2).
 // A judge failure voids the run like a runner failure (§4 step 10).
 const judgePrompt = [
-  'You are the judge of a salvo pick. Select exactly one candidate by this criterion:',
+  'You are the judge of a psepha pick. Select exactly one candidate by this criterion:',
   pick.criterion,
   '',
   ...candidates.map((c, i) => `--- CANDIDATE ${i + 1} ---\n${c}`),
   '',
   `Return the chosen candidate's number (1-${N}) and one sentence of grounds.`,
 ].join('\n')
-const judgeOpts = { agentType: 'salvo:runner', label: 'judge', phase: 'Merge' }
+const judgeOpts = { agentType: 'psepha:runner', label: 'judge', phase: 'Merge' }
 if (input.model) judgeOpts.model = input.model
 const verdict = await agent(judgePrompt, {
   ...judgeOpts,

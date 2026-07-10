@@ -21,11 +21,11 @@ const VECTOR = {
 const stub = (vector = VECTOR) => () => vector
 const routeArgs = (conditions, model = null) => ({ request: 'enumerate the contradictions in plan.md', conditions, model })
 
-test('classifier is the isolated salvo:runner, defaults to haiku, sees only the request', async () => {
+test('classifier is the isolated psepha:runner, defaults to haiku, sees only the request', async () => {
   const { result, calls } = await runRoute(routeArgs([]), stub())
   assert.equal(calls.length, 1)
   const c = calls[0]
-  assert.equal(c.opts.agentType, 'salvo:runner') // isolated no-tools classifier (M2)
+  assert.equal(c.opts.agentType, 'psepha:runner') // isolated no-tools classifier (M2)
   assert.equal(c.opts.model, 'haiku') // default tier when the door passes model: null
   assert.equal(c.opts.phase, 'Classify')
   assert.deepEqual(c.opts.schema.required, [
@@ -107,7 +107,7 @@ test('determinism: same vector + conditions twice yields identical results (AC8)
 // ---- record.mjs routing block (scripts/record.mjs) -------------------------
 
 const RECORD = path.join(path.dirname(fileURLToPath(import.meta.url)),
-  '../skills/salvo/scripts/record.mjs')
+  '../skills/psepha/scripts/record.mjs')
 
 const FORM = {
   definition: 'Enumerates contradictions in plan.md, one finding per section.',
@@ -122,7 +122,7 @@ const ROUTING = {
 }
 
 function setup() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-route-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'psepha-route-'))
   writeFileSync(path.join(dir, 'form.json'), JSON.stringify(FORM))
   writeFileSync(path.join(dir, 'routing.json'), JSON.stringify(ROUTING))
   return {

@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)),
-  '../skills/salvo/scripts/record.mjs')
+  '../skills/psepha/scripts/record.mjs')
 
 const FORM = {
   definition: 'Enumerates contradictions in plan.md, one finding per section.',
@@ -21,7 +21,7 @@ const FORM = {
 }
 
 function setup() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-record-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'psepha-record-'))
   const formFile = path.join(dir, 'form.json')
   writeFileSync(formFile, JSON.stringify(FORM))
   const root = path.join(dir, 'records')

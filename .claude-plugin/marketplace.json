@@ -23,11 +23,18 @@
     },
     {
       "name": "salvo",
-      "description": "Codex·Claude Code 공통 실행기. Leg($leg / /salvo:leg)는 번호가 고정된 task 구간을 외부 검증 증거로만 전진시키고, /salvo:salvo는 기존 병렬 라우팅 엔진을 제공.",
+      "description": "Codex·Claude Code 공통 실행기. Leg($leg / /salvo:leg)는 번호가 고정된 task 구간을 외부 검증 증거로만 전진시킴.",
       "source": "./plugins/salvo",
       "skills": [
-        "./skills/salvo",
         "./skills/leg"
+      ]
+    },
+    {
+      "name": "psepha",
+      "description": "요청을 동봉 하위 스킬로 라우팅하는 단일 문 /psepha:psepha — 격리 분류기(스위치)+코드 표로 결정, 매칭 없으면 내장 엔진이 union/vote/pick으로 N개 독립 실행을 병합, 실행 기록 축적.",
+      "source": "./plugins/psepha",
+      "skills": [
+        "./skills/psepha"
       ]
     },
     {

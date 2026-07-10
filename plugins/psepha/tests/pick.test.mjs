@@ -28,7 +28,7 @@ test('judged pick: one isolated judge sees only candidates + criterion, selectio
   assert.equal(result.candidates.length, 3)
   assert.equal(calls.length, 4)
   const judge = calls.find(c => c.opts.label === 'judge')
-  assert.equal(judge.opts.agentType, 'salvo:runner') // isolated judge (M2)
+  assert.equal(judge.opts.agentType, 'psepha:runner') // isolated judge (M2)
   assert.match(judge.prompt, /the clearest intro/)
   assert.match(judge.prompt, /CANDIDATE 2/)
   assert.ok(!judge.prompt.includes('WRITE')) // judge never sees the runner prompt

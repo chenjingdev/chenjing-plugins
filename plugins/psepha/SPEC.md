@@ -1,16 +1,18 @@
-# System Specification: salvo — routing door (/salvo) with a parallel-run engine
+# System Specification: psepha — routing door (/psepha) with a parallel-run engine
 
 **Created**: 2026-07-09
 **Status**: Draft
 **Gate**: passed (D-14 revision, round 2, 2026-07-09 — 0 confirmed blocking, readers opus ×3; report in `.spec/gate-report.md`, prior cycle frozen at docs/003-gate-report.md)
 
-> **v0.11 scope note (2026-07-10):** this specification governs the legacy
-> `/salvo:salvo` routing-door experiment only. The new cross-host
-> Leg (`$leg` in Codex, `/salvo:leg` in Claude Code) is an independent
-> user-facing runner with its own executable contract in `skills/leg/`; it is
-> not a sub-skill routed by this door. The
-> routing-door module is expected to move to the future behavior layer rather
-> than define Salvo's user-facing identity.
+> **v0.11 split note (2026-07-10):** this specification governs
+> `/psepha:psepha` — the routing door and its parallel-run engine. On
+> 2026-07-10 this module was split out of `plugins/salvo` into its own
+> `plugins/psepha`: the plugin name `salvo` was returned to the numen-ecosystem
+> behavior layer (a separate future project), and the routing door itself was
+> renamed **psepha**. The leg runner (`$leg` in Codex, `/salvo:leg` in Claude
+> Code) stays behind in `plugins/salvo` with its own executable contract in
+> `skills/leg/`; leg is a separate user-facing runner, not a sub-skill routed
+> by this door (D-15).
 
 <!-- A system-level implementation contract.
      Principle: nail down all the "axes" (state, boundaries, contracts, error
@@ -19,7 +21,7 @@
 
 ## 1. Purpose & Scope
 
-salvo is a **routing door**: one registered command, `/salvo`, in front of a
+psepha is a **routing door**: one registered command, `/psepha`, in front of a
 growing set of sub-skills bundled with the plugin. The user states work in
 plain language without knowing what sub-skills exist; the door discovers them
 from disk at request time and routes to the one whose routing card matches.
@@ -34,7 +36,7 @@ code table over that vector — not an LLM's direct pick — selects the
 destination: a sub-skill, or the engine.
 
 Behind the routing layer sits the built-in **engine**, and its founding
-claim: **one LLM pass is a guess; a salvo — N independent passes merged by
+claim: **one LLM pass is a guess; a psepha — N independent passes merged by
 pure code — is a measurement.** When no routing card matches, the door fills
 an ad-hoc intake form and the engine dispatches it as a run set (measurement)
 or a single-run delegation, or rejects it — all decided by one mechanism, the
@@ -48,7 +50,7 @@ Vocabulary used throughout (each defined in §2):
   dispatch Workflow call by the workflow script's code (M14).
 - **Run set**: the N independent runs fired in parallel plus a declared merge
   rule.
-- **Intake form**: the typed form every piece of /salvo work fills before
+- **Intake form**: the typed form every piece of /psepha work fills before
   dispatch; also the routing mechanism itself.
 - **Fill the form**: the internal procedure that fills an intake form from
   scratch when no preset matches. Not a separate user command.
@@ -75,7 +77,7 @@ Vocabulary used throughout (each defined in §2):
 
 **In scope (v1)**
 
-1. The `/salvo` routing surface (single door) and the live routing-card scan.
+1. The `/psepha` routing surface (single door) and the live routing-card scan.
 2. The intake form schema and its coherence rules.
 3. The form-filling procedure (ad-hoc forms).
 4. Delegation (single-run dispatch) under the same form.
@@ -188,9 +190,9 @@ is forbidden):
 
 ### 2.4 RunRecord
 
-Persistent. One file per routed or dispatched invocation under the salvo
+Persistent. One file per routed or dispatched invocation under the psepha
 data directory
-`~/.claude/plugins/data/salvo-chenjing-plugins/records/` (user-level, outside
+`~/.claude/plugins/data/psepha-chenjing-plugins/records/` (user-level, outside
 the plugin install — the install cache is read-only and replaced wholesale on
 every update; run records must survive updates and accumulate across projects,
 D-6; directory renamed from `residue/` to `records/` by D-7), written before
@@ -241,11 +243,11 @@ prior are its only consumers. Every switch has a reader (M3 applies):
 
 ## 3. State Model
 
-States of one /salvo invocation:
+States of one /psepha invocation:
 
 | State | Entered when | Left when |
 |---|---|---|
-| `RECEIVED` | `/salvo <request>` invoked | Always → `ROUTING` |
+| `RECEIVED` | `/psepha <request>` invoked | Always → `ROUTING` |
 | `ROUTING` | From `RECEIVED` | The routing workflow returns the switch vector and the table's pick (code, D-14): a run preset wins → `ARMED` (using its bundled form); a procedural sub-skill wins → `ROUTED`; no condition satisfied, or classifier failure (engine fallback, noted in the record) → `DRAFTING` |
 | `ROUTED` | A procedural sub-skill won the routing table | Terminal for the door: run record written (`outcome: routed`), one announcement line names the sub-skill, then control passes to that sub-skill's own instructions (if those instructions dispatch runs, they do so through the engine, whose states apply to that dispatch) |
 | `DRAFTING` | Form-filling starts filling a form | Form complete and coherent (C1–C6) → `ARMED`; form cannot be completed (see §5) → `REJECTED`; one coherence failure triggers one silent re-draft, a second → `REJECTED` |
@@ -266,7 +268,7 @@ any earlier state.
 
 Primary flow — ad-hoc measurement (v1's main path, zero presets):
 
-1. User invokes `/salvo <request>`.
+1. User invokes `/psepha <request>`.
 2. The door collects the routing conditions of the bundled sub-skills (from
    their card files) and launches the routing workflow: an isolated
    classifier agent reduces the request to the switch vector (§2.5), then the
@@ -437,24 +439,24 @@ classified in §5.
 ## 7. Acceptance Criteria
 
 - **AC1 — ad-hoc measurement.** Given zero presets, when the user runs
-  `/salvo find every contradiction in docs/plan.md`, then: a form is filled
+  `/psepha find every contradiction in docs/plan.md`, then: a form is filled
   with `merge` = `union`, `runs` = 3, `isolation` = `sealed`,
-  `invention` = `forbidden`, `criteria_from` = `document`, `anchors` set; a run record exists under the salvo data directory (§2.4) before any run starts; exactly one
+  `invention` = `forbidden`, `criteria_from` = `document`, `anchors` set; a run record exists under the psepha data directory (§2.4) before any run starts; exactly one
   announcement line precedes dispatch; 3 runs execute in parallel with no
   conversation context; the run output schema's anchor values are the
   section headings extracted from docs/plan.md by code; the report lists
   anchor-deduped findings and states "3 independent runs, union merge".
-- **AC2 — delegation.** When the user runs `/salvo rename function A to B
+- **AC2 — delegation.** When the user runs `/psepha rename function A to B
   across the repo and fix the tests`, then the filled form has `runs` = 1,
   `merge` = `none`, `isolation` = `tooled`; exactly one worker runs in a
   separate session; the report
   carries the literal label "단일 실행 — 교차 검증 없음"; the run record `outcome`
   ends as `delegated`.
-- **AC3 — rejection.** When the user runs `/salvo let's discuss the design
+- **AC3 — rejection.** When the user runs `/psepha let's discuss the design
   together and decide as we go`, then no run is spawned, no run record is
   written, and the reply names the unfillable aspect (user needed in the
   loop) and suggests a plain session.
-- **AC4 — no spec special-casing.** When the user runs `/salvo write a spec
+- **AC4 — no spec special-casing.** When the user runs `/psepha write a spec
   for feature X`, the request flows through the ordinary form like any other
   generation work (typically a `pick` run over N candidate drafts, or a
   `runs`-1 delegation); the door does not invoke or name another plugin's
@@ -469,13 +471,13 @@ classified in §5.
 - **AC6 — void run set.** Given a measurement dispatch of 3 where one run
   fails to complete, then the report contains no partial findings, states the
   failure, and the run record `outcome` is `void`.
-- **AC7 — judged pick.** When the user runs `/salvo draft 3 versions of this
+- **AC7 — judged pick.** When the user runs `/psepha draft 3 versions of this
   README intro and pick the clearest one`, then the filled form has `merge` =
   `pick`, `runs` = 3, `pick_criterion` route `judged`; exactly one judge
   agent runs, receiving only the 3 candidates and the criterion text; the
   report names the selected candidate and carries the label "판단 선택" with
   the criterion text.
-- **AC8 — recountable routing.** For any /salvo invocation that routes (to a
+- **AC8 — recountable routing.** For any /psepha invocation that routes (to a
   sub-skill or the engine), the run record contains the switch vector, the
   destination, and the matched condition (or the engine/fallback marker);
   re-evaluating the routing table on the recorded vector reproduces the
@@ -506,6 +508,7 @@ classified in §5.
 | D-12 | Router identity (2026-07-09): `/salvo` is redefined as the **routing door** over bundled sub-skills — routing is the product; the parallel-run platform is the built-in engine behind it. Adds the routing-card contract (§2.2): every sub-skill carries a card ("route here when …") the door scans live at request time; run presets carry a form the engine executes, procedural sub-skills carry instructions the door follows. Sub-skills are bundled-only (M13) — the runtime never creates one; the user-side exception path is the ad-hoc engine (form → run → record), and promotion stays a developer-side authoring loop over the records pile. Only the door is registered (M12), so session context carries one description no matter how many sub-skills ship | User correction (2026-07-09): salvo's founding intent is routing — skills will multiply, they cannot all sit in context, and users cannot be expected to know the inventory; the spec's platform-first framing made the engine look like the product (the author's second identity misreading, after D-9) | Runtime user-created sub-skills (read-only install cache; no versioning, no gate, quality drift; would need a second scan root in the data dir — deferred until records show demand); pre-building presets for every anticipated situation (speculative design, re-rejected per D-4 — the ad-hoc engine already floors every case); registering sub-skills as top-level skills (context cost grows per skill — defeats the door's purpose) |
 | D-13 | Dispatch API fixed to the Workflow tool (2026-07-09, post-gate amendment like D-6): the MAY hedge "Agent tool vs Workflow tool" is retired and M14 added — every engine dispatch is one Workflow call whose script spawns the runs; the vocabulary drops the "subagent/workflow" phrasing. No implementation change: the engine has been Workflow-only since v1 (`run-workflow.js`, M4's one-call rule) | User reading (2026-07-09): the hedged wording made a Workflow-based system read as subagent-based — a reader confusion is a spec defect; the Workflow layer is also load-bearing (M11 schema enforcement at the `agent()` dispatch, M1 merge as script code, run outputs never entering the invoking session's context), so the freedom was never real | Keeping the hedge (misleads readers; the implementation could not actually switch to bare Agent-tool dispatch without losing M11's dispatch-layer schema enforcement); dispatching runs via the Agent tool from the invoking session (no schema parameter, control flow returns to the LLM between runs, outputs land in session context) |
 | D-14 | Mechanical switch routing (2026-07-09): routing is mechanized now, not at first promotion. An isolated classifier agent (sealed: request text + switch schema only) reduces the request to a schema-enforced switch vector (§2.5 — 6 switches restating the intake form's own axes), and a code table evaluates sub-skill conditions against it (most-specific wins, lexicographic tie-break, no match ⇒ engine; classifier failure ⇒ engine fallback, noted — `routing_fallback`). The vector doubles as the form-filling prior (S6); every routed or dispatched invocation records vector + destination + matched condition (AC8; outcome `routed` added); routing cards gain a machine condition beside the prose; classification runs as its own Workflow call (M14 extended); M15 added | User decision (2026-07-09), overriding the author's wait-for-first-promotion recommendation: take the mechanism's guarantees now — recountable, testable routing plus a mechanical union/vote/pick prior (the exact spot all three D-12 gate readers independently flagged as vaguest). The D-1 ontology risk is contained: the switches restate the form's shipped axes rather than invent new ones, and recorded vectors make the vocabulary itself evidence-refinable | Waiting for the first promotion (author's recommendation — rejected: the prior and the recording pay rent even with one destination); LLM-direct card matching (unrecountable, untestable, misroutes invisible); a full pre-form ontology (D-1's rejected 6-axis shape — switches deliberately stop at destination + prior and never fill the form) |
+| D-15 | salvo → psepha rename and plugin split (2026-07-10): the routing door and its parallel-run engine — everything this document governs — are renamed **psepha** and split out of `plugins/salvo` into their own `plugins/psepha`. Concretely `/salvo:salvo` → `/psepha:psepha`, agent `salvo:runner` → `psepha:runner`, workflow meta `salvo-run`/`salvo-route` → `psepha-run`/`psepha-route`, and data dir `salvo-chenjing-plugins` → `psepha-chenjing-plugins`; the leg runner stays behind in `plugins/salvo`. Name: psepha ← Greek *psephos*, the pebble used for counting and voting — one independent run is one pebble and the code counts the pebbles; the founding claim (several independent passes merged by code are a measurement) survives the rename intact | User decision (2026-07-10): the plugin name `salvo` is returned to the numen-ecosystem behavior layer (a separate future project), which removes the last military word from this plugin; `psephos` names the one idea worth keeping. Vetted clean by web search against existing products — `talvo`/`janua`/`quorra`/`limen`/`grexa` all collided, `psepha` did not | Full-plugin rename including the leg runner (would break the Salvo-Leg branding created 2026-07-10 — leg keeps the `salvo` plugin name); keeping the door in `plugins/salvo` under the old name (the name is owed to the behavior layer, and a second military-flavored surface would remain here) |
 
 **D-7 rename table (normative old → new mapping):**
 
@@ -533,7 +536,7 @@ classified in §5.
 
 ## Assumptions
 
-- A1: The user-facing door is spelled `/salvo`; the harness-level skill
+- A1: The user-facing door is spelled `/psepha`; the harness-level skill
   naming needed to achieve that invocation path is implementation-defined.
 - A2: *(withdrawn by D-10 — the spec-referral branch was removed; no referral
   exists to record.)*

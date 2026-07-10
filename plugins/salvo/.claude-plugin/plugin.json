@@ -1,8 +1,8 @@
 {
   "name": "salvo",
-  "description": "Codex와 Claude Code 공통 Salvo Leg — 번호가 고정된 task 구간을 외부 상태기계가 실행하고 실제 산출물 변화·검증 명령이 통과해야만 다음 task로 진행. 기존 /salvo:salvo 병렬 라우팅 실험도 함께 제공.",
+  "description": "Codex와 Claude Code 공통 Salvo Leg — 번호가 고정된 task 구간을 외부 상태기계가 실행하고 실제 산출물 변화·검증 명령이 통과해야만 다음 task로 진행.",
   "author": {
     "name": "chenjing"
   },
-  "version": "0.11.0"
+  "version": "0.12.0"
 }

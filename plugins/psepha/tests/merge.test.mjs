@@ -49,7 +49,7 @@ test('union: dedup by closed-list anchor, counts distinct runs, sealed agentType
   assert.equal(a.entries.length, 3)
   assert.equal(calls.length, 3)
   for (const c of calls) {
-    assert.equal(c.opts.agentType, 'salvo:runner') // sealed -> isolated no-tools agent
+    assert.equal(c.opts.agentType, 'psepha:runner') // sealed -> isolated no-tools agent
     assert.deepEqual(c.opts.schema.properties.findings.items.properties.anchor.enum, ['A', 'B', 'C'])
   }
 })

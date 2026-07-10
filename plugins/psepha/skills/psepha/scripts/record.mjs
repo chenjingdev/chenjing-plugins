@@ -15,7 +15,7 @@ import path from 'node:path'
 
 // D-6: user-level data directory — survives plugin updates, accumulates
 // promotion evidence across projects.
-const DEFAULT_ROOT = path.join(homedir(), '.claude/plugins/data/salvo-chenjing-plugins/records')
+const DEFAULT_ROOT = path.join(homedir(), '.claude/plugins/data/psepha-chenjing-plugins/records')
 
 const [cmd, ...rest] = process.argv.slice(2)
 const opt = name => {

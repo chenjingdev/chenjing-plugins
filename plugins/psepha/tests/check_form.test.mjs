@@ -7,10 +7,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)),
-  '../skills/salvo/scripts/check_form.mjs')
+  '../skills/psepha/scripts/check_form.mjs')
 
 function run(doc) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-form-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'psepha-form-'))
   const file = path.join(dir, 'form.json')
   writeFileSync(file, JSON.stringify(doc))
   try {
@@ -119,7 +119,7 @@ test('C5: criteria_from document with missing file fails', () => {
 })
 
 test('C5: criteria_from document with existing file passes', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'salvo-doc-'))
+  const dir = mkdtempSync(path.join(tmpdir(), 'psepha-doc-'))
   const doc = path.join(dir, 'doc.md')
   writeFileSync(doc, '# hi')
   const r = run({ ...base(), criteria_from: 'document', criteria_ref: doc })

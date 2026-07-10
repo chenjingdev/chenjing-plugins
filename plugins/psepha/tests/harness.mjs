@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const RUN_SCRIPT = path.join(HERE, '../skills/salvo/references/run-workflow.js')
-const ROUTE_SCRIPT = path.join(HERE, '../skills/salvo/references/route-workflow.js')
+const RUN_SCRIPT = path.join(HERE, '../skills/psepha/references/run-workflow.js')
+const ROUTE_SCRIPT = path.join(HERE, '../skills/psepha/references/route-workflow.js')
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
 
