@@ -122,9 +122,13 @@
 
 ## Decision Ledger *(mandatory)*
 
-<!-- Record every directional decision made during the interview. The
-     "rationale" is what lets a later session verify assumption freshness
-     (whether that rationale still holds). -->
+<!-- Admission bar: record a decision when it is expensive to reverse, is an
+     external contract (API/schema/protocol), touches security or data
+     handling, had genuinely competing alternatives, or a future session might
+     re-litigate it. Cheap, easily-reversed choices are NOT ledger material —
+     an all-recording ledger becomes sediment nobody reads. The "rationale" is
+     what lets a later session verify assumption freshness (whether that
+     rationale still holds). -->
 
 | # | Decision | Rationale (facts at the time) | Rejected alternatives |
 |---|---|---|---|
@@ -136,6 +140,29 @@
      discretion". Items listed here are not re-raised by cold readers (G-7). -->
 
 - [item]: implementer's discretion. Reason: [why the spec does not need to decide this]
+
+## Resolved by Experiment *(experiment record)*
+
+<!-- Questions deliberately routed to experiments instead of pre-decided on
+     paper (G-13) — pre-deciding them would bake in a guess that building
+     candidates or observing real behavior answers better. Like waivers, items
+     listed here are not re-raised by cold readers. When an experiment
+     concludes, move the answer into the body and log it in the Decision
+     Ledger with the result as rationale. -->
+
+- [question] — answered by: [candidate comparison | user reaction | runtime observation], decided by: [milestone/generation]
+
+## Context Snapshot *(non-normative — re-verify at implementation)*
+
+<!-- Pre-research findings about the CURRENT code: patterns to follow, files
+     to touch, constraints observed, as file:line citations. This section is a
+     head start, not contract — the implementer re-verifies against live code
+     and tests, and a mismatch means this snapshot aged, never that the code
+     violates the spec. Snapshot date required. -->
+
+**Snapshot date**: [DATE]
+
+- [finding, e.g., "auth flow lives in `src/auth/session.ts:41-88`; new endpoints follow the pattern in `src/api/routes/user.ts:12`"]
 
 ## Assumptions
 

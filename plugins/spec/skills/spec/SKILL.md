@@ -1,15 +1,28 @@
 ---
 name: spec
-description: "Turn a raw idea into a spec an execution model can implement from the document alone, via a structured interview. Use this whenever the user describes a feature idea, wants a design or spec document, says 'I want to build X', or asks to scope or plan a system before coding. For a brand-new system it produces a system-level implementation contract (architecture, state, boundaries, contracts, error taxonomy); for a change to an existing codebase it produces a feature spec. Usage: /spec <idea description>. After drafting, /spec-gate fires automatically as the final step."
+description: "Turn a raw idea into the right-weight planning document via a structured interview. Use this whenever the user describes a feature or product idea, wants a design or spec document, says 'I want to build X', or asks to scope or plan work before coding. Three modes by how settled the direction is: exploration that is still deciding WHAT to build (candidate fan-out planned, UI experiments, MVP probes) gets a lightweight exploration brief (BRIEF.md) — no full spec, no gate; a change to an existing codebase gets a feature spec; a new system whose direction is already chosen gets a system-level implementation contract (architecture, state, boundaries, contracts, error taxonomy). Usage: /spec <idea description>. Contract-mode drafts end with /spec-gate firing automatically."
 ---
 
 # /spec — Interview-driven spec authoring
 
-Goal: **a spec the execution model (Opus) can implement by reading this
-document alone.** The final quality verdict comes from /spec-gate, so here you
-focus on filling in the *axes* rather than over-detailing. Axes = scope, state,
-boundaries, contracts, error taxonomy. Values (naming, format, algorithm
-details) are left to the implementer's discretion.
+Goal: **a document matched to how settled the work is.** For settled work
+(feature/system — the *contract modes*), that is a spec the execution model
+(Opus) can implement by reading this document alone. The final quality verdict
+comes from /spec-gate, so here you focus on filling in the *axes* rather than
+over-detailing. Axes = scope, state, boundaries, contracts, error taxonomy.
+Values (naming, format, algorithm details) are left to the implementer's
+discretion. For unsettled work (*explore mode*), the goal inverts: fix only
+the boundaries and the evaluation criteria and deliberately leave the rest
+open — a full spec written before any candidate exists collapses the diversity
+the exploration is for, and bakes in introspected guesses that seeing real
+candidates would have overturned.
+
+**Intent vs. world-state**: a spec is the single source of *intent,
+boundaries, and completion criteria*. Facts about the *current implementation
+state* (what the code looks like today) belong in the non-normative Context
+Snapshot and are re-verified from code and tests at execution time — recorded
+code facts start aging the moment they are written, and a stale "fact"
+presented as contract is worse than none.
 
 **Language**: Conduct the interview — questions, AskUserQuestion options, and
 reports — in the user's conversation language. Write the spec document itself
@@ -26,18 +39,62 @@ by the session.
 ## Procedure
 
 ### 1. Mode selection
+- If WHAT to build is still being discovered — the user plans to compare
+  multiple candidates, run UI/UX experiments, probe an MVP direction, or says
+  things like "여러 방향으로 만들어보고 고르자" → **explore mode**
+  (`references/brief-template.md`; §1.5 below replaces §2–§5 entirely)
 - If the current directory is an existing codebase (source files present) and
   the request is a change to it → **feature mode**
   (`references/spec-template.md`)
-- If it is a new system/app idea → **system mode**
-  (`references/spec-template-system.md`)
-- If ambiguous, ask once with AskUserQuestion.
+- If it is a new system/app idea whose direction is already chosen →
+  **system mode** (`references/spec-template-system.md`)
+- If the mode is ambiguous, ask once with AskUserQuestion — this covers both
+  frontiers. Explore vs contract, the cue: *"구현 결과를 보고 결정할 것이
+  많은가?"* — if most decisions should wait for real candidates, it is
+  explore. Feature vs system (e.g., a new app inside an existing monorepo),
+  the cue: does the work *change* existing behavior/contracts (feature), or
+  does it stand up a new system that merely lives beside existing code
+  (system)?
+
+### 1.5 Explore mode (replaces §2–§5)
+
+Exploration needs a launchpad, not a contract. Pre-deciding data models, state
+machines, and error taxonomies makes every candidate converge on the same
+design — the opposite of what a fan-out is for.
+
+- **Interview: 1–3 questions total.** Only what the brief cannot proceed
+  without: the value hypothesis (intent), the hard constraints (boundaries no
+  candidate may cross), and how candidates will be compared (evaluation
+  criteria). Propose Diversity Axes and Open Questions yourself and confirm
+  them in the same breath — they are your design contribution, not interview
+  material.
+- **Write `BRIEF.md`** at the project root from `references/brief-template.md`
+  (in English, like SPEC.md — machine-facing). A BRIEF and a SPEC can coexist:
+  the brief drives the exploration phase; the spec, if one exists, describes
+  the settled system around it.
+- **No gate.** BRIEF.md is never sent to /spec-gate (the gate rejects it).
+  Optionally offer ONE lightweight adversarial check — a single cold reader
+  (no context, no tools) asked: "Which of these Open Questions actually must
+  be decided *before* building candidates, because getting it wrong invalidates
+  the comparison?" Surface its answer as information, not as a gate.
+- **Promotion path.** After candidates are built and selected, run /spec again
+  → contract mode. The brief's Hard Constraints carry over verbatim; the
+  selected candidate's traits become interview material; Open Questions arrive
+  *answered by evidence* and land in the spec's Decision Ledger (rationale =
+  the experiment result) — the spec is written as codification of what
+  survived, not as prediction.
 
 ### 2. Pre-research (before the interview)
 - **Feature mode**: investigate the relevant code yourself — find the existing
   patterns to follow, the files you will touch, and the constraints, and
-  capture them as `file:line` citations. Bake the findings into the spec body
-  (so the implementation session does not have to dig again).
+  capture them as `file:line` citations. Record the findings in the spec's
+  **Context Snapshot** section (non-normative), NOT in the requirements body:
+  they are a head start for the implementation session, not part of the
+  contract. The implementer re-verifies them against the live code — a
+  mismatch between snapshot and code means the snapshot aged, never that the
+  code violates the spec. Constraints that ARE intent ("must follow the
+  existing auth flow") go in Requirements; the snapshot only carries where
+  that flow lives today.
 - **Assumption-freshness rule**: before inheriting a past decision or document,
   verify its rationale still holds today. Cross-check against memory (Honcho)
   and recent commits.
@@ -98,8 +155,14 @@ understood.
   axes → failure modes → acceptance criteria.
 - Quantification discipline: "fast" → "how many ms?", "several" → an exact
   number. Do not carry vague adjectives into the spec.
-- Record every directional decision you make in the **Decision Ledger**, along
-  with its rationale and the rejected alternatives.
+- Record decisions in the **Decision Ledger** with rationale and rejected
+  alternatives — but apply an admission bar, because a ledger that records
+  everything becomes sediment nobody reads and nobody dares delete. Record a
+  decision when it is expensive to reverse, is an external contract (API,
+  schema, protocol), touches security/data handling, had genuinely competing
+  alternatives, or a future session might plausibly re-litigate it. Cheap,
+  obvious, easily-reversed choices (a button label, an internal name) are not
+  ledger material — the diff records them well enough.
 - If the user does not know the answer: propose a reasonable default and, if
   adopted, declare it in **Assumptions**. No unstated assumptions.
 - Only where the judgment genuinely forks and you could not get an answer, mark

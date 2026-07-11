@@ -38,10 +38,22 @@
 
 ## Decision Ledger *(mandatory)*
 
+<!-- Admission bar: record decisions that are expensive to reverse, external
+     contracts, security/data choices, or genuinely contested forks. Cheap,
+     easily-reversed choices are not ledger material. -->
+
 | # | Decision | Rationale (facts at the time) | Rejected alternatives |
 |---|---|---|---|
 
 ## Deferred to Implementer *(waiver record)*
+
+## Resolved by Experiment *(experiment record)*
+
+<!-- Questions deliberately routed to experiments instead of pre-decided on
+     paper (G-13). Not re-raised by cold readers. When an experiment concludes,
+     move the answer into the body and log it in the Decision Ledger. -->
+
+- [question] — answered by: [candidate comparison | user reaction | runtime observation], decided by: [milestone/generation]
 
 ## Assumptions
 [Things not specified that you filled with reasonable defaults. No unstated
