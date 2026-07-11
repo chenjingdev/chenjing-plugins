@@ -164,6 +164,28 @@
 
 - [finding, e.g., "auth flow lives in `src/auth/session.ts:41-88`; new endpoints follow the pattern in `src/api/routes/user.ts:12`"]
 
+## Implementation Authority & Escalation *(handoff policy — mandatory)*
+
+<!-- The execution contract for whoever implements this spec. Keep the default
+     text; add project-specific escalation lines below it. -->
+
+This specification is authoritative for intent, observable behavior,
+invariants, compatibility, and safety boundaries. The implementer MUST inspect
+the current repository, tests, and dependencies before choosing an approach.
+Code references in this document are evidence from authoring time, not
+instructions to modify specific files. The implementer MAY change its plan as
+new evidence appears, and MUST stop only when an escalation condition below
+occurs.
+
+**Escalation conditions** (stop and ask a human):
+
+- A public API or persisted schema must change beyond what this spec declares
+- Requirements conflict with observed current behavior
+- The work cannot be completed within the declared scope
+- External writes, deployments, data deletion, or sensitive credentials are required
+- An acceptance criterion admits materially different interpretations
+- [project-specific condition]
+
 ## Assumptions
 
 <!--

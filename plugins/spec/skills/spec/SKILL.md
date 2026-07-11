@@ -1,21 +1,29 @@
 ---
 name: spec
-description: "Turn a raw idea into the right-weight planning document via a structured interview. Use this whenever the user describes a feature or product idea, wants a design or spec document, says 'I want to build X', or asks to scope or plan work before coding. Three modes by how settled the direction is: exploration that is still deciding WHAT to build (candidate fan-out planned, UI experiments, MVP probes) gets a lightweight exploration brief (BRIEF.md) — no full spec, no gate; a change to an existing codebase gets a feature spec; a new system whose direction is already chosen gets a system-level implementation contract (architecture, state, boundaries, contracts, error taxonomy). Usage: /spec <idea description>. Contract-mode drafts end with /spec-gate firing automatically."
+description: "Turn a raw idea into the right-weight planning document via a structured interview. Use this when the user wants a design or spec document, needs a durable shared contract (public APIs, persistence/schema, cross-component contracts, security boundaries, high-risk changes), or describes a product/feature direction worth pinning down before coding. Three modes by how settled the direction is: exploration that is still deciding WHAT to build (candidate fan-out planned, UI experiments, MVP probes) gets a lightweight exploration brief (BRIEF.md) — no full spec, no gate; a change to an existing codebase gets a feature spec; a new system whose direction is already chosen gets a system-level implementation contract. Do NOT run the contract interview for throwaway prototypes or simple local changes — a trivial change needs no planning document at all, and exploratory work belongs in explore mode. Usage: /spec <idea description>. Contract-mode drafts end with /spec-gate firing automatically."
 ---
 
 # /spec — Interview-driven spec authoring
 
 Goal: **a document matched to how settled the work is.** For settled work
-(feature/system — the *contract modes*), that is a spec the execution model
-(Opus) can implement by reading this document alone. The final quality verdict
-comes from /spec-gate, so here you focus on filling in the *axes* rather than
-over-detailing. Axes = scope, state, boundaries, contracts, error taxonomy.
-Values (naming, format, algorithm details) are left to the implementer's
-discretion. For unsettled work (*explore mode*), the goal inverts: fix only
-the boundaries and the evaluation criteria and deliberately leave the rest
-open — a full spec written before any candidate exists collapses the diversity
-the exploration is for, and bakes in introspected guesses that seeing real
-candidates would have overturned.
+(feature/system — the *contract modes*), that is an implementation contract:
+the executor gets **all the intent, boundaries, and completion criteria from
+this document alone**, then **re-inspects the live repository itself** and
+**chooses the implementation approach autonomously**. The division of labor:
+intent lives in the document (code inspection can never recover what the
+author wanted), world-state lives in the code (a document's copy of it ages
+from the moment it is written), and the how belongs to the implementer. A
+spec is NOT a document that lets the executor skip looking at the code — it
+is the document that makes every *intent* decision decidable without asking
+the author. The final quality verdict comes from /spec-gate, so here you
+focus on filling in the *axes* rather than over-detailing. Axes = scope,
+state, boundaries, contracts, error taxonomy. Values (naming, format,
+algorithm details) are left to the implementer's discretion. For unsettled
+work (*explore mode*), the goal inverts: fix only the boundaries and the
+evaluation criteria and deliberately leave the rest open — a full spec
+written before any candidate exists collapses the diversity the exploration
+is for, and bakes in introspected guesses that seeing real candidates would
+have overturned.
 
 **Intent vs. world-state**: a spec is the single source of *intent,
 boundaries, and completion criteria*. Facts about the *current implementation
@@ -151,10 +159,22 @@ understood.
 ### 3. Interview (superpowers brainstorming UX)
 - **One question per message.** AskUserQuestion with 2-4 options + free-form
   input.
+- **Blocking test before every question.** A question earns its interruption
+  only if the decision (a) changes a user-observable outcome or a
+  safety/data/compatibility boundary, (b) cannot be safely made by the
+  implementer after inspecting the code, (c) is better fixed now than by a
+  candidate experiment, and (d) is expensive to change later. Mostly-no →
+  don't ask: route it to a declared default (Assumptions), delegate it
+  (Deferred to Implementer), or mark it experimental (Resolved by
+  Experiment). Every question you don't ask is interview time the user keeps
+  and a guess you don't bake in.
 - Order: purpose/success criteria → scope (explicit out-of-scope) → state/data
   axes → failure modes → acceptance criteria.
-- Quantification discipline: "fast" → "how many ms?", "several" → an exact
-  number. Do not carry vague adjectives into the spec.
+- Quantification discipline, conditionally: quantify when the number does
+  real work — acceptance judgment, safety, cost, a performance floor ("fast"
+  → "p95 how many ms?"). Do NOT force numbers onto exploratory UX or product
+  taste ("clean UI" → not a number; a candidate-comparison criterion or an
+  experimental item). False precision reads as contract and gets built.
 - Record decisions in the **Decision Ledger** with rationale and rejected
   alternatives — but apply an admission bar, because a ledger that records
   everything becomes sediment nobody reads and nobody dares delete. Record a
@@ -189,10 +209,13 @@ understood.
   runs on the same project revise it in place (new Decision Ledger rows + body
   edits), never create SPEC-2.md or numbered siblings.
 - Write it while keeping the template structure. Frontmatter `**Gate**: not-run`.
-- Self-verify (up to 3 revision passes): any vague adjectives left? are
-  acceptance criteria observable? is every decision in the Ledger? zero markers
-  remaining? (During drafting the cap is 3, but the /spec-gate lint rejects on
-  ≥1 remaining marker.)
+- Self-verify (up to 3 revision passes): any vague adjectives left in
+  *normative* clauses (requirements, invariants, acceptance criteria)? — a
+  deliberately-open item belongs in Resolved by Experiment, not as a fuzzy
+  requirement. Are acceptance criteria observable? Does every ledger-worthy
+  decision sit in the Ledger? Zero markers remaining? Is the Implementation
+  Authority & Escalation block present? (During drafting the cap is 3, but
+  the /spec-gate lint rejects on ≥1 remaining marker.)
 - If any markers remain, resolve each one with AskUserQuestion (proposed
   answers A/B/C + free-form input) and reflect it into the body.
 

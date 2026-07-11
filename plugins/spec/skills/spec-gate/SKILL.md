@@ -44,7 +44,8 @@ recountable and the session's context clean enough to stay a fair courier.
   determine the round number: last round number + 1 (or 1 if there is no
   report). **There is
   no round cap** — since every round ends with user feedback, judging
-  divergence and deciding to stop is the user's call at that point (G-8 · D-9).
+  divergence and deciding to stop is the user's call at that point (G-8 ·
+  D-9; from round 3 the structural diagnosis in §3 must precede the launch).
 
 ### 0.5 Machine lint (floor check before cold reading, G-11)
 Before cold reading, run a reproducible floor check. The required sections are
@@ -96,8 +97,11 @@ the gate cannot run and stop.
   2. Fires N readers in parallel via
      `agent(readerPrompt, {agentType: 'spec:cold-reader', model: READER, schema: FINDINGS})`,
      where FINDINGS forces
-     `{blocking: [{anchor, category, title, ambiguous, why, proposals: [string]}], discretionary: [{anchor, category, title, resolution}], experimental: [{anchor, category, title, question, how_to_answer}], out_of_scope: [string], verdict: string}`
-     and `category` ∈ {question, decision, term, criteria}. The body is
+     `{blocking: [{anchor, category, title, ambiguous, why, proposals: [string]}], discretionary: [{anchor, category, title, resolution}], experimental: [{anchor, category, title, question, how_to_answer}], stale_assumption: [{anchor, title, claim, verify_how}], out_of_scope: [string], verdict: string}`
+     and `category` ∈ {question, decision, term, criteria}
+     (stale-assumption items carry no category — their fix is always the
+     same: move the fact to the Context Snapshot and restate the requirement
+     as intent, so they tally by anchor alone). The body is
      embedded in the prompt — no file path, no tool access (G-2).
   3. **Framing rotation (G-14)**: reader index 0 gets an adversarial preamble
      prepended to the same prompt: *"Assume this document contains at least
@@ -118,13 +122,15 @@ the gate cannot run and stop.
   5. Tallies in JS — code, not judgment: **confirmed blocking = the same
      `(anchor, category)` pair raised as blocking by ≥ 2 readers**; the same
      rule applied to experimental items yields **confirmed experimental**;
-     votes are integer counts; anchors are validated against the extracted
-     vocabulary (an anchor outside it is flagged, never silently dropped or
-     rewritten). Only confirmed *blocking* drives the pass verdict —
-     experimental items never block (G-13).
+     stale-assumption items tally by anchor alone (same ≥2 rule). Votes are
+     integer counts; anchors are validated against the extracted vocabulary
+     (an anchor outside it is flagged, never silently dropped or rewritten).
+     Only confirmed *blocking* drives the pass verdict — experimental and
+     stale-assumption items never block (G-13).
   6. Returns the round object: `confirmed[]` (each with every contributing
      reader's write-up verbatim), `solo[]`, `discretionary[]`,
-     `confirmedExperimental[]`, `soloExperimental[]`, `out_of_scope[]`,
+     `confirmedExperimental[]`, `soloExperimental[]`,
+     `confirmedStale[]`, `soloStale[]`, `out_of_scope[]`,
      `verdicts[]`, `flags[]`.
 - A round can take 5+ minutes; wait for the workflow to complete.
 
@@ -182,10 +188,27 @@ the gate cannot run and stop.
   it in Resolved by Experiment, or decide it now?" The user may still decide
   on the spot; the readers' judgment is advice, not a verdict. Solo
   experimental items are display-only.
+- **Confirmed stale-assumption items** (≥2 readers, same anchor) do not
+  block either: the writing session moves the world-state claim into the
+  Context Snapshot, restates the clause as intent, and notes the edit in the
+  report — no user question needed unless restating the intent itself forks
+  (then it becomes a blocking-style question). Solo stale items are
+  display-only.
+- **Round diagnostics (G-8 amendment)**: there is still no hard round cap,
+  but blind looping past round 2 mostly produces false precision and spec
+  bloat. If confirmed blocking remains after two full rounds, do not simply
+  launch round 3 — first present a structural diagnosis via AskUserQuestion:
+  (a) continue another round (the remaining issues are genuinely
+  interview-resolvable), (b) split the spec into sub-specs (scope too large —
+  issues cluster in separable areas), (c) demote to explore mode (the
+  direction itself is still undecided — the interview cannot answer these),
+  or (d) route the remainder to Resolved by Experiment. Stopping is still
+  the user's call; the diagnosis just replaces momentum with a decision.
 - Once reflection is done, **start the next round yourself** — announce it in
-  one line ("게이트: N라운드 시작") so the user can interrupt. The loop ends
-  only at zero confirmed blocking, or when the user says stop (there is no
-  round cap — divergence is the user's call, G-8 · D-9).
+  one line ("게이트: N라운드 시작") so the user can interrupt; from round 3
+  onward, run the round-diagnostics question above before launching. The loop
+  ends only at zero confirmed blocking, or when the user says stop (there is
+  no hard round cap — divergence is the user's call, G-8 · D-9).
 - If a dashboard exists at `.spec/dashboard.html` in the project (created by
   /spec), update its Progress and Decision-log sections with this round's
   result — the user watches that page for live state.
@@ -215,9 +238,10 @@ never let "gate passed" stand in for "the spec is right."
 ## What keeps the measurement honest
 - The verdict is read off the workflow's tally — zero confirmed blocking is
   the only pass condition, so report exactly what the script returned.
-- Discretionary, solo, and experimental items are information for the
-  implementer; the spec body grows only from the user's answers to confirmed
-  blocking and the user's explicit experiment-routing choices (G-4 · G-13 —
+- Discretionary, solo, experimental, and stale-assumption items are
+  information for the implementer; the spec body grows only from the user's
+  answers to confirmed blocking, the user's explicit experiment-routing
+  choices, and snapshot relocations of confirmed stale facts (G-4 · G-13 —
   "values" are the implementer's job, and a spec inflated to appease every
   informational note stops being an axes contract).
 - Reader isolation (embedded body, no tools) and the code tally are what make

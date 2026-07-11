@@ -1,5 +1,5 @@
 {
   "name": "spec",
-  "description": "아이디어의 확정 정도에 맞는 무게의 계획 문서를 만든다. 탐색 단계(후보 비교·MVP 실험)는 가벼운 BRIEF.md, 방향이 정해진 작업은 인터뷰로 구현 가능한 명세(SPEC.md)를 만들고(/spec:spec), 독립 콜드 리더 N명(1명은 적대 프레이밍)의 병렬 읽기 + 2표 이상 합의 집계로 명세의 결정가능성을 측정하는 관문(/spec:spec-gate). 실험으로 답할 질문은 EXPERIMENTAL로 분리 라우팅. 계약 모드 작성이 끝나면 관문이 자동 발동.",
-  "version": "0.3.0"
+  "description": "아이디어의 확정 정도에 맞는 무게의 계획 문서를 만든다. 탐색 단계(후보 비교·MVP 실험)는 가벼운 BRIEF.md, 방향이 정해진 작업은 인터뷰로 구현 계약(SPEC.md)을 만들고(/spec:spec — 의도는 문서에, 세계 상태는 코드에서 재확인, 방법은 구현자 자율), 독립 콜드 리더 N명(1명은 적대 프레이밍)의 병렬 읽기 + 2표 이상 합의 집계로 결정가능성을 측정하는 관문(/spec:spec-gate). 판정 4종: blocking/discretionary/experimental/stale-assumption. 계약 모드 작성이 끝나면 관문이 자동 발동.",
+  "version": "0.4.0"
 }

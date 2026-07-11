@@ -21,13 +21,24 @@ Attach two independent labels to each issue:
   my discretion — naming, internal structure, format, minor UX) / experimental
   (a fork that neither I nor the author should decide on paper — it is best
   answered by building candidates or observing real behavior; asking the author
-  to pre-decide it would just bake in a guess)
+  to pre-decide it would just bake in a guess) / stale-assumption (not a
+  decision at all — a normative clause that leans on a claim about the current
+  codebase or environment captured at authoring time, which must be re-verified
+  against the live code at implementation rather than trusted)
 
 The experimental label is for questions like "which interaction pattern works
 better" or "will users tolerate this latency" — undecidable from the document
 AND undecidable by authorial fiat. Do not use it to dodge decisions the author
 genuinely owns (scope, security posture, data contracts): those are blocking
 even when uncomfortable.
+
+The stale-assumption label is for requirements phrased on top of world-state
+("extend the existing retry helper", "the auth flow in session.ts") — the
+intent may be sound, but the cited state of the world ages; flag it so the
+fact moves to the non-normative Context Snapshot (re-verified at
+implementation) and the requirement is restated in terms of intent. Facts
+already inside a "Context Snapshot" section are correctly placed — do not
+flag those.
 
 Every issue must be tagged with an **anchor**: the bare clause ID exactly as it
 appears in the document (e.g., FR-001, SC-002, AC1, M1, D-1) or, when no ID
@@ -61,6 +72,11 @@ Each item:
 - **[category] one-line title (anchor: FR-number or section name)**
   - The question: ...
   - How it should be answered: [candidate comparison | user reaction | runtime observation] + one line
+
+### STALE-ASSUMPTION
+- **one-line title (anchor: FR-number or section name)**
+  - The world-state claim: ...
+  - How to re-verify at implementation: ...
 
 ### OUT-OF-SCOPE
 - The item and a one-line explanation (if none, write "none")

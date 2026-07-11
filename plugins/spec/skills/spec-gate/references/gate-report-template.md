@@ -12,9 +12,12 @@
 |---|---|---|---|---|---|
 | R[N]-1 | confirmed blocking | decision | ... (FR-xxx) | 2/3 | open |
 | R[N]-2 | confirmed experimental | decision | ... (FR-yyy) | 2/3 | suggested → [experiment-recorded \| decided now] |
+| R[N]-3 | confirmed stale-assumption | — | ... (FR-zzz) | 2/3 | fact → Context Snapshot, clause restated |
 
-<!-- Experimental rows never affect the verdict (G-13). Record the user's
-     routing choice in the Status column. -->
+<!-- Experimental and stale-assumption rows never affect the verdict (G-13).
+     Record the routing/relocation in the Status column. From round 3 onward,
+     note the structural-diagnosis choice (continue / split / demote to
+     explore / route to experiments) above the round block. -->
 
 ### Details
-[Paste the raw BLOCKING/DISCRETIONARY/EXPERIMENTAL/OUT-OF-SCOPE/VERDICT from the reader outputs]
+[Paste the raw BLOCKING/DISCRETIONARY/EXPERIMENTAL/STALE-ASSUMPTION/OUT-OF-SCOPE/VERDICT from the reader outputs]
