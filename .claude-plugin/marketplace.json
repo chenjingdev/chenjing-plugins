@@ -21,6 +21,14 @@
         "./skills/ultracode",
         "./skills/deep-research"
       ]
+    },
+    {
+      "name": "proto",
+      "description": "해석-발산 병렬 프로토타이핑 — 흐릿한 아이디어를 해석에서 갈라지는 실물 프로토타입 3개로 병렬 구현해 나란히 보여주고(/proto:proto), 사용자는 실물 위에서 객관식 판정만 한다. 코드는 버리고 판정을 ledger에 축적한다.",
+      "source": "./plugins/proto",
+      "skills": [
+        "./skills/proto"
+      ]
     }
   ]
 }
