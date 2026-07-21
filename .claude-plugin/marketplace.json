@@ -1,0 +1,26 @@
+{
+  "name": "chenjing-plugins",
+  "description": "chenjing의 Claude Code 플러그인 모음",
+  "owner": {
+    "name": "chenjing"
+  },
+  "plugins": [
+    {
+      "name": "resume",
+      "description": "전문가 패널 에이전트 기반 이력서 파이프라인",
+      "source": "./plugins/resume",
+      "skills": [
+        "./skills/resume-panel"
+      ]
+    },
+    {
+      "name": "tiers",
+      "description": "티어 고정 오케스트레이션 — fan-out 에이전트가 세션 모델을 상속하지 않게: /tiers:ultracode + /tiers:deep-research",
+      "source": "./plugins/tiers",
+      "skills": [
+        "./skills/ultracode",
+        "./skills/deep-research"
+      ]
+    }
+  ]
+}
