@@ -20,7 +20,7 @@ Arguments: $ARGUMENTS
 
 | Arguments | Action |
 |---|---|
-| exactly `setup` | Read `${CLAUDE_PLUGIN_ROOT}/skills/deep-research/references/setup.md` and follow it — do NOT run the workflow |
+| exactly `setup` | Read `references/setup.md` (relative to this skill's base directory) and follow it — do NOT run the workflow |
 | non-empty | Run IMMEDIATELY, no questions: `Workflow({scriptPath: <engine.js path>, args: {question: <arguments>, ...config}})`. CRITICAL: `args` must be an actual JSON object in the tool call — NEVER a JSON-encoded string (a quoted string turns the whole JSON into the question and silently drops every tier). Arguments present = the user chose the saved defaults. Sole exception: leading `model=` / `effort=` / `judge=` / `brain=` tokens are one-off overrides — apply them over config and strip them from the question. |
 | empty | ① Determine the research question: use it if the conversation clearly implies one; otherwise ask for it in plain text (mention the saved tiers in one short parenthetical so the user can object). ② Invoke the workflow with the question + saved config — same as the non-empty path. |
 

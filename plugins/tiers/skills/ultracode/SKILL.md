@@ -20,7 +20,7 @@ Arguments: $ARGUMENTS
 
 | Arguments | Action |
 |---|---|
-| exactly `setup` | Read `${CLAUDE_PLUGIN_ROOT}/skills/ultracode/references/setup.md` and follow it — do NOT orchestrate |
+| exactly `setup` | Read `references/setup.md` (relative to this skill's base directory) and follow it — do NOT orchestrate |
 | non-empty | Resolve the tier from config, then apply leading override tokens if present: bare `opus\|sonnet\|haiku\|fable` → MODEL · bare `low\|medium\|high\|xhigh\|max` → EFFORT. Strip them; the remainder is the TASK. Orchestrate IMMEDIATELY — no questions. |
 | empty | TASK = the user's most recent request in this conversation; if ambiguous, ask for it in plain text (mention the saved tier in one short parenthetical so the user can object). Then orchestrate with the saved config — same as the non-empty path. |
 
