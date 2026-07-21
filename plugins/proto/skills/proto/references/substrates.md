@@ -17,6 +17,8 @@ Each candidate ships its own control to switch states — a small toolbar or seg
 
 The toggle must actually move between all four; the verification gate reads the source to confirm the markup and handlers exist.
 
+Staged-mode detail rounds (SKILL Step 1.5) are the one exception: only the states the focused aspect actually touches are required — always including `bulk` — and the gate checks exactly that reduced set. The in-frame toggle requirement never relaxes.
+
 ---
 
 ## UI-shaped
@@ -42,6 +44,16 @@ Each candidate = a self-contained HTML rendering an input→output correspondenc
 - Divergence shows up as **a different transform contract**: what counts as a row, what the output columns are, what the diff is *of*, what gets aggregated vs. passed through.
 - `bulk`: the full input→output table over the flood rows. `empty`: input present but output empty (all filtered) or input empty — and how the table communicates it. `error`: the broken input row and its output-side handling (rejected row, error column, partial output). `loading`: the transform mid-run (rows streaming in / progress), toggled.
 - Show the correspondence explicitly (side-by-side or before/after diff), not just a result table.
+
+---
+
+## Probe sizing (staged mode)
+
+A candidate must be judgeable in ~30 seconds (the 30초 판정 standard, SKILL Invariant 8), so size it like a probe, not a product:
+
+- **Skeleton round (round 1):** one screen — the primary structure, the primary action, the four states. No secondary panels, no bonus features; anything not needed to judge the skeleton is scope creep.
+- **Detail round (round ≥ 2):** the inherited base, visually unchanged outside the focused aspect, plus exactly the aspect's variation. A viewer flipping between A/B/C should see the SAME app except at the aspect. The builder starts from the base file and edits one region — it does not regenerate the app.
+- **Pace budget:** a probe judged in 30 seconds does not deserve a 15-minute QA pipeline. The brief caps builder self-verification at one render/syntax pass — no test harnesses, no headless-browser suites. Target wall-clock per staged round is a few minutes; if the honest ETA exceeds ~5 minutes, the round is over-scoped — narrow it.
 
 ---
 
@@ -112,6 +124,12 @@ How it MUST differ from the other two:
   - vs <other 1>: <structural/interaction difference>
   - vs <other 2>: <structural/interaction difference>
 The divergence axis for this round: <axis> — you are the "<this point>" point on it.
+
+[Staged mode, round ≥ 2 only — inheritance base]
+Base artifact (the previous round's survivor): <absolute path>
+Read it FIRST and carry it forward WHOLE — same skeleton, same frozen
+decisions. Change ONLY this round's focused aspect: <aspect>. Any difference
+outside the aspect is a defect the verification gate rejects.
 
 Shared canonical dataset (verbatim — project only the fields your telos needs;
 do NOT invent extra rows, the rows are identical across all three candidates):
