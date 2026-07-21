@@ -52,8 +52,8 @@ Each candidate = a self-contained HTML rendering an input→output correspondenc
 A candidate must be judgeable in ~30 seconds (the 30초 판정 standard, SKILL Invariant 8), so size it like a probe, not a product:
 
 - **Skeleton round (round 1):** one screen — the primary structure, the primary action, the four states. No secondary panels, no bonus features; anything not needed to judge the skeleton is scope creep.
-- **Detail round (round ≥ 2):** the inherited base, visually unchanged outside the focused aspect, plus exactly the aspect's variation. A viewer flipping between A/B/C should see the SAME app except at the aspect. The builder starts from the base file and edits one region — it does not regenerate the app.
-- **Pace budget:** a probe judged in 30 seconds does not deserve a 15-minute QA pipeline. The brief caps builder self-verification at one render/syntax pass — no test harnesses, no headless-browser suites. Target wall-clock per staged round is a few minutes; if the honest ETA exceeds ~5 minutes, the round is over-scoped — narrow it.
+- **Detail round (round ≥ 2):** the inherited base, visually unchanged outside the focused aspect, plus exactly the aspect's variation. A viewer flipping between A/B/C should see the SAME app except at the aspect. The builder edits the pre-copied output file in place — it does not regenerate the app.
+- **Pace budget:** a probe judged in 30 seconds does not deserve a 15-minute QA pipeline. Two rules: ① **copy-then-edit** — the main session pre-copies the base to each candidate's output path (banner stripped) before spawning; the builder modifies that file with targeted Edits only and never re-emits it whole (re-emitting a ~70KB file is ~25k output tokens ≈ most of a 9-minute round; targeted edits are ~10× cheaper). ② self-verification capped at one render/syntax pass — no test harnesses, no headless-browser suites. Target wall-clock per staged round is a few minutes; if the honest ETA exceeds ~5 minutes, the round is over-scoped — narrow it.
 
 ---
 

@@ -91,7 +91,7 @@ The builder brief template lives in `references/substrates.md` — use it.
 
 **In staged mode (round ≥ 2):** the brief additionally names the previous round's surviving artifact as the BASE (exact absolute path). The builder Reads it, carries it forward whole — same skeleton, same frozen decisions — and varies ONLY this round's focused aspect. 계승은 통째로, 변주는 좁게. Any difference outside the aspect is a defect the gate rejects.
 
-**Staged rounds must also be fast.** The brief caps builder self-verification at one render/syntax pass (no test harnesses, no headless-browser suites — the main-session gate does the checking), and a detail-round builder edits the base's focused region rather than regenerating the app. Target a few minutes of wall-clock per round; if the honest ETA exceeds ~5 minutes, the round is over-scoped — narrow it before spawning.
+**Staged rounds must also be fast.** The dominant cost is a builder re-emitting the whole file, so make the fast path structural: before spawning, the main session COPIES the base to each candidate's output path (banner stripped), and the brief states the file already exists — the builder modifies it with targeted Edit operations only, never Write/regenerating the whole file. Cap builder self-verification at one render/syntax pass (no test harnesses, no headless-browser suites — the main-session gate does the checking). Target a few minutes of wall-clock per round; if the honest ETA exceeds ~5 minutes, the round is over-scoped — narrow it before spawning.
 
 **While building, do not show an empty spinner.** Show the user a Korean subtitle naming the three interpretations being built right now, plus an honest ETA in minutes. For example:
 
