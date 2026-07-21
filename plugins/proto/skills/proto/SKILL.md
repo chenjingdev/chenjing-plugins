@@ -19,7 +19,7 @@ This skill produces evidence of intent (a surviving prototype + a verdict ledger
 5. **Ledger carries no prose.** The ledger records verdict bits and direction vectors only. Never create a free-text "requirements" slot in it.
 6. **Survivor banner.** The one surviving prototype is preserved with a Korean banner comment at the top of the file forbidding building on top of it.
 7. **Interpretation-divergence, not style-divergence.** The user *adjudicates*, never generates. In any user-facing string, the word **"브레인스토밍" is banned** — this is interpretation divergence and multiple-choice judgment, not idea generation.
-8. **Thin candidates, many rounds.** A candidate is a probe: it proves ONE structural idea with the minimum surface needed to judge it — never a feature-complete product. If a candidate needs more than one primary structure and one primary action to describe, the round's scope is too wide: narrow the round instead of fattening the candidate. Richness accumulates across rounds, never inside one. The yardstick is the **30초 판정**: within ~30 seconds of the gallery opening, the user must see where the three candidates diverge and be able to give a verdict. A round that cannot be judged in 30 seconds is over-scoped — that is a defect of the round, never of the user.
+8. **Thin candidates, many rounds.** A candidate is a probe: it proves ONE structural idea with the minimum surface needed to judge it — never a feature-complete product. If a candidate needs more than one primary structure and one primary action to describe, the round's scope is too wide: narrow the round instead of fattening the candidate. Richness accumulates across rounds, never inside one. The yardstick is the **30초 판정**: within ~30 seconds of the gallery opening, the user must see where the three candidates diverge and be able to give a verdict. A round that cannot be judged in 30 seconds is over-scoped — that is a defect of the round, never of the user. Fidelity is **Figma-level** throughout: candidates aid visual understanding and judgment, so pre-rendered views and view-switching are enough — implementing live behavior (timers, simulations, computed state) is scope creep.
 
 All other "how" (axis scoring detail, exact mock-data shapes, per-substrate state semantics, the builder brief) is execution-session discretion. See `references/substrates.md`.
 
@@ -33,7 +33,7 @@ Invocation: `/proto:proto <fuzzy one-liner>`. Take the one-liner as the seed. Do
 
 Classify the seed into one substrate. Do not ask the user.
 
-- **UI-shaped** → each candidate = a self-contained interactive HTML app.
+- **UI-shaped** → each candidate = a self-contained visual prototype in HTML — Figma-click-through fidelity: pre-rendered views + hotspot/state switching, not a working app.
 - **CLI-shaped** → each candidate = a self-contained HTML that renders a mock terminal transcript (command → output sequence; static or lightly interactive).
 - **pipeline / data-shaped** → each candidate = a self-contained HTML rendering an input→output correspondence table / diff.
 

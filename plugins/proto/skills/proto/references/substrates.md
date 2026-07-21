@@ -6,7 +6,7 @@ Everything here is the "how" behind SKILL.md. All three substrates converge to *
 
 ## The four-state contract (applies to every substrate)
 
-Each candidate ships its own control to switch states — a small toolbar or segmented control rendered inside the sandboxed iframe. `bulk` is the opening screen; the user should never land on an empty screen.
+Each candidate ships its own control to switch states — a small toolbar or segmented control rendered inside the sandboxed iframe. `bulk` is the opening screen; the user should never land on an empty screen. A state is a pre-rendered view and the toggle is a frame jump (Figma-style); no state needs live behavior behind it.
 
 | state | what it must show |
 |---|---|
@@ -27,7 +27,7 @@ Each candidate = a self-contained interactive HTML app.
 
 - Divergence shows up as **different primary structure and primary action**: what the top-level navigation is, what the main button does, what the unit on screen is. Two UI candidates that share a layout and differ only in palette/copy are a skin collapse (gate fail).
 - `bulk`: the main surface populated from the flood rows. `empty`: the app's real first-run/zero state. `error`: how this app renders the broken row (inline flag, quarantine, silent skip made visible). `loading`: skeleton or progressive population.
-- Interactions must be real within the frame (clicks change state), but no persistence and no network.
+- Fidelity is Figma-level: clicks may simply swap pre-rendered views (hotspot semantics). Live logic — timers, simulated runs, computed state — is scope creep; where behavior matters to the interpretation, depict it (an annotated static view) instead of implementing it. No persistence, no network.
 
 ## CLI-shaped
 
@@ -148,6 +148,10 @@ Requirements (all mandatory):
       * loading — this interpretation's in-flight state
     bulk is the default first screen. The toggle must move between all four.
   - Real shape: long realistic names, believable values. No foo/bar.
+  - Figma-level fidelity: pre-rendered views + the state toggle (and simple
+    view-swapping hotspots). Do NOT implement live logic — no timers, no
+    simulations, no computed state; annotate behavior in words where a static
+    view can't show it.
   - No persistence, no network, no build step.
 
 Write the finished file to exactly:
