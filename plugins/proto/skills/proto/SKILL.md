@@ -1,55 +1,59 @@
 ---
 name: proto
-description: A five-minute interpretation-divergence sprint. Use when the user runs /proto:proto <fuzzy one-liner>, or brings a fuzzy under-specified idea and wants to see genuinely different takes on it side by side and just pick one before any real build starts. Sketch three low-fidelity wireframes that each interpret the idea differently, show them in one gallery, take one multiple-choice verdict, hand off the chosen sketch. Do NOT use for "make me this app/page" requests where the implementation is already specified, and never as a long-running product-discovery campaign.
+description: A five-minute structure-divergence sprint. Use when the user runs /proto:proto <fuzzy one-liner>, or brings a fuzzy under-specified idea and wants to see it take shape before any real build starts. One multiple-choice interview pins the must-have features, then two or three low-fidelity wireframes arrange that same feature set in genuinely different structures, shown side by side for one multiple-choice verdict. Do NOT use for "make me this app/page" requests where the implementation is already specified, and never as a long-running product-discovery campaign.
 argument-hint: "<흐릿한 한 줄 아이디어>"
 ---
 
-# proto — 해석 갈림 스프린트
+# proto — 구조 갈림 스프린트
 
-One fuzzy line comes in. About five minutes later the user is looking at three low-fidelity sketches that read that line three different ways, and answers one multiple-choice question. What survives is the chosen sketch and a few verdict lines — evidence of intent that a real build takes as input and starts fresh from. Nothing else survives, including the code.
+One fuzzy line comes in. One multiple-choice question settles which features the thing must have; about five minutes later the user is looking at two or three low-fidelity sketches that arrange those same features in different structures, and answers one more multiple-choice question. Only the chosen sketch and a few verdict lines are kept — a record of intent that the real build takes as input and starts fresh from. Everything else, including the sketch code, is deleted.
 
-This works because the verdict that matters — "맞긴 한데 이게 아님" — only ever comes out of a person looking at an artifact, never out of more text. So everything serves one goal: get judgeable artifacts in front of the user fast, and make the three differ in *interpretation* — what the idea is for, what unit it handles, who drives — never in styling.
+The split between the interview and the sketches is deliberate. What the tool must do — the feature list — can be settled in words in a few seconds, and guessing it instead produces sketches that differ in functionality. Those cannot be compared: the honest answer to "어느 게 낫나요?" becomes "둘 다 필요한데요", and no single choice is possible. What cannot be settled in words is structure — which feature is on the first screen, how the user moves between features, which action is one click away. That judgment only comes from a person looking at concrete artifacts. So the interview fixes what the tool does, and the sketches differ only in how it is arranged.
 
-Speed is the identity, not an optimization. Every part is sized to keep the gallery minutes away: you draw the sketches yourself (at this size, briefing and awaiting a subagent costs more than drawing), the data is a handful of realistic labels written inline (no dataset files), checking is one reread by eye (no verification pipeline), and there is no round 3 (a seed still unresolved after two rounds needs an interview or a spec pass — say so and stop). If any step's honest ETA breaks the budget, shrink the sketches, never the pace.
+The five-minute budget is a hard constraint, not an optimization target. Every part is sized to stay inside it: the interview is one question, not a questionnaire; you draw the sketches yourself, because at this size briefing a subagent and waiting for it takes longer than drawing; the data is a handful of realistic labels written inline, with no dataset files; checking is one reread by eye, with no verification step; and there is no round 3 — an idea still unresolved after two rounds needs a real spec pass, so say that and stop. If a step's honest ETA breaks the budget, make the sketches smaller instead of taking more time.
 
 ## The run
 
-**Seed.** The argument is the seed. If empty, take the user's most recent request; if there is truly nothing to work from, ask for the one line in plain text — the only question that ever precedes the gallery. From here until the gallery is on screen, ask nothing else: the premise is artifacts before words, and with the gallery minutes away a clarifying question costs more than it could save. After the gallery, questions are normal tools, and anything the user volunteers is recorded on the spot — never deferred on procedural grounds.
+**Input.** The argument is the input line. If empty, take the user's most recent request; if there is truly nothing to work from, ask for the one line in plain text.
 
-**Axis.** Pick the one axis on which interpretations of *this* seed genuinely split: what the tool is for, the user's posture (recording / exploring / automating), the unit being handled, the time frame, who drives — or mint a better axis from the seed itself. The three sketches are three points on that one axis. That is what makes them interpretations rather than skins: each needs a different *sentence* to describe, not a different adjective. (The user adjudicates, never generates — so the word "브레인스토밍" never appears in anything user-facing.)
+**Scope.** Infer three or four candidate features from the input — if it names a real project, read one or two files (README, product notes) so the candidates are accurate; don't read more than that. Then ask one multiSelect `AskUserQuestion`: "이 중 필수로 들어가야 하는 기능은?" — each candidate as an option with a one-line plain description; the user adds missing ones via Other. The selected set is the **scope**: every sketch contains all of it, and unselected features appear in none. This is the whole interview — one question, because the feature list is the one thing sketches cannot establish by themselves, and everything past it is judged better on artifacts. Anything the user volunteers beyond the checkboxes is recorded immediately, never deferred.
+
+**Axis.** With the features fixed, pick the one structural dimension on which arrangements of this scope actually differ: which feature is on the first screen and how the others are reached, the navigation type (mode switch / one split screen / a fixed sequence), which action is the primary one-click action, how much is visible at once (everything on one screen / one thing at a time) — or define a different dimension from the input itself if one fits better. Each sketch is one point on that one dimension: the same feature set, described by a different sentence about its structure. If the dimension honestly yields only two arrangements, draw two — a third added only to reach three makes the choice harder, not clearer. The sketches never differ in functionality (that makes them incomparable) and never only in visual styling (that leaves nothing to judge). (The user chooses between options and is never asked to generate ideas — so the word "브레인스토밍" never appears in anything user-facing.)
 
 **Draw.** Announce what's coming in one line with an honest ETA —
 
-> 세 갈래로 그리는 중 (~2분) — A) …한 줄… B) …한 줄… C) …한 줄…
+> 같은 기능, 세 구조로 그리는 중 (~2분) — A) …한 줄… B) …한 줄… C) …한 줄…
 
-— then write the three files yourself to `.proto/<YYYYMMDD-HHmmss>-<slug>/{A,B,C}.html`. Each sketch is:
+— then write the files yourself to `.proto/<YYYYMMDD-HHmmss>-<slug>/{A,B,C}.html` (or just A, B). Each sketch is:
 
 - one self-contained HTML file — all CSS/JS inline, zero external requests, because it must render inside a sandboxed iframe with no network;
-- wireframe fidelity — gray boxes, labels, hotspots, monochrome, roughly ≤200 lines, no live logic (timers, simulation, computed state). The verdict is about shape and flow; anything richer slows the sprint and pollutes the question;
-- populated with real nouns — a handful of plausible names and values, never `foo`/`bar`, because unnamed boxes are unjudgeable. If the seed names a real project, glance at a file or two for its vocabulary; don't dig. Real personal data stays in local files — never publish it to an external service;
-- honest — everything drawn is wired. An inert tab or an unopenable menu is a fake surface that skews the verdict toward things that don't exist; out-of-scope UI is omitted entirely.
+- wireframe fidelity — gray boxes, labels, clickable spots, monochrome, roughly ≤200 lines, no live logic (timers, simulation, computed state). The verdict is about layout and flow; anything richer takes longer and distracts from that question;
+- populated with real nouns — a handful of plausible names and values, never `foo`/`bar`, because unnamed boxes cannot be judged. Reuse the project vocabulary you read during the scope step. Real personal data stays in local files — never publish it to an external service;
+- complete — every must-have from the scope appears, wired, in every sketch. A sketch missing one cannot be compared with the others; fix it before presenting;
+- honest — everything drawn responds to interaction. An inert tab or an unopenable menu makes the user judge something that doesn't exist; out-of-scope UI is omitted entirely.
 
-**Glance.** Reread the three files once and ask two questions: do they actually split in structure and primary action, or did two collapse into skins of each other? Is anything drawn but not wired? Fix the weak file directly by editing it — you drew it, the fix takes seconds.
+**Glance.** Reread the files once and ask three questions: does every sketch contain the full scope? do they actually differ in structure and primary action, or are two of them the same layout with different styling? is anything drawn but not wired? Fix the weak file directly by editing it — you drew it, the fix takes seconds.
 
-**Gallery.** Assemble `gallery.html` (recipe below): three isolated frames, each labeled `A/B/C · 한 줄 해석`, with a header that states in one plain Korean sentence exactly where the three diverge. Present it with `SendUserFile(display: render)` and open the three sketch files as browser tabs in the same step (`open A.html B.html C.html`; Linux `xdg-open`; no GUI browser → send the files individually). The standard is a 30-second verdict: the user should see the split and be able to choose within half a minute of the gallery opening. If they can't, the sketches were over-scoped — that defect is yours, not theirs.
+**Gallery.** Assemble `gallery.html` (recipe below): isolated frames, each labeled `A/B/C · 구조 한 줄`, with a header that states in one plain Korean sentence that the sketches share the same features and how their structures differ. Present it with `SendUserFile(display: render)` and open the sketch files as browser tabs in the same step (`open A.html B.html C.html`; Linux `xdg-open`; no GUI browser → send the files individually). The standard is a 30-second verdict: the user should see the difference and be able to choose within half a minute of the gallery opening. If they can't, the sketches contained too much — that is a drawing defect, not the user's fault.
 
-**Verdict.** With the artifacts on screen, ask one question via `AskUserQuestion`: "어느 해석이 의도에 가장 가깝나요?" → `A / B / C / 전부 아님`. Each option's description is an identity anchor in plain words — "상단 탭=타임라인, 주 버튼=+1 기록" — never a pitch. A pick (or a hybrid via free text, like "UI는 A인데 단위는 C" — take the named base as survivor and keep the quote) goes straight to hand-off. `전부 아님` gets one follow-up — "가장 어긋난 지점은?" → `다루는 대상 / 핵심 동작 / 목적 자체 / 빠진 기능` — and that answer steers round 2.
+**Verdict.** With the artifacts on screen, ask one question via `AskUserQuestion`: "어느 구조가 의도에 가장 가깝나요?" → `A / B (/ C) / 전부 아님`. Each option's description is a factual one-line summary of that sketch's structure — "첫 화면=런 기록 테이블, 주 버튼=판정 저장" — never persuasion. A pick (or a mixed answer via free text, like "골격은 A인데 주 동작은 C" — take the named base as survivor and keep the quote) goes straight to hand-off. `전부 아님` gets one follow-up — "가장 어긋난 지점은?" → `첫 화면 기능 / 이동 방식 / 주 동작 / 스코프 자체` — and that answer determines round 2. `스코프 자체` means the interview was wrong: re-ask the scope question once, corrected by what you just learned, and build round 2 on the new scope.
 
-**Round 2 — only if the verdict asks for it.** Same run directory, overwrite A/B/C. The new round narrows: take the thing the mismatch answer pointed at and split *that*, at the same or lower fidelity. Rejection is never answered with a bigger or denser concept — that road leads away from the user, not toward them. Round 2's verdict ends the sprint whatever it is. A second `전부 아님` means the seed doesn't resolve in a five-minute split: write both rounds into `verdict.md`, say so plainly, and recommend an interview or spec pass. There is no round 3.
+**Round 2 — only if the verdict asks for it.** Same run directory, overwrite the files. The new round narrows: take the thing the mismatch answer pointed at and offer different versions of that, at the same or lower fidelity. Never respond to a rejection with a bigger or denser concept — the user rejected what was already shown, and adding more moves further from what they asked for. Round 2's verdict ends the sprint whatever it is. A second `전부 아님` means the idea doesn't resolve in a five-minute comparison: write both rounds into `verdict.md`, say so plainly, and recommend a real spec pass. There is no round 3.
 
 **Hand-off.** Write `.proto/<run>/verdict.md` — a few lines with the user's words kept verbatim, no derived-requirements essay:
 
 ```
-# proto — <seed>
+# proto — <입력 한 줄>
+- scope: <필수 기능 목록, 쉼표로>
 - axis: <갈림축>
-- A: <한 줄> / B: <한 줄> / C: <한 줄>
+- A: <구조 한 줄> / B: <구조 한 줄> / C: <구조 한 줄>
 - verdict: <A|B|C|전부 아님> — "<사용자 판정 원문>"
 - direction: <본 빌드를 위한 방향 한 줄>
 ```
 
 (Round 2 appends a second block.) Save the chosen sketch as `survivor.html` with this banner comment at the top, then delete the losing sketches and the gallery:
 
-> 이 파일은 의도의 증거입니다. 본 빌드는 이 코드 위에 짓지 말고 처음부터 새로 지으세요 — verdict.md의 판정과 이 실물을 입력으로만 쓰세요.
+> 이 파일은 판정 기록의 근거입니다. 본 빌드는 이 코드 위에 짓지 말고 처음부터 새로 지으세요 — verdict.md의 판정과 이 파일을 입력으로만 쓰세요.
 
 The final message is two paths — `verdict.md`, `survivor.html` — and one sentence: the real build starts fresh from these two files; the sketch code is never extended.
 
@@ -58,19 +62,19 @@ The final message is two paths — `verdict.md`, `survivor.html` — and one sen
 `gallery.html` must itself be self-contained (it renders in an isolated viewer that cannot fetch sibling files), so inline each sketch as a JS string and assign it to `iframe.srcdoc` at runtime — never paste raw HTML into a `srcdoc="…"` attribute, where escaping is fragile:
 
 ```html
-<figure><figcaption>A · 한 줄 해석</figcaption>
-  <iframe id="frame-A" sandbox="allow-scripts" title="해석 A"></iframe></figure>
+<figure><figcaption>A · 구조 한 줄</figcaption>
+  <iframe id="frame-A" sandbox="allow-scripts" title="구조 A"></iframe></figure>
 <!-- …B, C… -->
 <script>
   // each value = JSON.stringify(sketchHtml).replace(/</g, '\\u003c')
   const SKETCHES = { A: "…", B: "…", C: "…" };
-  for (const k of ["A","B","C"])
+  for (const k of Object.keys(SKETCHES))
     document.getElementById("frame-" + k).srcdoc = SKETCHES[k];
 </script>
 ```
 
-`sandbox="allow-scripts"` without `allow-same-origin` gives each sketch an opaque origin: its hotspots work, and nothing — CSS, JS, globals — leaks between frames or into the gallery.
+`sandbox="allow-scripts"` without `allow-same-origin` gives each sketch an opaque origin: its clickable spots work, and nothing — CSS, JS, globals — leaks between frames or into the gallery.
 
-## Substrate note
+## Input shapes
 
-The seed's shape changes what a "sketch" is, nothing else: UI-shaped seeds → screen wireframes; CLI-shaped → mock terminal transcripts (command → output); pipeline/data-shaped → input→output correspondence tables. All three are still single self-contained HTML files, so the gallery and the verdict work identically.
+The input's shape changes what a "sketch" is, nothing else: UI ideas → screen wireframes; CLI ideas → mock terminal transcripts (command → output); pipeline/data ideas → input→output correspondence tables. All are still single self-contained HTML files, so the gallery and the verdict work identically.
