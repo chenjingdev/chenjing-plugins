@@ -91,7 +91,7 @@ const serverEnv = (s) => ({ HOME: REAL_HOME, ...(s.env ?? {}) });
 function listTools(server, timeoutMs = 40000) {
   return new Promise((resolve, reject) => {
     const child = spawn(server.command, server.args ?? [], { env: { ...process.env, ...serverEnv(server) }, stdio: ["pipe", "pipe", "ignore"] });
-    let buf = "", done = false;
+    let buf = "", done = false, instructions = "";
     const finish = (err, val) => { if (done) return; done = true; clearTimeout(timer); child.kill(); err ? reject(err) : resolve(val); };
     const timer = setTimeout(() => finish(new Error("tools/list 응답 시간 초과")), timeoutMs);
     const send = (m) => child.stdin.write(JSON.stringify(m) + "\n");
@@ -104,12 +104,24 @@ function listTools(server, timeoutMs = 40000) {
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
         if (!line) continue;
         let msg; try { msg = JSON.parse(line); } catch { continue; }
-        if (msg.id === 1) { send({ jsonrpc: "2.0", method: "notifications/initialized" }); send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }); }
-        if (msg.id === 2) finish(null, (msg.result?.tools ?? []).map((t) => t.name));
+        if (msg.id === 1) { instructions = msg.result?.instructions ?? ""; send({ jsonrpc: "2.0", method: "notifications/initialized" }); send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }); }
+        if (msg.id === 2) finish(null, { instructions, tools: msg.result?.tools ?? [] });
       }
     });
     send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "bench", version: "0.1" } } });
   });
+}
+
+// 서버가 스킬을 언급하면 모델이 셸로 실제 홈(~/.claude/skills 등)을 뒤져 스킬을 읽어 버린다 — 프로필 격리는 설정만 가르고 파일시스템은 공유라 막을 수 없다.
+// 그래서 원인(서버 문구)을 등록 단계에서 잡아 경고한다. aria 2026-08-27 사례.
+function skillMentions(a, meta) {
+  const names = (a.skills ?? []).map((s) => path.basename(s)).filter(Boolean);
+  const pat = new RegExp([...names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "스킬", "\\bskills?\\b"].join("|"), "i");
+  const hits = [];
+  const check = (where, text) => { const m = String(text ?? "").match(pat); if (m) hits.push(`${where}: "…${String(text).slice(Math.max(0, m.index - 30), m.index + 40).replace(/\s+/g, " ")}…"`); };
+  check("instructions", meta.instructions);
+  for (const t of meta.tools) check(`tool ${t.name}`, t.description);
+  return hits;
 }
 
 // ---------- init ----------
@@ -155,8 +167,14 @@ async function init(app, opts) {
   for (const [n, s] of Object.entries(a.mcp)) {
     if (a.tools[n]?.length && !opts.refreshTools) continue;
     process.stderr.write(`[bench] ${n} 도구 목록 조회 중…`);
-    a.tools[n] = await listTools(s);
+    const meta = await listTools(s);
+    a.tools[n] = meta.tools.map((t) => t.name);
     process.stderr.write(` ${a.tools[n].length}개\n`);
+    const hits = skillMentions(a, meta);
+    if (hits.length) {
+      console.error(`[bench] 경고: MCP 서버 ${n} 의 안내문/도구 설명이 스킬을 언급합니다. raw 실행에서 모델이 셸로 실제 홈의 스킬을 찾아 읽을 수 있습니다(격리 무효). 서버 쪽 문구를 지우세요:`);
+      for (const h of hits) console.error(`  - ${h}`);
+    }
   }
   writeJson(appFile(app), a);   // 도구 목록 캐시
   const wasOn = skillInstalled(app, a);

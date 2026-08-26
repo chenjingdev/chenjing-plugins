@@ -6,7 +6,7 @@
 ## 명령
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" init <app> [--refresh-tools]   # 프로필 생성·갱신(멱등). 서버를 띄워 tools/list 캐시
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" init <app> [--refresh-tools]   # 프로필 생성·갱신(멱등). 서버를 띄워 tools/list 캐시. 안내문·도구 설명이 스킬을 언급하면 경고(pitfalls "파일시스템은 공유")
 node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" run <app> <claude|codex|agy> [--effort E] [--model M] [--dry-run] [-- 프롬프트…]
 node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" skill <app> on|off       # 앱 스킬을 세 하네스 프로필에 설치/제거. 기본 미설치(raw)
 node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" status [app]             # 스킬 설치 상태도 여기 보인다
