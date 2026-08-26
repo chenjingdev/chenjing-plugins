@@ -31,7 +31,7 @@
 
 - **로그인이 프로필별이다**: 키체인 항목이 `Claude Code-credentials-<CLAUDE_CONFIG_DIR 해시>` 라 새 `CLAUDE_CONFIG_DIR` 은 "Not logged in". 러너는 `_claude/` 를 앱 공유 프로필로 두어 **전체에서 1회** `/login` 만 필요(`bench run <app> claude` 로 열어 `/login`). 대안 `--bare` 는 훅·플러그인·CLAUDE.md 를 생략하지만 API 키가 필수라 구독 사용자에겐 부적합.
 - **MCP 격리**: `--strict-mcp-config --mcp-config <파일>` 이 다른 모든 MCP 설정을 무시한다(러너 처리). 사용자 범위 MCP 는 `~/.claude.json` 의 `mcpServers` 에 있다(settings.json 아님) — find-mcp 가 이걸 읽는다.
-- **스킬 ON/OFF**: 프로필이 아니라 **작업 디렉터리의 `.claude/skills/`** 로 나눈다(프로젝트 스킬 인식은 probe 스킬로 검증됨). 그래야 로그인 하나로 두 상태를 쓸 수 있다.
+- **스킬 설치 위치**: Claude 는 프로필이 아니라 **작업 디렉터리의 `.claude/skills/`**(프로젝트 스킬, probe 로 검증됨), Codex 는 `$CODEX_HOME/skills/`, agy 는 `.gemini/config/skills/`. `bench skill <app> on|off` 가 세 곳을 함께 바꾼다. 0.1.x 의 `--skill` 실행 옵션(raw/skill 프로필 이중화)은 "매 실행마다 환경이 바뀌는 숨은 스위치" 라는 이유로 설치 상태로 대체됐다.
 - **`--disable-slash-commands` 를 raw 에 붙이지 않는다**: 스킬만 아니라 `/mcp`·`/model` 같은 내장 명령까지 사라져 대화형에서 쓸 수 없다. 확인 결과 새 `CLAUDE_CONFIG_DIR` 프로필에는 `~/.agents/skills` 가 새어 들어오지 않아 플래그 없이도 사용자 스킬은 보이지 않는다(내장 스킬만 남음).
 - **HOME 오버라이드는 Claude 에 쓸 수 없다**: 키체인 항목 조회가 HOME 에 묶여 있어 `HOME` 을 바꾸면 "Not logged in" 이 된다. Claude 격리는 `CLAUDE_CONFIG_DIR` + `--strict-mcp-config` 로만.
 - `-p` 모드는 stdin 을 3초 기다린 뒤 진행한다(러너는 stdin 을 닫아 대기 없음).
@@ -51,7 +51,7 @@
 - **빈 데이터 디렉터리로는 MCP 가 뜨지 않는다**: `RuntimeError: MCP requires exactly one classified Project; found none`. `bench init` 에서는 "MCP 서버가 응답 전에 종료됐습니다" 로만 보이니 서버를 손으로 띄워 stderr 를 봐야 한다. 세팅용 CLI 명령이 없고 `POST /v1/setup/memory-scope` 또는 `Neuromem(Settings.from_env(dir)).setup_memory_scope(...)` 만 있다. 스키마가 `default` 네임스페이스 워크스페이스를 미리 만들어 두므로 `namespace="default"` 는 `memory scope target already exists` 로 실패한다 — 다른 네임스페이스(`bench`)를 쓴다. 한 번 만들면 재사용된다.
 - **개인 메모리 스토어를 벤치 대상으로 쓰지 않았다**: Codex 정의의 `--data-dir ~/.neuromem-personal-month-20260814`(730MB, 매일 쓰는 개인 기억)를 그대로 쓰면 벤치 ingest 가 사용자 기억을 오염시키고 사용자의 실제 Codex 세션과 SQLite 잠금을 다툰다 — Honcho 훅을 떼는 것과 같은 이유로 분리. 개인 데이터로 recall 을 재고 싶으면 앱 JSON 의 `--data-dir` 만 바꾸고 `bench init neuromem` 을 다시 돌린다.
 - 외부 의존: Ollama `127.0.0.1:11434`(임베딩 `qwen3-embedding-honcho-8192:latest`; `NEUROMEM_LLM_BASE_URL` 미지정 시 기본값이 11434)과 `NEUROMEM_LLM_PROVIDER=codex` 가 부르는 `codex` 바이너리. neuromem 이 내부적으로 띄우는 codex 는 실제 HOME 을 보므로 사용자 `~/.codex/config.toml` 을 읽는다(앱 내부 동작이라 벤치 격리 대상이 아님). `NEUROMEM_WORKER_MODE=off` 이므로 백그라운드 워커는 돌지 않는다.
-- 앱 소유 스킬이 없다(`~/.agents|.claude|.codex|.gemini` 스킬 디렉터리·리포 모두). `skills: []` — `--skill` 은 raw 와 같다.
+- 앱 소유 스킬이 없다(`~/.agents|.claude|.codex|.gemini` 스킬 디렉터리·리포 모두). `skills: []` — 스킬 트랙이 없다.
 
 ## 아직 안 되는 것
 

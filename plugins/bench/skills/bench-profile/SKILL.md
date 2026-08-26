@@ -9,11 +9,12 @@ description: Register an app (its MCP servers and the skills that belong to it) 
 
 `${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs`는 사용자 설정(다른 MCP·사용자 스킬·플러그인·훅·CLAUDE.md/AGENTS.md)이 하나도 없는
 **깨끗한 프로필**에서 Claude Code / Codex / agy를 실행하는 러너다. 프로필에는 벤치 대상 앱의 MCP 서버만 들어가고,
-그 앱의 스킬은 `--skill`일 때만 보인다. 훅이 없으니 벤치 런은 Honcho 같은 기억 시스템에 기록되지 않는다 — 벤치 잡음이
+그 앱의 스킬은 `bench skill <app> on`으로 설치했을 때만 보인다. 훅이 없으니 벤치 런은 Honcho 같은 기억 시스템에 기록되지 않는다 — 벤치 잡음이
 사용자 기억을 오염시키지 않게 하려는 의도다.
 
 사용자는 실행만 외운다: `ariabench codex --effort low -- "…"`. `<app>bench` 함수는 `~/.zshrc`가 `~/.bench/apps/*.json`을 읽어
-자동으로 만든다. **등록**은 판단이 들어가는 일(어느 MCP가 이 앱 것인가, 어떤 스킬을 붙이나, 서버가 HOME·cwd·외부 서비스에 기대나)이라
+자동으로 만든다. 앱의 스킬은 실행 옵션이 아니라 **프로필의 설치 상태**다 — `init` 직후는 미설치(raw)이고 사용자가 원할 때
+`<app>bench skill on`으로 설치한다. 매 실행마다 환경이 달라지는 숨은 스위치를 두지 않기 위한 결정이니, 등록할 때 네가 대신 켜지 않는다. **등록**은 판단이 들어가는 일(어느 MCP가 이 앱 것인가, 어떤 스킬을 붙이나, 서버가 HOME·cwd·외부 서비스에 기대나)이라
 사람이 옵션을 외우는 CLI 대신 이 스킬이 맡는다. 러너에는 `add` 명령이 없다 — 앱 JSON은 네가 직접 쓴다.
 
 러너 명령·앱 JSON 스키마·프로필 배치·"순정"의 정의는 `references/runner.md`에 있다. **등록 전에 읽어라** — 사용자에게 보이는
@@ -58,7 +59,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/find-mcp.mjs" <이름 일부>     # 인자 �
 
 관련 없는 스킬은 넣지 않는다. raw 트랙은 "스킬 없이 모델이 스스로 해내는가", skill 트랙은 "이 앱의 스킬이 얼마나 도움이 되나"를
 재는데, 다른 스킬이 섞이면 둘 다 흐려진다. 앱 리포의 `.claude/skills/*`가 개발용(디버깅·마이그레이션)이면 그것도 아니다.
-없으면 `skills: []`로 두고 `--skill`이 raw와 같다고 알려 준다.
+없으면 `skills: []`로 두고 스킬 트랙이 없다고 알려 준다.
 
 ### 3. 서버의 습성 확인
 
@@ -101,13 +102,16 @@ Codex는 MCP 도구를 **도구별로** 승인해야 하고 승인이 없으면 
 
 ```bash
 bench run <app> codex --effort low -- "1) Call the <서버> MCP tool <읽기도구> and report the result in one line. 2) List every MCP server and every skill available to you. Be brief."
-bench run <app> agy --skill --effort low -- "1) Is a skill named <스킬> available? YES/NO. 2) List every MCP server available to you. 3) Call <서버>/<읽기도구> and report one line."
+# 스킬이 있는 앱이면 설치 상태도 한 번 확인한 뒤 원래(미설치)로 되돌린다
+bench skill <app> on
+bench run <app> agy --effort low -- "1) Is a skill named <스킬> available? YES/NO. 2) List every MCP server available to you. 3) Call <서버>/<읽기도구> and report one line."
+bench skill <app> off
 ```
 
 기대값:
 - MCP 서버는 **이 앱의 것만**. 다른 이름이 보이면 오염 — pitfalls에서 그 하네스 항목을 본다.
 - raw에서 스킬은 CLI 내장만(Claude: dataviz·code-review·loop 등, Codex: imagegen·openai-docs·skill-creator 등, agy: antigravity-guide 등). 사용자 스킬 이름(html·design-artifact·aria-compose 등)이 보이면 오염.
-- `--skill`에서는 이 앱의 스킬이 보여야 한다.
+- `skill on` 상태에서는 이 앱의 스킬이 보여야 하고, `off`로 되돌린 뒤엔 다시 사라져야 한다.
 - 도구 호출이 실제 값을 돌려줘야 한다. "cancelled"·"unavailable"이면 Codex 승인 테이블 또는 서버 실행 문제.
 
 Claude Code는 공유 벤치 프로필 `~/.bench/_claude/`에 첫 1회 `/login`이 필요하다. `bench status`가 미로그인이라 하면 사용자에게
@@ -118,7 +122,7 @@ Claude Code는 공유 벤치 프로필 `~/.bench/_claude/`에 첫 1회 `/login`�
 사용자에게 알릴 것만 짧게:
 - 등록된 서버와 스킬, 어느 프로필 정의를 기준으로 했는지(다른 프로필과 달랐던 점, 죽은 정의였다면 그 사실)
 - 벤치 전용으로 새로 만든 것(데이터 디렉터리·부트스트랩 상태)과 그 이유
-- 실행 명령: `<app>bench claude|codex|agy [--skill] [--effort E] [-- "…"]` — 새 함수는 `source ~/.zshrc` 뒤에 생긴다
+- 실행 명령: `<app>bench claude|codex|agy [--effort E] [-- "…"]`, 스킬을 쓰려면 `<app>bench skill on` — 새 함수는 `source ~/.zshrc` 뒤에 생긴다
 - 스모크 결과(무엇이 보였고 무엇이 안 보였는지, 도구가 실제 값을 냈는지)
 - 남은 일: Claude `/login` 여부, 서버가 기대는 외부 서비스, 미지원 사항, 평문으로 복제된 비밀값
 

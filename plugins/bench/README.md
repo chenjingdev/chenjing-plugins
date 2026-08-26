@@ -5,8 +5,9 @@
 ```zsh
 ariabench claude                        # 대화형 (첫 1회 /login)
 ariabench codex --effort low -- "…"     # 비대화형 1회
-ariabench agy --skill                   # 앱 스킬 ON
-bench status                            # 앱·프로필·CLI 버전
+ariabench agy                           # agy
+ariabench skill on                      # 앱 스킬(aria-compose)을 벤치 프로필에 설치 — 기본은 미설치(raw). off 로 제거
+bench status                            # 앱·프로필·스킬 설치 상태·CLI 버전
 ```
 
 새 앱 등록은 Claude Code에 **"neuromem 벤치 만들어줘"** 라고 말하면 된다 — `bench-profile` 스킬이 실제 프로필의 MCP 정의를 찾아 `~/.bench/apps/<app>.json`을 쓰고 프로필을 만들고 격리를 검증한다. 새 `<app>bench` 함수는 `source ~/.zshrc` 뒤에 생긴다.

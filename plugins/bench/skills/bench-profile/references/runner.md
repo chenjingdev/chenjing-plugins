@@ -7,12 +7,16 @@
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" init <app> [--refresh-tools]   # 프로필 생성·갱신(멱등). 서버를 띄워 tools/list 캐시
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" run <app> <claude|codex|agy> [--skill] [--effort E] [--model M] [--dry-run] [-- 프롬프트…]
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" status [app]
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" run <app> <claude|codex|agy> [--effort E] [--model M] [--dry-run] [-- 프롬프트…]
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" skill <app> on|off       # 앱 스킬을 세 하네스 프로필에 설치/제거. 기본 미설치(raw)
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" status [app]             # 스킬 설치 상태도 여기 보인다
 node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" apps
 ```
 
-사용자 셸에는 `bench`(같은 인자)와 앱별 `<app>bench <harness> …`(= `bench run <app> <harness> …`)가 있다.
+사용자 셸에는 `bench`(같은 인자)와 앱별 `<app>bench <harness> …`(= `bench run <app> <harness> …`)가 있다. `<app>bench skill on|off`도 된다.
+
+**스킬은 실행 옵션이 아니라 프로필의 설치 상태다.** 매 실행에 숨은 환경 차이를 만들지 않고, 켜고 끄는 행위가 명시적으로 남게 하려는 설계다.
+`init` 직후는 미설치(= raw 트랙). 사용자가 원할 때 `skill on`으로 설치하면 이후 모든 실행이 스킬을 본다. 상태는 링크 존재로 정의되며 `status`에 표시된다.
 `<app>bench` 함수는 `~/.zshrc`가 `~/.bench/apps/*.json`을 읽어 **새 셸이 뜰 때** 생성한다 — 등록 직후엔 `source ~/.zshrc`가 필요하다고 알린다.
 
 effort 값은 하네스마다 다르다: claude `low|medium|high|xhigh|max`, codex `low|medium|high|xhigh`, agy `low|medium|high`.
@@ -26,7 +30,7 @@ effort 값은 하네스마다 다르다: claude `low|medium|high|xhigh|max`, cod
   "mcp": {
     "aria": { "command": "/opt/homebrew/bin/node", "args": ["/Users/chenjing/dev/aria/src/mcp-bridge.js"], "env": {} }
   },
-  "skills": ["~/dev/aria/skills/aria-compose"],           // 이 앱이 소유한 스킬 디렉터리(SKILL.md 포함)만. 없으면 []
+  "skills": ["~/dev/aria/skills/aria-compose"],           // 이 앱이 소유한 스킬 디렉터리(SKILL.md 포함)만. 없으면 []. 설치는 `skill on`으로 별도
   "tools": { "aria": ["new_song", "…"] }                  // init 이 tools/list 로 채움 — 손으로 쓰지 않음
 }
 ```
@@ -44,9 +48,9 @@ effort 값은 하네스마다 다르다: claude `low|medium|high|xhigh|max`, cod
 apps/<app>.json          앱 정의
 _claude/                 CLAUDE_CONFIG_DIR — 앱 공유. 키체인 로그인이 프로필별이라 전체에서 1회만 /login
 <app>/claude-mcp.json    Claude 에 --strict-mcp-config --mcp-config 로 주는 앱별 MCP
-<app>/codex-raw|skill/   CODEX_HOME 이자 HOME (HOME 도 바꿔야 ~/.agents/skills 가 안 보인다). auth.json 은 실제 것의 심볼릭링크
-<app>/agy-raw|skill/     HOME (.gemini 에 인증 파일 4개만 링크, settings.json 은 mcpServers·hooks 뺀 사본)
-<app>/work/raw|skill/    빈 작업 디렉터리 / Claude 스킬용 .claude/skills 링크
+<app>/codex/             CODEX_HOME 이자 HOME (HOME 도 바꿔야 ~/.agents/skills 가 안 보인다). auth.json 은 실제 것의 심볼릭링크. 스킬 설치 시 skills/<스킬> 링크
+<app>/agy/               HOME (.gemini 에 인증 파일 4개만 링크, settings.json 은 mcpServers·hooks 뺀 사본). 스킬 설치 시 .gemini/config/skills/<스킬> 링크
+<app>/work/              빈 작업 디렉터리. Claude 스킬 설치 시 .claude/skills/<스킬> 링크(프로젝트 스킬로 인식)
 ```
 
 하네스별 격리 수단: Claude `CLAUDE_CONFIG_DIR` + `--strict-mcp-config`(사용자 스킬은 이 프로필에 없어 보이지 않음); Codex `CODEX_HOME`+`HOME` + `features.apps=false` + 도구별 approve; agy `HOME`(설정 위치 환경변수가 없어 이것뿐).
