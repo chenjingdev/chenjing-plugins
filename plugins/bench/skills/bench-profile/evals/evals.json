@@ -1,0 +1,48 @@
+{
+  "skill_name": "bench-profile",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "neuromem 벤치 만들어줘. ~/dev/bench 에 있는 그 벤치 러너에 등록하는 거 말하는 거야. 테스트 중이니까 환경변수 BENCH_HOME={HOME_DIR} BENCH_APPS_DIR={APPS_DIR} 로 작업해. 실제 ~/.zshrc 와 실제 CLI 설정 파일(~/.claude.json, ~/.codex/config.toml, ~/.gemini 아래)은 절대 수정하지 마. 등록 과정에서 내 판단이 필요한 게 있으면 물어보지 말고 네가 합리적으로 정한 뒤 이유를 보고서에 적어.",
+      "expected_output": "apps/neuromem.json 작성(실제 프로필에서 stdio 정의를 가져옴), Claude의 neuromem 과 Codex의 neuromem_personal 정의가 다름(데이터 디렉터리·실행 방식)을 보고에 명시하고 선택 근거 제시, bench init 성공(tools 캐시), 스모크로 MCP 서버가 neuromem 만 보임을 확인, Claude 미로그인 안내, 실제 설정 파일 무변경",
+      "files": [],
+      "assertions": [
+        "앱 JSON(apps/*.json)이 유효하고 stdio 서버(command+args)만 있으며 url 키가 없다",
+        "선택한 정의가 실제 프로필의 neuromem 정의 중 하나다(command 가 neuromem 바이너리 또는 uv)이고 그 정의의 env 가 옮겨졸다",
+        "bench init 이 성공했다: JSON 에 tools 가 캐시되고 BENCH_HOME/<app>/codex-raw/config.toml 에 approval_mode 항목이 있다",
+        "report.md 가 Claude 의 neuromem 과 Codex 의 neuromem_personal 정의가 다르다는 점(데이터 디렉터리·실행 방식)을 언급하고 어느 것을 왜 골랐는지 말한다",
+        "스모크 런을 최소 한 하네스에서 실행했고(commands.txt 에 bench run) report 가 보인 MCP 서버·스킬 목록을 말한다",
+        "report.md 가 Claude 공유 벤치 프로필의 1회 /login 필요를 안내한다(또는 로그인 확인)",
+        "실제 설정 파일(~/.zshrc, ~/.claude.json, ~/.codex/config.toml, ~/.gemini/config/mcp_config.json, ~/.gemini/settings.json, ~/dev/bench/apps/aria.json)의 mtime 이 변하지 않았다",
+        "neuromem 소유가 아닌 스킬을 붙이지 않았다(skills 가 비었거나 neuromem 관련 스킬 디렉터리만)"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "korean-law 도 벤치에 등록해줘 (~/dev/bench 러너). 테스트 중이니까 환경변수 BENCH_HOME={HOME_DIR} BENCH_APPS_DIR={APPS_DIR} 로 작업해. 실제 ~/.zshrc 와 실제 CLI 설정 파일(~/.claude.json, ~/.codex/config.toml, ~/.gemini 아래)은 절대 수정하지 마. 등록 과정에서 내 판단이 필요한 게 있으면 물어보지 말고 네가 합리적으로 정한 뒤 이유를 보고서에 적어.",
+      "expected_output": "Codex 프로필에만 있는 korean-law 정의(command korean-law-mcp, env LAW_OC)를 가져와 앱 JSON 작성, LAW_OC 같은 비밀값이 프로필 파일에 평문으로 들어간다는 점을 사용자에게 알림, init·스모크 성공 또는 실패 원인 규명, 실제 설정 무변경",
+      "files": [],
+      "assertions": [
+        "앱 JSON 이 존재하고 command 가 korean-law-mcp(또는 그 절대경로)이며 env 에 LAW_OC 가 비어 있지 않게 들어 있다",
+        "bench init 이 성공했다(tools 캐시, codex-raw/config.toml 생성)",
+        "report.md 가 LAW_OC 같은 비밀값이 프로필 파일에 평문으로 쓰인다는 점을 사용자에게 알린다",
+        "스모크 런을 실행했고 report 가 보인 MCP 서버가 korean-law 만이라고 말한다(또는 실패 원인을 규명)",
+        "실제 설정 파일 mtime 이 변하지 않았다",
+        "report.md 가 실행 명령(<app>bench …)과 새 셸/source ~/.zshrc 뒤에 함수가 생긴다는 점을 알린다"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "honcho 벤치 프로필도 만들어줘. ~/dev/bench 벤치 러너 말하는 거야. 테스트 중이니까 환경변수 BENCH_HOME={HOME_DIR} BENCH_APPS_DIR={APPS_DIR} 로 작업해. 실제 ~/.zshrc 와 실제 CLI 설정 파일(~/.claude.json, ~/.codex/config.toml, ~/.gemini 아래)은 절대 수정하지 마. 등록 과정에서 내 판단이 필요한 게 있으면 물어보지 말고 네가 합리적으로 정한 뒤 이유를 보고서에 적어.",
+      "expected_output": "Claude/Codex 의 honcho_external 은 HTTP(url) 서버라 러너 미지원임을 인지하고, agy 프로필의 stdio 파이썬 브리지(cwd 있음)를 sh -c 로 감싸 등록하거나 미지원을 분명히 알리고 멈춤. url 형 서버를 지원되는 것처럼 등록하지 않음. 실제 설정 무변경",
+      "files": [],
+      "assertions": [
+        "outputs/apps 의 어떤 JSON 도 url 형 서버를 등록하지 않았다(mcp 항목에 url 키 없음)",
+        "report.md 가 Claude/Codex 의 honcho_external 이 HTTP 서버라 러너가 지원하지 않는다는 점을 명시한다",
+        "agy 프로필의 stdio 파이썬 브리지를 cwd 를 감싸(sh -c 'cd … && exec …') 등록해 init 이 성공했거나, 아니면 미지원을 분명히 알리고 등록하지 않았다 — 둘 중 하나이며 init 실패 상태로 JSON 만 남기지 않았다",
+        "등록했다면 스모크 런을 실행해 보인 MCP 서버를 보고했다(등록하지 않았다면 해당 없음=통과)",
+        "실제 설정 파일 mtime 이 변하지 않았다"
+      ]
+    }
+  ]
+}
