@@ -31,7 +31,9 @@
 
 - **로그인이 프로필별이다**: 키체인 항목이 `Claude Code-credentials-<CLAUDE_CONFIG_DIR 해시>` 라 새 `CLAUDE_CONFIG_DIR` 은 "Not logged in". 러너는 `_claude/` 를 앱 공유 프로필로 두어 **전체에서 1회** `/login` 만 필요(`bench run <app> claude` 로 열어 `/login`). 대안 `--bare` 는 훅·플러그인·CLAUDE.md 를 생략하지만 API 키가 필수라 구독 사용자에겐 부적합.
 - **MCP 격리**: `--strict-mcp-config --mcp-config <파일>` 이 다른 모든 MCP 설정을 무시한다(러너 처리). 사용자 범위 MCP 는 `~/.claude.json` 의 `mcpServers` 에 있다(settings.json 아님) — find-mcp 가 이걸 읽는다.
-- **스킬 ON/OFF**: 프로필이 아니라 **작업 디렉터리의 `.claude/skills/`** 로 나눈다(프로젝트 스킬 인식은 probe 스킬로 검증됨). 그래야 로그인 하나로 두 상태를 쓸 수 있다. raw 에는 `--disable-slash-commands` 도 함께 준다(러너 처리).
+- **스킬 ON/OFF**: 프로필이 아니라 **작업 디렉터리의 `.claude/skills/`** 로 나눈다(프로젝트 스킬 인식은 probe 스킬로 검증됨). 그래야 로그인 하나로 두 상태를 쓸 수 있다.
+- **`--disable-slash-commands` 를 raw 에 붙이지 않는다**: 스킬만 아니라 `/mcp`·`/model` 같은 내장 명령까지 사라져 대화형에서 쓸 수 없다. 확인 결과 새 `CLAUDE_CONFIG_DIR` 프로필에는 `~/.agents/skills` 가 새어 들어오지 않아 플래그 없이도 사용자 스킬은 보이지 않는다(내장 스킬만 남음).
+- **HOME 오버라이드는 Claude 에 쓸 수 없다**: 키체인 항목 조회가 HOME 에 묶여 있어 `HOME` 을 바꾸면 "Not logged in" 이 된다. Claude 격리는 `CLAUDE_CONFIG_DIR` + `--strict-mcp-config` 로만.
 - `-p` 모드는 stdin 을 3초 기다린 뒤 진행한다(러너는 stdin 을 닫아 대기 없음).
 - **`tmpclaude` 같은 "폴더만 바꾸는" 래퍼는 격리가 아니다**: 실제 프로필의 훅·MCP·스킬·CLAUDE.md 가 그대로 붙고 Honcho 에도 기록된다.
 

@@ -49,12 +49,12 @@ _claude/                 CLAUDE_CONFIG_DIR — 앱 공유. 키체인 로그인�
 <app>/work/raw|skill/    빈 작업 디렉터리 / Claude 스킬용 .claude/skills 링크
 ```
 
-하네스별 격리 수단: Claude `CLAUDE_CONFIG_DIR` + `--strict-mcp-config` + raw엔 `--disable-slash-commands`; Codex `CODEX_HOME`+`HOME` + `features.apps=false` + 도구별 approve; agy `HOME`(설정 위치 환경변수가 없어 이것뿐).
+하네스별 격리 수단: Claude `CLAUDE_CONFIG_DIR` + `--strict-mcp-config`(사용자 스킬은 이 프로필에 없어 보이지 않음); Codex `CODEX_HOME`+`HOME` + `features.apps=false` + 도구별 approve; agy `HOME`(설정 위치 환경변수가 없어 이것뿐).
 권한은 전부 자동 승인(claude `bypassPermissions`, codex exec 기본 / 대화형 `-a never`, agy `--dangerously-skip-permissions`).
 
 ## 순정에 남는 것 (제거 대상 아님)
 
-각 CLI 내장 스킬(Codex: imagegen·openai-docs·plugin-creator·skill-creator·skill-installer·plugin-management, agy: agy-customizations·antigravity-guide), 시스템 프롬프트, Codex의 `<recommended_plugins>` 주입. 벤더가 배포하는 상태라 "순정 스택"에 포함된다. 이것까지 지우려 하면 순정이 아니다.
+각 CLI 내장 스킬(Claude Code: dataviz·code-review·simplify·loop·schedule·claude-api·run·init·security-review 등, Codex: imagegen·openai-docs·plugin-creator·skill-creator·skill-installer·plugin-management, agy: agy-customizations·antigravity-guide), 시스템 프롬프트, Codex의 `<recommended_plugins>` 주입. 벤더가 배포하는 상태라 "순정 스택"에 포함된다. 이것까지 지우려 하면 순정이 아니다.
 
 제거되는 것: 사용자 MCP, 사용자 스킬(`~/.agents/skills` 포함), 플러그인, hooks(Honcho·orca 등 기억·관측 훅 → **벤치 런은 기억에 기록되지 않는다**), 전역 CLAUDE.md/AGENTS.md, Codex apps.
 

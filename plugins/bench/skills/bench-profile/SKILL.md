@@ -106,7 +106,7 @@ bench run <app> agy --skill --effort low -- "1) Is a skill named <스킬> availa
 
 기대값:
 - MCP 서버는 **이 앱의 것만**. 다른 이름이 보이면 오염 — pitfalls에서 그 하네스 항목을 본다.
-- raw에서 스킬은 CLI 내장만(Codex: imagegen·openai-docs·skill-creator 등, agy: antigravity-guide 등). 사용자 스킬 이름이 보이면 오염.
+- raw에서 스킬은 CLI 내장만(Claude: dataviz·code-review·loop 등, Codex: imagegen·openai-docs·skill-creator 등, agy: antigravity-guide 등). 사용자 스킬 이름(html·design-artifact·aria-compose 등)이 보이면 오염.
 - `--skill`에서는 이 앱의 스킬이 보여야 한다.
 - 도구 호출이 실제 값을 돌려줘야 한다. "cancelled"·"unavailable"이면 Codex 승인 테이블 또는 서버 실행 문제.
 

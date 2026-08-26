@@ -199,7 +199,8 @@ function run(o) {
   if (o.harness === "claude") {
     cmd = "claude"; env.CLAUDE_CONFIG_DIR = D.claude; cwd = D.work(o.skill);
     args.push("--strict-mcp-config", "--mcp-config", D.claudeMcp, "--permission-mode", "bypassPermissions");
-    if (!o.skill) args.push("--disable-slash-commands");
+    // raw 에 --disable-slash-commands 를 붙이면 /mcp 같은 내장 명령까지 사라진다. 사용자 스킬은 이 프로필에 없어
+    // 어차피 보이지 않고(확인됨), 남는 것은 Claude Code 내장 스킬뿐 — Codex 의 imagegen 처럼 "순정"에 속한다.
     if (o.effort) args.push("--effort", o.effort);
     if (o.model) args.push("--model", o.model);
     if (o.prompt) args.push("-p", o.prompt);
