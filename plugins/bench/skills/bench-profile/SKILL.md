@@ -1,13 +1,13 @@
 ---
 name: bench-profile
-description: Register an app (its MCP servers and the skills that belong to it) as a bench app so it runs inside clean "stock" harness profiles via `<app>bench claude|codex|agy`, then verify the isolation actually holds. Use this whenever the user asks to make, create, register, or add a bench / bench profile / 벤치 for an app or MCP server ("○○ 벤치 만들어줘", "벤치에 추가해줘", "순정 프로필로 돌려보고 싶어", "깨끗한 하네스에서 테스트"), wants to compare Claude Code, Codex, and agy on their own app without personal MCPs/skills/hooks interfering, or reports a bench profile problem (MCP tool call cancelled, a skill visible when it should not be, plugins leaking in, login prompt, Honcho recording bench runs). Also use it when the user asks which of their MCP servers are registered where, or how bench runs relate to memory hooks.
+description: Register an app (its MCP servers and the skills that belong to it) as a bench app so it runs inside clean "stock" harness profiles through app-specific commands such as ariabench claude, ariabench codex, and ariabench agy, then verify the isolation actually holds. Use this whenever the user asks to make, create, register, or add a bench / bench profile / 벤치 for an app or MCP server ("○○ 벤치 만들어줘", "벤치에 추가해줘", "순정 프로필로 돌려보고 싶어", "깨끗한 하네스에서 테스트"), wants to compare Claude Code, Codex, and agy on their own app without personal MCPs/skills/hooks interfering, or reports a bench profile problem (MCP tool call cancelled, a skill visible when it should not be, plugins leaking in, login prompt, Honcho recording bench runs). Also use it when the user asks which of their MCP servers are registered where, or how bench runs relate to memory hooks.
 ---
 
 # bench-profile — 앱을 순정 하네스 벤치에 등록하기
 
 ## 이게 무엇인가
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs`는 사용자 설정(다른 MCP·사용자 스킬·플러그인·훅·CLAUDE.md/AGENTS.md)이 하나도 없는
+플러그인 루트의 `scripts/bench.mjs`는 사용자 설정(다른 MCP·사용자 스킬·플러그인·훅·CLAUDE.md/AGENTS.md)이 하나도 없는
 **깨끗한 프로필**에서 Claude Code / Codex / agy를 실행하는 러너다. 프로필에는 벤치 대상 앱의 MCP 서버만 들어가고,
 그 앱의 스킬은 `bench skill <app> on`으로 설치했을 때만 보인다. 훅이 없으니 벤치 런은 Honcho 같은 기억 시스템에 기록되지 않는다 — 벤치 잡음이
 사용자 기억을 오염시키지 않게 하려는 의도다.
@@ -20,7 +20,10 @@ description: Register an app (its MCP servers and the skills that belong to it) 
 러너 명령·앱 JSON 스키마·프로필 배치·"순정"의 정의는 `references/runner.md`에 있다. **등록 전에 읽어라** — 사용자에게 보이는
 README는 다섯 줄짜리 사용법뿐이고, 스키마는 여기에만 있다.
 
-아래에서 `bench …`는 `node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" …`를 뜻한다(사용자 셸에는 같은 이름의 함수가 있지만 네 셸엔 없을 수 있다).
+실행 전에 플러그인 루트를 절대 경로로 정한다. Claude Code에서 `CLAUDE_PLUGIN_ROOT`가 있으면 그 값을 쓰고, 그렇지 않으면 현재 로드된
+이 `SKILL.md`의 실제 디렉터리에서 두 단계 위(`skills/bench-profile/../..`)를 `pwd -P`로 해석한다. 현재 작업 디렉터리를 기준으로
+추측하거나 저장소 경로를 하드코딩하지 않는다. 아래에서 `BENCH_PLUGIN_ROOT`는 이렇게 구한 경로이며, `bench …`는
+`node "$BENCH_PLUGIN_ROOT/scripts/bench.mjs" …`를 뜻한다(사용자 셸에는 같은 이름의 함수가 있지만 네 셸엔 없을 수 있다).
 
 ## 절차
 
@@ -32,7 +35,7 @@ README는 다섯 줄짜리 사용법뿐이고, 스키마는 여기에만 있다.
 정의는 손으로 옮겨 쓰지 말고 실제 프로필에서 가져온다:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/find-mcp.mjs" <이름 일부>     # 인자 없으면 전부
+node "$BENCH_PLUGIN_ROOT/scripts/find-mcp.mjs" <이름 일부>     # 인자 없으면 전부
 ```
 
 `~/.claude.json`(mcpServers) · `~/.codex/config.toml`([mcp_servers.*]) · `~/.gemini/config/mcp_config.json` 세 곳을 뒤져

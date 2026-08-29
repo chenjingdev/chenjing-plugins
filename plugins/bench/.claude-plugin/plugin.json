@@ -1,7 +1,7 @@
 {
   "name": "bench",
   "description": "순정 하네스 벤치 — 사용자 MCP·스킬·훅이 없는 깨끗한 프로필에서 Claude Code / Codex / agy 로 내 앱을 돌린다. 등록은 \"○○ 벤치 만들어줘\"(bench-profile 스킬), 실행은 <app>bench <harness>.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "author": {
     "name": "chenjing"
   }

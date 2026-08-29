@@ -1,0 +1,26 @@
+{
+  "name": "bench",
+  "version": "0.3.0",
+  "description": "Run an app's MCP servers and optional app-owned skills in clean Claude Code, Codex, and agy harness profiles, and verify that personal configuration does not leak into the bench.",
+  "author": {
+    "name": "chenjing",
+    "url": "https://github.com/chenjingdev"
+  },
+  "homepage": "https://github.com/chenjingdev/chenjing-plugins",
+  "repository": "https://github.com/chenjingdev/chenjing-plugins",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Bench",
+    "shortDescription": "Clean harness profiles for MCP app benchmarks",
+    "longDescription": "Register an app's MCP servers and app-owned skills, build isolated Claude Code, Codex, and agy profiles, and verify that unrelated personal MCPs, skills, plugins, and hooks stay out of benchmark runs.",
+    "developerName": "chenjing",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Register my app as a clean harness bench and verify its isolation."
+    ]
+  }
+}

@@ -1,16 +1,20 @@
 # 러너(bench.mjs) 레퍼런스 — 에이전트용
 
-`${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs`. 사용자 설정과 분리된 순정 프로필에서 앱(MCP 서버 묶음)을 실행한다.
+플러그인 루트의 `scripts/bench.mjs`. 사용자 설정과 분리된 순정 프로필에서 앱(MCP 서버 묶음)을 실행한다.
 사람은 `<app>bench <harness>`만 쓰고, 여기 있는 스키마·배치는 등록·진단을 맡은 에이전트가 안다.
+
+`BENCH_PLUGIN_ROOT`는 절대 경로로 정한다. Claude Code에서 `CLAUDE_PLUGIN_ROOT`가 있으면 그 값을 쓰고, 그렇지 않으면 현재 로드된
+`SKILL.md`의 실제 디렉터리에서 두 단계 위(`skills/bench-profile/../..`)를 `pwd -P`로 해석한다. 현재 작업 디렉터리나 특정 사용자의
+저장소 위치를 가정하지 않는다.
 
 ## 명령
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" init <app> [--refresh-tools]   # 프로필 생성·갱신(멱등). 서버를 띄워 tools/list 캐시. 안내문·도구 설명이 스킬을 언급하면 경고(pitfalls "파일시스템은 공유")
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" run <app> <claude|codex|agy> [--effort E] [--model M] [--dry-run] [-- 프롬프트…]
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" skill <app> on|off       # 앱 스킬을 세 하네스 프로필에 설치/제거. 기본 미설치(raw)
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" status [app]             # 스킬 설치 상태도 여기 보인다
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bench.mjs" apps
+node "$BENCH_PLUGIN_ROOT/scripts/bench.mjs" init <app> [--refresh-tools]   # 프로필 생성·갱신(멱등). 서버를 띄워 tools/list 캐시. 안내문·도구 설명이 스킬을 언급하면 경고(pitfalls "파일시스템은 공유")
+node "$BENCH_PLUGIN_ROOT/scripts/bench.mjs" run <app> <claude|codex|agy> [--effort E] [--model M] [--dry-run] [-- 프롬프트…]
+node "$BENCH_PLUGIN_ROOT/scripts/bench.mjs" skill <app> on|off       # 앱 스킬을 세 하네스 프로필에 설치/제거. 기본 미설치(raw)
+node "$BENCH_PLUGIN_ROOT/scripts/bench.mjs" status [app]             # 스킬 설치 상태도 여기 보인다
+node "$BENCH_PLUGIN_ROOT/scripts/bench.mjs" apps
 ```
 
 사용자 셸에는 `bench`(같은 인자)와 앱별 `<app>bench <harness> …`(= `bench run <app> <harness> …`)가 있다. `<app>bench skill on|off`도 된다.
