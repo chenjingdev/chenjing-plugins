@@ -1,6 +1,6 @@
 {
   "name": "bench",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Run an app's MCP servers and optional app-owned skills in clean Claude Code, Codex, and agy harness profiles, and verify that personal configuration does not leak into the bench.",
   "author": {
     "name": "chenjing",

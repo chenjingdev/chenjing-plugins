@@ -45,15 +45,6 @@
 - 도구 15개는 tool-config.json 의 `disabled_tools` 가 걸러낸 뒤의 읽기 도구만이다(쓰기 도구 16개 제외). 실제 Codex 프로필은 그중 7개만 approve 해 뒀지만 벤치는 `init` 이 받아온 15개를 전부 approve 한다 — 벤치는 "무엇이 가능한가"를 재므로 의도.
 - 외부 의존: Honcho API `127.0.0.1:8001` 이 떠 있어야 도구가 값을 돌려준다(`tools/list` 는 API 없이도 된다). 훅이 없고 쓰기 도구가 꺼져 있어 벤치 런이 memory 워크스페이스에 남기는 것은 없다.
 
-## neuromem — 2026-08-27 등록
-
-- **Claude 정의는 죽은 정의였다**: `~/.claude.json` 의 `neuromem` 은 Rust 바이너리 `target/debug/neuromem … serve --mcp stdio` 인데 리포는 이미 Python(`uv run neuromem … mcp`)으로 바뀌어 바이너리·Cargo.toml 이 없다. find-mcp 가 보여 주는 정의라도 command 경로가 실제로 있는지 `ls` 로 먼저 확인한다. Codex 의 `neuromem_personal` 정의를 기준으로 삼았다.
-- **데이터 디렉터리 이름 충돌**: 벤치 전용으로 `~/.neuromem-bench` 를 골랐는데 그 이름은 사용자의 neuromem 자체 벤치마크 작업 공간(1GB 이상, 7월~8월 산출물)이었다. 서버가 그 안에 `neuromem.sqlite3`·`blobs/`·`runtime/` 을 새로 만들어 버렸다(birth time 으로 확인해 그 세 개 + `-shm/-wal` 만 지웠다). 새 데이터 디렉터리를 정할 때는 `ls -d ~/.<app>*` 로 이미 있는 이름을 먼저 본다. 최종 이름은 `~/.neuromem-benchprofile`.
-- **빈 데이터 디렉터리로는 MCP 가 뜨지 않는다**: `RuntimeError: MCP requires exactly one classified Project; found none`. `bench init` 에서는 "MCP 서버가 응답 전에 종료됐습니다" 로만 보이니 서버를 손으로 띄워 stderr 를 봐야 한다. 세팅용 CLI 명령이 없고 `POST /v1/setup/memory-scope` 또는 `Neuromem(Settings.from_env(dir)).setup_memory_scope(...)` 만 있다. 스키마가 `default` 네임스페이스 워크스페이스를 미리 만들어 두므로 `namespace="default"` 는 `memory scope target already exists` 로 실패한다 — 다른 네임스페이스(`bench`)를 쓴다. 한 번 만들면 재사용된다.
-- **개인 메모리 스토어를 벤치 대상으로 쓰지 않았다**: Codex 정의의 `--data-dir ~/.neuromem-personal-month-20260814`(730MB, 매일 쓰는 개인 기억)를 그대로 쓰면 벤치 ingest 가 사용자 기억을 오염시키고 사용자의 실제 Codex 세션과 SQLite 잠금을 다툰다 — Honcho 훅을 떼는 것과 같은 이유로 분리. 개인 데이터로 recall 을 재고 싶으면 앱 JSON 의 `--data-dir` 만 바꾸고 `bench init neuromem` 을 다시 돌린다.
-- 외부 의존: Ollama `127.0.0.1:11434`(임베딩 `qwen3-embedding-honcho-8192:latest`; `NEUROMEM_LLM_BASE_URL` 미지정 시 기본값이 11434)과 `NEUROMEM_LLM_PROVIDER=codex` 가 부르는 `codex` 바이너리. neuromem 이 내부적으로 띄우는 codex 는 실제 HOME 을 보므로 사용자 `~/.codex/config.toml` 을 읽는다(앱 내부 동작이라 벤치 격리 대상이 아님). `NEUROMEM_WORKER_MODE=off` 이므로 백그라운드 워커는 돌지 않는다.
-- 앱 소유 스킬이 없다(`~/.agents|.claude|.codex|.gemini` 스킬 디렉터리·리포 모두). `skills: []` — 스킬 트랙이 없다.
-
 ## 아직 안 되는 것
 
 - `url` 형 HTTP MCP 서버. 러너가 stdio 만 만든다. honcho 는 같은 서버의 stdio 모드로 우회했다(위 항목). 필요해지면 Claude `type:"http"`, Codex `url =`, agy 는 키 이름 확인 후 추가.

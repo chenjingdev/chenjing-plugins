@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 실제 프로필 세 곳에서 MCP 서버 정의를 찾아 정규화된 JSON 으로 출력한다.
 //   node find-mcp.mjs            전부
-//   node find-mcp.mjs neuromem   이름에 'neuromem' 이 들어간 것만 (대소문자 무시)
+//   node find-mcp.mjs myapp      이름에 'myapp' 이 들어간 것만 (대소문자 무시)
 // 출처: ~/.claude.json (mcpServers) · ~/.codex/config.toml ([mcp_servers.*]) · ~/.gemini/config/mcp_config.json
 import fs from "node:fs";
 import os from "node:os";

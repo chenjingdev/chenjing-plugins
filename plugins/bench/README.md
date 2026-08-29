@@ -10,7 +10,7 @@ ariabench skill on                      # 앱 스킬(aria-compose)을 벤치 프
 bench status                            # 앱·프로필·스킬 설치 상태·CLI 버전
 ```
 
-새 앱 등록은 Claude Code에 **"neuromem 벤치 만들어줘"** 라고 말하면 된다 — `bench-profile` 스킬이 실제 프로필의 MCP 정의를 찾아 `~/.bench/apps/<app>.json`을 쓰고 프로필을 만들고 격리를 검증한다. 새 `<app>bench` 함수는 `source ~/.zshrc` 뒤에 생긴다.
+새 앱 등록은 Claude Code에 **"myapp 벤치 만들어줘"** 라고 말하면 된다 — `bench-profile` 스킬이 실제 프로필의 MCP 정의를 찾아 `~/.bench/apps/<app>.json`을 쓰고 프로필을 만들고 격리를 검증한다. 새 `<app>bench` 함수는 `source ~/.zshrc` 뒤에 생긴다.
 
 셸 설정(`~/.zshrc`)에 한 번 넣는다:
 
