@@ -285,7 +285,8 @@ function run(o) {
     args.push("--dangerously-skip-permissions");
     if (o.effort) args.push("--effort", o.effort);
     if (o.model) args.push("--model", o.model);
-    if (o.prompt) args.push("-p", o.prompt, "--output-format", "text");
+    // agy -p 는 --print-timeout 기본 5분이라 긴 런이 "timeout waiting for response" 로 끊긴다(aria 2026-09-05).
+    if (o.prompt) args.push("-p", o.prompt, "--output-format", "text", "--print-timeout", "2h");
   } else if (o.harness === "grok") {
     cmd = GROK_BIN; env.GROK_HOME = D.grok; env.HOME = D.grok; env.GROK_DISABLE_AUTOUPDATER = "1";
     args.push("--permission-mode", "bypassPermissions");   // MCP 도구까지 전부 자동 승인. 대화형·헤드리스(-p) 공통

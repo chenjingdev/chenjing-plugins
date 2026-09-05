@@ -28,6 +28,7 @@
 - **`antigravity-cli/` 디렉터리 전체를 링크하면 플러그인이 딸려온다**: 그 안의 `mcp/` 캐시에서 nanobanana 같은 플러그인을 `config/plugins/` 로 되살린다. 인증에 필요한 건 `oauth_creds.json`, `google_accounts.json`, `installation_id`, `antigravity-cli/antigravity-oauth-token` 네 파일뿐(러너 처리).
 - `settings.json` 은 `mcpServers`·`hooks` 만 뺀 사본을 둔다 — 모델·보안 설정은 유지(러너 처리).
 - 스키마 JSON 을 도구별로 전부 읽는 경향(`~/.gemini/antigravity-cli/mcp/<서버>/*.json`)이 있어 준비 시간이 길다. 이건 하네스 특성이지 오류가 아니다 — 벤치에선 그대로 측정 대상.
+- **print 모드는 5분에 끊긴다**: `agy -p` 의 `--print-timeout` 기본값이 5m0s 라 그 안에 답이 안 나오면 `Error: timeout waiting for response` 로 종료되고 앱에는 미완성 곡만 남는다(aria 2026-09-05: 두 런이 8마디 시험곡 단계에서 끊김). 러너 처리 — 프롬프트 모드에 `--print-timeout 2h`.
 
 ## grok (Grok Build CLI, xAI) — 2026-09-05 추가
 

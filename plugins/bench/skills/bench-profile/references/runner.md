@@ -60,7 +60,7 @@ _claude/                 CLAUDE_CONFIG_DIR — 앱 공유. 키체인 로그인�
 ```
 
 하네스별 격리 수단: Claude `CLAUDE_CONFIG_DIR` + `--strict-mcp-config`(사용자 스킬은 이 프로필에 없어 보이지 않음); Codex `CODEX_HOME`+`HOME` + `features.apps=false` + 도구별 approve; agy `HOME`(설정 위치 환경변수가 없어 이것뿐); Grok `GROK_HOME`+`HOME` + config `[compat.claude]`·`[compat.cursor]` 전부 false(호환 스캔이 실제 `~/.claude.json` MCP·`~/.claude/skills`·settings.json 훅·Claude.md 를 끌어오므로) + `GROK_DISABLE_AUTOUPDATER=1`.
-권한은 전부 자동 승인(claude `bypassPermissions`, codex exec 기본 / 대화형 `-a never`, agy `--dangerously-skip-permissions`, grok `--permission-mode bypassPermissions` — MCP 도구까지 포함, 도구별 승인 테이블 불필요).
+권한은 전부 자동 승인(claude `bypassPermissions`, codex exec 기본 / 대화형 `-a never`, agy `--dangerously-skip-permissions`(+ 프롬프트 모드 `--print-timeout 2h`), grok `--permission-mode bypassPermissions` — MCP 도구까지 포함, 도구별 승인 테이블 불필요).
 
 ## 순정에 남는 것 (제거 대상 아님)
 
