@@ -11,6 +11,7 @@
 - **격리는 설정까지, 파일시스템은 공유** — 벤치 모델도 셸로 `~/.claude/skills`, `~/dev/<app>` 등 실제 홈을 읽을 수 있다. 그래서 *찾을 이유*를 주면 안 된다. aria 2026-08-27: MCP 안내문에 "작곡 지침은 aria-compose 스킬에 있다"는 중립 포인터 한 줄이 남아 있었는데, raw 실행의 Claude가 첫 행동으로 `ls ~/.claude/skills/; find ~/.claude -iname "*aria*"`를 돌려 실제 스킬과 references 전부를 `cat`으로 읽었다(`Skill(aria-compose)` 는 "Unknown skill"로 실패했으나 셸이 우회). raw 결과가 사실상 skill 결과였다. 러너 처리 — `init`이 instructions·도구 설명에서 스킬 이름/"스킬"/"skill"을 찾으면 경고. 해결은 서버 문구 삭제(aria `src/mcp.js` INSTRUCTIONS에서 제거). 이런 누출은 트랜스크립트(`_claude/projects/-…-work/<session>.jsonl`)의 첫 Bash 호출을 보면 바로 보인다.
 - **effort 이름이 같아도 뜻이 다르다**: Claude Code `low|medium|high|xhigh|max`, Codex `model_reasoning_effort` `low|medium|high|xhigh`, agy `--effort low|medium|high`, Grok `--effort none|minimal|low|medium|high|xhigh|max`(모델별 메뉴에 있는 단계만). 하네스 간 "high 끼리" 비교는 이름만 같은 것이니 결과에 각주로 남긴다.
 - **도구 스키마가 크면 토큰이 많이 든다**: aria 45개 도구는 `get_song` 한 번에 Codex 4만 토큰대. 벤치 비용 추정 시 감안.
+- **동시 실행은 앱 인스턴스를 공유한다**(2026-09-05): 네 프로필의 서버 env 가 같으면 브리지가 같은 데이터 디렉터리의 runtime.json 을 읽어 한 인스턴스에 붙고, 두 모델이 곡 하나를 함께 편집한다(동시에 시작해도 시작 잠금으로 인스턴스는 하나). 러너 처리 — env 값의 `{harness}` 자리표시자를 프로필별 하네스 이름으로 치환. aria 는 `ARIA_DATA_DIR=…/data-{harness}` 로 하네스별 인스턴스가 뜨고 포트는 7799 부터 빈 곳으로 이동한다. 같은 하네스 둘을 동시에 돌리는 것은 아직 안 된다(아래 '아직 안 되는 것').
 
 ## Codex
 
@@ -61,3 +62,4 @@
 - `url` 형 HTTP MCP 서버. 러너가 stdio 만 만든다. honcho 는 같은 서버의 stdio 모드로 우회했다(위 항목). 필요해지면 Claude `type:"http"`, Codex `url =`, agy 는 키 이름 확인 후 추가.
 - 런마다 앱 상태를 초기화하는 훅(예: aria 빈 곡으로 리셋). 지금은 앱의 현재 상태가 그대로 보인다.
 - pi 같은 추가 하네스. 러너의 `run()` 에 분기 하나 추가하면 된다.
+- 같은 하네스의 병렬 실행(예 codex low 와 high 동시). 런마다 데이터 디렉터리를 새로 파는 `{run}` 식 설계가 필요하고, 런이 끝난 뒤 그 앱 인스턴스를 거두는 문제가 함께 온다.

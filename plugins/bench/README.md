@@ -11,6 +11,8 @@ ariabench skill on                      # 앱 스킬(aria-compose)을 벤치 프
 bench status                            # 앱·프로필·스킬 설치 상태·CLI 버전
 ```
 
+서로 다른 하네스는 동시에 돌려도 된다 — 앱 정의의 데이터 디렉터리에 `{harness}`가 들어 있으면 하네스마다 앱 인스턴스가 따로 뜬다(aria 등록은 그렇게 돼 있다). 같은 하네스 두 개를 동시에 돌리면 한 인스턴스를 공유한다.
+
 새 앱 등록은 Claude Code에 **"myapp 벤치 만들어줘"** 라고 말하면 된다 — `bench-profile` 스킬이 실제 프로필의 MCP 정의를 찾아 `~/.bench/apps/<app>.json`을 쓰고 프로필을 만들고 격리를 검증한다. 새 `<app>bench` 함수는 `source ~/.zshrc` 뒤에 생긴다.
 
 셸 설정(`~/.zshrc`)에 한 번 넣는다:

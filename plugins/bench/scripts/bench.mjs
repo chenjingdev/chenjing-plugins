@@ -89,7 +89,12 @@ function setSkill(app, a, on) {
   }
 }
 // MCP 서버 프로세스는 실제 HOME 을 봐야 한다(HOME 오버라이드 하네스 아래에서 ~/.<app> 데이터·엔진을 잃지 않게).
-const serverEnv = (s) => ({ HOME: REAL_HOME, ...(s.env ?? {}) });
+// env 값의 {harness} 는 그 프로필의 하네스 이름으로 바뀐다 — 하네스마다 데이터 디렉터리를 갈라(예 ARIA_DATA_DIR=…/data-{harness})
+// 서로 다른 하네스를 동시에 돌려도 앱 인스턴스와 상태를 공유하지 않게. init 의 tools/list 프로브에서는 "init" 으로 바뀐다.
+const serverEnv = (s, harness = "init") => ({
+  HOME: REAL_HOME,
+  ...Object.fromEntries(Object.entries(s.env ?? {}).map(([k, v]) => [k, String(v).replaceAll("{harness}", harness)])),
+});
 
 // ---------- MCP tools/list (Codex 는 MCP 도구를 도구별로 승인해야 해서 이름 목록이 필요) ----------
 function listTools(server, timeoutMs = 40000) {
@@ -132,7 +137,7 @@ function skillMentions(a, meta) {
 function initClaude(app, a) {
   const D = dirs(app);
   mkdir(D.claude);
-  writeJson(D.claudeMcp, { mcpServers: Object.fromEntries(Object.entries(a.mcp).map(([n, s]) => [n, { type: "stdio", command: s.command, args: s.args ?? [], env: serverEnv(s) }])) });
+  writeJson(D.claudeMcp, { mcpServers: Object.fromEntries(Object.entries(a.mcp).map(([n, s]) => [n, { type: "stdio", command: s.command, args: s.args ?? [], env: serverEnv(s, "claude") }])) });
   mkdir(D.work);
 }
 function initCodex(app, a) {
@@ -144,7 +149,7 @@ function initCodex(app, a) {
   let toml = `# bench 프로필 (${app}) — bench.mjs 가 생성. 실제 ~/.codex/config.toml 과 무관.\n[features]\napps = false\n`;
   for (const [n, s] of Object.entries(a.mcp)) {
     toml += `\n[mcp_servers.${n}]\ncommand = ${q(s.command)}\nargs = [${(s.args ?? []).map(q).join(", ")}]\n`;
-    toml += `\n[mcp_servers.${n}.env]\n${Object.entries(serverEnv(s)).map(([k, v]) => `${k} = ${q(String(v))}`).join("\n")}\n`;
+    toml += `\n[mcp_servers.${n}.env]\n${Object.entries(serverEnv(s, "codex")).map(([k, v]) => `${k} = ${q(String(v))}`).join("\n")}\n`;
     // approval_policy=never 에서 MCP 도구는 즉시 취소되므로 도구별 approve 선언 (서버 단위 키는 무시됨)
     for (const t of a.tools?.[n] ?? []) toml += `[mcp_servers.${n}.tools.${t}]\napproval_mode = "approve"\n`;
   }
@@ -162,7 +167,7 @@ function initAgy(app, a) {
   let settings = {}; try { settings = JSON.parse(fs.readFileSync(path.join(g, "settings.json"), "utf8")); } catch {}
   delete settings.mcpServers; delete settings.hooks;
   writeJson(path.join(bg, "settings.json"), settings);
-  writeJson(path.join(bg, "config", "mcp_config.json"), { mcpServers: Object.fromEntries(Object.entries(a.mcp).map(([n, s]) => [n, { command: s.command, args: s.args ?? [], env: serverEnv(s) }])) });
+  writeJson(path.join(bg, "config", "mcp_config.json"), { mcpServers: Object.fromEntries(Object.entries(a.mcp).map(([n, s]) => [n, { command: s.command, args: s.args ?? [], env: serverEnv(s, "agy") }])) });
 }
 
 // Grok Build CLI: GROK_HOME 으로 설정·세션·스킬 위치를 옮기고 HOME 도 바꾼다(~/.agents/skills 같은 홈 기준 스캔 차단).
@@ -180,7 +185,7 @@ function initGrok(app, a) {
   }
   for (const [n, s] of Object.entries(a.mcp)) {
     toml += `\n[mcp_servers.${n}]\ncommand = ${q(s.command)}\nargs = [${(s.args ?? []).map(q).join(", ")}]\n`;
-    toml += `\n[mcp_servers.${n}.env]\n${Object.entries(serverEnv(s)).map(([k, v]) => `${k} = ${q(String(v))}`).join("\n")}\n`;
+    toml += `\n[mcp_servers.${n}.env]\n${Object.entries(serverEnv(s, "grok")).map(([k, v]) => `${k} = ${q(String(v))}`).join("\n")}\n`;
   }
   fs.writeFileSync(path.join(home, "config.toml"), toml);
   mkdir(path.join(home, "skills"));
