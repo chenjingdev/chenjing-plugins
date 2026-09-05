@@ -43,7 +43,7 @@ effort 값은 하네스마다 다르다: claude `low|medium|high|xhigh|max`, cod
 - `cwd` 필드는 없다. cwd에 기대는 서버는 `"command": "/bin/sh", "args": ["-c", "cd /path && exec /path/.venv/bin/python server.py"]`로 감싼다.
 - `command`는 절대 경로로 쓴다(`/opt/homebrew/bin/node` 등). codex·agy·grok 프로필은 HOME을 바꿔 실행하므로 PATH 의존 한 단어 명령은 깨질 수 있다.
 - 서버 프로세스 env에는 러너가 항상 `HOME=<실제 홈>`을 넣는다(HOME 오버라이드 하네스 아래에서도 `~/.<app>` 데이터·엔진을 그대로 쓰게). 벤치 전용 데이터로 분리하려면 그 앱의 데이터 디렉터리 변수(예 `ARIA_DATA_DIR`, `--data-dir` 인자)를 정의에 넣는다.
-- env 값의 `{harness}`는 프로필을 만들 때 그 하네스 이름(`claude`·`codex`·`agy`·`grok`)으로 바뀐다. `ARIA_DATA_DIR=…/data-{harness}`처럼 쓰면 하네스마다 데이터 디렉터리와 앱 인스턴스가 갈라져 **서로 다른 하네스를 동시에** 돌릴 수 있다(포트는 선호 포트에서 빈 곳으로 자동 이동, 각자 runtime.json에 기록). 같은 하네스 두 개를 동시에 돌리는 것은 여전히 한 인스턴스를 공유한다. `init`의 tools/list 프로브에서는 `init`으로 바뀐다.
+- env 값의 `{harness}`는 프로필을 만들 때 그 하네스 이름(`claude`·`codex`·`agy`·`grok`)으로 바뀐다. `ARIA_DATA_DIR=…/data-{harness}`처럼 쓰면 하네스마다 데이터 디렉터리와 앱 인스턴스가 갈라져 **서로 다른 하네스를 동시에** 돌릴 수 있다(포트는 선호 포트에서 빈 곳으로 자동 이동, 각자 runtime.json에 기록). 같은 하네스 두 개를 동시에 돌리는 것까지 가르려면 앱이 브리지 세션별 데이터 디렉터리를 지원해야 한다(aria `ARIA_DATA_DIR_PER_SESSION=1`). `init`의 tools/list 프로브에서는 `init`으로 바뀐다.
 - `tools`는 Codex용. Codex는 MCP 도구를 **도구별로** 승인해야 하고(서버 단위 키는 무시됨), 승인이 없으면 호출이 0초 만에 "user cancelled"로 취소된다. 서버에 도구가 늘면 `init <app> --refresh-tools`.
 - `~`는 `repo`·`skills`에서만 확장된다. `mcp.*.command/args`는 절대 경로.
 
