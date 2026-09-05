@@ -6,10 +6,10 @@
 ## 공통
 
 - **격리의 정의**: 제거 대상은 사용자가 얹은 것 — 다른 MCP, 사용자 스킬(`~/.agents/skills` 포함), 플러그인, hooks(Honcho·orca 등 기억·관측 훅), 전역 CLAUDE.md/AGENTS.md, Codex apps. 남기는 것은 벤더가 배포하는 상태 — 각 CLI 내장 스킬(Codex: imagegen·openai-docs·plugin-creator·skill-creator·skill-installer·plugin-management, agy: agy-customizations·antigravity-guide), 시스템 프롬프트, Codex 의 `<recommended_plugins>` 주입. 이것까지 지우려 하면 "순정"이 아니게 된다.
-- **기억 훅이 없으므로 벤치 런은 Honcho 에 기록되지 않는다** — 의도된 동작. 대신 각 프로필이 자기 트랜스크립트를 남긴다: Claude `_claude/projects/*/<session>.jsonl`, Codex `<app>/codex-*/sessions/YYYY/MM/DD/rollout-*.jsonl`(도구 호출·시간·토큰 포함), agy `<app>/agy-*/.gemini/antigravity-cli/conversations/`. 프로세스 지표는 여기서 뽑는다.
-- **서버 프로세스의 HOME**: HOME 오버라이드 하네스(codex·agy) 아래에서 MCP 서버가 `os.homedir()`/`~` 를 쓰면 가짜 HOME 밑에 데이터·엔진을 새로 만들어 버린다(aria 는 `~/.aria` 에 팩·엔진·라이브러리가 있어 두 번째 GUI 인스턴스가 뜰 상황이었다). 러너 처리 — 서버 env 에 항상 `HOME=<실제 홈>` 을 넣는다. 벤치 전용 데이터 디렉터리를 따로 주고 싶으면 앱 JSON 의 `env` 에 그 앱의 데이터 디렉터리 변수(예: `ARIA_DATA_DIR`)를 넣는다.
+- **기억 훅이 없으므로 벤치 런은 Honcho 에 기록되지 않는다** — 의도된 동작. 대신 각 프로필이 자기 트랜스크립트를 남긴다: Claude `_claude/projects/*/<session>.jsonl`, Codex `<app>/codex-*/sessions/YYYY/MM/DD/rollout-*.jsonl`(도구 호출·시간·토큰 포함), agy `<app>/agy-*/.gemini/antigravity-cli/conversations/`, Grok `<app>/grok/sessions/<URL 인코딩된 cwd>/<session>/updates.jsonl`. 프로세스 지표는 여기서 뽑는다.
+- **서버 프로세스의 HOME**: HOME 오버라이드 하네스(codex·agy·grok) 아래에서 MCP 서버가 `os.homedir()`/`~` 를 쓰면 가짜 HOME 밑에 데이터·엔진을 새로 만들어 버린다(aria 는 `~/.aria` 에 팩·엔진·라이브러리가 있어 두 번째 GUI 인스턴스가 뜰 상황이었다). 러너 처리 — 서버 env 에 항상 `HOME=<실제 홈>` 을 넣는다. 벤치 전용 데이터 디렉터리를 따로 주고 싶으면 앱 JSON 의 `env` 에 그 앱의 데이터 디렉터리 변수(예: `ARIA_DATA_DIR`)를 넣는다.
 - **격리는 설정까지, 파일시스템은 공유** — 벤치 모델도 셸로 `~/.claude/skills`, `~/dev/<app>` 등 실제 홈을 읽을 수 있다. 그래서 *찾을 이유*를 주면 안 된다. aria 2026-08-27: MCP 안내문에 "작곡 지침은 aria-compose 스킬에 있다"는 중립 포인터 한 줄이 남아 있었는데, raw 실행의 Claude가 첫 행동으로 `ls ~/.claude/skills/; find ~/.claude -iname "*aria*"`를 돌려 실제 스킬과 references 전부를 `cat`으로 읽었다(`Skill(aria-compose)` 는 "Unknown skill"로 실패했으나 셸이 우회). raw 결과가 사실상 skill 결과였다. 러너 처리 — `init`이 instructions·도구 설명에서 스킬 이름/"스킬"/"skill"을 찾으면 경고. 해결은 서버 문구 삭제(aria `src/mcp.js` INSTRUCTIONS에서 제거). 이런 누출은 트랜스크립트(`_claude/projects/-…-work/<session>.jsonl`)의 첫 Bash 호출을 보면 바로 보인다.
-- **effort 이름이 같아도 뜻이 다르다**: Claude Code `low|medium|high|xhigh|max`, Codex `model_reasoning_effort` `low|medium|high|xhigh`, agy `--effort low|medium|high`. 하네스 간 "high 끼리" 비교는 이름만 같은 것이니 결과에 각주로 남긴다.
+- **effort 이름이 같아도 뜻이 다르다**: Claude Code `low|medium|high|xhigh|max`, Codex `model_reasoning_effort` `low|medium|high|xhigh`, agy `--effort low|medium|high`, Grok `--effort none|minimal|low|medium|high|xhigh|max`(모델별 메뉴에 있는 단계만). 하네스 간 "high 끼리" 비교는 이름만 같은 것이니 결과에 각주로 남긴다.
 - **도구 스키마가 크면 토큰이 많이 든다**: aria 45개 도구는 `get_song` 한 번에 Codex 4만 토큰대. 벤치 비용 추정 시 감안.
 
 ## Codex
@@ -28,11 +28,22 @@
 - `settings.json` 은 `mcpServers`·`hooks` 만 뺀 사본을 둔다 — 모델·보안 설정은 유지(러너 처리).
 - 스키마 JSON 을 도구별로 전부 읽는 경향(`~/.gemini/antigravity-cli/mcp/<서버>/*.json`)이 있어 준비 시간이 길다. 이건 하네스 특성이지 오류가 아니다 — 벤치에선 그대로 측정 대상.
 
+## grok (Grok Build CLI, xAI) — 2026-09-05 추가
+
+- **`GROK_HOME` 만 바꾸면 격리가 안 된다**: Claude·Cursor 호환 스캔이 기본 on 이라 빈 GROK_HOME 에서도 `grok inspect` 에 실제 `~/.claude/Claude.md` 지침, `~/.claude/settings.json` 훅 9개(Honcho 포함), 사용자 스킬 8개(aria-compose 포함), 플러그인 5개, `~/.claude.json` 의 MCP 3개가 `[claude]` 꼬리표로 그대로 붙었다. 러너 처리 — 프로필 `config.toml` 에 `[compat.claude]`·`[compat.cursor]` 의 `skills·rules·agents·mcps·hooks·sessions` 전부 false, 그리고 `HOME` 도 프로필로(`~/.agents/skills` 같은 홈 기준 스캔 차단). 확인은 `GROK_HOME=<프로필> HOME=<프로필> grok inspect` — LLM 호출 없이 출처별 목록이 나온다(정상: Skills 0, Plugins 0, Hooks 0, MCP 는 앱 것만 `config` 출처).
+- 인증은 `$GROK_HOME/auth.json` 하나 — 실제 것을 링크하면 재로그인 없음(러너 처리). 로그인 상태·모델 목록은 `grok models`(2026-09 기준 grok-4.6 기본, grok-4.5).
+- **자동 업데이트**: 러너가 `GROK_DISABLE_AUTOUPDATER=1` 을 넣는다. 관리 설치(`~/.grok/bin`)가 아닌 GROK_HOME 에서 업데이터가 돌거나 버전이 런 중간에 바뀌지 않게.
+- **MCP 접근이 다른 하네스와 다르다**: 모델에 주어지는 도구는 `search_tool`/`use_tool` 둘뿐이고(스모크 세션 `chat_history.jsonl` 로 확인), MCP 도구는 `search_tool({query})` 로 찾은 뒤 `use_tool({tool_name: "aria__get_song", tool_input})` 로 부른다. aria 스모크에서 get_song 한 번에 search_tool 3회·use_tool 1회가 들었다. 스키마 전체가 시스템 프롬프트에 들어가는 Claude·Codex 와 토큰 구조가 다르다 — 하네스 특성이지 오류가 아니고, 벤치에선 그대로 측정 대상. 같은 스모크에서 모델이 작업 디렉터리의 `.agents/skills` 를 `list_dir` 로 뒤졌다(위 "파일시스템은 공유" 항목 — 빈 디렉터리라 문제는 없었다).
+- **MCP 결과 20,000바이트 상한**(`GROK_MAX_MCP_OUTPUT_BYTES`, 기본값): 큰 결과는 잘리고 전체는 세션 `mcp/` 폴더에 저장된다. aria `get_song` 처럼 곡 전체 JSON 을 돌려주는 도구는 3분짜리 곡에서 잘릴 수 있다. 순정 값을 그대로 두고 결과 각주로 남긴다.
+- 권한은 `--permission-mode bypassPermissions` 하나로 MCP 도구까지 자동 승인 — Codex 식 도구별 approve 테이블이 필요 없다(러너 처리).
+- cross-session memory 는 기본 off(실험 기능). 프로필에서 건드리지 않는다 — 켜져 있으면 런 사이에 기억이 이어져 N-of-1 벤치가 오염되니, `GROK_MEMORY` 나 `[memory] enabled` 가 환경·프로필에 없는지만 확인.
+- 세션은 `$GROK_HOME/sessions/<URL 인코딩된 cwd>/<session-id>/` — `updates.jsonl`(도구 호출 포함 대화), `chat_history.jsonl`(모델에 보낸 원문), `signals.json`(토큰·도구·턴 수).
+
 ## Claude Code
 
 - **로그인이 프로필별이다**: 키체인 항목이 `Claude Code-credentials-<CLAUDE_CONFIG_DIR 해시>` 라 새 `CLAUDE_CONFIG_DIR` 은 "Not logged in". 러너는 `_claude/` 를 앱 공유 프로필로 두어 **전체에서 1회** `/login` 만 필요(`bench run <app> claude` 로 열어 `/login`). 대안 `--bare` 는 훅·플러그인·CLAUDE.md 를 생략하지만 API 키가 필수라 구독 사용자에겐 부적합.
 - **MCP 격리**: `--strict-mcp-config --mcp-config <파일>` 이 다른 모든 MCP 설정을 무시한다(러너 처리). 사용자 범위 MCP 는 `~/.claude.json` 의 `mcpServers` 에 있다(settings.json 아님) — find-mcp 가 이걸 읽는다.
-- **스킬 설치 위치**: Claude 는 프로필이 아니라 **작업 디렉터리의 `.claude/skills/`**(프로젝트 스킬, probe 로 검증됨), Codex 는 `$CODEX_HOME/skills/`, agy 는 `.gemini/config/skills/`. `bench skill <app> on|off` 가 세 곳을 함께 바꾼다. 0.1.x 의 `--skill` 실행 옵션(raw/skill 프로필 이중화)은 "매 실행마다 환경이 바뀌는 숨은 스위치" 라는 이유로 설치 상태로 대체됐다.
+- **스킬 설치 위치**: Claude 는 프로필이 아니라 **작업 디렉터리의 `.claude/skills/`**(프로젝트 스킬, probe 로 검증됨), Codex 는 `$CODEX_HOME/skills/`, agy 는 `.gemini/config/skills/`, Grok 은 `$GROK_HOME/skills/`. `bench skill <app> on|off` 가 네 곳을 함께 바꾼다. 0.1.x 의 `--skill` 실행 옵션(raw/skill 프로필 이중화)은 "매 실행마다 환경이 바뀌는 숨은 스위치" 라는 이유로 설치 상태로 대체됐다.
 - **`--disable-slash-commands` 를 raw 에 붙이지 않는다**: 스킬만 아니라 `/mcp`·`/model` 같은 내장 명령까지 사라져 대화형에서 쓸 수 없다. 확인 결과 새 `CLAUDE_CONFIG_DIR` 프로필에는 `~/.agents/skills` 가 새어 들어오지 않아 플래그 없이도 사용자 스킬은 보이지 않는다(내장 스킬만 남음).
 - **HOME 오버라이드는 Claude 에 쓸 수 없다**: 키체인 항목 조회가 HOME 에 묶여 있어 `HOME` 을 바꾸면 "Not logged in" 이 된다. Claude 격리는 `CLAUDE_CONFIG_DIR` + `--strict-mcp-config` 로만.
 - `-p` 모드는 stdin 을 3초 기다린 뒤 진행한다(러너는 stdin 을 닫아 대기 없음).

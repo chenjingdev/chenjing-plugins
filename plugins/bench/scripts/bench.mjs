@@ -8,7 +8,7 @@
 //   bench status [app]                    버전·프로필·스킬 설치 상태
 //   bench apps                            등록된 앱 이름
 //
-// 하네스: claude | codex | agy   (effort 값은 하네스마다 다르다: claude low…max, codex low…xhigh, agy low|medium|high)
+// 하네스: claude | codex | agy | grok   (effort 값은 하네스마다 다르다: claude low…max, codex low…xhigh, agy low|medium|high, grok none…max)
 // 스킬은 실행 옵션이 아니라 프로필의 설치 상태다 — 매 실행에 숨은 환경 차이를 만들지 않고, 켜고 끄는 행위가 명시적으로 남게.
 // 앱 등록(apps/<app>.json 작성)은 사람이 손으로 하지 않고 bench-profile 스킬이 담당한다 — 스키마는 skills/bench-profile/references/runner.md.
 // 이 파일은 chenjing-plugins 의 bench 플러그인에 번들되며, 셸의 `bench` 함수가 설치된 플러그인 경로에서 이 파일을 찾아 실행한다.
@@ -21,6 +21,7 @@
 //     <app>/claude-mcp.json    Claude 에 --mcp-config 로 주는 앱별 MCP 정의
 //     <app>/codex/             CODEX_HOME 이자 HOME (HOME 도 바꿔야 ~/.agents/skills 가 안 보인다). 스킬 설치 시 skills/<스킬> 링크
 //     <app>/agy/               HOME 오버라이드용 홈 (.gemini 에 인증 파일만 링크). 스킬 설치 시 .gemini/config/skills/<스킬> 링크
+//     <app>/grok/              GROK_HOME 이자 HOME. auth.json 은 실제 것의 링크, config.toml 은 Claude·Cursor 호환 스캔을 끄고 앱 MCP 만 둔다. 스킬 설치 시 skills/<스킬> 링크
 //     <app>/work/              빈 작업 디렉터리. Claude 스킬 설치 시 .claude/skills/<스킬> 링크
 
 import fs from "node:fs";
@@ -32,6 +33,7 @@ const REAL_HOME = os.homedir();
 const BENCH_HOME = process.env.BENCH_HOME || path.join(REAL_HOME, ".bench");
 const APPS_DIR = process.env.BENCH_APPS_DIR || path.join(BENCH_HOME, "apps");
 const AGY_BIN = process.env.AGY_BIN || path.join(REAL_HOME, ".local", "bin", "agy");
+const GROK_BIN = process.env.GROK_BIN || path.join(REAL_HOME, ".grok", "bin", "grok");
 
 // ---------- 공용 ----------
 const mkdir = (d) => fs.mkdirSync(d, { recursive: true });
@@ -63,13 +65,15 @@ const dirs = (app) => ({
   claudeMcp: path.join(BENCH_HOME, app, "claude-mcp.json"),
   codex: path.join(BENCH_HOME, app, "codex"),
   agy: path.join(BENCH_HOME, app, "agy"),
+  grok: path.join(BENCH_HOME, app, "grok"),
   work: path.join(BENCH_HOME, app, "work"),
 });
-// 스킬이 들어가는 세 자리 — 설치 상태는 이 링크들의 존재로 정의한다(별도 상태 파일 없음)
+// 스킬이 들어가는 네 자리 — 설치 상태는 이 링크들의 존재로 정의한다(별도 상태 파일 없음)
 const skillSlots = (app) => [
   path.join(dirs(app).work, ".claude", "skills"),
   path.join(dirs(app).codex, "skills"),
   path.join(dirs(app).agy, ".gemini", "config", "skills"),
+  path.join(dirs(app).grok, "skills"),
 ];
 function skillInstalled(app, a) {
   if (!a.skills.length) return false;
@@ -161,6 +165,27 @@ function initAgy(app, a) {
   writeJson(path.join(bg, "config", "mcp_config.json"), { mcpServers: Object.fromEntries(Object.entries(a.mcp).map(([n, s]) => [n, { command: s.command, args: s.args ?? [], env: serverEnv(s) }])) });
 }
 
+// Grok Build CLI: GROK_HOME 으로 설정·세션·스킬 위치를 옮기고 HOME 도 바꾼다(~/.agents/skills 같은 홈 기준 스캔 차단).
+// GROK_HOME 만 바꾸면 Claude·Cursor 호환 스캔이 실제 ~/.claude.json 의 MCP, ~/.claude/skills, settings.json 의 훅, Claude.md 를
+// 그대로 끌어온다(grok inspect 로 확인) — config 에서 전부 끈다. 인증은 auth.json 하나라 실제 것을 링크한다.
+function initGrok(app, a) {
+  const home = dirs(app).grok;
+  mkdir(home);
+  must(path.join(REAL_HOME, ".grok", "auth.json"), "grok 인증 파일");
+  link(path.join(REAL_HOME, ".grok", "auth.json"), path.join(home, "auth.json"));
+  const q = (v) => JSON.stringify(v);
+  let toml = `# bench 프로필 (${app}) — bench.mjs 가 생성. 실제 ~/.grok/config.toml 과 무관.\n`;
+  for (const vendor of ["claude", "cursor"]) {
+    toml += `\n[compat.${vendor}]\n${["skills", "rules", "agents", "mcps", "hooks", "sessions"].map((k) => `${k} = false`).join("\n")}\n`;
+  }
+  for (const [n, s] of Object.entries(a.mcp)) {
+    toml += `\n[mcp_servers.${n}]\ncommand = ${q(s.command)}\nargs = [${(s.args ?? []).map(q).join(", ")}]\n`;
+    toml += `\n[mcp_servers.${n}.env]\n${Object.entries(serverEnv(s)).map(([k, v]) => `${k} = ${q(String(v))}`).join("\n")}\n`;
+  }
+  fs.writeFileSync(path.join(home, "config.toml"), toml);
+  mkdir(path.join(home, "skills"));
+}
+
 async function init(app, opts) {
   const a = loadApp(app);
   a.tools ??= {};
@@ -184,6 +209,7 @@ async function init(app, opts) {
   initClaude(app, a);
   initCodex(app, a);
   initAgy(app, a);
+  initGrok(app, a);
   if (wasOn) setSkill(app, a, true);   // 재생성해도 설치 상태는 유지
   console.log(`프로필 준비 완료: ${dirs(app).app}  (스킬 ${wasOn ? "설치됨" : "미설치 — 켜려면: bench skill " + app + " on"})`);
   if (!exists(path.join(dirs(app).claude, ".claude.json"))) console.log(`Claude Code 는 공유 벤치 프로필에 첫 1회 로그인이 필요합니다:  bench run ${app} claude  → /login`);
@@ -196,7 +222,7 @@ function version(cmd, args, env) {
 }
 function status(only) {
   console.log(`BENCH_HOME=${BENCH_HOME}  BENCH_APPS_DIR=${APPS_DIR}`);
-  console.log(`claude ${version("claude", ["--version"])} · codex ${version("codex", ["--version"])} · agy ${version(AGY_BIN, ["--version"])}`);
+  console.log(`claude ${version("claude", ["--version"])} · codex ${version("codex", ["--version"])} · agy ${version(AGY_BIN, ["--version"])} · grok ${version(GROK_BIN, ["--version"])}`);
   console.log(`Claude 공유 프로필: ${exists(path.join(BENCH_HOME, "_claude", ".claude.json")) ? "로그인 이력 있음(미확정 — 첫 실행 때 확인)" : "미로그인 — bench run <app> claude → /login"}`);
   for (const app of listApps().filter((x) => !only || x === only)) {
     let a; try { a = loadApp(app); } catch (e) { console.log(`\n${app}: 정의 오류 — ${e.message}`); continue; }
@@ -206,7 +232,7 @@ function status(only) {
     console.log(`  MCP: ${Object.entries(a.mcp).map(([n]) => `${n}(${a.tools?.[n]?.length ?? "?"}개 도구)`).join(", ")}`);
     const names = a.skills.map((s) => path.basename(s)).join(", ");
     console.log(`  스킬: ${!a.skills.length ? "등록된 스킬 없음" : skillInstalled(app, a) ? `설치됨 (${names}) — 끄려면 bench skill ${app} off` : `미설치 (${names}) — 켜려면 bench skill ${app} on`}`);
-    const ok = exists(D.claudeMcp) && exists(path.join(D.codex, "config.toml")) && exists(path.join(D.agy, ".gemini", "config", "mcp_config.json"));
+    const ok = exists(D.claudeMcp) && exists(path.join(D.codex, "config.toml")) && exists(path.join(D.agy, ".gemini", "config", "mcp_config.json")) && exists(path.join(D.grok, "config.toml"));
     console.log(`  프로필: ${ok ? "준비됨" : "미생성 — bench init " + app}  ${D.app}`);
   }
 }
@@ -228,7 +254,7 @@ function parseRun(argv) {
   return o;
 }
 function run(o) {
-  if (!o.app || !o.harness) throw new Error("사용법: bench run <app> <claude|codex|agy> [--effort E] [--model M] [--dry-run] [-- 프롬프트…]  |  bench run <app> skill on|off");
+  if (!o.app || !o.harness) throw new Error("사용법: bench run <app> <claude|codex|agy|grok> [--effort E] [--model M] [--dry-run] [-- 프롬프트…]  |  bench run <app> skill on|off");
   const a = loadApp(o.app);
   if (o.harness === "skill") return skillCmd(o.app, a, o.rest[0]);   // <app>bench skill on|off
   const D = dirs(o.app);
@@ -255,7 +281,13 @@ function run(o) {
     if (o.effort) args.push("--effort", o.effort);
     if (o.model) args.push("--model", o.model);
     if (o.prompt) args.push("-p", o.prompt, "--output-format", "text");
-  } else throw new Error(`알 수 없는 하네스: ${o.harness} (claude | codex | agy)`);
+  } else if (o.harness === "grok") {
+    cmd = GROK_BIN; env.GROK_HOME = D.grok; env.HOME = D.grok; env.GROK_DISABLE_AUTOUPDATER = "1";
+    args.push("--permission-mode", "bypassPermissions");   // MCP 도구까지 전부 자동 승인. 대화형·헤드리스(-p) 공통
+    if (o.model) args.push("-m", o.model);
+    if (o.effort) args.push("--effort", o.effort);
+    if (o.prompt) args.push("-p", o.prompt);
+  } else throw new Error(`알 수 없는 하네스: ${o.harness} (claude | codex | agy | grok)`);
   mkdir(cwd);
   console.error(`[bench] ${o.app} · ${o.harness} skill=${skillOn ? "설치됨" : "미설치"} effort=${o.effort ?? "기본"} model=${o.model ?? "기본"} cwd=${cwd}`);
   if (o.dryRun) {
@@ -284,5 +316,5 @@ try {
   else if (sub === "apps") console.log(listApps().join("\n"));
   else if (sub === "skill") { if (!rest[0]) throw new Error("사용법: bench skill <app> on|off"); skillCmd(rest[0], loadApp(rest[0]), rest[1]); }
   else if (sub === "run") run(parseRun(rest));
-  else { console.log("사용법: bench init <app> | status [app] | apps | skill <app> on|off | run <app> <claude|codex|agy> [--effort E] [--model M] [--dry-run] [-- 프롬프트…]"); process.exit(sub ? 1 : 0); }
+  else { console.log("사용법: bench init <app> | status [app] | apps | skill <app> on|off | run <app> <claude|codex|agy|grok> [--effort E] [--model M] [--dry-run] [-- 프롬프트…]"); process.exit(sub ? 1 : 0); }
 } catch (e) { console.error(`오류: ${e.message}`); process.exit(1); }

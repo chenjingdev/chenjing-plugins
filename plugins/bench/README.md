@@ -1,11 +1,12 @@
 # bench
 
-내 앱을 **순정 하네스**에서 돌려 보는 벤치. Claude Code / Codex / agy 를 사용자 MCP·스킬·플러그인·훅(Honcho 포함) 없는 깨끗한 프로필로 띄우고, 벤치 대상 앱의 MCP 하나만 붙인다.
+내 앱을 **순정 하네스**에서 돌려 보는 벤치. Claude Code / Codex / agy / Grok 을 사용자 MCP·스킬·플러그인·훅(Honcho 포함) 없는 깨끗한 프로필로 띄우고, 벤치 대상 앱의 MCP 하나만 붙인다.
 
 ```zsh
 ariabench claude                        # 대화형 (첫 1회 /login)
 ariabench codex --effort low -- "…"     # 비대화형 1회
 ariabench agy                           # agy
+ariabench grok --effort low -- "…"      # Grok Build CLI(xAI). effort none…max
 ariabench skill on                      # 앱 스킬(aria-compose)을 벤치 프로필에 설치 — 기본은 미설치(raw). off 로 제거
 bench status                            # 앱·프로필·스킬 설치 상태·CLI 버전
 ```

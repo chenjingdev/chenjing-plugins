@@ -1,6 +1,6 @@
 ---
 name: bench-profile
-description: Register an app (its MCP servers and the skills that belong to it) as a bench app so it runs inside clean "stock" harness profiles through app-specific commands such as ariabench claude, ariabench codex, and ariabench agy, then verify the isolation actually holds. Use this whenever the user asks to make, create, register, or add a bench / bench profile / 벤치 for an app or MCP server ("○○ 벤치 만들어줘", "벤치에 추가해줘", "순정 프로필로 돌려보고 싶어", "깨끗한 하네스에서 테스트"), wants to compare Claude Code, Codex, and agy on their own app without personal MCPs/skills/hooks interfering, or reports a bench profile problem (MCP tool call cancelled, a skill visible when it should not be, plugins leaking in, login prompt, Honcho recording bench runs). Also use it when the user asks which of their MCP servers are registered where, or how bench runs relate to memory hooks.
+description: Register an app (its MCP servers and the skills that belong to it) as a bench app so it runs inside clean "stock" harness profiles through app-specific commands such as ariabench claude, ariabench codex, ariabench agy, and ariabench grok, then verify the isolation actually holds. Use this whenever the user asks to make, create, register, or add a bench / bench profile / 벤치 for an app or MCP server ("○○ 벤치 만들어줘", "벤치에 추가해줘", "순정 프로필로 돌려보고 싶어", "깨끗한 하네스에서 테스트"), wants to compare Claude Code, Codex, agy, and Grok on their own app without personal MCPs/skills/hooks interfering, or reports a bench profile problem (MCP tool call cancelled, a skill visible when it should not be, plugins leaking in, login prompt, Honcho recording bench runs). Also use it when the user asks which of their MCP servers are registered where, or how bench runs relate to memory hooks.
 ---
 
 # bench-profile — 앱을 순정 하네스 벤치에 등록하기
@@ -8,7 +8,7 @@ description: Register an app (its MCP servers and the skills that belong to it) 
 ## 이게 무엇인가
 
 플러그인 루트의 `scripts/bench.mjs`는 사용자 설정(다른 MCP·사용자 스킬·플러그인·훅·CLAUDE.md/AGENTS.md)이 하나도 없는
-**깨끗한 프로필**에서 Claude Code / Codex / agy를 실행하는 러너다. 프로필에는 벤치 대상 앱의 MCP 서버만 들어가고,
+**깨끗한 프로필**에서 Claude Code / Codex / agy / Grok을 실행하는 러너다. 프로필에는 벤치 대상 앱의 MCP 서버만 들어가고,
 그 앱의 스킬은 `bench skill <app> on`으로 설치했을 때만 보인다. 훅이 없으니 벤치 런은 Honcho 같은 기억 시스템에 기록되지 않는다 — 벤치 잡음이
 사용자 기억을 오염시키지 않게 하려는 의도다.
 
@@ -38,11 +38,11 @@ README는 다섯 줄짜리 사용법뿐이고, 스키마는 여기에만 있다.
 node "$BENCH_PLUGIN_ROOT/scripts/find-mcp.mjs" <이름 일부>     # 인자 없으면 전부
 ```
 
-`~/.claude.json`(mcpServers) · `~/.codex/config.toml`([mcp_servers.*]) · `~/.gemini/config/mcp_config.json` 세 곳을 뒤져
+`~/.claude.json`(mcpServers) · `~/.codex/config.toml`([mcp_servers.*]) · `~/.gemini/config/mcp_config.json` · `~/.grok/config.toml`([mcp_servers.*]) 네 곳을 뒤져
 `source, name, type, command, args, env, cwd, url`로 정규화해 준다. 개발 중인 앱은 거의 항상 이 중 한 곳엔 등록돼 있다.
 
 결과를 읽을 때:
-- **세 프로필의 정의가 다르면** 그대로 하나를 고르지 말고 차이를 사용자에게 보여 준다. 이름이 다르거나(`myapp` vs
+- **프로필마다 정의가 다르면** 그대로 하나를 고르지 말고 차이를 사용자에게 보여 준다. 이름이 다르거나(`myapp` vs
   `myapp_personal`), 데이터 디렉터리·모델·실행 방식이 다른 경우가 흔하다. 벤치는 "어떤 상태의 앱을 재는가"가 결과에
   직접 들어가므로 이 선택은 사용자 몫이다. 물을 수 없는 상황이면 합리적으로 정하고 이유를 보고에 남긴다.
 - **정의가 살아 있는지 확인한다.** `command` 경로가 존재하는가, 리포가 그 실행 방식을 아직 쓰는가(Rust 바이너리 → Python으로
@@ -57,7 +57,7 @@ node "$BENCH_PLUGIN_ROOT/scripts/find-mcp.mjs" <이름 일부>     # 인자 없�
 ### 2. 스킬 고르기
 
 이 앱이 **소유한** 스킬만 붙인다 — 에이전트에게 이 앱 쓰는 법을 가르치는 스킬. 후보는
-`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/config/skills`, 앱 리포의 `skills/`에서 찾고,
+`~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/config/skills`, `~/.grok/skills`, 앱 리포의 `skills/`에서 찾고,
 같은 스킬이 여러 곳에 링크돼 있으면 **리포 안의 원본**을 가리킨다(벤치가 항상 최신 스킬을 보게).
 
 관련 없는 스킬은 넣지 않는다. raw 트랙은 "스킬 없이 모델이 스스로 해내는가", skill 트랙은 "이 앱의 스킬이 얼마나 도움이 되나"를
@@ -93,7 +93,7 @@ node "$BENCH_PLUGIN_ROOT/scripts/find-mcp.mjs" <이름 일부>     # 인자 없�
 bench init <app>
 ```
 
-`init`은 각 MCP 서버를 실제로 한 번 띄워 `tools/list`를 받아 도구 이름을 JSON에 캐시하고, 세 하네스의 프로필을 만든다.
+`init`은 각 MCP 서버를 실제로 한 번 띄워 `tools/list`를 받아 도구 이름을 JSON에 캐시하고, 네 하네스의 프로필을 만든다.
 **여기서 실패하면 서버가 그 정의로 단독 실행되지 않는 것이다.** 러너는 "MCP 서버가 응답 전에 종료됐습니다"까지만 말하므로,
 같은 command/args/env로 서버를 **손으로 띄워 stderr를 읽는다** — 죽은 바이너리, 스키마 버전 불일치, 필수 상태 없음 같은
 진짜 원인은 거기 있다. 정의를 고친 뒤 다시 `init`. `references/pitfalls.md`에 증상별 원인이 있다.
@@ -114,11 +114,15 @@ bench run <app> codex --effort low -- "1) Call the <서버> MCP tool <읽기도�
 bench skill <app> on
 bench run <app> agy --effort low -- "1) Is a skill named <스킬> available? YES/NO. 2) List every MCP server available to you. 3) Call <서버>/<읽기도구> and report one line."
 bench skill <app> off
+bench run <app> grok --effort low -- "1) Call the <서버> MCP tool <읽기도구> and report the result in one line. 2) List every MCP server and every skill available to you. Be brief."
 ```
+
+Grok은 LLM을 부르기 전에 `GROK_HOME=~/.bench/<app>/grok HOME=~/.bench/<app>/grok grok inspect`로 로드된 MCP·스킬·훅·지침의 출처를
+볼 수 있다. `[claude]`·`[cursor]` 꼬리표가 하나라도 보이면 호환 스캔이 새는 것이다(pitfalls의 grok 항목).
 
 기대값:
 - MCP 서버는 **이 앱의 것만**. 다른 이름이 보이면 오염 — pitfalls에서 그 하네스 항목을 본다.
-- raw에서 스킬은 CLI 내장만(Claude: dataviz·code-review·loop 등, Codex: imagegen·openai-docs·skill-creator 등, agy: antigravity-guide 등). 사용자 스킬 이름(html·design-artifact·aria-compose 등)이 보이면 오염.
+- raw에서 스킬은 CLI 내장만(Claude: dataviz·code-review·loop 등, Codex: imagegen·openai-docs·skill-creator 등, agy: antigravity-guide 등, Grok: 없음). 사용자 스킬 이름(html·design-artifact·aria-compose 등)이 보이면 오염.
 - `skill on` 상태에서는 이 앱의 스킬이 보여야 하고, `off`로 되돌린 뒤엔 다시 사라져야 한다.
 - 도구 호출이 실제 값을 돌려줘야 한다. "cancelled"·"unavailable"이면 Codex 승인 테이블 또는 서버 실행 문제.
 
@@ -130,7 +134,7 @@ Claude Code는 공유 벤치 프로필 `~/.bench/_claude/`에 첫 1회 `/login`�
 사용자에게 알릴 것만 짧게:
 - 등록된 서버와 스킬, 어느 프로필 정의를 기준으로 했는지(다른 프로필과 달랐던 점, 죽은 정의였다면 그 사실)
 - 벤치 전용으로 새로 만든 것(데이터 디렉터리·부트스트랩 상태)과 그 이유
-- 실행 명령: `<app>bench claude|codex|agy [--effort E] [-- "…"]`, 스킬을 쓰려면 `<app>bench skill on` — 새 함수는 `source ~/.zshrc` 뒤에 생긴다
+- 실행 명령: `<app>bench claude|codex|agy|grok [--effort E] [-- "…"]`, 스킬을 쓰려면 `<app>bench skill on` — 새 함수는 `source ~/.zshrc` 뒤에 생긴다
 - 스모크 결과(무엇이 보였고 무엇이 안 보였는지, 도구가 실제 값을 냈는지)
 - 남은 일: Claude `/login` 여부, 서버가 기대는 외부 서비스, 미지원 사항, 평문으로 복제된 비밀값
 
@@ -140,6 +144,6 @@ Claude Code는 공유 벤치 프로필 `~/.bench/_claude/`에 첫 1회 `/login`�
 ## 문제가 생기면
 
 `references/pitfalls.md`에 하네스별 함정과 해결이 정리돼 있다(Codex 도구 승인·`~/.agents/skills` 유출·`codex_apps`·stdin 대기,
-agy 플러그인 유출·HOME 오버라이드, Claude 프로필별 로그인·스킬 위치, 앱별 등록 이력). 새 함정을 만나면 그 파일에
+agy 플러그인 유출·HOME 오버라이드, Claude 프로필별 로그인·스킬 위치, Grok 호환 스캔 유출·MCP 결과 크기 상한, 앱별 등록 이력). 새 함정을 만나면 그 파일에
 증상 → 원인 → 해결을 한 항목으로 추가해 다음 등록이 반복하지 않게 한다. 러너 자체를 고쳐야 하는 문제면 `scripts/bench.mjs`를
 고치고 `bench init <app>`으로 프로필을 다시 생성한다 — 프로필은 언제든 버리고 다시 만들 수 있는 산출물이다.

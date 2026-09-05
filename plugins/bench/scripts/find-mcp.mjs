@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// 실제 프로필 세 곳에서 MCP 서버 정의를 찾아 정규화된 JSON 으로 출력한다.
+// 실제 프로필 네 곳에서 MCP 서버 정의를 찾아 정규화된 JSON 으로 출력한다.
 //   node find-mcp.mjs            전부
 //   node find-mcp.mjs myapp      이름에 'myapp' 이 들어간 것만 (대소문자 무시)
-// 출처: ~/.claude.json (mcpServers) · ~/.codex/config.toml ([mcp_servers.*]) · ~/.gemini/config/mcp_config.json
+// 출처: ~/.claude.json (mcpServers) · ~/.codex/config.toml ([mcp_servers.*]) · ~/.gemini/config/mcp_config.json · ~/.grok/config.toml ([mcp_servers.*])
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,15 +18,16 @@ try {
   for (const [n, s] of Object.entries(d.mcpServers ?? {})) push("claude", n, { type: s.type ?? (s.url ? "http" : "stdio"), command: s.command, args: s.args ?? [], env: s.env ?? {}, cwd: s.cwd, url: s.url });
 } catch (e) { console.error(`claude 프로필 읽기 실패: ${e.message}`); }
 
-// Codex — 최소 TOML 파서: [mcp_servers.X] / [mcp_servers.X.env] 섹션의 문자열·배열·불·숫자만
-try {
-  const toml = fs.readFileSync(path.join(H, ".codex", "config.toml"), "utf8");
+// 최소 TOML 파서(Codex·Grok 공용): [mcp_servers.X] / [mcp_servers.X.env] 섹션의 문자열·배열·불·숫자·인라인 테이블 env 만
+function parseMcpToml(toml) {
   const servers = {};
   let cur = null, skipMultiline = false;
+  const str = (v) => JSON.parse(v);
   const val = (v) => {
     v = v.trim();
     if (v.startsWith("[")) return [...v.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => JSON.parse(`"${m[1]}"`));
-    if (v.startsWith('"')) return JSON.parse(v);
+    if (v.startsWith("{")) return Object.fromEntries([...v.matchAll(/([A-Za-z0-9_-]+)\s*=\s*("(?:[^"\\]|\\.)*")/g)].map((m) => [m[1], str(m[2])]));
+    if (v.startsWith('"')) return str(v);
     if (v === "true" || v === "false") return v === "true";
     if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
     return v;
@@ -35,7 +36,7 @@ try {
     const line = raw.replace(/\s+#.*$/, "").trim();
     if (skipMultiline) { if (line.includes('"""') || line.includes("'''")) skipMultiline = false; continue; }
     if (!line || line.startsWith("#")) continue;
-    const sec = /^\[mcp_servers\.([A-Za-z0-9_-]+)(\.env|\.tools\.[^\]]+|\.http_headers)?\]$/.exec(line);
+    const sec = /^\[mcp_servers\.([A-Za-z0-9_-]+)(\.env|\.tools\.[^\]]+|\.http_headers|\.headers|\.tool_timeouts)?\]$/.exec(line);
     if (sec) { cur = sec[2] === ".env" ? { n: sec[1], env: true } : sec[2] ? null : { n: sec[1], env: false }; servers[sec[1]] ??= { env: {} }; continue; }
     if (/^\[/.test(line)) { cur = null; continue; }
     if (!cur) continue;
@@ -43,10 +44,24 @@ try {
     const rhs = kv[2].trim();
     if (/^("""|''')/.test(rhs) && !/("""|''').*("""|''')$/.test(rhs)) { skipMultiline = true; continue; }   // 여러 줄 문자열은 건너뛴다
     let v; try { v = val(rhs); } catch { v = rhs; }
-    if (cur.env) servers[cur.n].env[kv[1]] = v; else servers[cur.n][kv[1]] = v;
+    if (cur.env) servers[cur.n].env[kv[1]] = v;
+    else if (kv[1] === "env" && v && typeof v === "object") servers[cur.n].env = { ...servers[cur.n].env, ...v };
+    else servers[cur.n][kv[1]] = v;
   }
-  for (const [n, s] of Object.entries(servers)) push("codex", n, { type: s.url ? "http" : "stdio", command: s.command, args: s.args ?? [], env: s.env, cwd: s.cwd, url: s.url, enabled: s.enabled ?? true, startup_timeout_sec: s.startup_timeout_sec });
-} catch (e) { console.error(`codex 프로필 읽기 실패: ${e.message}`); }
+  return servers;
+}
+const pushToml = (source, file) => {
+  const servers = parseMcpToml(fs.readFileSync(file, "utf8"));
+  for (const [n, s] of Object.entries(servers)) push(source, n, { type: s.url ? "http" : "stdio", command: s.command, args: s.args ?? [], env: s.env, cwd: s.cwd, url: s.url, enabled: s.enabled ?? true, startup_timeout_sec: s.startup_timeout_sec });
+};
+
+// Codex — ~/.codex/config.toml
+try { pushToml("codex", path.join(H, ".codex", "config.toml")); }
+catch (e) { console.error(`codex 프로필 읽기 실패: ${e.message}`); }
+
+// Grok Build CLI — ~/.grok/config.toml (같은 [mcp_servers.*] 형식, env 는 인라인 테이블도 쓴다)
+try { pushToml("grok", path.join(H, ".grok", "config.toml")); }
+catch (e) { console.error(`grok 프로필 읽기 실패: ${e.message}`); }
 
 // agy (Antigravity CLI) — 전역 MCP 설정
 try {
@@ -54,5 +69,5 @@ try {
   for (const [n, s] of Object.entries(d.mcpServers ?? d)) push("agy", n, { type: s.url || s.httpUrl ? "http" : "stdio", command: s.command, args: s.args ?? [], env: s.env ?? {}, cwd: s.cwd, url: s.url ?? s.httpUrl });
 } catch (e) { console.error(`agy 프로필 읽기 실패: ${e.message}`); }
 
-if (!out.length) { console.error(q ? `'${q}' 에 해당하는 MCP 서버가 세 프로필 어디에도 없습니다` : "MCP 서버 정의를 찾지 못했습니다"); process.exit(1); }
+if (!out.length) { console.error(q ? `'${q}' 에 해당하는 MCP 서버가 네 프로필 어디에도 없습니다` : "MCP 서버 정의를 찾지 못했습니다"); process.exit(1); }
 console.log(JSON.stringify(out, null, 2));
