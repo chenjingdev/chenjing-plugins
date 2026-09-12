@@ -1,7 +1,7 @@
 {
   "name": "tiers",
   "description": "실행 티어를 사용자가 고정하는 위임 플러그인 — 일상 구현은 /tiers:delegate(worker·scout 에이전트 + 가드 훅), 대규모 fan-out은 /tiers:ultracode, 리서치는 /tiers:deep-research. 세션 모델은 계획·검증만, 실행은 지정 티어.",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "author": {
     "name": "chenjing"
   }

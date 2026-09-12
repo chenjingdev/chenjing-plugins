@@ -1,74 +1,47 @@
 ---
 name: delegate
-description: Use when the user runs /tiers:delegate — the everyday delegation layer of tiers. The main session keeps judgment (intent, narrow reading, the brief, verification) and writes every human-facing document itself; code goes to the pinned-tier `tiers:worker`, wide lookups to `tiers:scout`. `on`/`off` turns the whole hook on or off (model pinning included), `status` shows config and recent handoffs, `setup` changes the tier, and `<task>` runs the protocol once.
+description: Use when the user runs /tiers:delegate — the everyday delegation layer of tiers. The main session plans, briefs, verifies and writes human-facing documents; `tiers:worker` writes the code; `tiers:scout` does wide lookups. `on`/`off` turns the whole hook on or off (model pinning included), `status` shows config and recent handoffs, `setup` changes the tier, `<task>` runs the protocol once.
 argument-hint: "on | off | status | setup | <작업>"
 disable-model-invocation: true
 ---
 
-# delegate — plan here, implement there
+# delegate
 
-tiers pins the tier of everything you fan out. `/tiers:ultracode` does it for Workflow runs; this
-skill does it for ordinary work through the Agent tool, and adds the discipline that makes a
-handoff survive: a structured brief, an ask-back channel, and verification by the session that
-holds the context.
+Config: `${CLAUDE_PLUGIN_DATA}/delegate.json`, read on every hook call, so changes apply at once.
+Defaults: `{"model":"opus","enabled":false,"pin":"all","prose":[".md",".mdx",".rst",".txt"],"small_edit_chars":200,"log":true}`
 
-The plugin's hook (`hooks/guard.js`) runs whether or not this skill is loaded, behind a single
-switch — `enabled`. On, it pins the model of Agent calls, denies code edits in the main session,
-denies prose edits by the worker (files whose extension is in `prose`, by default `.md .mdx .rst
-.txt` — those the session writes itself, at any size), and rejects worker briefs that lack the
-four sections. Off, it does none of those, model pinning included; only the handoff result log
-keeps closing out workers that started while it was on.
-Config lives in `${CLAUDE_PLUGIN_DATA}/delegate.json` and is read on every call, so changes apply
-immediately, no restart.
+While `enabled` is true the hook pins the model of Agent calls, denies code edits in the main session, denies prose edits by the worker, and rejects worker briefs missing the four sections. Off, it does nothing.
 
-## Dispatch — decide by arguments
+## Dispatch
 
 Arguments: $ARGUMENTS
 
-| Arguments | Action |
+| Arguments | Do |
 |---|---|
-| `on` / `off` | Read `${CLAUDE_PLUGIN_DATA}/delegate.json` (create the directory and file if missing; defaults below), set `enabled` to true/false, write it back keeping the other keys, then confirm in one line: mode, worker model, pin scope. |
-| `status` or empty | Read the config (or say the defaults are in effect), then print: enabled, model, pin, prose, small_edit_chars, log, the data dir path, whether `TIERS_DELEGATE` is set in this environment, and the three most recent files under `${CLAUDE_PLUGIN_DATA}/handoffs/` if any. Finish with the five-line rules digest below. Do not run a task. |
-| `setup` | Read `references/setup.md` (relative to this skill's base directory) and follow it. Do not run a task. |
-| anything else | TASK = the arguments. Run the protocol below once, now, regardless of whether the hook is on. |
+| `on` / `off` | Read the config (create the directory and file with the defaults if missing), set `enabled`, write it back keeping the other keys. Confirm in one line: mode, worker model, pin scope. |
+| `status` or empty | Print enabled, model, pin, prose, small_edit_chars, log, the data dir path, whether `TIERS_DELEGATE` is set, and the three newest files in `${CLAUDE_PLUGIN_DATA}/handoffs/`. Then print the rules digest. Do not run a task. |
+| `setup` | Follow `references/setup.md` (relative to this skill's base directory). Do not run a task. |
+| anything else | TASK = the arguments. Run the protocol once, now, whether the hook is on or off. |
 
-Defaults when the file is missing:
-`{"model":"opus","enabled":false,"pin":"all","prose":[".md",".mdx",".rst",".txt"],"small_edit_chars":200,"log":true}`
+## Protocol — one work item
 
-## The protocol — one work item
-
-1. **Narrow reading, yourself.** Read the specific files the brief will cite. Do not delegate the
-   reading that feeds your own judgment. Anything wide — "find every caller", "what did we decide
-   about X last month", "how does this library handle Y" — goes to `tiers:scout` with a *question*,
-   not keywords; it returns verbatim excerpts with provenance and no conclusions.
-2. **Write the brief.** Four sections, real content in each. Korean or English headings.
-   - `## 목표 (Goal)` — what to achieve in the user's terms, plus how you resolved anything ambiguous.
-   - `## 맥락 (Context)` — what you already found: files with line refs, conventions, decisions made
-     in this conversation and *why*, rejected alternatives. The worker starts with none of this.
-   - `## 범위 (Scope)` — files to touch and not to touch, what the user explicitly does not want,
-     and which decisions you hand to the worker's discretion.
+1. Read the specific files the brief will cite, yourself. Send wide questions ("every caller of X", "what did we decide about Y") to `tiers:scout` as a question; it returns excerpts with provenance.
+2. Write the brief, four sections with real content:
+   - `## 목표 (Goal)` — what to achieve in the user's terms; how you resolved ambiguity.
+   - `## 맥락 (Context)` — files with line refs, conventions, decisions made in this conversation and why, rejected alternatives. The worker has none of this.
+   - `## 범위 (Scope)` — files to touch and not, what the user does not want, decisions left to the worker.
    - `## 완료 기준 (Done when)` — observable criteria and the exact verification commands.
-3. **Spawn `tiers:worker`** with the Agent tool (`subagent_type: "tiers:worker"`, the brief as the
-   prompt). Do not pass `model`; the hook pins it. Do not wrap this in a Workflow.
-4. **Answer BLOCKED in place.** If the worker returns a message starting with `BLOCKED:`, reply
-   with SendMessage to that same agent — its context is intact. Never spawn a fresh worker to
-   answer a question the old one asked. If the same spot blocks twice, the gap lives in your head:
-   run `/tiers:delegate off`, make that part yourself, run `on` again.
-5. **Verify yourself, then write the words.** `git diff`, run the done-when commands, read the
-   worker's "Decisions I made", "Open / Risks" and "Docs for the session". Send fix-ups to the same
-   worker as a follow-up message. Then write the README lines, handoff notes and any other
-   human-facing text yourself, in your own sentences. The worker's report is raw material, not copy
-   to paste; the hook denies the worker those files anyway.
-6. **Reuse or refresh.** The next task on the same files in the same sitting goes to the same
-   worker. When the area changes, or the worker's report shows it is confused or carrying a lot of
-   context, start a new one.
-7. **Report to the user** in your own words: what changed, what you verified and how, which
-   decisions were delegated and what the worker chose, what remains.
+3. Spawn `tiers:worker` with the Agent tool (`subagent_type: "tiers:worker"`, the brief as the prompt). No `model`; the hook pins it. No Workflow.
+4. On `BLOCKED:` answer with SendMessage to the same agent. Never spawn a new worker for the old one's question. If the same spot blocks twice, run `/tiers:delegate off`, do that part yourself, run `on`.
+5. Verify: `git diff`, run the done-when commands, read "Decisions I made", "Open / Risks", "Docs for the session". Fix-ups go to the same worker.
+6. Write the prose yourself: README lines, handoff notes, any text a person reads, in your own words. The worker's report is material, not copy.
+7. Same files, same sitting: reuse the worker. New area, or a worker that reports confused: start a new one.
+8. Report to the user: what changed, how you verified it, what the worker decided, what remains.
 
 ## Rules digest (print with `status`)
 
-- Code is the worker's, without exception; the session plans, briefs, verifies — and writes every human-facing document itself (`prose` extensions; the hook denies the worker there).
-- Narrow reading for the brief is the session's; wide sweeps are the scout's (excerpts + provenance, no conclusions).
-- One worker per work item; questions and fix-ups go back to that worker, not to a new one.
-- What the session may still write: prose files, /tmp, `${CLAUDE_PLUGIN_DATA}/delegate.json`, and one code Edit under `small_edit_chars`. `/tiers:delegate off` for analysis sessions or a repeating BLOCKED loop; `TIERS_DELEGATE=off` for one session.
-- `off` turns the whole hook off, pinning included. `pin: all|worker` only sets how far pinning reaches while on.
+- Code is the worker's; the session plans, briefs, verifies, and writes every human-facing document.
+- Narrow reading is the session's; wide sweeps are the scout's (excerpts + provenance, no conclusions).
+- One worker per work item; questions and fix-ups go back to it.
+- The session may still write: prose files, /tmp, `${CLAUDE_PLUGIN_DATA}/delegate.json`, one code Edit under `small_edit_chars`.
+- `off` stops the whole hook, pinning included; `TIERS_DELEGATE=off` does it for one session; `pin: all|worker` sets how far pinning reaches while on.
