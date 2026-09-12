@@ -11,7 +11,8 @@
 //      this hook's own data dir — and `tiers:worker` may not, anywhere but tmp. Only
 //      `tiers:worker` — every other subagent passes as before.
 //   4. brief check + handoff log: worker/general-purpose briefs must carry goal/context/scope/done;
-//      accepted briefs and the worker's final report are written to ${CLAUDE_PLUGIN_DATA}/handoffs/.
+//      accepted briefs and every report the worker returns (one section per stop, so a
+//      SendMessage follow-up lands in the same file) are written to ${CLAUDE_PLUGIN_DATA}/handoffs/.
 // `enabled: false` → PreToolUse emits nothing at all, pinning included. SubagentStop still closes
 // out a handoff started while it was on (`log`). Writes to the guard's own delegate.json are
 // always allowed — that one file, nothing else in the data dir — so /tiers:delegate off can run.
@@ -424,16 +425,27 @@ function appendResult(input) {
   const psha = prompt !== null ? sha(prompt) : null;
   const sid = String(input.session_id || '');
   let target = null;
+  let round = 1;
   for (const f of files.slice().reverse()) {
     const p = path.join(dir, f);
     const body = fs.readFileSync(p, 'utf8');
+    if (psha) {
+      // Same brief, same handoff — however many times the worker stops. A SendMessage
+      // follow-up reports under the same first user prompt, so it appends another section
+      // to the file round 1 already wrote to instead of being dropped.
+      if (!body.includes(`prompt_sha: ${psha}`)) continue;
+      target = p;
+      round = (body.match(/\n# Result \(/g) || []).length + 1;
+      break;
+    }
+    // No transcript to hash: the newest file of this session that is still unanswered.
     if (body.includes('\n# Result')) continue;
-    if (psha && body.includes(`prompt_sha: ${psha}`)) { target = p; break; }
-    if (!psha && sid && body.includes(`session: ${sid}`) && !target) target = p;
+    if (sid && body.includes(`session: ${sid}`)) { target = p; break; }
   }
   if (!target) return;
   const msg = input.last_assistant_message || '(no final message captured)';
-  fs.appendFileSync(target, `\n# Result (${new Date().toISOString()}, agent ${input.agent_id || ''})\n\n${msg}\n`);
+  const head = `${new Date().toISOString()}, agent ${input.agent_id || ''}${round > 1 ? `, round ${round}` : ''}`;
+  fs.appendFileSync(target, `\n# Result (${head})\n\n${msg}\n`);
 }
 
 // ---------- main ----------

@@ -312,6 +312,34 @@ test('SubagentStop appends the worker report to the matching handoff by prompt h
   assert.match(body, /Status: DONE/);
 });
 
+test('SubagentStop twice on the same brief appends both reports to that one handoff, in order', () => {
+  // The SendMessage flow: the worker stops, gets a follow-up, stops again. Its transcript still
+  // opens with the original brief, so both reports belong to the handoff that brief created.
+  const OTHER_BRIEF = FULL_BRIEF.replace('--json flag', '--csv flag');
+  const first = run(main('Agent', { subagent_type: 'tiers:worker', prompt: FULL_BRIEF }), { cfg: ON });
+  run(main('Agent', { subagent_type: 'tiers:worker', prompt: OTHER_BRIEF }), { cfg: ON, dir: first.dir });
+  const transcript = path.join(first.dir, 'agent-x.jsonl');
+  writeFileSync(transcript, JSON.stringify({ type: 'user', message: { role: 'user', content: FULL_BRIEF } }) + '\n');
+  const stop = (last_assistant_message) => spawnSync('node', [GUARD], {
+    input: JSON.stringify({ hook_event_name: 'SubagentStop', session_id: 'sess-1234-abcd', agent_id: 'a9', agent_type: 'tiers:worker',
+      agent_transcript_path: transcript, last_assistant_message }),
+    encoding: 'utf8', env: { ...process.env, TIERS_DATA_DIR: first.dir, TIERS_DELEGATE: '' },
+  });
+  assert.equal(stop('## Status: BLOCKED\nwhich flag name?').status, 0);
+  assert.equal(stop('## Status: DONE\n- scripts/bench.mjs — added --json').status, 0);
+
+  const hdir = path.join(first.dir, 'handoffs');
+  const files = readdirSync(hdir);
+  assert.equal(files.length, 2);
+  const bodies = files.map((f) => readFileSync(path.join(hdir, f), 'utf8'));
+  const mine = bodies.find((b) => b.includes('--json flag'));
+  const other = bodies.find((b) => b.includes('--csv flag'));
+  assert.equal((mine.match(/# Result \(/g) || []).length, 2);
+  assert.ok(mine.indexOf('Status: BLOCKED') < mine.indexOf('Status: DONE'));
+  assert.match(mine, /# Result \([^)]*, round 2\)/);
+  assert.ok(!other.includes('# Result'), 'the other brief\'s handoff stays untouched');
+});
+
 test('TIERS_DELEGATE env overrides the config in both directions, pinning included', () => {
   const offEnv = { TIERS_DELEGATE: 'off' };
   assert.equal(run(main('Write', { file_path: 'a.js', content: 'x' }), { cfg: ON, env: offEnv }).out, null);
