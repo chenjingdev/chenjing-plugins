@@ -298,17 +298,11 @@ function bashWriteViolation(cmd, cfg) {
 }
 
 // ---------- messages ----------
-function delegateInstructions(cfg) {
-  return [
-    '[tiers delegate] Delegate mode is on: the main session plans, briefs and verifies; `tiers:worker` implements.',
-    'Do this instead of editing directly:',
-    '1. Read only what you need to write the brief (specific files). Wide sweeps go to `tiers:scout`, which returns excerpts with provenance.',
-    '2. Call Agent with subagent_type "tiers:worker" and a brief with these four sections (Korean or English headings, real content in each):',
-    briefTemplate(),
-    '3. If the worker returns BLOCKED, answer it with SendMessage to that same agent (its context is intact). Do not spawn a new one.',
-    '4. Verify yourself afterwards: read the diff and run the done-when commands. Send fix-ups to the same worker.',
-    `Escape hatches: one Edit under ${cfg.small_edit_chars} chars is allowed; writes under /tmp are allowed, and so is the delegate config itself (\${CLAUDE_PLUGIN_DATA}/delegate.json); for analysis sessions or a repeating BLOCKED loop run /tiers:delegate off (or start the session with TIERS_DELEGATE=off, which turns the whole hook off — pinning included).`,
-  ].join('\n');
+// One line, deliberately. A denied edit only has to teach two things: it is not yours to make, and
+// `tiers:worker` makes it. The four-section template belongs to the brief check below — that is the
+// moment a model actually needs it — and the worker agent's own description carries it too.
+function delegateNote() {
+  return 'Hand it to the tiers:worker subagent instead (Agent, subagent_type "tiers:worker") with a brief, then verify the diff yourself; /tiers:delegate off turns this guard off.';
 }
 
 // ---------- handoff log ----------
@@ -420,13 +414,13 @@ function handlePreToolUse(input, cfg) {
       const size = String(ti.old_string || '').length + String(ti.new_string || '').length;
       if (size <= cfg.small_edit_chars) return;
     }
-    return deny(delegateInstructions(cfg));
+    return deny(`[tiers delegate] ${tool} blocked in the main session — you plan and verify here, you don't implement.\n${delegateNote()}`);
   }
 
   if (tool === 'Bash') {
     const op = bashWriteViolation(ti.command || '', cfg);
     if (op) {
-      return deny(`[tiers delegate] Bash write blocked in the main session (matched: ${op}). Reads, git status/log/diff, tests and /tmp writes are fine.\n${delegateInstructions(cfg)}`);
+      return deny(`[tiers delegate] Bash write blocked in the main session (matched: ${op}). Reads, git status/log/diff, tests and /tmp writes are fine.\n${delegateNote()}`);
     }
   }
 }

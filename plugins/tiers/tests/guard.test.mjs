@@ -50,11 +50,16 @@ test('delegate off: the hook is silent — edits pass and nothing is pinned', ()
   }
 });
 
-test('delegate on: main Edit above the small-edit limit is denied with delegation instructions', () => {
+test('delegate on: main Edit above the small-edit limit is denied with a short handoff note', () => {
   const r = run(main('Edit', { file_path: 'a.js', old_string: 'x'.repeat(150), new_string: 'y'.repeat(150) }), { cfg: ON });
   assert.equal(decision(r), 'deny');
-  assert.match(r.out.hookSpecificOutput.permissionDecisionReason, /tiers:worker/);
-  assert.match(r.out.hookSpecificOutput.permissionDecisionReason, /완료 기준/);
+  const reason = r.out.hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /tiers:worker/);
+  assert.match(reason, /\/tiers:delegate off/);
+  // short on purpose: the brief template belongs to the brief check, not to every denied edit
+  assert.ok(reason.split('\n').length <= 2, `${reason.split('\n').length} lines: ${reason}`);
+  assert.ok(reason.length <= 300, `${reason.length} chars: ${reason}`);
+  assert.doesNotMatch(reason, /완료 기준|Escape hatches/);
 });
 
 test('delegate on: a small main Edit is allowed; replace_all is not', () => {
