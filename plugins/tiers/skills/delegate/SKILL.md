@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: Use when the user runs /tiers:delegate — the everyday delegation layer of tiers. The main session keeps judgment (intent, narrow reading, the brief, verification) and hands implementation to the pinned-tier `tiers:worker`; wide lookups go to `tiers:scout`. `on`/`off` toggles hook enforcement, `status` shows config and recent handoffs, `setup` changes the tier, and `<task>` runs the protocol once.
+description: Use when the user runs /tiers:delegate — the everyday delegation layer of tiers. The main session keeps judgment (intent, narrow reading, the brief, verification) and hands implementation to the pinned-tier `tiers:worker`; wide lookups go to `tiers:scout`. `on`/`off` turns the hook on or off as a whole (model pinning included), `status` shows config and recent handoffs, `setup` changes the tier, and `<task>` runs the protocol once.
 argument-hint: "on | off | status | setup | <작업>"
 disable-model-invocation: true
 ---
@@ -12,9 +12,10 @@ skill does it for ordinary work through the Agent tool, and adds the discipline 
 handoff survive: a structured brief, an ask-back channel, and verification by the session that
 holds the context.
 
-The plugin's hook (`hooks/guard.js`) already does three things whether or not this skill is
-loaded: it pins the model of Agent calls that omit one, and — when enforcement is on — it denies
-implementation edits in the main session and rejects worker briefs that lack the four sections.
+The plugin's hook (`hooks/guard.js`) runs whether or not this skill is loaded, behind a single
+switch — `enabled`. On, it pins the model of Agent calls, denies implementation edits in the main
+session, and rejects worker briefs that lack the four sections. Off, it does none of those, model
+pinning included; only the handoff result log keeps closing out workers that started while it was on.
 Config lives in `${CLAUDE_PLUGIN_DATA}/delegate.json` and is read on every call, so changes apply
 immediately, no restart.
 
@@ -24,13 +25,13 @@ Arguments: $ARGUMENTS
 
 | Arguments | Action |
 |---|---|
-| `on` / `off` | Read `${CLAUDE_PLUGIN_DATA}/delegate.json` (create the directory and file if missing; defaults below), set `enforce` to true/false, write it back keeping the other keys, then confirm in one line: mode, worker model, pin scope. |
-| `status` or empty | Read the config (or say the defaults are in effect), then print: enforce, model, pin, small_edit_chars, log, the data dir path, whether `TIERS_DELEGATE` is set in this environment, and the three most recent files under `${CLAUDE_PLUGIN_DATA}/handoffs/` if any. Finish with the five-line rules digest below. Do not run a task. |
+| `on` / `off` | Read `${CLAUDE_PLUGIN_DATA}/delegate.json` (create the directory and file if missing; defaults below), set `enabled` to true/false, write it back keeping the other keys, then confirm in one line: mode, worker model, pin scope. |
+| `status` or empty | Read the config (or say the defaults are in effect), then print: enabled, model, pin, small_edit_chars, log, the data dir path, whether `TIERS_DELEGATE` is set in this environment, and the three most recent files under `${CLAUDE_PLUGIN_DATA}/handoffs/` if any. Finish with the five-line rules digest below. Do not run a task. |
 | `setup` | Read `references/setup.md` (relative to this skill's base directory) and follow it. Do not run a task. |
-| anything else | TASK = the arguments. Run the protocol below once, now, regardless of whether enforcement is on. |
+| anything else | TASK = the arguments. Run the protocol below once, now, regardless of whether the hook is on. |
 
 Defaults when the file is missing:
-`{"model":"opus","enforce":false,"pin":"all","small_edit_chars":200,"log":true}`
+`{"model":"opus","enabled":false,"pin":"all","small_edit_chars":200,"log":true}`
 
 ## The protocol — one work item
 
@@ -64,5 +65,5 @@ Defaults when the file is missing:
 - Implementation is the worker's, without exception; the session plans, briefs, verifies.
 - Narrow reading for the brief is the session's; wide sweeps are the scout's (excerpts + provenance, no conclusions).
 - One worker per work item; questions and fix-ups go back to that worker, not to a new one.
-- Escape hatches: one Edit under `small_edit_chars`; writes under /tmp; `/tiers:delegate off` for analysis sessions or a repeating BLOCKED loop; `TIERS_DELEGATE=off` for one session.
-- Model pinning of Agent calls stays on even when enforcement is off (`pin: all|worker|off`).
+- Escape hatches: one Edit under `small_edit_chars`; writes under /tmp and to `${CLAUDE_PLUGIN_DATA}/delegate.json`; `/tiers:delegate off` for analysis sessions or a repeating BLOCKED loop; `TIERS_DELEGATE=off` for one session.
+- `off` turns the whole hook off, pinning included. `pin: all|worker` only sets how far pinning reaches while on.

@@ -23,24 +23,24 @@ tiers는 이 상속을 끊는다. 판단·설계·검증은 세션 모델이 그
 
 ## /tiers:delegate
 
-세션이 계획하고, worker가 구현하고, 세션이 검증한다. 설치만으로는 아무것도 강제하지 않고 모델 고정만 켜진다. `on`을 켠 사람의 세션에서만 편집이 차단된다.
+세션이 계획하고, worker가 구현하고, 세션이 검증한다. 설치만으로는 훅이 아무 일도 하지 않는다. `on`을 켠 사람의 세션에서만 모델 고정과 편집 차단이 걸린다.
 
 ```
-/tiers:delegate on          → 강제 모드. 메인 세션의 구현 편집을 훅이 거부
-/tiers:delegate off         → 해제. 모델 고정은 유지
+/tiers:delegate on          → 훅 전체를 켠다. 모델 고정 + 메인 세션 구현 편집 거부
+/tiers:delegate off         → 훅 전체를 끈다. 모델 고정도 하지 않는다
 /tiers:delegate status      → 설정·데이터 위치·최근 핸드오프
 /tiers:delegate setup       → worker 모델, 고정 범위, 소규모 편집 허용치
-/tiers:delegate <작업>       → 강제 모드와 무관하게 위임 프로토콜을 한 번 실행
+/tiers:delegate <작업>       → on/off와 무관하게 위임 프로토콜을 한 번 실행
 ```
 
 ### 훅이 하는 일
 
-플러그인의 `hooks/guard.js` 하나가 PreToolUse와 SubagentStop에 붙는다. 설정 파일은 호출마다 다시 읽으므로 변경이 즉시 적용된다.
+플러그인의 `hooks/guard.js` 하나가 PreToolUse와 SubagentStop에 붙는다. 설정 파일은 호출마다 다시 읽으므로 변경이 즉시 적용된다. 스위치는 `enabled` 하나다. `true`면 아래 세 가지가 함께 동작하고, `false`면 훅은 아무것도 하지 않는다. 모델 고정도 하지 않는다.
 
-- **모델 고정** (항상): Agent 호출에 `model`이 없으면 설정 모델을 넣는다. `tiers:worker`는 명시한 모델이 있어도 설정 모델로 바꾼다. `fork`는 건드리지 않는다. 범위는 `pin: all | worker | off`.
-- **메인 세션 편집 차단** (`enforce: true`일 때): 훅 입력에 `agent_id`가 없는 호출, 즉 메인 세션의 Edit/Write/MultiEdit/NotebookEdit를 거부한다. Bash도 파일 쓰기 패턴을 거부한다. 리다이렉트, `tee`, `sed -i`, `cp/mv/rm/touch`, `git apply`, `patch`, Python·Node의 파일 쓰기. `/tmp` 아래 쓰기는 통과. 서브에이전트의 호출은 전부 통과.
-- **브리프 검사** (`enforce: true`일 때): 메인 세션이 `tiers:worker`나 general-purpose를 부를 때 브리프에 목표·맥락·범위·완료 기준 네 절이 없으면 거부하고 빠진 절과 템플릿을 알려 준다. 한글·영문 제목 모두 인식한다.
-- **핸드오프 기록** (`log: true`일 때): 통과한 worker 브리프를 `${CLAUDE_PLUGIN_DATA}/handoffs/`에 남기고, worker가 끝나면 마지막 보고를 같은 파일에 붙인다.
+- **모델 고정**: Agent 호출에 `model`이 없으면 설정 모델을 넣는다. `tiers:worker`는 명시한 모델이 있어도 설정 모델로 바꾼다. `fork`는 건드리지 않는다. 범위는 `pin: all | worker`.
+- **메인 세션 편집 차단**: 훅 입력에 `agent_id`가 없는 호출, 즉 메인 세션의 Edit/Write/MultiEdit/NotebookEdit를 거부한다. Bash도 파일 쓰기 패턴을 거부한다. 리다이렉트, `tee`, `sed -i`, `cp/mv/rm/touch`, `git apply`, `patch`, Python·Node의 파일 쓰기. `/tmp` 아래 쓰기와 설정 파일(`${CLAUDE_PLUGIN_DATA}/delegate.json`) 쓰기는 통과한다. 설정 파일이 열려 있어야 `off`가 스스로를 끌 수 있다. 데이터 디렉토리의 나머지(핸드오프 기록)는 훅이 직접 쓰므로 열어 두지 않는다. 서브에이전트의 호출은 전부 통과.
+- **브리프 검사**: 메인 세션이 `tiers:worker`나 general-purpose를 부를 때 브리프에 목표·맥락·범위·완료 기준 네 절이 없으면 거부하고 빠진 절과 템플릿을 알려 준다. 한글·영문 제목 모두 인식한다.
+- **핸드오프 기록** (`log: true`일 때): 통과한 worker 브리프를 `${CLAUDE_PLUGIN_DATA}/handoffs/`에 남긴다. worker가 끝나면 마지막 보고를 같은 파일에 붙이는데, 이쪽은 `enabled`가 꺼진 뒤에도 계속 동작한다. 켜져 있을 때 시작한 worker의 기록이 반쪽으로 남지 않게 하기 위해서다.
 
 거부 사유에는 위임 방법과 브리프 템플릿이 그대로 들어 있어서, 모델은 그 자리에서 브리프를 써서 worker를 띄우게 된다. CLAUDE.md에 규칙을 깔아 두는 것보다 필요한 순간에 주입되는 쪽이 훨씬 덜 희석된다.
 
@@ -65,18 +65,18 @@ scout는 그 사람 환경에 등록된 MCP 도구를 그대로 상속한다. �
 `${CLAUDE_PLUGIN_DATA}/delegate.json`
 
 ```json
-{"model":"opus","enforce":false,"pin":"all","small_edit_chars":200,"log":true}
+{"model":"opus","enabled":false,"pin":"all","small_edit_chars":200,"log":true}
 ```
 
 | 키 | 값 | 뜻 |
 |---|---|---|
 | `model` | `opus` `sonnet` `haiku` `fable` 또는 전체 모델 ID | worker 모델이자 고정 대상 모델 |
-| `enforce` | `true` `false` | 메인 세션 편집 차단 + 브리프 검사 |
-| `pin` | `all` `worker` `off` | 모델 고정 범위 |
-| `small_edit_chars` | 정수, 0이면 없음 | 강제 모드에서 허용하는 단일 Edit 크기(old+new 문자 수) |
+| `enabled` | `true` `false` | 훅 전체. 모델 고정 + 메인 세션 편집 차단 + 브리프 검사 |
+| `pin` | `all` `worker` | 켜졌을 때의 모델 고정 범위 |
+| `small_edit_chars` | 정수, 0이면 없음 | 켜졌을 때 허용하는 단일 Edit 크기(old+new 문자 수) |
 | `log` | `true` `false` | 핸드오프 기록 |
 
-환경변수 `TIERS_DELEGATE=on|off`는 그 세션에 한해 `enforce`를 덮어쓴다.
+환경변수 `TIERS_DELEGATE=on|off`는 그 세션에 한해 `enabled`를 덮어쓴다. 즉 모델 고정까지 함께 켜고 끈다.
 
 ## /tiers:ultracode
 

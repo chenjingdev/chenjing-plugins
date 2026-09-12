@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 'use strict';
-// tiers delegate guard — one PreToolUse/SubagentStop hook, three jobs:
-//   1. pin: Agent calls that omit `model` get the configured tier (never the session model).
-//   2. enforce (opt-in): the MAIN session may not implement — Edit/Write/MultiEdit/NotebookEdit and
-//      file-writing Bash are denied with instructions to brief `tiers:worker`. Subagents pass.
+// tiers delegate guard — one PreToolUse/SubagentStop hook behind one switch.
+// `enabled` (opt-in, or TIERS_DELEGATE=on|off for a session) turns the whole PreToolUse side on:
+//   1. pin: Agent calls get the configured tier instead of inheriting the session model.
+//      `pin` is the scope only — all (every subagent) or worker (`tiers:worker` alone).
+//   2. no implementing in the MAIN session — Edit/Write/MultiEdit/NotebookEdit and file-writing
+//      Bash are denied with instructions to brief `tiers:worker`. Subagents pass.
 //   3. brief check + handoff log: worker/general-purpose briefs must carry goal/context/scope/done;
 //      accepted briefs and the worker's final report are written to ${CLAUDE_PLUGIN_DATA}/handoffs/.
+// `enabled: false` → PreToolUse emits nothing at all, pinning included. SubagentStop still closes
+// out a handoff started while it was on (`log`). Writes to the guard's own delegate.json are
+// always allowed — that one file, nothing else in the data dir — so /tiers:delegate off can run.
 // Fails open: any internal error is logged and the tool call proceeds unchanged.
 
 const fs = require('fs');
@@ -13,7 +18,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const DEFAULTS = { model: 'opus', enforce: false, pin: 'all', small_edit_chars: 200, log: true };
+const DEFAULTS = { model: 'opus', enabled: false, pin: 'all', small_edit_chars: 200, log: true };
 const WORKER_RE = /(^|:)worker$/;
 const GENERIC_TYPES = new Set(['', 'general-purpose', 'claude']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -36,18 +41,33 @@ function dataDir() {
     || path.join(os.homedir(), '.claude', 'plugins', 'data', 'tiers-chenjing-plugins');
 }
 
+// The guard's own config file is always writable: /tiers:delegate on|off|setup rewrites it from
+// the main session, and that must work whatever small_edit_chars says. Only that one file — the
+// handoff log and guard-error.log are written by the hook process itself, never by the session.
+function configPaths() {
+  const dir = String(dataDir()).replace(/\/+$/, '');
+  const home = String(os.homedir() || '').replace(/\/+$/, '');
+  const out = [`${dir}/delegate.json`, '$CLAUDE_PLUGIN_DATA/delegate.json', '${CLAUDE_PLUGIN_DATA}/delegate.json'];
+  if (home && dir.startsWith(`${home}/`)) out.push(`~${dir.slice(home.length)}/delegate.json`);
+  return out;
+}
+
 function loadConfig() {
   const cfg = { ...DEFAULTS };
   try {
     const raw = fs.readFileSync(path.join(dataDir(), 'delegate.json'), 'utf8');
     const parsed = JSON.parse(raw);
     for (const k of Object.keys(DEFAULTS)) if (parsed[k] !== undefined) cfg[k] = parsed[k];
+    // back-compat: `enabled` was called `enforce` before 0.3.1
+    if (parsed.enabled === undefined && parsed.enforce !== undefined) cfg.enabled = parsed.enforce;
   } catch (_) { /* missing or invalid → defaults */ }
   const env = String(process.env.TIERS_DELEGATE || '').trim().toLowerCase();
-  if (['on', '1', 'true'].includes(env)) cfg.enforce = true;
-  if (['off', '0', 'false'].includes(env)) cfg.enforce = false;
-  if (!['all', 'worker', 'off'].includes(cfg.pin)) cfg.pin = 'all';
+  if (['on', '1', 'true'].includes(env)) cfg.enabled = true;
+  if (['off', '0', 'false'].includes(env)) cfg.enabled = false;
+  cfg.enabled = Boolean(cfg.enabled);
+  if (!['all', 'worker'].includes(cfg.pin)) cfg.pin = 'all';
   cfg.small_edit_chars = Number(cfg.small_edit_chars) || 0;
+  cfg.config_paths = configPaths();
   return cfg;
 }
 
@@ -100,17 +120,142 @@ function analyzeBrief(text) {
 }
 
 // ---------- bash write detection ----------
-function isTmpPath(tok) {
-  const t = tok.replace(/^['"]|['"]$/g, '');
-  return TMP_PREFIXES.some((p) => t.startsWith(p));
+function hasPrefix(tok, prefixes) {
+  const t = String(tok).replace(/^['"]|['"]$/g, '');
+  return prefixes.some((p) => t.startsWith(p) || t === p.replace(/\/$/, ''));
 }
+function isConfigPath(tok, cfg) {
+  const t = String(tok).replace(/^['"]|['"]$/g, '');
+  return ((cfg && cfg.config_paths) || configPaths()).includes(t);
+}
+function isAllowedWritePath(tok, cfg) { return hasPrefix(tok, TMP_PREFIXES) || isConfigPath(tok, cfg); }
 function pathLike(tok) {
   if (!tok || tok.startsWith('-')) return false;
   const t = tok.replace(/^['"]|['"]$/g, '');
   return t.includes('/') || /\.[A-Za-z0-9]{1,6}$/.test(t) || t.startsWith('~');
 }
+const HEREDOC_RE = /^<<(-?)[ \t]*(?:'([^']*)'|"([^"]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))/;
+// Blanks heredoc bodies (and their terminator line) so the text a command is *fed* is never read
+// as shell syntax: a stray ' in the body must not open a quote and hide the next line's redirect,
+// and a > or | in the body must not look like one. Same length as the input, so offsets still line
+// up; the newline that ends the terminator line survives as a segment boundary.
+function stripHeredocs(s) {
+  let out = s;
+  const blank = (from, to) => {
+    if (to <= from) return;
+    out = out.slice(0, from) + ' '.repeat(to - from) + out.slice(to);
+  };
+  let quote = null;
+  let brace = 0;
+  const pending = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === "'") { if (c === "'") quote = null; continue; }
+    if (c === '\\') { i++; continue; }
+    if (c === '$' && s[i + 1] === '{') { brace++; i++; continue; }
+    if (brace > 0) { if (c === '}') brace--; else if (c === '{') brace++; continue; }
+    if (quote === '"') { if (c === '"') quote = null; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (c === '<' && s[i + 1] === '<' && s[i + 2] !== '<') {
+      const m = HEREDOC_RE.exec(s.slice(i));
+      if (m) {
+        pending.push({ word: m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4], strip: m[1] === '-' });
+        i += m[0].length - 1;
+        continue;
+      }
+    }
+    if (c === '\n' && pending.length) {
+      let j = i + 1;
+      while (pending.length && j < s.length) {
+        const { word, strip } = pending.shift();
+        while (j < s.length) {
+          const nl = s.indexOf('\n', j);
+          const end = nl === -1 ? s.length : nl;
+          const done = (strip ? s.slice(j, end).replace(/^[\t ]*/, '') : s.slice(j, end)) === word;
+          blank(j, end);
+          if (done) { j = end; break; }
+          if (nl === -1) { j = s.length; break; }
+          blank(nl, nl + 1); // an interior body newline is not a command boundary
+          j = nl + 1;
+        }
+      }
+      i = j - 1;
+      continue;
+    }
+  }
+  return out;
+}
+// Marks the characters that are shell syntax: outside single/double quotes and outside ${...}.
+// Everything else is data — `echo "a > b"`, `grep "=>"`, `${VAR:-<unset>}` redirect nothing.
+function topLevelMask(s) {
+  const mask = new Array(s.length).fill(false);
+  let quote = null;
+  let brace = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === "'") { if (c === "'") quote = null; continue; }
+    if (c === '\\') { i++; continue; }
+    if (c === '$' && s[i + 1] === '{') { brace++; i++; continue; }
+    if (brace > 0) { if (c === '}') brace--; else if (c === '{') brace++; continue; }
+    if (quote === '"') { if (c === '"') quote = null; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    mask[i] = true;
+  }
+  return mask;
+}
 function segments(cmd) {
-  return String(cmd).split(/&&|\|\||;|\||\n/).map((s) => s.trim()).filter(Boolean);
+  const s = stripHeredocs(String(cmd));
+  const mask = topLevelMask(s);
+  const out = [];
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (!mask[i]) continue;
+    const c = s[i];
+    const and = c === '&' && s[i + 1] === '&';
+    if (!(and || c === '|' || c === ';' || c === '\n')) continue;
+    out.push(s.slice(start, i));
+    if (and || (c === '|' && s[i + 1] === '|')) i++;
+    start = i + 1;
+  }
+  out.push(s.slice(start));
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+// the file a real (unquoted) > or >> writes to, or null. `2>&1` and `<>` are not file writes.
+function redirectTarget(seg) {
+  const mask = topLevelMask(seg);
+  for (let i = 0; i < seg.length; i++) {
+    if (!mask[i] || seg[i] !== '>') continue;
+    if (i > 0 && seg[i - 1] === '<') continue;
+    let j = i + 1;
+    if (seg[j] === '>') j++;
+    while (seg[j] === ' ' || seg[j] === '\t') j++;
+    if (seg[j] === '&') { i = j; continue; }
+    let tok = '';
+    if (seg[j] === '"' || seg[j] === "'") {
+      const end = seg.indexOf(seg[j], j + 1);
+      tok = end === -1 ? seg.slice(j + 1) : seg.slice(j + 1, end);
+      j = end === -1 ? seg.length : end;
+    } else {
+      while (j < seg.length && !/[\s|;&<>'"]/.test(seg[j])) { tok += seg[j]; j++; }
+    }
+    if (tok) return tok;
+    i = j;
+  }
+  return null;
+}
+// path-ish strings in a segment, looking inside quoted code too: node -e "...writeFileSync('x')".
+function candidatePaths(seg) {
+  const out = [];
+  for (const t of (seg.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [])) {
+    const body = t.replace(/^(['"])([\s\S]*)\1$/, '$2');
+    const inner = [];
+    const re = /'([^']*)'|"([^"]*)"/g;
+    let m;
+    while ((m = re.exec(body))) inner.push(m[1] !== undefined ? m[1] : m[2]);
+    if (inner.length) { for (const q of inner) if (pathLike(q)) out.push(q); continue; }
+    if (pathLike(t)) out.push(t.replace(/^['"]|['"]$/g, ''));
+  }
+  return out;
 }
 // returns { op, targets } | null. targets === null means "unknown targets" (deny unless every path in the segment is tmp)
 function writeOpInSegment(seg) {
@@ -121,8 +266,8 @@ function writeOpInSegment(seg) {
   const rest = toks.slice(first + 1);
   const argsNoFlags = rest.filter((t) => !t.startsWith('-'));
 
-  const redir = seg.match(/(^|[^<>])>{1,2}\s*(?!&)(['"]?)([^\s|;&'"]+)/);
-  if (redir) return { op: 'redirect', targets: [redir[3]] };
+  const redir = redirectTarget(seg);
+  if (redir) return { op: 'redirect', targets: [redir] };
 
   if (['cp', 'mv', 'install'].includes(base)) return { op: base, targets: argsNoFlags.slice(-1) };
   if (['rm', 'touch', 'ln', 'truncate', 'shred', 'rmdir'].includes(base)) return { op: base, targets: argsNoFlags };
@@ -136,16 +281,17 @@ function writeOpInSegment(seg) {
   if (/\b(writeFileSync|writeFile|appendFileSync|appendFile|outputFile|renameSync|unlinkSync)\s*\(/.test(seg)) return { op: 'node fs write', targets: null };
   return null;
 }
-function bashWriteViolation(cmd) {
+function bashWriteViolation(cmd, cfg) {
+  const allowed = (t) => isAllowedWritePath(t, cfg);
   for (const seg of segments(cmd)) {
     const w = writeOpInSegment(seg);
     if (!w) continue;
     if (w.targets === null) {
-      const paths = (seg.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []).filter(pathLike);
-      if (paths.length && paths.every(isTmpPath)) continue;
+      const paths = candidatePaths(seg);
+      if (paths.length && paths.every(allowed)) continue;
       return w.op;
     }
-    if (w.targets.length && w.targets.every(isTmpPath)) continue;
+    if (w.targets.length && w.targets.every(allowed)) continue;
     return w.op;
   }
   return null;
@@ -161,7 +307,7 @@ function delegateInstructions(cfg) {
     briefTemplate(),
     '3. If the worker returns BLOCKED, answer it with SendMessage to that same agent (its context is intact). Do not spawn a new one.',
     '4. Verify yourself afterwards: read the diff and run the done-when commands. Send fix-ups to the same worker.',
-    `Escape hatches: one Edit under ${cfg.small_edit_chars} chars is allowed; writes under /tmp are allowed; for analysis sessions or a repeating BLOCKED loop run /tiers:delegate off (or start the session with TIERS_DELEGATE=off).`,
+    `Escape hatches: one Edit under ${cfg.small_edit_chars} chars is allowed; writes under /tmp are allowed, and so is the delegate config itself (\${CLAUDE_PLUGIN_DATA}/delegate.json); for analysis sessions or a repeating BLOCKED loop run /tiers:delegate off (or start the session with TIERS_DELEGATE=off, which turns the whole hook off — pinning included).`,
   ].join('\n');
 }
 
@@ -233,6 +379,7 @@ function appendResult(input) {
 
 // ---------- main ----------
 function handlePreToolUse(input, cfg) {
+  if (!cfg.enabled) return; // one switch: off means no pinning, no denials, no handoff log
   const isMain = !input.agent_id;
   const tool = input.tool_name;
   const ti = input.tool_input || {};
@@ -241,12 +388,12 @@ function handlePreToolUse(input, cfg) {
     const type = String(ti.subagent_type || '');
     const isWorker = WORKER_RE.test(type);
     let updated = null;
-    if (type !== 'fork' && cfg.pin !== 'off') {
+    if (type !== 'fork') {
       if (isWorker && ti.model !== cfg.model) updated = { ...ti, model: cfg.model };
       else if (!isWorker && cfg.pin === 'all' && !ti.model) updated = { ...ti, model: cfg.model };
     }
     const effective = updated || ti;
-    if (cfg.enforce && isMain && (isWorker || GENERIC_TYPES.has(type))) {
+    if (isMain && (isWorker || GENERIC_TYPES.has(type))) {
       const { missing } = analyzeBrief(ti.prompt);
       if (missing.length) {
         return deny([
@@ -264,9 +411,11 @@ function handlePreToolUse(input, cfg) {
     return;
   }
 
-  if (!cfg.enforce || !isMain) return;
+  if (!isMain) return;
 
   if (EDIT_TOOLS.has(tool)) {
+    const target = tool === 'NotebookEdit' ? ti.notebook_path : ti.file_path;
+    if (target && isConfigPath(target, cfg)) return; // the guard's own delegate.json, nothing else
     if (tool === 'Edit' && cfg.small_edit_chars > 0 && !ti.replace_all) {
       const size = String(ti.old_string || '').length + String(ti.new_string || '').length;
       if (size <= cfg.small_edit_chars) return;
@@ -275,7 +424,7 @@ function handlePreToolUse(input, cfg) {
   }
 
   if (tool === 'Bash') {
-    const op = bashWriteViolation(ti.command || '');
+    const op = bashWriteViolation(ti.command || '', cfg);
     if (op) {
       return deny(`[tiers delegate] Bash write blocked in the main session (matched: ${op}). Reads, git status/log/diff, tests and /tmp writes are fine.\n${delegateInstructions(cfg)}`);
     }
