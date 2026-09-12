@@ -15,9 +15,10 @@
     },
     {
       "name": "tiers",
-      "description": "티어 고정 오케스트레이션 — fan-out 에이전트가 세션 모델을 상속하지 않게: /tiers:ultracode + /tiers:deep-research",
+      "description": "티어 고정 위임 — 일상 구현은 /tiers:delegate(worker·scout 에이전트 + 가드 훅), 대규모 fan-out은 /tiers:ultracode, 리서치는 /tiers:deep-research. 세션 모델은 계획·검증만, 실행은 지정 티어.",
       "source": "./plugins/tiers",
       "skills": [
+        "./skills/delegate",
         "./skills/ultracode",
         "./skills/deep-research"
       ]
