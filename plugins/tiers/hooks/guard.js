@@ -6,7 +6,11 @@
 //      `pin` is the scope only — all (every subagent) or worker (`tiers:worker` alone).
 //   2. no implementing in the MAIN session — Edit/Write/MultiEdit/NotebookEdit and file-writing
 //      Bash are denied with instructions to brief `tiers:worker`. Subagents pass.
-//   3. brief check + handoff log: worker/general-purpose briefs must carry goal/context/scope/done;
+//   3. prose is the other way round: files whose extension is in `prose` (.md/.mdx/.rst/.txt by
+//      default) are the main session's to write, so the main session may edit them — anywhere but
+//      this hook's own data dir — and `tiers:worker` may not, anywhere but tmp. Only
+//      `tiers:worker` — every other subagent passes as before.
+//   4. brief check + handoff log: worker/general-purpose briefs must carry goal/context/scope/done;
 //      accepted briefs and the worker's final report are written to ${CLAUDE_PLUGIN_DATA}/handoffs/.
 // `enabled: false` → PreToolUse emits nothing at all, pinning included. SubagentStop still closes
 // out a handoff started while it was on (`log`). Writes to the guard's own delegate.json are
@@ -18,7 +22,11 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const DEFAULTS = { model: 'opus', enabled: false, pin: 'all', small_edit_chars: 200, log: true };
+const DEFAULTS = {
+  model: 'opus', enabled: false, pin: 'all', small_edit_chars: 200, log: true,
+  // human-facing text: the main session writes it, the worker doesn't. [] turns the rule off.
+  prose: ['.md', '.mdx', '.rst', '.txt'],
+};
 const WORKER_RE = /(^|:)worker$/;
 const GENERIC_TYPES = new Set(['', 'general-purpose', 'claude']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -52,6 +60,16 @@ function configPaths() {
   return out;
 }
 
+// the same spellings as configPaths(), as prefixes: everything the data dir holds besides
+// delegate.json is the hook's own (handoff records, guard-error.log), not the session's to write.
+function dataDirPrefixes() {
+  const dir = String(dataDir()).replace(/\/+$/, '');
+  const home = String(os.homedir() || '').replace(/\/+$/, '');
+  const out = [`${dir}/`, '$CLAUDE_PLUGIN_DATA/', '${CLAUDE_PLUGIN_DATA}/'];
+  if (home && dir.startsWith(`${home}/`)) out.push(`~${dir.slice(home.length)}/`);
+  return out;
+}
+
 function loadConfig() {
   const cfg = { ...DEFAULTS };
   try {
@@ -67,7 +85,12 @@ function loadConfig() {
   cfg.enabled = Boolean(cfg.enabled);
   if (!['all', 'worker'].includes(cfg.pin)) cfg.pin = 'all';
   cfg.small_edit_chars = Number(cfg.small_edit_chars) || 0;
+  // extensions, lower-cased, each starting with a dot. [] is a valid answer (rule off); anything
+  // else malformed (a string, a bare "md") falls back to the defaults rather than silently to off.
+  const prose = Array.isArray(cfg.prose) ? cfg.prose.map((x) => String(x).trim().toLowerCase()) : null;
+  cfg.prose = prose && prose.every((x) => /^\.\S+$/.test(x)) ? prose : DEFAULTS.prose.slice();
   cfg.config_paths = configPaths();
+  cfg.data_prefixes = dataDirPrefixes();
   return cfg;
 }
 
@@ -128,10 +151,35 @@ function isConfigPath(tok, cfg) {
   const t = String(tok).replace(/^['"]|['"]$/g, '');
   return ((cfg && cfg.config_paths) || configPaths()).includes(t);
 }
-function isAllowedWritePath(tok, cfg) { return hasPrefix(tok, TMP_PREFIXES) || isConfigPath(tok, cfg); }
+// human-facing text — README, docs, handover notes. Extension only: a path list would have to be
+// guessed per project, an extension list has an obvious default.
+function isProsePath(tok, cfg) {
+  const exts = (cfg && cfg.prose) || [];
+  if (!exts.length || !tok) return false;
+  const t = String(tok).replace(/^['"]|['"]$/g, '').toLowerCase();
+  return exts.some((ext) => t.length > ext.length && t.endsWith(ext));
+}
+// prose the MAIN session may write: anywhere except the hook's own data dir. A handoff record is a
+// .md file, but it is the hook's, not a document — delegate.json is the one exception there, and it
+// is checked before this.
+function sessionProse(tok, cfg) {
+  return isProsePath(tok, cfg) && !hasPrefix(tok, (cfg && cfg.data_prefixes) || dataDirPrefixes());
+}
+// prose the WORKER may not write: anywhere except tmp. A scratch note under /tmp or in the agent's
+// scratchpad is not a human-facing document.
+function workerProse(tok, cfg) {
+  return isProsePath(tok, cfg) && !hasPrefix(tok, TMP_PREFIXES);
+}
+function isAllowedWritePath(tok, cfg) {
+  return hasPrefix(tok, TMP_PREFIXES) || isConfigPath(tok, cfg) || sessionProse(tok, cfg);
+}
+// `s/a/b/g`, `y|x|z|`, `1,$s#a#b#` — a sed/perl script. Full of slashes, never a write target;
+// left in, it would make every `sed -i` look like it touches an unknown path.
+const SCRIPT_ARG_RE = /^[0-9,$]*[sy]([^\w\s])[\s\S]*?\1[\s\S]*?\1[a-zA-Z]*$/;
 function pathLike(tok) {
   if (!tok || tok.startsWith('-')) return false;
   const t = tok.replace(/^['"]|['"]$/g, '');
+  if (SCRIPT_ARG_RE.test(t)) return false;
   return t.includes('/') || /\.[A-Za-z0-9]{1,6}$/.test(t) || t.startsWith('~');
 }
 const HEREDOC_RE = /^<<(-?)[ \t]*(?:'([^']*)'|"([^"]*)"|\\?([A-Za-z_][A-Za-z0-9_]*))/;
@@ -296,6 +344,18 @@ function bashWriteViolation(cmd, cfg) {
   }
   return null;
 }
+// The worker side, opposite polarity: the main-session scan denies unless it is sure the write is
+// harmless, this one denies only when it is sure prose is being written. An unknown target
+// (`sed -i` with no readable path, `> "$OUT"`) passes — the worker's everyday Bash must not break.
+function bashProseWrite(cmd, cfg) {
+  for (const seg of segments(cmd)) {
+    const w = writeOpInSegment(seg);
+    if (!w) continue;
+    const targets = w.targets === null ? candidatePaths(seg) : w.targets;
+    if (targets.some((t) => workerProse(t, cfg))) return w.op;
+  }
+  return null;
+}
 
 // ---------- messages ----------
 // One line, deliberately. A denied edit only has to teach two things: it is not yours to make, and
@@ -303,6 +363,11 @@ function bashWriteViolation(cmd, cfg) {
 // moment a model actually needs it — and the worker agent's own description carries it too.
 function delegateNote() {
   return 'Hand it to the tiers:worker subagent instead (Agent, subagent_type "tiers:worker") with a brief, then verify the diff yourself; /tiers:delegate off turns this guard off.';
+}
+// The mirror image, for the worker. Same shape: whose job it is, and where the work goes instead.
+// "## Docs for the session" is the section the worker agent's own prompt tells it to write.
+function proseNote() {
+  return 'Leave the file alone and put the exact text you wanted to write in your report under "## Docs for the session" (path + content); code, tests and config stay yours.';
 }
 
 // ---------- handoff log ----------
@@ -405,11 +470,30 @@ function handlePreToolUse(input, cfg) {
     return;
   }
 
-  if (!isMain) return;
+  if (!isMain) {
+    // only tiers:worker; scout, Explore, general-purpose and other plugins' agents are untouched,
+    // and a subagent with no agent_type is not guessed at.
+    if (!WORKER_RE.test(String(input.agent_type || ''))) return;
+    if (EDIT_TOOLS.has(tool)) {
+      const target = tool === 'NotebookEdit' ? ti.notebook_path : ti.file_path;
+      if (workerProse(target, cfg)) {
+        return deny(`[tiers delegate] ${tool} to a prose file blocked — human-facing text is the main session's to write.\n${proseNote()}`);
+      }
+      return;
+    }
+    if (tool === 'Bash') {
+      const op = bashProseWrite(ti.command || '', cfg);
+      if (op) {
+        return deny(`[tiers delegate] Bash write to a prose file blocked (matched: ${op}) — human-facing text is the main session's to write.\n${proseNote()}`);
+      }
+    }
+    return;
+  }
 
   if (EDIT_TOOLS.has(tool)) {
     const target = tool === 'NotebookEdit' ? ti.notebook_path : ti.file_path;
     if (target && isConfigPath(target, cfg)) return; // the guard's own delegate.json, nothing else
+    if (sessionProse(target, cfg)) return; // prose is the session's own job, at any size
     if (tool === 'Edit' && cfg.small_edit_chars > 0 && !ti.replace_all) {
       const size = String(ti.old_string || '').length + String(ti.new_string || '').length;
       if (size <= cfg.small_edit_chars) return;
@@ -443,4 +527,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { analyzeBrief, bashWriteViolation, loadConfig, handlePreToolUse };
+module.exports = { analyzeBrief, bashWriteViolation, bashProseWrite, isProsePath, sessionProse, workerProse, loadConfig, handlePreToolUse };

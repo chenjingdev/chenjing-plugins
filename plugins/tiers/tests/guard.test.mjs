@@ -79,20 +79,23 @@ test('delegate on: main Write/MultiEdit/NotebookEdit denied, subagent edits pass
   assert.equal(run(sub('Edit', { file_path: 'a.js', old_string: 'x'.repeat(900), new_string: '' }), { cfg: ON }).out, null);
 });
 
+// non-prose targets on purpose: .md/.txt are the main session's to write (see the prose tests below),
+// so a prose extension here would test the prose rule, not the write-op detection this test is about.
 test('delegate on: Bash write patterns are denied unless every target is under tmp', () => {
   const denied = [
     "sed -i 's/a/b/' src/app.js",
-    'echo hi > src/out.txt',
-    'echo "hi" > src/x.txt',
-    'echo x >> notes.md',
-    "echo '>' > src/gt.txt",
+    "sed -i 's/a/b/'", // the script is not a path, so this has no readable target at all
+    'echo hi > src/out.log',
+    'echo "hi" > src/x.log',
+    'echo x >> notes.log',
+    "echo '>' > src/gt.log",
     "cat <<'EOF' > src/new.js\nhello\nEOF",
     'cp /tmp/x.js src/x.js',
     'rm -rf dist',
     'git apply fix.patch',
     'python3 -c "open(\'src/a.py\',\'w\').write(1)"',
     'node -e "require(\'fs\').writeFileSync(\'a.json\', \'{}\')"',
-    'printf x | tee src/a.txt',
+    'printf x | tee src/a.log',
   ];
   for (const c of denied) assert.equal(decision(run(main('Bash', { command: c }), { cfg: ON })), 'deny', c);
   const allowed = [
@@ -124,7 +127,7 @@ test('delegate on: a > inside quotes or ${...} is not a redirect', () => {
 test('delegate on: a heredoc body is data — it neither hides nor fakes a redirect', () => {
   const body = "don't; echo 'x' | tee a > b";
   // the stray quote in the body must not mask the real redirect on the line after EOF
-  const hidden = `cat <<'EOF' > /tmp/a\n${body}\nEOF\necho hi > src/x.txt`;
+  const hidden = `cat <<'EOF' > /tmp/a\n${body}\nEOF\necho hi > src/x.js`;
   assert.equal(decision(run(main('Bash', { command: hidden }), { cfg: ON })), 'deny');
   // ...and the body's own >, ; and | are not writes
   assert.equal(run(main('Bash', { command: `cat <<'EOF' > /tmp/a\na > b\nEOF` }), { cfg: ON }).out, null);
@@ -132,11 +135,102 @@ test('delegate on: a heredoc body is data — it neither hides nor fakes a redir
   assert.equal(run(main('Bash', { command: `cat <<-EOF > /tmp/a\n\t${body}\n\tEOF` }), { cfg: ON }).out, null);
   // same heredoc, real target: still denied
   assert.equal(decision(run(main('Bash', { command: `cat <<'EOF' > src/new.js\n${body}\nEOF` }), { cfg: ON })), 'deny');
-  assert.equal(decision(run(main('Bash', { command: `cat <<EOF >> notes.md\n${body}\nEOF` }), { cfg: ON })), 'deny');
+  assert.equal(decision(run(main('Bash', { command: `cat <<EOF >> notes.log\n${body}\nEOF` }), { cfg: ON })), 'deny');
 });
 
 test('delegate on: subagent Bash writes are not touched', () => {
   assert.equal(run(sub('Bash', { command: "sed -i 's/a/b/' src/app.js" }), { cfg: ON }).out, null);
+});
+
+test('prose: the main session writes human-facing text itself, at any size and by any tool', () => {
+  const long = 'a'.repeat(300);
+  assert.equal(run(main('Edit', { file_path: 'README.md', old_string: long, new_string: 'b' }), { cfg: ON }).out, null);
+  assert.equal(run(main('Write', { file_path: 'docs/notes.txt', content: long }), { cfg: ON }).out, null);
+  assert.equal(run(main('Write', { file_path: 'README.MD', content: long }), { cfg: ON }).out, null); // case-insensitive
+  assert.equal(run(main('Bash', { command: 'printf x >> CHANGELOG.md' }), { cfg: ON }).out, null);
+  assert.equal(run(main('Bash', { command: "sed -i '' s/a/b/ README.md" }), { cfg: ON }).out, null);
+  assert.equal(run(main('Bash', { command: "sed -i 's/a/b/' docs/guide.rst" }), { cfg: ON }).out, null);
+  // code is still the worker's
+  assert.equal(decision(run(main('Edit', { file_path: 'a.js', old_string: long, new_string: 'b' }), { cfg: ON })), 'deny');
+  assert.equal(decision(run(main('Bash', { command: 'printf x >> src/a.js' }), { cfg: ON })), 'deny');
+  assert.equal(decision(run(main('Bash', { command: 'cp README.md src/a.js' }), { cfg: ON })), 'deny'); // one non-prose target is enough
+});
+
+test('prose: the worker may not write it, and is told where to put the text instead', () => {
+  const r = run(sub('Edit', { file_path: 'README.md', old_string: 'x', new_string: 'y' }), { cfg: ON });
+  assert.equal(decision(r), 'deny');
+  const reason = r.out.hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /Docs for the session/);
+  assert.ok(reason.split('\n').length <= 2, `${reason.split('\n').length} lines: ${reason}`);
+  for (const t of ['Write', 'MultiEdit']) {
+    assert.equal(decision(run(sub(t, { file_path: 'docs/handover.md', content: 'x' }), { cfg: ON })), 'deny', t);
+  }
+  assert.equal(decision(run(sub('Bash', { command: "sed -i '' s/a/b/ README.md" }), { cfg: ON })), 'deny');
+  assert.equal(decision(run(sub('Bash', { command: 'echo x > notes.txt' }), { cfg: ON })), 'deny');
+  assert.equal(decision(run(sub('Bash', { command: 'printf x | tee docs/a.rst' }), { cfg: ON })), 'deny');
+  // code, tests, config and everyday Bash stay the worker's
+  assert.equal(run(sub('Write', { file_path: 'src/a.js', content: 'x' }), { cfg: ON }).out, null);
+  assert.equal(run(sub('Bash', { command: 'echo x > build.log' }), { cfg: ON }).out, null);
+  assert.equal(run(sub('Bash', { command: 'node --test tests/ > /tmp/out' }), { cfg: ON }).out, null);
+});
+
+test('prose: a scratch note under tmp is not a document — the worker may write it', () => {
+  const allowed = [
+    main('Write', { file_path: '/tmp/notes.md', content: 'x' }),
+    main('Write', { file_path: '/private/tmp/claude-501/scratchpad/plan.md', content: 'x' }),
+    main('Edit', { file_path: '/var/folders/ab/cd/T/draft.txt', old_string: 'a', new_string: 'b' }),
+    main('Bash', { command: 'echo x > /tmp/notes.md' }),
+    main('Bash', { command: "sed -i '' s/a/b/ /tmp/notes.md" }),
+  ];
+  for (const i of allowed) assert.equal(run({ ...i, agent_id: 'a1', agent_type: 'tiers:worker' }, { cfg: ON }).out, null, JSON.stringify(i.tool_input));
+  // ...but a document in the repo is still denied
+  assert.equal(decision(run(sub('Write', { file_path: 'docs/notes.md', content: 'x' }), { cfg: ON })), 'deny');
+  assert.equal(decision(run(sub('Bash', { command: 'cp /tmp/notes.md docs/notes.md' }), { cfg: ON })), 'deny');
+});
+
+test('prose: the worker side denies only when it is sure — an unknown target passes', () => {
+  const pass = [
+    'echo x > "$OUT"',            // target is a variable — not readable as prose, so not blocked
+    "sed -i 's/a/b/' $FILE",
+    'git apply fix.patch',        // unknown targets, none of them readable as prose
+    'rm -rf dist',
+    "python3 -c \"open('src/a.py','w').write(1)\"",
+  ];
+  for (const c of pass) assert.equal(run(sub('Bash', { command: c }), { cfg: ON }).out, null, c);
+  // an unknown *directory* is still a known prose file
+  assert.equal(decision(run(sub('Bash', { command: 'echo x > ${DOC}/a.md' }), { cfg: ON })), 'deny');
+});
+
+test('prose: only tiers:worker is held to it — other subagents and an unlabelled one pass', () => {
+  for (const agent_type of ['general-purpose', 'tiers:scout', 'Explore']) {
+    const r = run(main('Edit', { file_path: 'README.md', old_string: 'x'.repeat(300), new_string: 'y' }, { agent_id: 'a1', agent_type }), { cfg: ON });
+    assert.equal(r.out, null, agent_type);
+  }
+  const unlabelled = run(main('Edit', { file_path: 'README.md', old_string: 'x'.repeat(300), new_string: 'y' }, { agent_id: 'a1' }), { cfg: ON });
+  assert.equal(unlabelled.out, null);
+});
+
+test('prose: an empty list turns the rule off; a malformed one falls back to the defaults', () => {
+  const edit = (cfg) => ({ mainR: run(main('Edit', { file_path: 'README.md', old_string: 'x'.repeat(300), new_string: 'y' }), { cfg }),
+    subR: run(sub('Edit', { file_path: 'README.md', old_string: 'x', new_string: 'y' }), { cfg }) });
+  const off = edit({ ...ON, prose: [] });
+  assert.equal(decision(off.mainR), 'deny');   // back to "the main session doesn't implement"
+  assert.equal(off.subR.out, null);
+  for (const prose of ['md', ['md'], null, 42]) {
+    const r = edit({ ...ON, prose });
+    assert.equal(r.mainR.out, null, JSON.stringify(prose));
+    assert.equal(decision(r.subR), 'deny', JSON.stringify(prose));
+  }
+  const custom = edit({ ...ON, prose: ['.MD'] }); // normalised to lower case
+  assert.equal(custom.mainR.out, null);
+  assert.equal(decision(custom.subR), 'deny');
+  assert.equal(run(sub('Edit', { file_path: 'notes.txt', old_string: 'x', new_string: 'y' }), { cfg: { ...ON, prose: ['.md'] } }).out, null);
+});
+
+test('prose: the switch still governs it — off means the worker writes prose too', () => {
+  assert.equal(run(sub('Edit', { file_path: 'README.md', old_string: 'x', new_string: 'y' }), { cfg: OFF }).out, null);
+  assert.equal(run(sub('Bash', { command: 'echo x > README.md' }), { cfg: OFF }).out, null);
+  assert.equal(run(sub('Edit', { file_path: 'README.md', old_string: 'x', new_string: 'y' }), { cfg: ON, env: { TIERS_DELEGATE: 'off' } }).out, null);
 });
 
 test('pin all: Agent calls without model get the configured model; fork is untouched', () => {
@@ -254,10 +348,14 @@ test('delegate on: delegate.json is always writable — and nothing else in the 
   assert.equal(at(main('Bash', { command: 'echo \'{}\' > $CLAUDE_PLUGIN_DATA/delegate.json' })).out, null);
   assert.equal(at(main('Bash', { command: 'echo \'{}\' > ${CLAUDE_PLUGIN_DATA}/delegate.json' })).out, null);
   assert.equal(at(main('Bash', { command: `mkdir -p ${dir}` })).out, null); // mkdir is not a write op
-  // everything else in the data dir is the hook's, not the session's
+  // everything else in the data dir is the hook's, not the session's — the prose rule does not
+  // reach in here, even though a handoff record really is a .md file
   assert.equal(decision(at(main('Write', { file_path: path.join(dir, 'handoffs', 'a.md'), content: 'x' }))), 'deny');
   assert.equal(decision(at(main('Bash', { command: `rm -rf ${dir}` }))), 'deny');
   assert.equal(decision(at(main('Bash', { command: `rm ${dir}/handoffs/x.md` }))), 'deny');
+  assert.equal(decision(at(main('Edit', { file_path: `${short.replace('/delegate.json', '')}/handoffs/x.md`, old_string: 'a', new_string: 'b' }))), 'deny');
+  assert.equal(decision(at(main('Bash', { command: 'echo x > $CLAUDE_PLUGIN_DATA/handoffs/x.md' }))), 'deny');
+  assert.equal(decision(at(main('Bash', { command: 'echo x > ${CLAUDE_PLUGIN_DATA}/notes.md' }))), 'deny');
   assert.equal(decision(at(main('Bash', { command: `echo x > ${dir}/guard-error.log` }))), 'deny');
   const sibling = path.join(path.dirname(dir), '.tiers-guard-sibling.json');
   assert.equal(decision(at(main('Write', { file_path: sibling, content: '{}' }))), 'deny');
