@@ -401,3 +401,36 @@ test('missing or corrupt config falls back to defaults (delegate off, pin all); 
   assert.equal(res.stdout, '');
   assert.ok(existsSync(path.join(dir, 'guard-error.log')));
 });
+
+// ---------- SessionStart: the role text ----------
+const ROLE = path.join(here, '..', 'skills', 'delegate', 'references', 'role.md');
+const start = (extra = {}) => ({ hook_event_name: 'SessionStart', session_id: 'sess-1234-abcd', cwd: '/proj', source: 'startup', ...extra });
+const context = (r) => r.out?.hookSpecificOutput?.additionalContext ?? null;
+
+test('SessionStart: delegate on injects references/role.md as additionalContext', () => {
+  const r = run(start(), { cfg: ON });
+  assert.equal(r.status, 0);
+  assert.equal(r.out.hookSpecificOutput.hookEventName, 'SessionStart');
+  const ctx = context(r);
+  assert.match(ctx, /tiers:worker/);
+  assert.match(ctx, /tiers:scout/);
+  assert.equal(ctx, readFileSync(ROLE, 'utf8').trim()); // role.md is the only source, emitted as written
+});
+
+test('SessionStart: delegate off says nothing at all', () => {
+  const r = run(start(), { cfg: OFF });
+  assert.equal(r.out, null);
+  assert.equal(r.status, 0);
+});
+
+test('SessionStart: a subagent gets nothing — it has its own start event and prompt', () => {
+  const r = run(start({ agent_id: 'a1', agent_type: 'tiers:worker' }), { cfg: ON });
+  assert.equal(r.out, null);
+  assert.equal(r.status, 0);
+});
+
+test('SessionStart: the TIERS_DELEGATE env switch governs it too', () => {
+  const r = run(start(), { cfg: ON, env: { TIERS_DELEGATE: 'off' } });
+  assert.equal(r.out, null);
+  assert.equal(r.status, 0);
+});

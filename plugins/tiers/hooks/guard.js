@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
-// tiers delegate guard — one PreToolUse/SubagentStop hook behind one switch.
-// `enabled` (opt-in, or TIERS_DELEGATE=on|off for a session) turns the whole PreToolUse side on:
+// tiers delegate guard — one SessionStart/PreToolUse/SubagentStop hook behind one switch.
+// `enabled` (opt-in, or TIERS_DELEGATE=on|off for a session) turns everything below on:
 //   1. pin: Agent calls get the configured tier instead of inheriting the session model.
 //      `pin` is the scope only — all (every subagent) or worker (`tiers:worker` alone).
 //   2. no implementing in the MAIN session — Edit/Write/MultiEdit/NotebookEdit and file-writing
@@ -13,6 +13,7 @@
 //   4. brief check + handoff log: worker/general-purpose briefs must carry goal/context/scope/done;
 //      accepted briefs and every report the worker returns (one section per stop, so a
 //      SendMessage follow-up lands in the same file) are written to ${CLAUDE_PLUGIN_DATA}/handoffs/.
+//   5. role: at SessionStart (startup/resume/clear/compact) skills/delegate/references/role.md is injected as context.
 // `enabled: false` → PreToolUse emits nothing at all, pinning included. SubagentStop still closes
 // out a handoff started while it was on (`log`). Writes to the guard's own delegate.json are
 // always allowed — that one file, nothing else in the data dir — so /tiers:delegate off can run.
@@ -521,6 +522,22 @@ function handlePreToolUse(input, cfg) {
   }
 }
 
+// The role text for the main session, injected at startup/resume/clear/compact. Same switch as the
+// rest: off means nothing is said at all. role.md is the only source — it is emitted as written.
+function handleSessionStart(input, cfg) {
+  if (!cfg.enabled) return;
+  if (input.agent_id) return; // subagents have their own start event and their own prompt
+  let text;
+  try {
+    text = fs.readFileSync(path.join(__dirname, '..', 'skills', 'delegate', 'references', 'role.md'), 'utf8').trim();
+  } catch (e) {
+    logError(e); // missing or unreadable → the session starts as it would have without the hook
+    return;
+  }
+  if (!text) return;
+  emit({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text } });
+}
+
 function main() {
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -531,6 +548,7 @@ function main() {
       const cfg = loadConfig();
       if (input.hook_event_name === 'PreToolUse') handlePreToolUse(input, cfg);
       else if (input.hook_event_name === 'SubagentStop' && cfg.log && WORKER_RE.test(String(input.agent_type || ''))) appendResult(input);
+      else if (input.hook_event_name === 'SessionStart') handleSessionStart(input, cfg);
     } catch (e) {
       logError(e);
     }
@@ -539,4 +557,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { analyzeBrief, bashWriteViolation, bashProseWrite, isProsePath, sessionProse, workerProse, loadConfig, handlePreToolUse };
+module.exports = { analyzeBrief, bashWriteViolation, bashProseWrite, isProsePath, sessionProse, workerProse, loadConfig, handlePreToolUse, handleSessionStart };
