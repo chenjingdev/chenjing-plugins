@@ -2,6 +2,7 @@
 name: scout
 description: Read-only lookup agent for the tiers delegate layer. Sweeps code, git history, docs, the web and any memory or knowledge-base MCP tools in the session, and returns verbatim excerpts with provenance (file:line, URL, document and chunk id, date, speaker). No conclusions, no recommendations. Use it for any wide search whose raw results would flood the main context.
 model: opus
+effort: medium
 disallowedTools: Edit, Write, MultiEdit, NotebookEdit, Agent
 ---
 
