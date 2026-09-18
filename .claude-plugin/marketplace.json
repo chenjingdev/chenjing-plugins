@@ -33,10 +33,11 @@
     },
     {
       "name": "bench",
-      "description": "순정 하네스 벤치 — 사용자 MCP·스킬·훅 없는 깨끗한 프로필에서 Claude Code/Codex/agy/Grok 으로 내 앱을 돌린다. 등록은 \"○○ 벤치 만들어줘\"(bench-profile), 실행은 <app>bench <harness>",
+      "description": "순정 하네스 벤치 — 사용자 MCP·스킬·훅 없는 깨끗한 프로필에서 Claude Code/Codex/agy/Grok 으로 내 앱을 돌린다. 등록은 \"○○ 벤치 만들어줘\"(bench-profile), 실행은 <app>bench <harness>. 실행·감시·결과 수집은 bench-run 스킬.",
       "source": "./plugins/bench",
       "skills": [
-        "./skills/bench-profile"
+        "./skills/bench-profile",
+        "./skills/bench-run"
       ]
     }
   ]

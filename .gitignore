@@ -3,3 +3,4 @@ resume-source.json
 resume-draft.md
 .DS_Store
 .proto/
+*-workspace/

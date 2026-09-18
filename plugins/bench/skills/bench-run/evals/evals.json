@@ -1,0 +1,45 @@
+{
+  "skill_name": "bench-run",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "cmux에 'sol medium'이랑 'grok xhigh' 워크스페이스를 열어놨어. aria 벤치 자유곡 프롬프트(~/.bench/aria/prompts/free.txt)를 이 두 터미널에서 돌리려고 하는데, 실제로 보내지는 말고 준비만 해줘: 각 워크스페이스의 참조와 터미널 surface, 거기에 보낼 명령 한 줄, 그리고 완료 감시를 어떻게 걸지까지 dispatch-plan.md 파일로 정리해줘.",
+      "expected_output": "dispatch-plan.md. 워크스페이스를 workspace:N 참조로 지정, surface 확인, sol→codex --model gpt-5.6-sol --effort medium, grok→grok --effort xhigh, BENCH_MJS 접두, sed로 {run} 태그 치환, ctrl+u 후 \\r 전송, monitor_runs.py 감시 명령.",
+      "files": [],
+      "assertions": [
+        "워크스페이스를 workspace:14, workspace:19 참조 형식으로 지정한다(맨 숫자 인덱스가 아니라)",
+        "각 워크스페이스의 터미널 surface 참조(surface:N)를 적는다",
+        "sol 명령이 codex --model gpt-5.6-sol --effort medium 이다",
+        "grok 명령이 grok --effort xhigh 이고 잘못된 --model 플래그가 없다",
+        "프롬프트를 free.txt 에서 읽어 {run} 자리에 런 태그를 치환한다(sed 등)",
+        "보내기 전에 입력 줄을 비우고(ctrl+u) 명령을 Enter(\\r)로 끝낸다",
+        "완료 감시 방법이 있다(monitor_runs.py 또는 프롬프트 복귀 감지 등)",
+        "BENCH_MJS 로 개발 러너를 지정한다(캐시된 옛 러너는 grok 을 모른다)"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "이 Codex 트랜스크립트에서 aria 도구 호출 순서를 뽑아서 calls.jsonl로 저장해주고, 이 모델이 곡을 통째로 넣는 방식이었는지 트랙별로 쌓는 방식이었는지 한두 문장으로 알려줘. 파일: ~/.bench/aria/codex/sessions/2026/09/05/rollout-2026-09-05T13-02-31-01a06fbb-75f7-7611-b324-d82c9f7cca2d.jsonl",
+      "expected_output": "calls.jsonl(호출 51개, McpToolCall 기준) + 'set_song으로 곡 전체를 한 번에(통째 배치)'라는 판정. set_song 인자가 song_json 문자열임을 처리해 노트 수를 셈.",
+      "files": [],
+      "assertions": [
+        "calls.jsonl 이 51줄이다(McpToolCall 51개)",
+        "calls.jsonl 에 set_song 이 4번 나온다",
+        "answer.md 가 통째 배치(set_song 으로 곡 전체를 한 번에)라고 판정한다",
+        "set_song 인자가 song_json 문자열임을 처리해 노트 수를 언급한다(1250 안팎)"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "agy(Antigravity CLI)로 돌린 Gemini 3.8 벤치 런의 기록이 ~/.bench/aria/agy/.gemini/antigravity-cli/brain/ 아래 어딘가에 있어. 곡 제목이 '자유곡 (agy-3.8-high)'인 런이야. 거기서 aria 도구 호출을 뽑아 순서대로 calls.jsonl로 저장하고, 왜 노트 수(2053개)에 비해 MCP 호출이 이렇게 적은지 설명해줘.",
+      "expected_output": "call_mcp_tool 항목에서 ToolName/Arguments를 풀어 aria 호출 17개를 추출. Arguments가 잘려 있고, 모델이 run_command로 aria HTTP API(/api/rpc)를 직접 curl로 쳤으며 set_song으로 곡을 통째로 넣었다는 설명. 근거로 aria 편집 이력(곡 통째 교체)을 언급하면 좋음.",
+      "files": [],
+      "assertions": [
+        "calls.jsonl 에 aria 도구 호출이 15개 이상 있다(call_mcp_tool 의 ToolName 을 풀었음)",
+        "answer.md 가 모델이 aria HTTP API(/api/rpc)를 curl 등으로 직접 호출해 MCP 를 우회했다고 설명한다",
+        "answer.md 가 set_song(곡 통째 교체)으로 곡을 넣었다고 설명한다",
+        "answer.md 가 트랜스크립트의 Arguments 페이로드가 잘려 있음을 언급한다"
+      ]
+    }
+  ]
+}
