@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/optiview.mjs\" hook session-start", "async": true, "timeout": 15 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/optiview.mjs\" hook prompt", "async": true, "timeout": 15 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/optiview.mjs\" hook stop", "async": true, "timeout": 15 }] }
+    ],
+    "StopFailure": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/optiview.mjs\" hook stop-failure", "async": true, "timeout": 15 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/optiview.mjs\" hook session-end", "async": true, "timeout": 5 }] }
+    ]
+  }
+}
