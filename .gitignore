@@ -4,3 +4,4 @@ resume-draft.md
 .DS_Store
 .proto/
 *-workspace/
+plugins/chenjing-mods/.claude-plugin/types/
