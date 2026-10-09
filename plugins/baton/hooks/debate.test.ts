@@ -3,7 +3,7 @@ import { test, expect } from 'claude-code/testing'
 import { debateDirs, parseArgs, parseBgId, parsePeer } from './debate'
 
 test('debate folders: ~ is the home folder, an empty work folder is the session folder', () => {
-  expect(debateDirs({}, '/home/u', '/work/proj')).toEqual({ reportDir: '/home/u/.claude/chenjing-mods/debates', workDir: '/work/proj' })
+  expect(debateDirs({}, '/home/u', '/work/proj')).toEqual({ reportDir: '/home/u/.claude/baton/debates', workDir: '/work/proj' })
   expect(debateDirs({ debate_dir: '~/notes/debates/', debate_work_dir: ' /tmp/d ' }, '/home/u', '/w')).toEqual({ reportDir: '/home/u/notes/debates', workDir: '/tmp/d' })
   expect(debateDirs({ debate_dir: '/r', debate_work_dir: '~' }, '/home/u', '/w')).toEqual({ reportDir: '/r', workDir: '/home/u' })
   expect(() => debateDirs({}, '', '/w')).toThrow('홈 폴더')
@@ -58,7 +58,7 @@ test('a question to the debate carries the record, the verdict and earlier answe
   expect(p.endsWith('[사용자 질문]\n왜 무승부?')).toBe(true)
 })
 
-test('/debate hands the debaters the latest request and answer as background', () => {
+test('/baton-debate hands the debaters the latest request and answer as background', () => {
   const b = recentBrief([{ role: 'user', text: '플러그인 합쳐줘' }, { role: 'assistant', text: '합쳤어요.' }, { role: 'system', text: 'x' }])
   expect(b).toContain('사용자: 플러그인 합쳐줘\n\nClaude: 합쳤어요.')
   expect(recentBrief([])).toBe('')
@@ -85,18 +85,18 @@ test('an older debate state gets empty questions and is not marked sent', () => 
 
 import { commandText } from './debate'
 
-test('/debate tells the person, not the model, that the debate started', () => {
+test('/baton-debate tells the person, not the model, that the debate started', () => {
   const t = commandText('토론을 시작했다: "T" (10라운드). 사용자에게 시작했다고만 짧게 알려라.', 'T', 12)
   expect(t).toContain('토론을 시작했어요: "T" (10라운드, 12라운드는 10라운드로 줄였어요)')
   expect(t).not.toContain('알려라')
-  expect(commandText('이미 토론이 진행 중이다.', 'T', 3)).toContain('/debate stop')
+  expect(commandText('이미 토론이 진행 중이다.', 'T', 3)).toContain('/baton-debate stop')
 })
 
 import { mock } from 'claude-code/testing'
 import type { Engine, TestBody } from 'claude-code/testing'
 
 import { NOTHING_YET, parseTopic, topicPrompt } from './debate'
-import { fakeSession, modsOn, RUN } from './testkit'
+import { fakeSession, turnOn, RUN } from './testkit'
 
 type On = Parameters<TestBody>[1]
 
@@ -149,12 +149,12 @@ function debateWorld(on: On, fork: () => Promise<string | undefined> | string | 
   return { clock, spawned, forks }
 }
 
-const paneOf = ($: Engine) => $.ui.mount({ plugin: 'chenjing-mods', surface: 'terminal', component: 'Pane', props: DEBATE_PANE, requestId: 'debate' })
+const paneOf = ($: Engine) => $.ui.mount({ plugin: 'baton', surface: 'terminal', component: 'Pane', props: DEBATE_PANE, requestId: 'debate' })
 
-test('/debate alone picks the topic from the conversation and starts on it', async ($, on) => {
+test('/baton-debate alone picks the topic from the conversation and starts on it', async ($, on) => {
   const w = debateWorld(on, () => PICKED)
-  await modsOn($)
-  expect((await $.command.run({ command: 'debate', args: '', ...RUN })).text).toContain('주제를 고르고 있어요(10라운드)')
+  await turnOn($)
+  expect((await $.command.run({ command: 'baton-debate', args: '', ...RUN })).text).toContain('주제를 고르고 있어요(10라운드)')
   await w.clock.settle()
   expect(w.forks[0]).toContain('[토론 주제 고르기]')
   const pane = await paneOf($)
@@ -165,10 +165,10 @@ test('/debate alone picks the topic from the conversation and starts on it', asy
   expect((await pane.find({ text: '실패:' }))?.text).toContain('debate_work_dir')
 })
 
-test('/debate alone before any answer asks for a topic and forks nothing', async ($, on) => {
+test('/baton-debate alone before any answer asks for a topic and forks nothing', async ($, on) => {
   const w = debateWorld(on, () => PICKED, [])
-  await modsOn($)
-  expect((await $.command.run({ command: 'debate', args: '', ...RUN })).text).toBe(NOTHING_YET)
+  await turnOn($)
+  expect((await $.command.run({ command: 'baton-debate', args: '', ...RUN })).text).toBe(NOTHING_YET)
   await w.clock.settle()
   expect(w.forks).toEqual([])
 })
@@ -176,20 +176,20 @@ test('/debate alone before any answer asks for a topic and forks nothing', async
 test('a fork reply with no readable topic, or nothing to fork, fails with a way out and starts nothing', async ($, on) => {
   const replies: (string | undefined)[] = ['잘 모르겠어요', undefined]
   const w = debateWorld(on, () => replies.shift())
-  await modsOn($)
+  await turnOn($)
   const pane = await paneOf($)
-  await $.command.run({ command: 'debate', args: '2', ...RUN })
+  await $.command.run({ command: 'baton-debate', args: '2', ...RUN })
   await w.clock.settle()
   await pane.redraw()
-  expect((await pane.find({ text: '실패:' }))?.text).toContain('답 형식이 달랐어요). /debate 주제로 직접')
-  await $.command.run({ command: 'debate', args: '', ...RUN })
+  expect((await pane.find({ text: '실패:' }))?.text).toContain('답 형식이 달랐어요). /baton-debate 주제로 직접')
+  await $.command.run({ command: 'baton-debate', args: '', ...RUN })
   await w.clock.settle()
   await pane.redraw()
   expect((await pane.find({ text: '실패:' }))?.text).toContain('아직 고를 대화가 없어요')
   expect(w.spawned).toEqual([])
 })
 
-test('stopping while the topic is being picked starts nothing; a second /debate meanwhile is told to wait', async ($, on) => {
+test('stopping while the topic is being picked starts nothing; a second /baton-debate meanwhile is told to wait', async ($, on) => {
   let release = () => {}
   const gate = new Promise<void>(r => {
     release = () => r()
@@ -198,11 +198,11 @@ test('stopping while the topic is being picked starts nothing; a second /debate 
     await gate
     return PICKED
   })
-  await modsOn($)
-  await $.command.run({ command: 'debate', args: '', ...RUN })
+  await turnOn($)
+  await $.command.run({ command: 'baton-debate', args: '', ...RUN })
   await w.clock.settle()
-  expect((await $.command.run({ command: 'debate', args: '', ...RUN })).text).toContain('이미 토론이 진행 중')
-  expect((await $.command.run({ command: 'debate', args: 'stop', ...RUN })).text).toBe('주제 고르기를 멈췄어요.')
+  expect((await $.command.run({ command: 'baton-debate', args: '', ...RUN })).text).toContain('이미 토론이 진행 중')
+  expect((await $.command.run({ command: 'baton-debate', args: 'stop', ...RUN })).text).toBe('주제 고르기를 멈췄어요.')
   release()
   await w.clock.settle()
   expect(w.spawned).toEqual([])

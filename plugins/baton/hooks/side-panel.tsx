@@ -11,32 +11,32 @@ import { answerMark, EMPTY, restore, settingsFrom as asksSettingsFrom } from './
 // 내 차례는 항목마다 패널 안에서 짧게 답을 써 두었다가, 모은 답을 한 번에 본 대화로 보낸다.
 // 작업과 관계없는 곁질문은 본 대화에 넣지 않고 곁대화로 보낸다: 질문처럼 보이는 메시지만 작은 모델로 가르고,
 // 애매하거나 판정이 늦거나 패널을 둘 자리가 없으면 본 대화로 보낸다. 곁대화의 답은 지금 대화를 이어받은 모델($.model.fork)이 쓴다.
-const ENABLED = { plugin: 'chenjing-mods', key: 'sideEnabled' } as const
-const LASTSIDE = { plugin: 'chenjing-mods', key: 'lastSide' } as const
-const STATS = { plugin: 'chenjing-mods', key: 'sideStats' } as const
-const ASKS = { plugin: 'chenjing-mods', key: 'book' } as const
-const DEBATE = { plugin: 'chenjing-mods', key: 'debate' } as const
+const ENABLED = { plugin: 'baton', key: 'sideEnabled' } as const
+const LASTSIDE = { plugin: 'baton', key: 'lastSide' } as const
+const STATS = { plugin: 'baton', key: 'sideStats' } as const
+const ASKS = { plugin: 'baton', key: 'book' } as const
+const DEBATE = { plugin: 'baton', key: 'debate' } as const
 const enabled = atom(ENABLED, false)
 const lastSide = atom(LASTSIDE, '')
 const stats = atom(STATS, { checked: 0, side: 0, failed: 0, totalMs: 0 })
 const asks = atom(ASKS, { items: [], closed: [], seq: 0 })
-const ASKS_STATS = { plugin: 'chenjing-mods', key: 'asksStats' } as const
-const JUDGED = { plugin: 'chenjing-mods', key: 'judgedAnswer' } as const
-// 패널의 [지우기](또는 /side clear·drop)로 지운 항목: [되돌리기]나 /side undo가 되살린다.
+const ASKS_STATS = { plugin: 'baton', key: 'asksStats' } as const
+const JUDGED = { plugin: 'baton', key: 'judgedAnswer' } as const
+// 패널의 [지우기](또는 /baton-side clear·drop)로 지운 항목: [되돌리기]나 /baton-side undo가 되살린다.
 // 사용자가 다음 메시지를 보내면 비운다: 되돌리기는 지운 직후에만 띄운다(모듈 변수라 다시 불러와도 사라진다)
 let lastRemoved: Ask[] = []
 
 export type Settings = { model: 'haiku' | 'sonnet'; auto: boolean }
 
 export function settingsFrom(o: PluginOptions): Settings {
-  // 곁질문 자동 분리는 옵션이고 기본은 꺼짐이다(2026-10-09 사용자 "자동으로 넘어가는건 옵션 기본은 off"). /side auto on|off는 그 세션만 바꾼다
+  // 곁질문 자동 분리는 옵션이고 기본은 꺼짐이다(2026-10-09 사용자 "자동으로 넘어가는건 옵션 기본은 off"). /baton-side auto on|off는 그 세션만 바꾼다
   return { model: o['classify_model'] === 'sonnet' ? 'sonnet' : 'haiku', auto: o['side_auto'] === 'on' }
 }
 
 // 곁대화와 써 둔 답은 모듈 변수로 그리고, 바뀔 때마다 state(sideKeep)에도 적는다: 다시 불러오면 session.start에서 되살린다
 export type { SideTurn }
 let chat: SideTurn[] = []
-const KEEP = { plugin: 'chenjing-mods', key: 'sideKeep' } as const
+const KEEP = { plugin: 'baton', key: 'sideKeep' } as const
 const PANE = 'side-chat'
 export const SIDE_PANE = PANE
 const SEND_KEY = 'send-answers'
@@ -276,7 +276,7 @@ async function openDebateTab($: EngineInterface) {
   await $.ui.open({ id: 'debate', title: paneTitle(d) })
 }
 
-// 패널의 [지우기]: 그 항목만 내 차례에서 뺀다. 2026-10-09 하위 명령(/side drop·undo)을 몰라서 못 쓴다고 해서 버튼으로 옮겼다.
+// 패널의 [지우기]: 그 항목만 내 차례에서 뺀다. 2026-10-09 하위 명령(/baton-side drop·undo)을 몰라서 못 쓴다고 해서 버튼으로 옮겼다.
 // 다음 메시지 전까지 지운 것은 쌓아 두어 [되돌리기] 한 번에 모두 살린다
 async function dropTodo($: EngineInterface, a: Ask) {
   lastRemoved = [...lastRemoved, a]
@@ -317,12 +317,12 @@ async function undoDrop($: EngineInterface): Promise<number> {
 }
 
 // 다시 그려진 뒤에 링을 옮긴다: 바로 옮기면 Enter 처리와 줄 빠짐 뒤에 링이 한 칸 더 밀려 다음 항목을 건너뛰었다(2026-10-08).
-// 패널이 키를 쥐고 있지 않으면(/side 명령으로 불렀을 때 등) 엔진이 거절하고, 그러면 그대로 둔다
+// 패널이 키를 쥐고 있지 않으면(/baton-side 명령으로 불렀을 때 등) 엔진이 거절하고, 그러면 그대로 둔다
 function moveRing($: EngineInterface, key: string) {
   $.clock.after(FOCUS_DELAY_MS, () => void $.ui.focus({ requestId: PANE, key }).catch(() => undefined))
 }
 
-// 곁대화의 [자동 분리 켜기/끄기]: 이 세션만 바꾼다(/side auto on|off와 같다)
+// 곁대화의 [자동 분리 켜기/끄기]: 이 세션만 바꾼다(/baton-side auto on|off와 같다)
 async function toggleAuto($: EngineInterface, s: Settings) {
   const { value: isOn = s.auto } = await $.state.get(ENABLED)
   await update($, enabled, () => !isOn)
@@ -359,13 +359,13 @@ function openWhenJudged($: EngineInterface, mark: string, tries: number) {
   })().catch(() => undefined))
 }
 
-// /side의 목록·지우기·되돌리기: clear, undo, drop N, 그 밖(list)은 목록
+// /baton-side의 목록·지우기·되돌리기: clear, undo, drop N, 그 밖(list)은 목록
 async function asksCommand($: EngineInterface, arg: string, model: string): Promise<{ text: string }> {
   const { value: b = EMPTY } = await $.state.get(ASKS)
   if (arg === 'clear') {
     lastRemoved = [...lastRemoved, ...b.items]
     await update($, asks, (cur: Book): Book => ({ ...cur, items: [] }))
-    return { text: `내 차례 ${b.items.length}개를 지웠어요. 되돌리려면 패널의 [되돌리기]나 /side undo` }
+    return { text: `내 차례 ${b.items.length}개를 지웠어요. 되돌리려면 패널의 [되돌리기]나 /baton-side undo` }
   }
   if (arg === 'undo') {
     const n = await undoDrop($)
@@ -377,7 +377,7 @@ async function asksCommand($: EngineInterface, arg: string, model: string): Prom
     if (!target) return { text: `${drop[1]}번 항목이 없어요.` }
     lastRemoved = [...lastRemoved, target]
     await update($, asks, (cur: Book): Book => ({ ...cur, items: cur.items.filter(a => a.id !== target.id) }))
-    return { text: `지웠어요: ${target.text} · 되돌리려면 패널의 [되돌리기]나 /side undo` }
+    return { text: `지웠어요: ${target.text} · 되돌리려면 패널의 [되돌리기]나 /baton-side undo` }
   }
   const { value: n = { judged: 0, failed: 0 } } = await $.state.get(ASKS_STATS)
   const open = b.items.map((a, i) => `${i + 1}. ${a.text}${a.skips >= 1 ? ` (답 없이 ${a.skips}번 지나감)` : ' (방금 물음)'}`)
@@ -393,10 +393,10 @@ async function asksCommand($: EngineInterface, arg: string, model: string): Prom
   }
 }
 
-// 하위 명령(main, list, drop N, clear, undo, auto on|off, status)은 그대로 받지만 안내에는 넣지 않는다: 같은 일을 패널 버튼과 /mods가 한다(2026-10-09 사용자 "기능이 너무 많아서 외우기도 벅찬데")
+// 하위 명령(main, list, drop N, clear, undo, auto on|off, status)은 그대로 받지만 안내에는 넣지 않는다: 같은 일을 패널 버튼과 /baton이 한다(2026-10-09 사용자 "기능이 너무 많아서 외우기도 벅찬데")
 export const SIDE_COMMAND = {
-  name: 'side',
-  description: '옆 패널 열기(위는 내 차례, 아래는 곁대화). /side 질문: 곁대화에 바로 묻기. 지우기·되돌리기·자동 분리는 패널 버튼으로',
+  name: 'baton-side',
+  description: '옆 패널 열기(위는 내 차례, 아래는 곁대화). /baton-side 질문: 곁대화에 바로 묻기. 지우기·되돌리기·자동 분리는 패널 버튼으로',
   argumentHint: '[질문]',
 }
 
@@ -534,7 +534,7 @@ export function registerSide(on: On, options: PluginOptions): void {
         ]}
       </Box>,
       // 토론은 이 패널 밖(옆 탭)에 있어서, 있는 줄 모르고 지나치지 않게 한 줄로 알린다
-      <Text key="debate-hint" dimColor wrap="wrap">토론: /debate만 치면 지금 대화에서 주제를 골라 두 Claude가 따져요.</Text>,
+      <Text key="debate-hint" dimColor wrap="wrap">토론: /baton-debate만 치면 지금 대화에서 주제를 골라 두 Claude가 따져요.</Text>,
     ]
     return (
       <Box flexDirection="column">
@@ -573,7 +573,7 @@ export function registerSide(on: On, options: PluginOptions): void {
     }
     await update($, lastSide, () => e.text)
     void askSide($, e.text).catch(() => undefined)
-    return { drop: '작업과 관계없는 질문이라 옆 패널의 곁대화에서 답해요. 이어서 물으려면 패널 입력칸에 쓰세요. 본 대화로 보내려면 /side main' }
+    return { drop: '작업과 관계없는 질문이라 옆 패널의 곁대화에서 답해요. 이어서 물으려면 패널 입력칸에 쓰세요. 본 대화로 보내려면 /baton-side main' }
   })
 
   on('session.start', { isInteractive: true }, async ($, e, next) => {
@@ -584,13 +584,13 @@ export function registerSide(on: On, options: PluginOptions): void {
     return started
   })
 
-  on('command.run', { command: 'side' }, async ($, e) => {
+  on('command.run', { command: 'baton-side' }, async ($, e) => {
     if (!(await live($))) return { text: OFF_TEXT }
     const arg = e.args.trim()
     const auto = arg.match(/^(?:auto\s+)?(on|off)$/)
     if (auto) {
       await update($, enabled, () => auto[1] === 'on')
-      return { text: auto[1] === 'on' ? '작업과 관계없는 질문을 곁대화로 보내요.' : '곁질문 자동 분리를 껐어요. /side 질문으로는 계속 물을 수 있어요.' }
+      return { text: auto[1] === 'on' ? '작업과 관계없는 질문을 곁대화로 보내요.' : '곁질문 자동 분리를 껐어요. /baton-side 질문으로는 계속 물을 수 있어요.' }
     }
     // 내 차례 정리(예전 /asks)
     if (arg === 'list' || arg === 'clear' || arg === 'undo' || /^drop\s+\d+$/.test(arg)) return asksCommand($, arg, judgeModel)

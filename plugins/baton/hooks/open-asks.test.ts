@@ -1,6 +1,6 @@
 import { test, expect, mock } from 'claude-code/testing'
 
-import { fakeSession, modsOn } from './testkit'
+import { fakeSession, turnOn } from './testkit'
 
 import type { Ask, Book } from '../types'
 import { answeredIds, answerMark, apply, carryKey, endMarkOf, END_MARKS, withEndMark, contextText, judgePrompt, labeledAsks, lastExchange, mayAsk, mergeCarried, parseJudgment, readCarried, restore, isHuman, settingsFrom, supersede, tailText, toCarry, waiting } from './open-asks'
@@ -97,10 +97,10 @@ test('after a reload the last answer and the message before it are found', () =>
 })
 
 test('notices from an earlier answer close when the next answer lands; questions stay', () => {
-  const b: Book = { items: [ask(1, '세 가지를 적용할까요?'), ask(2, '볼 것: /side 출력'), ask(3, '다르게 한 것: 띠를 뺐어요.')], closed: [], seq: 3 }
+  const b: Book = { items: [ask(1, '세 가지를 적용할까요?'), ask(2, '볼 것: /baton-side 출력'), ask(3, '다르게 한 것: 띠를 뺐어요.')], closed: [], seq: 3 }
   const next = supersede(b, 9)
   expect(next.items.map(a => a.id)).toEqual([1])
-  expect(next.closed.map(c => c.text)).toEqual(['볼 것: /side 출력', '다르게 한 것: 띠를 뺐어요.'])
+  expect(next.closed.map(c => c.text)).toEqual(['볼 것: /baton-side 출력', '다르게 한 것: 띠를 뺐어요.'])
   expect(supersede(next, 10)).toBe(next)
 })
 
@@ -147,8 +147,8 @@ test('answers sent from the side panel close their items before the turn starts'
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('prompt.submit', (_$, e) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
   on('model.complete', () => ({ value: { isAnswered: true, text: '{"closed":[],"new":[]}', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
-  const asks = async () => (await $.command.run({ command: 'side', args: 'list', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })).text
-  await modsOn($)
+  const asks = async () => (await $.command.run({ command: 'baton-side', args: 'list', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })).text
+  await turnOn($)
   await $.turn.complete({ answer: '했어요.\n\n물을 것: debate를 옮길까요?\n물을 것: 자동 분리를 끌까요?', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' })
   expect(await asks()).toContain('내 차례 2개')
   await $.prompt.submit({ text: '↩ debate를 옮길까요? → ㅇㅇ', origin: { kind: 'plugin', name: 'side-panel', asUser: true }, wait: false })
@@ -168,12 +168,12 @@ test('a -p or SDK session (not interactive) collects nothing; an interactive one
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('model.complete', () => ({ value: { isAnswered: true, text: '{"closed":[],"new":[]}', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
-  const list = async () => (await $.command.run({ command: 'side', args: 'list', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })).text
+  const list = async () => (await $.command.run({ command: 'baton-side', args: 'list', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })).text
   const answer = { answer: '했어요.\n\n물을 것: A?', reason: 'answer' as const, durationMs: 1, isAborted: false, turnId: 't1' }
-  await modsOn($)
+  await turnOn($)
   await $.session.start({ cwd: '/tmp', surface: null, isInteractive: false })
   await $.turn.complete(answer)
-  // /mods on으로 고른 세션이라도 -p·SDK에서는 꺼져 있다
+  // /baton on으로 고른 세션이라도 -p·SDK에서는 꺼져 있다
   expect(await list()).toContain('꺼져 있어요')
   await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
   await $.turn.complete({ ...answer, turnId: 't2' })
@@ -198,12 +198,12 @@ test('a reload does not judge the last answer again, so a dropped item stays dro
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('model.complete', () => ({ value: { isAnswered: true, text: '{"closed":[],"new":[]}', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
-  const side = async (args: string) => (await $.command.run({ command: 'side', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })).text
+  const side = async (args: string) => (await $.command.run({ command: 'baton-side', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })).text
   const start = async () => {
     await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
     await clock.settle()
   }
-  await modsOn($)
+  await turnOn($)
   await start()
   await $.turn.complete({ answer: '했어요.\n\n물을 것: A?', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' })
   await clock.settle()
@@ -238,7 +238,7 @@ test('a session that ends leaves the mark of its last judged answer in the store
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('model.complete', () => ({ value: { isAnswered: true, text: '{"closed":[],"new":[]}', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
-  await modsOn($)
+  await turnOn($)
   await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
   const answer = '했어요.\n\n물을 것: A?'
   await $.turn.complete({ answer, reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' })

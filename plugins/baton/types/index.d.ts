@@ -18,7 +18,7 @@ export type Debate = {
   brief: string
   labels: Record<Side, string>
   maxRounds: number
-  // picking: /debate만 쳐서 지금 대화에서 주제를 고르는 중(topic은 아직 비어 있음)
+  // picking: /baton-debate만 쳐서 지금 대화에서 주제를 고르는 중(topic은 아직 비어 있음)
   status: 'picking' | 'starting' | 'running' | 'judging' | 'done' | 'failed'
   pro: Debater
   con: Debater
@@ -33,7 +33,7 @@ export type Debate = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'chenjing-mods': {
+    'baton': {
       expanded: string[]
       book: Book
       turn: number

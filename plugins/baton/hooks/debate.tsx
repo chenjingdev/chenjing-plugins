@@ -6,9 +6,9 @@ import type { Debate, DebateQA, Side, Turn } from '../types'
 
 const PANE = 'debate'
 export const DEBATE_PANE = PANE
-const CURRENT = { plugin: 'chenjing-mods', key: 'debate' } as const
+const CURRENT = { plugin: 'baton', key: 'debate' } as const
 const current = atom(CURRENT, null)
-const DEFAULT_REPORT_DIR = '~/.claude/chenjing-mods/debates'
+const DEFAULT_REPORT_DIR = '~/.claude/baton/debates'
 const DEBATER_TOOLS = 'SendMessage,WebSearch,WebFetch,Read,Grep,Glob'
 const DEBATER_MODEL = 'sonnet'
 const TOOL = 'start_debate'
@@ -17,7 +17,7 @@ const DEFAULT_LABELS: Record<Side, string> = { pro: '찬성', con: '반대' }
 const DEFAULT_ROUNDS = 10
 const MAX_ROUNDS = 10
 
-// "/debate [라운드] [주제]": 주제가 비면(topic '') 지금 대화에서 고른다
+// "/baton-debate [라운드] [주제]": 주제가 비면(topic '') 지금 대화에서 고른다
 export function parseArgs(args: string): { maxRounds: number; topic: string } {
   const [first = '', ...rest] = args.trim().split(/\s+/)
   const n = Number(first)
@@ -26,10 +26,10 @@ export function parseArgs(args: string): { maxRounds: number; topic: string } {
   return { maxRounds: isRounds ? n : DEFAULT_ROUNDS, topic }
 }
 
-// /debate만 쳤을 때 주제를 고르는 포크에 붙이는 말. 포크는 이 대화 전부(도구 결과 포함)를 보고 도구 없이 답한다(2026-10-09 사용자 "/debate 만 치면 자동으로 실행되게")
+// /baton-debate만 쳤을 때 주제를 고르는 포크에 붙이는 말. 포크는 이 대화 전부(도구 결과 포함)를 보고 도구 없이 답한다(2026-10-09 사용자 "/baton-debate 만 치면 자동으로 실행되게")
 export function topicPrompt(previous: string): string {
   return [
-    '[토론 주제 고르기] 사용자가 /debate만 쳤다. 지금까지 이 대화를 보고, 두 Claude가 두 편으로 나눠 토론할 주제를 하나 골라라. 이 답은 사용자에게 보이지 않고 토론 준비에만 쓰인다. 도구는 쓰지 않는다.',
+    '[토론 주제 고르기] 사용자가 /baton-debate만 쳤다. 지금까지 이 대화를 보고, 두 Claude가 두 편으로 나눠 토론할 주제를 하나 골라라. 이 답은 사용자에게 보이지 않고 토론 준비에만 쓰인다. 도구는 쓰지 않는다.',
     '- 따져 볼 값어치가 가장 큰 쟁점을 고른다. 사용자가 아직 정하지 않은 선택, Claude가 최근 답에서 권하거나 단정한 주장, 방금 한 작업이 제대로 됐는지 순으로 보고, 최근 대화를 먼저 본다.',
     ...(previous ? [`- 직전 토론 주제는 "${previous}"였다. 그 뒤로 다시 따질 일이 생긴 게 아니면 다른 쟁점을 고른다.`] : []),
     '- topic: 두 편이 갈리는 한 문장 명제, 60자 안.',
@@ -60,7 +60,7 @@ export function parseTopic(text: string): PickedTopic | undefined {
   }
 }
 
-// /mods가 보여 주는 토론 상태 한 단어
+// /baton이 보여 주는 토론 상태 한 단어
 export function debateWord(d: Debate | null | undefined): string {
   if (!isCurrent(d)) return '없음'
   if (isStalePick(d)) return '끊김'
@@ -301,7 +301,7 @@ async function askDebate($: EngineInterface, question: string) {
   await patch($, cur => (cur.qa?.some(x => x.id === item.id) ? { ...cur, qa: cur.qa.map(x => (x.id === item.id ? done : x)) } : cur))
 }
 
-// launch의 글은 모델에게 하는 말이라, 사용자가 /debate로 시작했을 때는 사용자에게 할 말로 바꾼다(2026-10-09 "사용자에게 시작했다고만 짧게 알려라"가 사용자 화면에 떴다)
+// launch의 글은 모델에게 하는 말이라, 사용자가 /baton-debate로 시작했을 때는 사용자에게 할 말로 바꾼다(2026-10-09 "사용자에게 시작했다고만 짧게 알려라"가 사용자 화면에 떴다)
 export function commandText(said: string, topic: string, rounds: number): string {
   if (said.startsWith('이미 토론이')) return BUSY_TEXT
   if (!said.startsWith('토론을 시작')) return said
@@ -309,7 +309,7 @@ export function commandText(said: string, topic: string, rounds: number): string
   return `토론을 시작했어요: "${topic.trim()}" (${n}라운드${rounds > n ? `, ${rounds}라운드는 ${n}라운드로 줄였어요` : ''}). 토론 탭에서 진행을 보고, 끝나면 [본 대화로 보내기](m)로 결과를 이 대화에 넣을 수 있어요.`
 }
 
-// /debate로 시작하면 토론자는 이 대화를 못 보므로 최근 요청과 답을 배경으로 넘긴다(2026-10-09 토론자가 "지금 작업"을 몰라 엉뚱한 파일을 두고 다퉜다)
+// /baton-debate로 시작하면 토론자는 이 대화를 못 보므로 최근 요청과 답을 배경으로 넘긴다(2026-10-09 토론자가 "지금 작업"을 몰라 엉뚱한 파일을 두고 다퉜다)
 export function recentBrief(msgs: readonly { role: string; text: string }[]): string {
   const out: string[] = []
   for (let i = msgs.length - 1; i >= 0 && out.length < 4; i--) {
@@ -366,7 +366,7 @@ function newDebate(input: LaunchInput, status: Debate['status']): Debate {
 
 async function launch($: EngineInterface, input: LaunchInput, o: PluginOptions): Promise<string> {
   const { value: prev } = await $.state.get(CURRENT)
-  if (isActive(prev)) return '이미 토론이 진행 중이다. 끝나거나 /debate stop 후 다시 시작해야 한다.'
+  if (isActive(prev)) return '이미 토론이 진행 중이다. 끝나거나 /baton-debate stop 후 다시 시작해야 한다.'
   const debate = newDebate(input, 'starting')
   await update($, current, (): Debate | null => debate)
   await $.ui.open({ id: PANE, title: paneTitle(debate) })
@@ -374,13 +374,13 @@ async function launch($: EngineInterface, input: LaunchInput, o: PluginOptions):
   return `토론을 시작했다: "${debate.topic}" (${debate.maxRounds}라운드, ${debate.labels.pro} vs ${debate.labels.con}). 패널에서 진행이 보이고, 끝나면 사용자가 토론 패널의 [본 대화로 보내기]를 눌렀을 때만 결과가 이 대화에 들어온다. 사용자에게 시작했다고만 짧게 알려라.`
 }
 
-const BUSY_TEXT = '이미 토론이 진행 중이에요. 끝나거나 /debate stop 뒤에 다시 시작하세요.'
-export const NOTHING_YET = '토론할 대화가 아직 없어요. 대화를 조금 한 뒤 /debate를 치거나, /debate 주제로 직접 주세요.'
+const BUSY_TEXT = '이미 토론이 진행 중이에요. 끝나거나 /baton-debate stop 뒤에 다시 시작하세요.'
+export const NOTHING_YET = '토론할 대화가 아직 없어요. 대화를 조금 한 뒤 /baton-debate를 치거나, /baton-debate 주제로 직접 주세요.'
 
 // 주제를 고르다 실패하면 그 토론이 아직 고르는 중일 때만 실패로 적는다
 async function failPick($: EngineInterface, name: string, why: string) {
   await update($, current, (cur: Debate | null): Debate | null =>
-    cur && cur.pro.name === name && cur.status === 'picking' ? { ...cur, status: 'failed', error: `주제를 고르지 못했어요(${why}). /debate 주제로 직접 주세요.` } : cur,
+    cur && cur.pro.name === name && cur.status === 'picking' ? { ...cur, status: 'failed', error: `주제를 고르지 못했어요(${why}). /baton-debate 주제로 직접 주세요.` } : cur,
   )
 }
 
@@ -403,8 +403,8 @@ async function pick($: EngineInterface, name: string, previous: string, o: Plugi
   await start($, o)
 }
 
-// /debate만 쳤을 때: 패널을 먼저 열어 "주제 고르는 중"을 보이고, 지금 대화를 이어받은 포크($.model.fork)가 고른 주제로 시작한다.
-// /debate 주제처럼 최근 메시지 몇 개만 넘기는 대신 포크가 brief를 쓰므로, 토론자가 받는 배경도 대화 전체에서 나온다
+// /baton-debate만 쳤을 때: 패널을 먼저 열어 "주제 고르는 중"을 보이고, 지금 대화를 이어받은 포크($.model.fork)가 고른 주제로 시작한다.
+// /baton-debate 주제처럼 최근 메시지 몇 개만 넘기는 대신 포크가 brief를 쓰므로, 토론자가 받는 배경도 대화 전체에서 나온다
 async function launchPicked($: EngineInterface, rounds: number, o: PluginOptions): Promise<string> {
   const { value: prev } = await $.state.get(CURRENT)
   if (isActive(prev)) return BUSY_TEXT
@@ -414,7 +414,7 @@ async function launchPicked($: EngineInterface, rounds: number, o: PluginOptions
   const name = debate.pro.name
   pickingFor = name
   await update($, current, (): Debate | null => debate)
-  // 패널을 못 열어도 고르기는 한다: 여기서 멈추면 'picking'이 남아 다음 /debate를 막는다
+  // 패널을 못 열어도 고르기는 한다: 여기서 멈추면 'picking'이 남아 다음 /baton-debate를 막는다
   await $.ui.open({ id: PANE, title: paneTitle(debate) }).catch(() => undefined)
   void pick($, name, isCurrent(prev) ? prev.topic : '', o)
     .catch((err: unknown) => failPick($, name, String(err)))
@@ -434,8 +434,8 @@ async function stopCurrent($: EngineInterface): Promise<{ text: string }> {
 }
 
 export const DEBATE_COMMAND = {
-  name: 'debate',
-  description: '두 Claude가 토론해요. /debate만 치면 지금 대화에서 주제를 골라 시작하고, /debate [라운드] 주제로 직접 줄 수도 있어요. /debate stop: 중지',
+  name: 'baton-debate',
+  description: '두 Claude가 토론해요. /baton-debate만 치면 지금 대화에서 주제를 골라 시작하고, /baton-debate [라운드] 주제로 직접 줄 수도 있어요. /baton-debate stop: 중지',
   argumentHint: '[라운드] [주제 (비우면 지금 대화에서 골라요)]',
 }
 
@@ -508,7 +508,7 @@ export function registerDebate(on: On, options: PluginOptions): void {
     return { result: { started: text.startsWith('토론을 시작') }, text }
   })
 
-  on('command.run', { command: 'debate' }, async ($, e) => {
+  on('command.run', { command: 'baton-debate' }, async ($, e) => {
     if (!(await live($))) return { text: OFF_TEXT }
     if (e.args.trim() === 'stop') return stopCurrent($)
     const { maxRounds, topic } = parseArgs(e.args)
@@ -552,10 +552,10 @@ export function registerDebate(on: On, options: PluginOptions): void {
     if (!(await live($))) return <Text dimColor>{OFF_TEXT}</Text>
     const Input = 'Input' in els ? els.Input : undefined
     const d = await read($, current)
-    if (!isCurrent(d)) return <Text dimColor>진행 중인 토론이 없어요. /debate [라운드] &lt;주제&gt;</Text>
+    if (!isCurrent(d)) return <Text dimColor>진행 중인 토론이 없어요. /baton-debate [라운드] &lt;주제&gt;</Text>
 
     const status = {
-      picking: isStalePick(d) ? '주제를 고르다 플러그인을 다시 불러와 멈췄어요. /debate를 다시 쳐요.' : '지금 대화에서 토론 주제를 고르는 중…',
+      picking: isStalePick(d) ? '주제를 고르다 플러그인을 다시 불러와 멈췄어요. /baton-debate를 다시 쳐요.' : '지금 대화에서 토론 주제를 고르는 중…',
       starting: '토론자 세션 띄우는 중…',
       running: `${d.labels[nextSide(d.log)]} 측 생각 중…`,
       judging: '심판이 판정 중…',

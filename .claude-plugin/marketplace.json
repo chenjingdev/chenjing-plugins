@@ -46,9 +46,9 @@
       "source": "./plugins/optiview/plugin"
     },
     {
-      "name": "chenjing-mods",
-      "description": "답 형식(첫 문단·접히는 설명·내 차례), 내 차례 모으기, 옆 패널(내 차례·곁대화), 두 Claude 토론을 묶은 mod. /mods on으로 고른 터미널 대화형 세션에서만 켜진다. Claude Code 전용.",
-      "source": "./plugins/chenjing-mods"
+      "name": "baton",
+      "description": "답 형식(첫 문단·접히는 설명·내 차례), 내 차례 모으기, 옆 패널(내 차례·곁대화), 두 Claude 토론을 묶은 mod. /baton on으로 고른 터미널 대화형 세션에서만 켜진다. Claude Code 전용.",
+      "source": "./plugins/baton"
     }
   ]
 }

@@ -25,8 +25,8 @@ export function fakeSession(on: On, first = 'test-session') {
   return s
 }
 
-// 테스트 세션을 /mods on으로 고른다. 키트는 on()을 모두 첫 $ 호출 전에 받으므로, fakeSession(on)을 먼저 부르고 다른 on()들 뒤에 이것을 부른다
-export async function modsOn($: Engine) {
-  const r = await $.command.run({ command: 'mods', args: 'on', ...RUN })
-  if (!r.text?.includes('켰어요')) throw new Error(r.text ?? '/mods on: 답 없음')
+// 테스트 세션을 /baton on으로 고른다. 키트는 on()을 모두 첫 $ 호출 전에 받으므로, fakeSession(on)을 먼저 부르고 다른 on()들 뒤에 이것을 부른다
+export async function turnOn($: Engine) {
+  const r = await $.command.run({ command: 'baton', args: 'on', ...RUN })
+  if (!r.text?.includes('켰어요')) throw new Error(r.text ?? '/baton on: 답 없음')
 }

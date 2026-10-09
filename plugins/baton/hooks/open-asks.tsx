@@ -7,12 +7,12 @@ import type { Ask, AsksStats as Stats, Book } from '../types'
 // Claude가 사용자에게 넘긴 일(물을 것·볼 것·다르게 한 것)을 모아 두고, 입력창 아래 줄 끝에 개수를 보인다. 목록은 옆 패널의 내 차례(side-panel).
 // 턴이 끝날 때마다 작은 모델이 판정한다: 이번 메시지로 답한 질문은 닫고, 이번 답의 새 질문은 더한다.
 
-const BOOK = { plugin: 'chenjing-mods', key: 'book' } as const
-const TURN = { plugin: 'chenjing-mods', key: 'turn' } as const
-const LAST = { plugin: 'chenjing-mods', key: 'lastRequest' } as const
-const HUMAN = { plugin: 'chenjing-mods', key: 'humanTurn' } as const
-const STATS = { plugin: 'chenjing-mods', key: 'asksStats' } as const
-const JUDGED = { plugin: 'chenjing-mods', key: 'judgedAnswer' } as const
+const BOOK = { plugin: 'baton', key: 'book' } as const
+const TURN = { plugin: 'baton', key: 'turn' } as const
+const LAST = { plugin: 'baton', key: 'lastRequest' } as const
+const HUMAN = { plugin: 'baton', key: 'humanTurn' } as const
+const STATS = { plugin: 'baton', key: 'asksStats' } as const
+const JUDGED = { plugin: 'baton', key: 'judgedAnswer' } as const
 export const EMPTY: Book = { items: [], closed: [], seq: 0 }
 // 이 세션에서 지난 세션 항목을 이미 가져왔는지, 세션이 끝날 때 쓸 작업 폴더
 let importedFor = ''

@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { fakeSession, modsOn } from './testkit'
+import { fakeSession, turnOn } from './testkit'
 
 import { countChars, pickRecent, ruleText, splitBlocks, textKey, turnNote } from './answer-blocks'
 
@@ -44,25 +44,25 @@ test('counting and keys ignore whitespace and code', () => {
 })
 
 test('user-turn lines leave one note in the body', () => {
-  expect(turnNote('물을 것: A를 할까요?\n볼 것: B\n물을 것: C?')).toBe('↩ 물을 것 2 · 볼 것 1 → 옆 패널 내 차례 (/side)')
-  expect(turnNote('- **다르게 한 것:** D')).toBe('↩ 다르게 한 것 1 → 옆 패널 내 차례 (/side)')
+  expect(turnNote('물을 것: A를 할까요?\n볼 것: B\n물을 것: C?')).toBe('↩ 물을 것 2 · 볼 것 1 → 옆 패널 내 차례 (/baton-side)')
+  expect(turnNote('- **다르게 한 것:** D')).toBe('↩ 다르게 한 것 1 → 옆 패널 내 차례 (/baton-side)')
 })
 
 test('the rule tells the turn lines to stand alone', () => {
   expect(ruleText()).toContain('본문을 가리키는 말을 쓰지 않는다')
 })
 
-test('/e picks the last answer, /e 2 the one before', () => {
+test('/baton-e picks the last answer, /baton-e 2 the one before', () => {
   expect(pickRecent(['a', 'b', 'c'], '')).toBe('c')
   expect(pickRecent(['a', 'b', 'c'], '2')).toBe('b')
   expect(pickRecent(['a', 'b', 'c'], '4')).toBe(undefined)
   expect(pickRecent(['a'], 'x')).toBe(undefined)
 })
 
-test('/e says so when no answer has an explanation yet', async ($, on) => {
+test('/baton-e says so when no answer has an explanation yet', async ($, on) => {
   fakeSession(on)
-  await modsOn($)
-  const r = await $.command.run({ command: 'e', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await turnOn($)
+  const r = await $.command.run({ command: 'baton-e', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
   expect(r.text).toContain('아직 없어요')
 })
 

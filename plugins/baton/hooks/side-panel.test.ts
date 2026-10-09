@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { fakeSession, modsOn, RUN } from './testkit'
+import { fakeSession, turnOn, RUN } from './testkit'
 import type { Engine, TestBody } from 'claude-code/testing'
 
 type On = Parameters<TestBody>[1]
@@ -87,9 +87,9 @@ async function seed($: Engine, on: On, texts: string[]) {
   fakeSession(on)
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('model.complete', () => ({ value: { isAnswered: true, text: '{"closed":[],"new":[]}', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
-  await modsOn($)
+  await turnOn($)
   await $.turn.complete({ answer: `했어요.\n\n${texts.map(t => `물을 것: ${t}`).join('\n')}`, reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' })
-  return $.ui.mount({ plugin: 'chenjing-mods', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'side-chat' })
+  return $.ui.mount({ plugin: 'baton', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'side-chat' })
 }
 
 test('answers written in the panel are sent together as the person\'s words', async ($, on) => {
@@ -107,7 +107,7 @@ test('answers written in the panel are sent together as the person\'s words', as
   expect((await ui.find({ key: 'send-answers' }))?.text).toContain('답 2개 본 대화로 보내기')
   expect((await ui.find({ key: 'todo-btn-1' }))?.text).toContain('고치기')
   await ui.press({ key: 'send-answers' })
-  expect(got).toEqual([{ text: '↩ debate를 옮길까요? → ㅇㅇ\n↩ 자동 분리를 끌까요? → 아니, 첫 문단 규칙만', origin: { kind: 'plugin', name: 'chenjing-mods', asUser: true } }])
+  expect(got).toEqual([{ text: '↩ debate를 옮길까요? → ㅇㅇ\n↩ 자동 분리를 끌까요? → 아니, 첫 문단 규칙만', origin: { kind: 'plugin', name: 'baton', asUser: true } }])
   expect(await ui.find({ key: 'send-answers' })).toBe(undefined)
   expect(await ui.find({ text: '[ 보냄 ]' })).not.toBe(undefined)
 })
@@ -130,12 +130,12 @@ test('a side question sent to the main conversation goes as the person\'s words'
     return { text: e.text }
   })
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  await modsOn($)
-  const r = await $.command.run({ command: 'side', args: 'zsh랑 bash 차이?', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await turnOn($)
+  const r = await $.command.run({ command: 'baton-side', args: 'zsh랑 bash 차이?', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
   expect(r.text).toContain('곁대화에서 답해요')
-  const ui = await $.ui.mount({ plugin: 'chenjing-mods', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'side-chat' })
+  const ui = await $.ui.mount({ plugin: 'baton', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'side-chat' })
   await ui.press({ key: 'main' })
-  expect(got).toEqual([{ text: 'zsh랑 bash 차이?', origin: { kind: 'plugin', name: 'chenjing-mods', asUser: true } }])
+  expect(got).toEqual([{ text: 'zsh랑 bash 차이?', origin: { kind: 'plugin', name: 'baton', asUser: true } }])
 })
 
 test('keys: digits answer the item, s sends, and the ring starts on the first unanswered item', async ($, on) => {
@@ -157,7 +157,7 @@ async function askLooksSide($: Engine, on: On) {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.messages', () => ({ value: [{ role: 'user', text: '플러그인 고쳐줘', toolUses: [] }, { role: 'assistant', text: '고쳤어요.', toolUses: [] }] }))
   on('prompt.submit', (_$, e) => ({ text: e.text }))
-  await modsOn($)
+  await turnOn($)
   return $.prompt.submit({ text: '근데 zsh랑 bash 차이가 뭐야?', origin: { kind: 'composer' }, wait: false })
 }
 
@@ -226,6 +226,6 @@ test('the side chat has a button for automatic routing, and the panel says where
   expect(await ui.find({ text: '[자동 분리 켜기]를 누르면' })).not.toBe(undefined)
   await ui.press({ key: 'auto' })
   expect((await ui.find({ key: 'auto' }))?.text).toContain('자동 분리 끄기')
-  expect((await $.command.run({ command: 'side', args: 'status', ...RUN })).text).toContain('자동 분리 켜짐')
-  expect(await ui.find({ type: 'Text', text: '토론: /debate만 치면' })).not.toBe(undefined)
+  expect((await $.command.run({ command: 'baton-side', args: 'status', ...RUN })).text).toContain('자동 분리 켜짐')
+  expect(await ui.find({ type: 'Text', text: '토론: /baton-debate만 치면' })).not.toBe(undefined)
 })

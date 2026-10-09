@@ -1,12 +1,12 @@
 {
-  "name": "chenjing-mods",
+  "name": "baton",
   "description": "이 폴더를 그대로 읽는 개발용 마켓플레이스. 고치고 /reload-plugins로 바로 본다. 다른 컴퓨터에서는 chenjing-plugins 마켓플레이스로 설치한다.",
   "owner": {
     "name": "chenjing"
   },
   "plugins": [
     {
-      "name": "chenjing-mods",
+      "name": "baton",
       "source": "./"
     }
   ]

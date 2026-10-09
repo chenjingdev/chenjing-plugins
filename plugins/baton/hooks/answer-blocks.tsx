@@ -6,7 +6,7 @@ import { enter, isKnown, isLive, OFF_TEXT, SESSIONS, settle } from './live'
 // 길이 제한은 두지 않는다: 설명은 접혀 있고, 사용자 차례는 본문에서 빠져 옆 패널(side-panel)의 내 차례에 뜬다.
 // 2026-10-06 벤치마크에서 접힌 설명이 다음 판단에 필요한 단서·숫자를 숨겨서, 그것들은 첫 문단에 쓰게 했다.
 // 2026-10-08 첫 문단 끝에 설명에 든 것의 이름을 대게 했다: 필요한 것이 접혔을 때 주제를 알린 비율 2/24 → 19/21(A3 벤치).
-const EXPANDED = { plugin: 'chenjing-mods', key: 'expanded' } as const
+const EXPANDED = { plugin: 'baton', key: 'expanded' } as const
 const expanded = atom(EXPANDED, [])
 
 export function ruleText(): string {
@@ -55,7 +55,7 @@ export function turnNote(turn: string): string {
     if (m?.[1]) counts[m[1]] = (counts[m[1]] ?? 0) + 1
   }
   const parts = Object.entries(counts).map(([k, n]) => `${k} ${n}`)
-  return `↩ ${parts.length ? parts.join(' · ') : '사용자 차례'} → 옆 패널 내 차례 (/side)`
+  return `↩ ${parts.length ? parts.join(' · ') : '사용자 차례'} → 옆 패널 내 차례 (/baton-side)`
 }
 
 // 접힌 설명의 목차: 설명의 맨 앞 단계 항목 이름("- 확인한 것: …"이나 "1. 확인한 것: …"이면 "확인한 것")을 글에서 그대로 뽑는다.
@@ -93,13 +93,13 @@ export function textKey(text: string): string {
   return `${t.length}:${(h >>> 0).toString(36)}`
 }
 
-// 설명이 있는 최근 답의 key, 새것이 끝: /e가 키보드로 펼치고 접는다. 모듈 변수라 다시 불러오면 비고, 그때는 그려진 순서로 채운다
+// 설명이 있는 최근 답의 key, 새것이 끝: /baton-e가 키보드로 펼치고 접는다. 모듈 변수라 다시 불러오면 비고, 그때는 그려진 순서로 채운다
 let recent: string[] = []
 const remember = (key: string) => {
   recent = [...recent.filter(k => k !== key), key].slice(-20)
 }
 
-// /e N: 끝에서 N번째 답(1이 마지막)의 설명을 펼치거나 접는다
+// /baton-e N: 끝에서 N번째 답(1이 마지막)의 설명을 펼치거나 접는다
 export function pickRecent(list: readonly string[], arg: string): string | undefined {
   const n = arg.trim() ? Number(arg.trim()) : 1
   if (!Number.isInteger(n) || n < 1) return undefined
@@ -109,7 +109,7 @@ export function pickRecent(list: readonly string[], arg: string): string | undef
 const MD_MAX = 9500
 const clip = (s: string) => (s.length > MD_MAX ? `${s.slice(0, MD_MAX)}\n…(ctrl+o로 원문)` : s)
 
-export const E_COMMAND = { name: 'e', description: '마지막 답의 설명 펼치기/접기 (/e 2: 그 전 답)' }
+export const E_COMMAND = { name: 'baton-e', description: '마지막 답의 설명 펼치기/접기 (/baton-e 2: 그 전 답)' }
 
 // 이 세션에서 켜졌는지(live.ts). $를 쓰는 함수라 hook과 같은 파일에 둔다
 async function live($: EngineInterface): Promise<boolean> {
@@ -146,7 +146,7 @@ export function registerBlocks(on: On): void {
     } else if (b.explain) {
       const index = explainIndex(b.explain)
       if (index.length) parts.push(<Text key="index" dimColor wrap="wrap">{`설명 목차: ${index.join(' · ')}`}</Text>)
-      parts.push(<Button key={`open-${key}`} label={`설명 펼치기 (${countChars(b.explain)}자) /e`} variant="primary" onPress={toggle} />)
+      parts.push(<Button key={`open-${key}`} label={`설명 펼치기 (${countChars(b.explain)}자) /baton-e`} variant="primary" onPress={toggle} />)
     }
     // 사용자 차례 줄은 옆 패널(side-panel)의 내 차례로 보내고, 본문에는 한 줄만 남긴다
     if (b.turn) parts.push(<Text key="turn" dimColor>{turnNote(b.turn)}</Text>)
@@ -170,10 +170,10 @@ export function registerBlocks(on: On): void {
     return started
   })
 
-  on('command.run', { command: 'e' }, async ($, e) => {
+  on('command.run', { command: 'baton-e' }, async ($, e) => {
     if (!(await live($))) return { text: OFF_TEXT }
     const key = pickRecent(recent, e.args)
-    if (!key) return { text: recent.length ? `설명이 있는 답은 최근 ${recent.length}개예요. /e 1~${recent.length}로 골라요.` : '펼칠 설명이 있는 답이 아직 없어요.' }
+    if (!key) return { text: recent.length ? `설명이 있는 답은 최근 ${recent.length}개예요. /baton-e 1~${recent.length}로 골라요.` : '펼칠 설명이 있는 답이 아직 없어요.' }
     let isOpen = false
     await update($, expanded, (l: string[]): string[] => {
       isOpen = !l.includes(key)
