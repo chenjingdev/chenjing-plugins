@@ -12,6 +12,7 @@ const expanded = atom(EXPANDED, [])
 export function ruleText(): string {
   return [
     '# 답 형식 (answer-blocks)',
+    '- 사용자가 이 세션에서 켠 baton 플러그인의 규칙이다. 이 대화의 모든 답에 적용한다.',
     '- 답은 세 덩어리로 쓴다. 해당 없는 덩어리는 쓰지 않는다. 길이 제한은 없다.',
     '- 첫 문단: 사용자가 물은 것에 답한다. 결론부터, 보통 1~3문장. 물은 것과 상관없는 내용은 넣지 않는다.',
     '- 사용자는 접힌 설명을 펼치지 않고 첫 문단과 사용자 차례 줄만 보고 다음 말을 정한다. 그래서 결론에 붙는 단서(확인 못 함·추정·실패·위험)와 사용자가 판단에 쓸 숫자는 첫 문단에 쓴다. 물을 것에 답하는 데 필요한 선택지별 차이는 첫 문단이나 그 물을 것 줄에 쓴다.',
@@ -22,6 +23,9 @@ export function ruleText(): string {
     '- 작업 중간에 쓰는 글은 한 줄로 쓴다.',
   ].join('\n')
 }
+
+// 규칙을 받은 대화에서 /baton off를 하면 다음 입력에 한 번 붙인다
+export const OFF_RULE = '사용자가 이 세션에서 baton을 껐다. 앞에서 받은 "답 형식 (answer-blocks)" 규칙은 이제 따르지 않는다.'
 
 const TURN_LABEL = /^\s*(?:[-*•]\s*)?(?:\*\*)?(?:물을 것|볼 것|다르게 한 것)(?:\*\*)?\s*[:：]/
 const EXPLAIN_LABEL = /^\s*(?:\*\*)?설명(?:\*\*)?\s*[:：]\s*(?:\*\*)?\s*/
@@ -120,11 +124,29 @@ async function live($: EngineInterface): Promise<boolean> {
   return list === null ? false : settle(list, id)
 }
 
+// 규칙을 이미 받은 대화의 세션 id. 압축하면 규칙이 붙은 입력이 요약으로 바뀌어 사라지니 지운다
+let ruleIn: string | undefined
+
 export function registerBlocks(on: On): void {
-  on('prompt.compose', async ($, e, next) => {
-    if (!(await live($))) return next(e)
+  // 규칙은 시스템 프롬프트가 아니라 입력 옆 맥락으로 넣는다. Team·Enterprise 조직이나 managed settings가 있는 Mac에서는
+  // 내장 cc-plugin-sec-default가 사용자 플러그인의 prompt.compose·prompt.section·prompt.context hook을 건너뛰지만 prompt.submit은 두기 때문이다(2.1.296에서 확인).
+  // 입력마다 붙이면 약 760자씩 대화에 쌓여서, 대화마다 한 번(첫 입력, /clear 뒤, 압축 뒤) 붙인다
+  on('prompt.submit', { text: /[\s\S]/ }, async ($, e, next) => {
+    const isOn = await live($)
+    if (!isOn && ruleIn === undefined) return next(e)
+    const id = await $.session.id().catch(() => '')
+    // 켜져 있으면 이 대화가 아직 규칙을 받지 않았을 때, 꺼져 있으면 이 대화가 규칙을 받았을 때만 붙인다
+    if (isOn ? ruleIn === id : ruleIn !== id) return next(e)
+    const r = await next({ ...e, context: [...(e.context ?? []), isOn ? ruleText() : OFF_RULE] })
+    // 곁대화로 보내는 등 들어가지 않은 입력은 규칙을 싣지 못했으니 다음 입력에 다시 붙인다
+    if (!r.drop) ruleIn = isOn ? id : undefined
+    return r
+  })
+
+  on('session.compact', async ($, e, next) => {
     const r = await next(e)
-    return { sections: [...r.sections, { id: 'answer-blocks:rule', text: ruleText(), scope: 'session' as const }] }
+    if (!e.agentId && e.trigger !== 'precompute' && r.messages) ruleIn = undefined
+    return r
   })
 
   // 설명 덩어리는 접어서 한 줄 버튼으로만 보인다. 설명이 없는 답은 엔진이 그대로 그린다
