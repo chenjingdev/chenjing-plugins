@@ -117,29 +117,34 @@ function judgeAll(scenario, transcript, cwd, fixture) {
   });
 }
 
-// 시나리오나 pact 지침(skills, agents)이 바뀌면 옛 transcript는 다시 쓰지 않는다.
-function fingerprint(scenario) {
-  const h = createHash('sha256').update(JSON.stringify(scenario));
+// 보내는 턴이나 pact 지침(skills, agents)이 바뀌면 옛 transcript는 다시 쓰지 않는다.
+// 검사(checks)만 바뀐 것은 다시 판정하면 되고, 대조군은 pact 지침과 상관없다.
+function fingerprint(scenario, variant) {
+  const { checks, ...asSent } = scenario;
+  const h = createHash('sha256').update(JSON.stringify(asSent));
+  if (variant === 'control') return h.digest('hex').slice(0, 16);
   const walk = (dir) =>
     readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
   for (const f of [...walk(path.join(PACT, 'skills')), ...walk(path.join(PACT, 'agents'))].sort()) h.update(readFileSync(f));
   return h.digest('hex').slice(0, 16);
 }
 
-function loadPrevious(file, scenario) {
+function loadPrevious(file, scenario, variant) {
   if (!existsSync(file)) return null;
   const lines = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const meta = lines[0];
   const transcript = [];
   for (const e of lines.slice(1)) (transcript[e._turn] ??= []).push(e);
-  if (meta.fingerprint !== fingerprint(scenario) || hitLimit(transcript) || !existsSync(meta.workdir ?? '')) return null;
+  // 지문이 없는 옛 기록은 대조군만 받는다(대조군은 지침과 상관없음).
+  const stamp = meta.fingerprint ?? (variant === 'control' ? fingerprint(scenario, variant) : null);
+  if (stamp !== fingerprint(scenario, variant) || hitLimit(transcript) || !existsSync(meta.workdir ?? '')) return null;
   return { transcript, cwd: meta.workdir };
 }
 
 async function runOnce(scenario, variant, n, bin, resume) {
   const fixture = path.join(HERE, 'fixtures', scenario.fixture);
   const outFile = path.join(HERE, 'out', scenario.name, `${variant}-${n}.jsonl`);
-  const previous = resume ? loadPrevious(outFile, scenario) : null;
+  const previous = resume ? loadPrevious(outFile, scenario, variant) : null;
   if (previous) return { r: judgeAll(scenario, previous.transcript, previous.cwd, fixture), reused: true };
   if (limited) return { limited: true };
   const cwd = workdirFor(fixture);
@@ -168,7 +173,7 @@ async function runOnce(scenario, variant, n, bin, resume) {
   }
   const outDir = path.join(HERE, 'out', scenario.name);
   mkdirSync(outDir, { recursive: true });
-  const lines = [{ type: 'pact-test', scenario: scenario.name, variant, n, workdir: cwd, fingerprint: fingerprint(scenario) }];
+  const lines = [{ type: 'pact-test', scenario: scenario.name, variant, n, workdir: cwd, fingerprint: fingerprint(scenario, variant) }];
   transcript.forEach((events, turn) => events.forEach((e) => lines.push({ ...e, _turn: turn })));
   writeFileSync(outFile, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   if (hitLimit(transcript)) return { limited: true };
