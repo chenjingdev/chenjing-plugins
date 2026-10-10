@@ -31,13 +31,13 @@ export function settingsFrom(o: PluginOptions): Settings {
 
 const CODE = /```[\s\S]*?```/g
 
-// 다른 mod가 사용자의 말로 보낸 글(asUser, 옆 패널에서 모아 보낸 답)도 사람 턴으로 센다
+// 다른 mod가 사용자의 말로 보낸 글(asUser)도 사람 턴으로 센다. baton 자신이 보낸 글은 이 훅에 오지 않는다(countHumanTurn)
 export function isHuman(origin: { kind?: string; asUser?: boolean } | undefined): boolean {
   if (!origin || origin.kind === undefined || origin.kind === 'composer' || origin.kind === 'bridge') return true
   return origin.kind === 'plugin' && origin.asUser === true
 }
 
-// "↩ 항목 → 답" 줄로 답한 항목(옆 패널에서 모아 보낸 답): 판정을 기다리지 않고 바로 닫는다
+// "↩ 항목 → 답" 줄로 답한 항목(옆 패널의 [답하기]가 입력창에 붙인 줄): 판정을 기다리지 않고 바로 닫는다
 export function answeredIds(items: readonly Ask[], text: string): number[] {
   const ids: number[] = []
   for (const raw of text.split('\n')) {
@@ -312,6 +312,23 @@ async function live($: EngineInterface): Promise<boolean> {
   return list === null ? false : settle(list, id)
 }
 
+// 사람 턴의 메시지로 내 차례를 고친다: "↩ 항목 → 답" 줄로 답한 항목을 닫는다
+export function closeAnswered(cur: Book, text: string, turnNo: number, now: number): Book {
+  const answered = answeredIds(cur.items, text)
+  return answered.length ? apply(cur, [], answered, [], turnNo, now, false) : cur
+}
+
+// 사람 턴 하나를 센다: 턴 번호, 판정이 볼 사용자 메시지, 답한 항목 닫기.
+// baton이 $.prompt.submit으로 보낸 글(곁대화·토론의 [본 대화로 보내기])에는 엔진이 baton의 prompt.submit 훅을 모두 건너뛴다
+// (debug 로그 "prompt.submit skipped: re-entry"). 그래서 보내는 파일(side-panel, debate)에도 같은 함수를 두고 보내기 전에 부른다:
+// 안 세면 판정이 지난 메시지를 이번 메시지로 읽어 내 차례를 잘못 닫거나 남겼다(2026-10-10). $는 다른 파일의 함수로 넘길 수 없다
+async function countHumanTurn($: EngineInterface, text: string): Promise<void> {
+  const turnNo = await update($, turn, (n: number) => n + 1)
+  await update($, lastRequest, () => text)
+  await update($, humanTurn, () => true)
+  await update($, book, (cur: Book): Book => closeAnswered(cur, text, turnNo, Date.now()))
+}
+
 export function registerAsks(on: On, options: PluginOptions): void {
   const s = settingsFrom(options)
 
@@ -323,13 +340,7 @@ export function registerAsks(on: On, options: PluginOptions): void {
       await update($, humanTurn, () => false)
       return next(e)
     }
-    const turnNo = await update($, turn, (n: number) => n + 1)
-    await update($, lastRequest, () => e.text)
-    await update($, humanTurn, () => true)
-    await update($, book, (cur: Book): Book => {
-      const answered = answeredIds(cur.items, e.text)
-      return answered.length ? apply(cur, [], answered, [], turnNo, Date.now(), false) : cur
-    })
+    await countHumanTurn($, e.text)
     const { value: b = EMPTY } = await $.state.get(BOOK)
     const list = waiting(b)
     if (!list.length) return next(e)

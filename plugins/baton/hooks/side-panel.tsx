@@ -5,10 +5,11 @@ import { enter, isKnown, isLive, OFF_TEXT, SESSIONS, settle } from './live'
 import type { SideStats as Stats } from '../types'
 import type { Ask, Book, SideKeep, SideTurn } from '../types'
 import { paneTitle } from './debate'
-import { answerMark, EMPTY, restore, settingsFrom as asksSettingsFrom } from './open-asks'
+import { answerMark, closeAnswered, EMPTY, restore, settingsFrom as asksSettingsFrom } from './open-asks'
 
 // 전체 화면 모드의 옆 패널 하나에 위는 "내 차례"(open-asks가 모은 할 일), 아래는 "곁대화"를 보여 준다.
-// 내 차례는 항목마다 패널 안에서 짧게 답을 써 두었다가, 모은 답을 한 번에 본 대화로 보낸다.
+// 내 차례의 [답하기]는 그 항목을 입력창에 "↩ 항목 → "로 붙이고, 답은 입력창에서 쓴다. 곁질문도 입력창에서 /baton-side로 쓴다:
+// 패널 입력칸(Input)은 한글 조합이 깨졌다(2026-10-10 "ㅌ튀어나와서", "기억ㅇ ㅣ섞인단"). 지난 대화 기록에서 입력창으로 친 글에는 이런 깨짐이 거의 없었다
 // 작업과 관계없는 곁질문은 본 대화에 넣지 않고 곁대화로 보낸다: 질문처럼 보이는 메시지만 작은 모델로 가르고,
 // 애매하거나 판정이 늦거나 패널을 둘 자리가 없으면 본 대화로 보낸다. 곁대화의 답은 지금 대화를 이어받은 모델($.model.fork)이 쓴다.
 const ENABLED = { plugin: 'baton', key: 'sideEnabled' } as const
@@ -22,6 +23,10 @@ const stats = atom(STATS, { checked: 0, side: 0, failed: 0, totalMs: 0 })
 const asks = atom(ASKS, { items: [], closed: [], seq: 0 })
 const ASKS_STATS = { plugin: 'baton', key: 'asksStats' } as const
 const JUDGED = { plugin: 'baton', key: 'judgedAnswer' } as const
+// 사람 턴 세기(open-asks와 같은 키)
+const turn = atom({ plugin: 'baton', key: 'turn' } as const, 0)
+const lastRequest = atom({ plugin: 'baton', key: 'lastRequest' } as const, '')
+const humanTurn = atom({ plugin: 'baton', key: 'humanTurn' } as const, false)
 // 패널의 [지우기](또는 /baton-side clear·drop)로 지운 항목: [되돌리기]나 /baton-side undo가 되살린다.
 // 사용자가 다음 메시지를 보내면 비운다: 되돌리기는 지운 직후에만 띄운다(모듈 변수라 다시 불러와도 사라진다)
 let lastRemoved: Ask[] = []
@@ -33,32 +38,26 @@ export function settingsFrom(o: PluginOptions): Settings {
   return { model: o['classify_model'] === 'sonnet' ? 'sonnet' : 'haiku', auto: o['side_auto'] === 'on' }
 }
 
-// 곁대화와 써 둔 답은 모듈 변수로 그리고, 바뀔 때마다 state(sideKeep)에도 적는다: 다시 불러오면 session.start에서 되살린다
+// 곁대화는 모듈 변수로 그리고, 바뀔 때마다 state(sideKeep)에도 적는다: 다시 불러오면 처음 그릴 때 되살린다
 export type { SideTurn }
 let chat: SideTurn[] = []
 const KEEP = { plugin: 'baton', key: 'sideKeep' } as const
 const PANE = 'side-chat'
 export const SIDE_PANE = PANE
-const SEND_KEY = 'send-answers'
-// 내 차례 항목 id별로 써 둔 답, 보냈지만 open-asks가 아직 닫지 않은 답(본 대화가 일하는 중이면 끝난 뒤에 들어간다)
-const drafts = new Map<number, string>()
-const sent = new Map<number, string>()
-let editing: number | undefined
-let typed = ''
 
-export function toKeep(d: ReadonlyMap<number, string>, s: ReadonlyMap<number, string>, c: readonly SideTurn[]): SideKeep {
-  return { drafts: Object.fromEntries(d), sent: Object.fromEntries(s), chat: [...c] }
+// 0.7.1까지는 패널에 써 둔 답(drafts·sent)도 여기 두었다. 이제 답은 입력창에 있어서 곁대화만 남기고, 예전 값은 읽을 때 버린다
+export function toKeep(c: readonly SideTurn[]): SideKeep {
+  return { chat: [...c] }
 }
 
-export function fromKeep(k: SideKeep | undefined): { drafts: Map<number, string>; sent: Map<number, string>; chat: SideTurn[] } {
-  const toMap = (r: Record<string, string> | undefined) => new Map(Object.entries(r ?? {}).map(([id, v]) => [Number(id), v] as const))
+export function fromKeep(k: SideKeep | undefined): { chat: SideTurn[] } {
   // 답을 기다리던 중에 다시 불러왔으면 그 답은 오지 않는다
   const chat = (k?.chat ?? []).map(t => (t.a || t.err ? t : { ...t, err: '답을 기다리는 중에 플러그인을 다시 불러와 답을 받지 못했어요.' }))
-  return { drafts: toMap(k?.drafts), sent: toMap(k?.sent), chat }
+  return { chat }
 }
 
 async function persist($: EngineInterface) {
-  await $.state.set(KEEP, toKeep(drafts, sent, chat))
+  await $.state.set(KEEP, toKeep(chat))
 }
 
 // 처음 그리거나 처음 쓸 때 한 번 state에서 되살린다: /reload-plugins로 다시 불러왔을 때는 session.start가 오지 않아 거기서만 되살리면 비어 보였다(2026-10-09 tmux로 확인)
@@ -71,12 +70,7 @@ async function ensureLoaded($: EngineInterface) {
 
 async function hydrate($: EngineInterface) {
   const { value } = await $.state.get(KEEP)
-  const k = fromKeep(value)
-  drafts.clear()
-  sent.clear()
-  for (const [id, v] of k.drafts) drafts.set(id, v)
-  for (const [id, v] of k.sent) sent.set(id, v)
-  chat = k.chat
+  chat = fromKeep(value).chat
 }
 
 export function isHuman(origin: { kind?: string } | undefined): boolean {
@@ -170,80 +164,67 @@ export function forkPrompt(history: readonly SideTurn[], question: string): stri
   ].join('\n')
 }
 
-// 입력칸을 그리지 못하는 화면에서는 [답하기]가 입력창 앞에 그 항목을 붙인다. 써 둔 글은 뒤에 남긴다
-export function draftWith(q: string, draft: string): string {
-  return `↩ ${q} → ${draft.replace(/^↩ [^\n]*? → /, '').trim()}`
+// [답하기]가 입력창에 붙이는 글. 빈 입력창이면 "↩ 항목 → "만 붙이고, 먼저 써 둔 글이 있으면 그 글을 답으로 보고 앞에 항목을 붙인다.
+// 이미 "↩" 줄이 있으면 다음 줄에 하나 더 붙여 여러 답을 한 번에 보낸다. 같은 항목은 두 번 붙이지 않는다.
+// 입력창에서 Enter를 치면 open-asks가 "↩ 항목 → 답" 줄을 보고 그 항목을 바로 닫는다
+export function withAnswerLine(q: string, draft: string): string {
+  const head = `↩ ${q} → `
+  const d = draft.trimEnd()
+  const lines = d.split('\n').map(l => l.trim())
+  if (!d.trim()) return head
+  if (lines.some(l => l.startsWith(head.trim()))) return draft
+  if (!lines.some(l => l.startsWith('↩'))) return `${head}${d.trim()}`
+  return `${d}\n${head}`
 }
 
-// 모은 답을 본 대화로 보낼 글: 한 줄에 한 항목. open-asks는 "↩ 항목 → 답" 줄을 보고 그 항목을 바로 닫는다
-export function answersText(list: readonly { q: string; a: string }[]): string {
-  return list
-    .filter(x => x.a.trim())
-    .map(x => `↩ ${x.q} → ${x.a.trim()}`)
-    .join('\n')
+// 곁질문(q)이 입력창에 붙이는 글: 써 둔 글이 있으면 그 글을 곁질문으로 본다. 입력창에 답("↩" 줄)을 쓰던 중이면 건드리지 않는다(undefined)
+export function withSideCommand(draft: string): string | undefined {
+  const d = draft.trim()
+  if (d.startsWith('/baton-side')) return draft
+  if (d.split('\n').some(l => l.trim().startsWith('↩'))) return undefined
+  return d ? `/baton-side ${d}` : '/baton-side '
 }
 
-// 답을 저장한 뒤 키보드가 갈 곳: 아직 답이 없는 다음 항목의 [답하기], 다 썼으면 보내기 버튼
-export function focusAfter(order: readonly number[], from: number, done: ReadonlySet<number>, canSend: boolean): string | undefined {
-  const i = order.indexOf(from)
-  const next = [...order.slice(i + 1), ...order.slice(0, Math.max(0, i))].find(id => !done.has(id))
-  if (next !== undefined) return `todo-btn-${next}`
-  return canSend ? SEND_KEY : undefined
+// 패널은 키보드를 입력창에 돌려줄 수 없어서(엔진에 그런 호출이 없다) Esc를 누르라고 알린다
+async function answerTodo($: EngineInterface, q: string) {
+  const { text: draft } = await $.prompt.read()
+  const text = withAnswerLine(q, draft)
+  const r = text === draft ? { isFilled: true } : await $.prompt.fill({ text, mode: 'replace' })
+  $.ui.toast(r.isFilled ? '입력창에 붙였어요. Esc를 누르고 답을 쓰세요.' : '입력창에 붙이지 못했어요.', { timeoutMs: 6000 })
 }
 
-// 닫힌 항목의 답은 버린다
-function prune(open: readonly number[]) {
-  for (const m of [drafts, sent]) for (const id of [...m.keys()]) if (!open.includes(id)) m.delete(id)
-  if (editing !== undefined && !open.includes(editing)) editing = undefined
+async function askInBox($: EngineInterface) {
+  const { text: draft } = await $.prompt.read()
+  const text = withSideCommand(draft)
+  if (text === undefined) {
+    $.ui.toast('입력창에 쓰던 답이 있어요. 먼저 보내고 q를 눌러 주세요.', { timeoutMs: 6000 })
+    return
+  }
+  const r = text === draft ? { isFilled: true } : await $.prompt.fill({ text, mode: 'replace' })
+  $.ui.toast(r.isFilled ? 'Esc를 누르고 곁질문을 쓰세요. 답은 이 패널에 와요.' : '입력창에 붙이지 못했어요.', { timeoutMs: 6000 })
 }
 
-async function startAnswer($: EngineInterface, id: number) {
-  editing = id
-  typed = drafts.get(id) ?? ''
-  $.ui.invalidate('ui.render')
-  // 버튼을 누른 패널이 키보드를 쥐고 있으면 새 입력칸으로 옮긴다. 못 옮기면 입력칸을 눌러 쓰면 된다
-  await $.ui.focus({ requestId: PANE, key: `answer-${id}` })
+// open-asks의 countHumanTurn과 같다: baton이 보낸 글은 baton의 prompt.submit 훅을 모두 건너뛰고, $는 다른 파일의 함수로 넘길 수 없다
+async function countHumanTurn($: EngineInterface, text: string) {
+  const turnNo = await update($, turn, (n: number) => n + 1)
+  await update($, lastRequest, () => text)
+  await update($, humanTurn, () => true)
+  await update($, asks, (cur: Book): Book => closeAnswered(cur, text, turnNo, Date.now()))
 }
 
-function saveAnswer($: EngineInterface, id: number, value: string, order: readonly number[]) {
-  const v = value.trim()
-  if (v) drafts.set(id, v)
-  else drafts.delete(id)
-  editing = undefined
-  typed = ''
-  $.ui.invalidate('ui.render')
-  void persist($).catch(() => undefined)
-  const key = focusAfter(order, id, new Set([...drafts.keys(), ...sent.keys()]), drafts.size > 0)
-  // 입력칸이 사라진 뒤 다시 그려지고 나서 옮긴다
-  if (key) moveRing($, key)
+// 사용자가 쓴 글을 본 대화로 보낸다(asUser: 본 대화의 모델은 사용자의 말로 읽는다).
+// baton이 보낸 글은 baton의 prompt.submit 훅을 모두 건너뛰므로, 사람 턴 세기와 [되돌리기] 내리기를 여기서 한다
+async function sendAsUser($: EngineInterface, text: string) {
+  if (lastRemoved.length) {
+    lastRemoved = []
+    $.ui.invalidate('ui.render')
+  }
+  await countHumanTurn($, text)
+  const r = await $.prompt.submit({ text, asUser: true }).catch((err: unknown) => ({ drop: String(err) }))
+  if (r.drop !== undefined) $.ui.toast(`본 대화로 못 보냈어요: ${r.drop}`, { timeoutMs: 8000 })
 }
 
 const FOCUS_DELAY_MS = 150
-
-async function sendAnswers($: EngineInterface) {
-  await ensureLoaded($)
-  const { value: b } = await $.state.get(ASKS)
-  const list = (b?.items ?? []).filter(a => drafts.has(a.id))
-  const text = answersText(list.map(a => ({ q: a.text, a: drafts.get(a.id) ?? '' })))
-  if (!text) return
-  for (const a of list) {
-    sent.set(a.id, drafts.get(a.id) ?? '')
-    drafts.delete(a.id)
-  }
-  editing = undefined
-  $.ui.invalidate('ui.render')
-  await persist($).catch(() => undefined)
-  // 사용자가 쓴 답이라 asUser로 보낸다: 본 대화의 모델은 사용자의 말로 읽고, open-asks는 사람 턴으로 센다
-  const r = await $.prompt.submit({ text, asUser: true }).catch((err: unknown) => ({ drop: String(err) }))
-  if (r.drop === undefined) return
-  for (const a of list) {
-    drafts.set(a.id, sent.get(a.id) ?? '')
-    sent.delete(a.id)
-  }
-  $.ui.invalidate('ui.render')
-  await persist($).catch(() => undefined)
-  $.ui.toast(`본 대화로 못 보냈어요: ${r.drop}`, { timeoutMs: 8000 })
-}
 
 async function askSide($: EngineInterface, question: string) {
   const q = question.trim()
@@ -261,9 +242,10 @@ async function askSide($: EngineInterface, question: string) {
   await persist($).catch(() => undefined)
 }
 
-// Esc는 입력창으로 돌아갈 뿐 패널을 닫지 않는다: 내 차례를 옆에 늘 두기 위해서
-async function openPane($: EngineInterface): Promise<boolean> {
-  const r = await $.ui.open({ id: PANE, title: '내 차례 · 곁대화', focus: true })
+// Esc는 입력창으로 돌아갈 뿐 패널을 닫지 않는다: 내 차례를 옆에 늘 두기 위해서.
+// 키보드는 패널만 열 때(/baton-side)만 가져온다. 곁질문을 보낸 뒤에 가져오면 이어 치는 글자가 패널 단축키(숫자·q·m)를 눌렀다(2026-10-10 tmux로 확인)
+async function openPane($: EngineInterface, focus: boolean): Promise<boolean> {
+  const r = await $.ui.open({ id: PANE, title: '내 차례 · 곁대화', ...(focus ? { focus: true as const } : {}) })
   return r.isPlaced
 }
 
@@ -330,13 +312,9 @@ async function toggleAuto($: EngineInterface, s: Settings) {
   $.ui.toast(isOn ? '곁질문 자동 분리를 껐어요.' : '작업과 관계없어 보이는 질문을 곁대화로 보내요.', { timeoutMs: 5000 })
 }
 
-async function answerTodo($: EngineInterface, text: string) {
-  const { text: draft } = await $.prompt.read()
-  await $.prompt.fill({ text: draftWith(text, draft), mode: 'replace' })
-}
-
-// 단축키: 입력창에서 ctrl+x tab(엔진 기본)으로 패널에 들어오고, 패널 안에서는 버튼에 링이 있을 때 숫자·글자가 버튼을 누른다
-const KEYS_HINT = 'ctrl+x tab 패널로 · 숫자 답하기 · Enter 저장 · s 보내기 · q 곁질문 · Esc 입력창 · 토론 중이면 위 탭에 토론'
+// 단축키: 입력창에서 ctrl+x tab(엔진 기본)으로 패널에 들어오고, 패널 안에서는 숫자·글자가 버튼을 누른다.
+// 패널 폭(40칸 남짓)에 한 줄로 들어가게 줄였다: 예전 안내는 세 줄로 접혔다(2026-10-10)
+const KEYS_HINT = '숫자 답하기 · Esc 입력창 · ctrl+x tab 패널'
 
 const NO_ROOM = '옆 패널을 둘 자리가 없어요. 전체 화면 모드에서 터미널이 넓어야 옆에 붙어요.'
 
@@ -414,69 +392,35 @@ export function registerSide(on: On, options: PluginOptions): void {
   const judgeModel = asksSettingsFrom(options).model
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const els = $.ui.resolve(e)
-    const { Box, Text, Markdown, Button } = els
+    const { Box, Text, Markdown, Button } = $.ui.resolve(e)
     if (!(await live($))) return <Text dimColor>{OFF_TEXT}</Text>
-    const Input = 'Input' in els ? els.Input : undefined
     const width = Math.max(20, e.props.bodyColumns - 2)
     await ensureLoaded($)
     const todo = (await read($, asks)).items
-    prune(todo.map(a => a.id))
     const shown = todo.slice(0, 8)
-    const order = shown.map(a => a.id)
-    // 패널이 키보드를 받으면 링은 아직 답 안 한 첫 [답하기]에서 시작한다: 숫자·글자 단축키는 버튼에 링이 있을 때만 먹고, 입력칸에 있으면 글자로 들어가기 때문
-    const firstOpen = editing === undefined ? shown.findIndex(a => !drafts.has(a.id) && !sent.has(a.id)) : -1
-    const rows = shown.flatMap((a, i) => {
-      const draft = drafts.get(a.id)
-      const gone = sent.get(a.id)
-      // 답이 없는 항목은 강조색 [답하기], 써 둔 항목은 보통 [고치기], 보낸 항목은 흐린 [ 보냄 ]: 남은 일이 바로 보이게
-      const head = (
-        <Box key={`todo-${a.id}`} flexDirection="row" gap={1}>
-          {gone !== undefined ? (
-            <Text key={`todo-sent-${a.id}`} dimColor>[ 보냄 ]</Text>
-          ) : (
-            <Button
-              key={`todo-btn-${a.id}`}
-              label={draft === undefined ? '답하기' : '고치기'}
-              hotkey={String(i + 1)}
-              {...(draft === undefined ? { variant: 'primary' as const } : {})}
-              {...(i === firstOpen ? { autoFocus: true as const } : {})}
-              onPress={() => void (Input ? startAnswer($, a.id) : answerTodo($, a.text)).catch(() => undefined)}
-            />
-          )}
-          <Box flexShrink={1}>
-            <Text wrap="wrap">{`${i + 1}. ${a.text}`}</Text>
+    // 항목 글은 패널 폭을 다 쓰고(줄이 바뀌면 번호 뒤에 맞춰 들여 쓴다), 버튼은 그 아래 줄에 둔다.
+    // 버튼을 글 양옆에 두던 때는 글이 패널의 반쯤으로 좁아져 한 항목이 예닐곱 줄이 됐다(2026-10-10)
+    const rows = shown.map((a, i) => (
+      <Box key={`todo-${a.id}`} flexDirection="column">
+        <Box key={`todo-q-${a.id}`} flexDirection="row">
+          <Text key={`todo-n-${a.id}`}>{`${i + 1}. `}</Text>
+          <Box key={`todo-tb-${a.id}`} flexShrink={1}>
+            <Text key={`todo-t-${a.id}`} wrap="wrap">{a.text}</Text>
           </Box>
+        </Box>
+        <Box key={`todo-acts-${a.id}`} flexDirection="row" gap={1} marginLeft={3}>
+          <Button
+            key={`todo-btn-${a.id}`}
+            label="답하기"
+            hotkey={String(i + 1)}
+            dimColor
+            {...(i === 0 ? { autoFocus: true as const } : {})}
+            onPress={() => void answerTodo($, a.text).catch(() => undefined)}
+          />
           <Button key={`todo-del-${a.id}`} label="지우기" dimColor onPress={() => void dropTodo($, a).catch(() => undefined)} />
         </Box>
-      )
-      if (Input && editing === a.id)
-        return [
-          head,
-          <Box key={`answer-box-${a.id}`} marginLeft={4}>
-            <Input
-              key={`answer-${a.id}`}
-              label="→ "
-              placeholder="짧게 답하고 Enter (비우면 지움)"
-              submitLabel="저장"
-              value={typed}
-              autoFocus
-              onInput={v => {
-                typed = v
-              }}
-              onSubmit={v => saveAnswer($, a.id, v, order)}
-            />
-          </Box>,
-        ]
-      const said = gone ?? draft
-      if (said === undefined) return [head]
-      return [
-        head,
-        <Box key={`todo-said-${a.id}`} marginLeft={4}>
-          <Text wrap="wrap" dimColor={gone !== undefined}>{`→ ${said}`}</Text>
-        </Box>,
-      ]
-    })
+      </Box>
+    ))
     // 방금 지운 항목은 다음 메시지를 보내기 전까지 [되돌리기]로 살린다
     const removed = lastRemoved
     const undoRow = removed.length
@@ -493,48 +437,35 @@ export function registerSide(on: On, options: PluginOptions): void {
       <Text key="todo-h" bold>{`내 차례 ${todo.length}`}</Text>,
       ...(todo.length ? rows : [<Text key="todo-none" dimColor>지금 답하거나 볼 것이 없어요.</Text>]),
       ...undoRow,
-      ...(drafts.size
-        ? [<Button key={SEND_KEY} label={`답 ${drafts.size}개 본 대화로 보내기 (s)`} hotkey="s" variant="primary" onPress={() => void sendAnswers($).catch(() => undefined)} />]
-        : []),
       // 모두 지우기 버튼은 두지 않는다: 2026-10-06 잘못 눌려 다 지워졌다. 항목마다 [지우기]를 두고, 지운 직후에는 [되돌리기]를 띄운다
       ...(todo.length ? [<Text key="todo-hint" dimColor wrap="wrap">{KEYS_HINT}</Text>] : []),
     ]
     const last = chat[chat.length - 1]
     const { value: isAuto = s.auto } = await $.state.get(ENABLED)
+    // 강조(굵은 글씨, 사용자 터미널에서는 주황)는 제목과 곁질문에만 쓰고 버튼은 흐리게 둔다: 링이 오면 진해진다.
+    // 버튼까지 강조색이면 어디를 읽을지 보이지 않았다(2026-10-10 사용자 "가독성이 안좋은거 같은데"). [되돌리기]만 지운 직후라 진하게 둔다
     const bottom = [
       <Text key="side-h" bold>곁대화</Text>,
       ...(chat.length
-        ? chat.slice(-6).flatMap((t, i) => [
-            <Text key={`q-${i}`} bold>{`Q. ${t.q}`}</Text>,
-            t.a ? <Markdown key={`a-${i}`} text={t.a.slice(0, 9500)} /> : <Text key={`a-${i}`} dimColor>{t.err ?? '답 쓰는 중…'}</Text>,
-          ])
-        : [
-            <Text key="side-none" dimColor wrap="wrap">
-              {`작업과 관계없는 질문은 여기서 답해요. 본 대화에는 남지 않아요. ${isAuto ? '자동 분리가 켜져 있어 그런 질문은 저절로 이리 와요.' : '[자동 분리 켜기]를 누르면 그런 질문이 저절로 이리 와요.'}`}
-            </Text>,
-          ]),
-      // 답을 쓰는 중에는 그 입력칸이 키보드를 먼저 받게 곁질문 칸의 autoFocus를 뺀다
-      ...(Input
-        ? [
-            <Input
-              key="ask"
-              placeholder="곁질문 쓰기"
-              submitLabel="보내기"
-              {...(editing === undefined && firstOpen < 0 ? { autoFocus: true as const } : {})}
-              onSubmit={v => void askSide($, v).catch(() => undefined)}
-            />,
-          ]
-        : []),
-      <Box key="side-actions" flexDirection="row" flexWrap="wrap" gap={1}>
+        ? chat.slice(-4).map((t, i) => (
+            <Box key={`turn-${i}`} flexDirection="column" marginBottom={1}>
+              <Text key={`q-${i}`} bold wrap="wrap">{`Q. ${t.q}`}</Text>
+              {t.a ? <Markdown key={`a-${i}`} text={t.a.slice(0, 9500)} /> : <Text key={`a-${i}`} dimColor>{t.err ?? '답 쓰는 중…'}</Text>}
+            </Box>
+          ))
+        : [<Text key="side-none" dimColor wrap="wrap">작업과 관계없는 질문은 q로 여기에 물어요. 본 대화에 남지 않아요.</Text>]),
+      <Box key="side-actions" flexDirection="row" flexWrap="wrap" columnGap={1}>
         {[
-          ...(Input ? [<Button key="ask-focus" label="곁질문 (q)" hotkey="q" onPress={() => void $.ui.focus({ requestId: PANE, key: 'ask' }).catch(() => undefined)} />] : []),
-          ...(last ? [<Button key="main" label="본 대화로 보내기 (m)" hotkey="m" variant="primary" onPress={() => void $.prompt.submit({ text: last.q, asUser: true }).catch(() => undefined)} />] : []),
-          <Button key="clear" label="곁대화 비우기" onPress={() => { chat = []; $.ui.invalidate('ui.render'); void persist($).catch(() => undefined) }} />,
+          <Button key="ask-focus" label="곁질문 (q)" hotkey="q" dimColor onPress={() => void askInBox($).catch(() => undefined)} />,
+          ...(last ? [<Button key="main" label="본 대화로 보내기 (m)" hotkey="m" dimColor onPress={() => void sendAsUser($, last.q).catch(() => undefined)} />] : []),
+          ...(chat.length
+            ? [<Button key="clear" label="비우기" dimColor onPress={() => { chat = []; $.ui.invalidate('ui.render'); void persist($).catch(() => undefined) }} />]
+            : []),
           <Button key="auto" label={isAuto ? '자동 분리 끄기' : '자동 분리 켜기'} dimColor onPress={() => void toggleAuto($, s).catch(() => undefined)} />,
         ]}
       </Box>,
       // 토론은 이 패널 밖(옆 탭)에 있어서, 있는 줄 모르고 지나치지 않게 한 줄로 알린다
-      <Text key="debate-hint" dimColor wrap="wrap">토론: /baton-debate만 치면 지금 대화에서 주제를 골라 두 Claude가 따져요.</Text>,
+      <Text key="debate-hint" dimColor wrap="wrap">토론: /baton-debate (두 Claude가 따져요)</Text>,
     ]
     return (
       <Box flexDirection="column">
@@ -567,13 +498,13 @@ export function registerSide(on: On, options: PluginOptions): void {
     if (!isOn) return next(e)
     const side = await classify($, s, e.text).catch(() => false)
     if (!side) return next(e)
-    if (!(await openPane($).catch(() => false))) {
+    if (!(await openPane($, false).catch(() => false))) {
       $.ui.toast(`${NO_ROOM} 본 대화로 보냈어요.`, { timeoutMs: 8000 })
       return next(e)
     }
     await update($, lastSide, () => e.text)
     void askSide($, e.text).catch(() => undefined)
-    return { drop: '작업과 관계없는 질문이라 옆 패널의 곁대화에서 답해요. 이어서 물으려면 패널 입력칸에 쓰세요. 본 대화로 보내려면 /baton-side main' }
+    return { drop: '작업과 관계없는 질문이라 옆 패널의 곁대화에서 답해요. 본 대화로 보내려면 패널에서 m(또는 /baton-side main)' }
   })
 
   on('session.start', { isInteractive: true }, async ($, e, next) => {
@@ -599,7 +530,7 @@ export function registerSide(on: On, options: PluginOptions): void {
       const { value: text = '' } = await $.state.get(LASTSIDE)
       if (!text) return { text: '본 대화로 보낼 곁질문이 없어요.' }
       await update($, lastSide, () => '')
-      void $.prompt.submit({ text, asUser: true }).catch(() => undefined)
+      void sendAsUser($, text).catch(() => undefined)
       return { text: `본 대화로 보냈어요: ${text}` }
     }
     if (arg === 'status') {
@@ -615,7 +546,7 @@ export function registerSide(on: On, options: PluginOptions): void {
     // 인자가 없으면 패널만 열고, 그 밖의 글은 질문으로 보고 곁대화에서 답한다. 패널 둘 자리가 없으면 내 차례를 글로 보여 준다
     const question = arg === 'open' ? '' : arg
     await openDebateTab($).catch(() => undefined)
-    if (!(await openPane($).catch(() => false))) {
+    if (!(await openPane($, !question).catch(() => false))) {
       if (question) return { text: NO_ROOM }
       return { text: `${NO_ROOM}\n\n${(await asksCommand($, 'list', judgeModel)).text}` }
     }
@@ -623,6 +554,10 @@ export function registerSide(on: On, options: PluginOptions): void {
       await update($, lastSide, () => question)
       void askSide($, question).catch(() => undefined)
     }
-    return { text: question ? '옆 패널의 곁대화에서 답해요.' : '옆 패널을 열었어요. 위는 내 차례, 아래는 곁대화예요. 숫자로 답하기, s로 보내기, q로 곁질문, Esc로 입력창, ctrl+x tab으로 다시 패널에 와요.' }
+    return {
+      text: question
+        ? '옆 패널의 곁대화에서 답해요.'
+        : '옆 패널을 열었어요. 위는 내 차례, 아래는 곁대화예요. 숫자를 누르면 그 질문이 입력창에 붙어요: Esc로 입력창에 가서 답을 쓰고 Enter. q는 곁질문, ctrl+x tab은 다시 패널로.',
+    }
   })
 }

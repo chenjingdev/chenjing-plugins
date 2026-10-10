@@ -142,7 +142,7 @@ test('"↩ item → answer" lines name the items they answer', () => {
   expect(answeredIds(items, '↩ 없는 질문? → ㅇㅇ')).toEqual([])
 })
 
-test('answers sent from the side panel close their items before the turn starts', async ($, on) => {
+test('answers another mod sends as the person close their items before the turn starts', async ($, on) => {
   fakeSession(on)
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('prompt.submit', (_$, e) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))

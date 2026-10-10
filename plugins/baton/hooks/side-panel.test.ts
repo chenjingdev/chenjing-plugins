@@ -5,7 +5,7 @@ import type { Engine, TestBody } from 'claude-code/testing'
 
 type On = Parameters<TestBody>[1]
 
-import { answersText, classifyPrompt, draftWith, focusAfter, forkPrompt, isHuman, isSide, recentWork, ringAfterDrop, settingsFrom, worthChecking } from './side-panel'
+import { classifyPrompt, forkPrompt, isHuman, isSide, recentWork, ringAfterDrop, settingsFrom, withAnswerLine, withSideCommand, worthChecking } from './side-panel'
 
 test('settings default to haiku with automatic routing off', () => {
   expect(settingsFrom({})).toEqual({ model: 'haiku', auto: false })
@@ -63,21 +63,20 @@ test('the panel fork carries the earlier side turns and the new question', () =>
   expect(forkPrompt([], '첫 질문')).not.toContain('[앞선 곁대화]')
 })
 
-test('pressing a to-do puts it in front of the draft, once', () => {
-  expect(draftWith('debate를 끌까요?', '')).toBe('↩ debate를 끌까요? → ')
-  expect(draftWith('B?', '↩ debate를 끌까요? → ㅇㅇ')).toBe('↩ B? → ㅇㅇ')
+test('[답하기] puts the item in the prompt box: alone, in front of what was typed, or on a new line after other answers', () => {
+  expect(withAnswerLine('debate를 끌까요?', '')).toBe('↩ debate를 끌까요? → ')
+  expect(withAnswerLine('debate를 끌까요?', '  \n')).toBe('↩ debate를 끌까요? → ')
+  expect(withAnswerLine('B?', 'ㅇㅇ 그렇게 해')).toBe('↩ B? → ㅇㅇ 그렇게 해')
+  expect(withAnswerLine('B?', '↩ A? → ㅇㅇ\n')).toBe('↩ A? → ㅇㅇ\n↩ B? → ')
+  // 같은 항목을 또 누르면 그대로 둔다
+  expect(withAnswerLine('A?', '↩ A? → ㅇㅇ')).toBe('↩ A? → ㅇㅇ')
 })
 
-test('collected answers go to the main conversation one line per item', () => {
-  expect(answersText([{ q: 'debate를 옮길까요?', a: ' ㅇㅇ ' }, { q: 'B?', a: '' }, { q: 'C?', a: '나중에' }])).toBe('↩ debate를 옮길까요? → ㅇㅇ\n↩ C? → 나중에')
-  expect(answersText([])).toBe('')
-})
-
-test('after saving, the keyboard goes to the next unanswered item, then to send', () => {
-  expect(focusAfter([1, 2, 3], 1, new Set([1]), true)).toBe('todo-btn-2')
-  expect(focusAfter([1, 2, 3], 3, new Set([3]), true)).toBe('todo-btn-1')
-  expect(focusAfter([1, 2, 3], 2, new Set([1, 2, 3]), true)).toBe('send-answers')
-  expect(focusAfter([1], 1, new Set(), false)).toBe(undefined)
+test('q puts /baton-side in front of the prompt box, but leaves answers being written alone', () => {
+  expect(withSideCommand('')).toBe('/baton-side ')
+  expect(withSideCommand('zsh랑 bash 차이?')).toBe('/baton-side zsh랑 bash 차이?')
+  expect(withSideCommand('/baton-side 이미')).toBe('/baton-side 이미')
+  expect(withSideCommand('↩ A? → ㅇㅇ')).toBe(undefined)
 })
 
 const PANE_PROPS = { title: '내 차례 · 곁대화', isFocused: true, bodyColumns: 60, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} }
@@ -92,63 +91,94 @@ async function seed($: Engine, on: On, texts: string[]) {
   return $.ui.mount({ plugin: 'baton', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'side-chat' })
 }
 
-test('answers written in the panel are sent together as the person\'s words', async ($, on) => {
-  const got: { text: string; origin: unknown }[] = []
-  on('prompt.submit', (_$, e) => {
-    got.push({ text: e.text, origin: e.origin })
-    return { text: e.text }
+// 테스트의 입력창: [답하기]와 q가 읽고 쓰는 곳
+function fakeBox(on: On) {
+  const box = { text: '' }
+  on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
+  on('prompt.fill', (_$, e) => {
+    box.text = e.mode === 'replace' ? e.text : box.text + e.text
+    return { isFilled: true }
   })
+  on('ui.toast', () => ({ value: undefined }))
+  return box
+}
+
+// 패널 입력칸은 한글 조합이 깨져서(2026-10-10) 답은 입력창에서 쓴다. 보낸 답의 항목은 바로 닫혀 패널에서 사라진다
+test('answers go through the prompt box, and sending them closes their items in the panel', async ($, on) => {
+  const box = fakeBox(on)
+  on('prompt.submit', (_$, e) => ({ text: e.text }))
   const ui = await seed($, on, ['debate를 옮길까요?', '자동 분리를 끌까요?'])
-  expect(await ui.find({ key: 'send-answers' })).toBe(undefined)
+  expect(await ui.find({ type: 'Input' })).toBe(undefined)
   await ui.press({ key: 'todo-btn-1' })
-  await ui.input({ key: 'answer-1', text: 'ㅇㅇ' })
+  expect(box.text).toBe('↩ debate를 옮길까요? → ')
+  box.text += 'ㅇㅇ'
   await ui.press({ key: 'todo-btn-2' })
-  await ui.input({ key: 'answer-2', text: ' 아니, 첫 문단 규칙만 ' })
-  expect((await ui.find({ key: 'send-answers' }))?.text).toContain('답 2개 본 대화로 보내기')
-  expect((await ui.find({ key: 'todo-btn-1' }))?.text).toContain('고치기')
-  await ui.press({ key: 'send-answers' })
-  expect(got).toEqual([{ text: '↩ debate를 옮길까요? → ㅇㅇ\n↩ 자동 분리를 끌까요? → 아니, 첫 문단 규칙만', origin: { kind: 'plugin', name: 'baton', asUser: true } }])
-  expect(await ui.find({ key: 'send-answers' })).toBe(undefined)
-  expect(await ui.find({ text: '[ 보냄 ]' })).not.toBe(undefined)
+  expect(box.text).toBe('↩ debate를 옮길까요? → ㅇㅇ\n↩ 자동 분리를 끌까요? → ')
+  box.text += '아니, 첫 문단 규칙만'
+  await $.prompt.submit({ text: box.text, origin: { kind: 'composer' }, wait: false })
+  await ui.redraw()
+  expect(await ui.find({ key: 'todo-btn-1' })).toBe(undefined)
+  expect(await ui.find({ key: 'todo-btn-2' })).toBe(undefined)
+  expect(await ui.find({ text: '내 차례 0' })).not.toBe(undefined)
 })
 
-test('an empty answer removes the draft', async ($, on) => {
+test('q starts a side question in the prompt box', async ($, on) => {
+  const box = fakeBox(on)
   const ui = await seed($, on, ['A?'])
-  await ui.press({ key: 'todo-btn-1' })
-  await ui.input({ key: 'answer-1', text: 'ㅇㅇ' })
-  expect(await ui.find({ key: 'send-answers' })).not.toBe(undefined)
-  await ui.press({ key: 'todo-btn-1' })
-  await ui.input({ key: 'answer-1', text: '  ' })
-  expect(await ui.find({ key: 'send-answers' })).toBe(undefined)
+  await ui.press({ key: 'ask-focus' })
+  expect(box.text).toBe('/baton-side ')
 })
 
-test('a side question sent to the main conversation goes as the person\'s words', async ($, on) => {
+// 엔진은 baton이 보낸 글에 baton의 prompt.submit 훅을 돌리지 않는다(re-entry). 그래서 보내는 쪽이 사람 턴을 직접 센다:
+// 안 세면 내 차례 판정이 지난 메시지를 이번 메시지로 읽었다(2026-10-10)
+test('a side question sent to the main conversation goes as the person\'s words, and the judge reads it as this turn\'s message', async ($, on) => {
   fakeSession(on)
   const got: unknown[] = []
+  const judged: string[] = []
   on('prompt.submit', (_$, e) => {
     got.push({ text: e.text, origin: e.origin })
     return { text: e.text }
   })
   on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('model.complete', (_$, e) => {
+    judged.push(e.prompt)
+    return { value: { isAnswered: true, text: '{"closed":[],"new":[]}', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
+  })
   await turnOn($)
+  await $.prompt.submit({ text: '플러그인 고쳐줘', origin: { kind: 'composer' }, wait: false })
+  got.length = 0
   const r = await $.command.run({ command: 'baton-side', args: 'zsh랑 bash 차이?', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
   expect(r.text).toContain('곁대화에서 답해요')
   const ui = await $.ui.mount({ plugin: 'baton', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'side-chat' })
   await ui.press({ key: 'main' })
   expect(got).toEqual([{ text: 'zsh랑 bash 차이?', origin: { kind: 'plugin', name: 'baton', asUser: true } }])
+  await $.turn.complete({ answer: '대화형이면 zsh예요. 더 볼까요?', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't2' })
+  // 판정은 턴이 끝난 뒤 따로 돈다: 목록을 한 번 읽어 그 사이를 둔다
+  await $.command.run({ command: 'baton-side', args: 'list', ...RUN })
+  expect(judged.at(-1)).toContain('[이번 사용자 메시지]\nzsh랑 bash 차이?')
 })
 
-test('keys: digits answer the item, s sends, and the ring starts on the first unanswered item', async ($, on) => {
+test('keys: digits answer the item, q asks on the side, and the ring starts on the first item', async ($, on) => {
   const ui = await seed($, on, ['A?', 'B?'])
   expect((await ui.find({ key: 'todo-btn-1' }))?.props).toMatchObject({ hotkey: '1', autoFocus: true })
   expect((await ui.find({ key: 'todo-btn-2' }))?.props.hotkey).toBe('2')
-  expect((await ui.find({ key: 'ask' }))?.props.autoFocus).toBe(undefined)
-  await ui.press({ key: 'todo-btn-1' })
-  await ui.input({ key: 'answer-1', text: 'ㅇㅇ' })
-  expect((await ui.find({ key: 'todo-btn-1' }))?.props.autoFocus).toBe(undefined)
-  expect((await ui.find({ key: 'todo-btn-2' }))?.props.autoFocus).toBe(true)
-  expect((await ui.find({ key: 'send-answers' }))?.props.hotkey).toBe('s')
+  expect((await ui.find({ key: 'todo-btn-2' }))?.props.autoFocus).toBe(undefined)
   expect((await ui.find({ key: 'ask-focus' }))?.props.hotkey).toBe('q')
+})
+
+// 패널에 입력칸이 없어서, 키보드는 패널만 열 때 가져온다. 곁질문 뒤에 가져가면 이어 친 글자가 단축키를 눌렀다
+test('/baton-side takes the keyboard to the panel, /baton-side 질문 leaves it in the prompt box', async ($, on) => {
+  fakeSession(on)
+  const opened: unknown[] = []
+  on('ui.open', (_$, e) => {
+    opened.push(e.focus)
+    return { value: { isPlaced: true } }
+  })
+  await turnOn($)
+  await $.command.run({ command: 'baton-side', args: '', ...RUN })
+  await $.command.run({ command: 'baton-side', args: 'zsh랑 bash 차이?', ...RUN })
+  expect(opened).toEqual([true, undefined])
 })
 
 async function askLooksSide($: Engine, on: On) {
@@ -173,16 +203,14 @@ test('with the side_auto option on, an unrelated question goes to the side chat'
 
 import { fromKeep, toKeep } from './side-panel'
 
-test('answers written in the panel and the side chat survive a reload through state', () => {
-  const k = toKeep(new Map([[3, 'ㅇㅇ']]), new Map([[5, '보낸 답']]), [{ q: '먼저?', a: '답' }, { q: '기다리는 중' }])
-  expect(k).toEqual({ drafts: { '3': 'ㅇㅇ' }, sent: { '5': '보낸 답' }, chat: [{ q: '먼저?', a: '답' }, { q: '기다리는 중' }] })
+test('the side chat survives a reload through state', () => {
+  const k = toKeep([{ q: '먼저?', a: '답' }, { q: '기다리는 중' }])
+  expect(k).toEqual({ chat: [{ q: '먼저?', a: '답' }, { q: '기다리는 중' }] })
   const back = fromKeep(k)
-  expect(back.drafts.get(3)).toBe('ㅇㅇ')
-  expect(back.sent.get(5)).toBe('보낸 답')
   expect(back.chat[0]).toEqual({ q: '먼저?', a: '답' })
   // 답을 기다리던 질문은 다시 불러온 뒤 답이 오지 않으니 그렇다고 보여 준다
   expect(back.chat[1]?.err).toContain('다시 불러와')
-  expect(fromKeep(undefined).drafts.size).toBe(0)
+  expect(fromKeep(undefined).chat).toEqual([])
 })
 
 test('a to-do is dropped with its button and [되돌리기] brings it back until the next message', async ($, on) => {
@@ -216,16 +244,16 @@ test('[지우기] several times keeps them all for one [되돌리기], which put
   for (const key of ['todo-del-2', 'todo-del-3', 'todo-del-1']) await ui.press({ key })
   expect(await ui.find({ text: '지운 항목 3개' })).not.toBe(undefined)
   await ui.press({ key: 'undo' })
-  expect((await ui.findAll({ type: 'Text', text: /^\d\. / })).map(t => t.text)).toEqual(['1. A?', '2. B?', '3. C?'])
+  expect((await ui.findAll({ type: 'Text', text: /^[ABC]\?$/ })).map(t => t.text)).toEqual(['A?', 'B?', 'C?'])
 })
 
 test('the side chat has a button for automatic routing, and the panel says where the debate is', async ($, on) => {
   on('ui.toast', () => ({ value: undefined }))
   const ui = await seed($, on, ['A?'])
   expect((await ui.find({ key: 'auto' }))?.text).toContain('자동 분리 켜기')
-  expect(await ui.find({ text: '[자동 분리 켜기]를 누르면' })).not.toBe(undefined)
+  expect(await ui.find({ text: 'q로 여기에 물어요' })).not.toBe(undefined)
   await ui.press({ key: 'auto' })
   expect((await ui.find({ key: 'auto' }))?.text).toContain('자동 분리 끄기')
   expect((await $.command.run({ command: 'baton-side', args: 'status', ...RUN })).text).toContain('자동 분리 켜짐')
-  expect(await ui.find({ type: 'Text', text: '토론: /baton-debate만 치면' })).not.toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: '토론: /baton-debate' })).not.toBe(undefined)
 })

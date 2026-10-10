@@ -2,12 +2,18 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, ToolSpec } from 'claude-code'
 
 import { enter, isKnown, isLive, OFF_TEXT, SESSIONS, settle } from './live'
-import type { Debate, DebateQA, Side, Turn } from '../types'
+import { closeAnswered } from './open-asks'
+import type { Book, Debate, DebateQA, Side, Turn } from '../types'
 
 const PANE = 'debate'
 export const DEBATE_PANE = PANE
 const CURRENT = { plugin: 'baton', key: 'debate' } as const
 const current = atom(CURRENT, null)
+// 사람 턴 세기(open-asks와 같은 키): [본 대화로 보내기]가 쓴다
+const askBook = atom({ plugin: 'baton', key: 'book' } as const, { items: [], closed: [], seq: 0 })
+const turnNo = atom({ plugin: 'baton', key: 'turn' } as const, 0)
+const lastRequest = atom({ plugin: 'baton', key: 'lastRequest' } as const, '')
+const humanTurn = atom({ plugin: 'baton', key: 'humanTurn' } as const, false)
 const DEFAULT_REPORT_DIR = '~/.claude/baton/debates'
 const DEBATER_TOOLS = 'SendMessage,WebSearch,WebFetch,Read,Grep,Glob'
 const DEBATER_MODEL = 'sonnet'
@@ -255,11 +261,21 @@ export function reportText(d: Pick<Debate, 'topic' | 'verdict' | 'reportPath'>, 
   ].join('\n')
 }
 
+// open-asks의 countHumanTurn과 같다: baton이 보낸 글은 baton의 prompt.submit 훅을 모두 건너뛰고, $는 다른 파일의 함수로 넘길 수 없다
+async function countHumanTurn($: EngineInterface, text: string) {
+  const n = await update($, turnNo, (x: number) => x + 1)
+  await update($, lastRequest, () => text)
+  await update($, humanTurn, () => true)
+  await update($, askBook, (cur: Book): Book => closeAnswered(cur, text, n, Date.now()))
+}
+
 async function sendReport($: EngineInterface) {
   const { value: d } = await $.state.get(CURRENT)
   if (!isCurrent(d) || d.status !== 'done' || !d.verdict || d.sent) return
   await patch($, cur => ({ ...cur, sent: true }))
-  const r = await $.prompt.submit({ text: reportText(d, d.qa ?? []), asUser: true }).catch((err: unknown) => ({ drop: String(err) }))
+  const text = reportText(d, d.qa ?? [])
+  await countHumanTurn($, text)
+  const r = await $.prompt.submit({ text, asUser: true }).catch((err: unknown) => ({ drop: String(err) }))
   if (r.drop === undefined) return
   await patch($, cur => ({ ...cur, sent: false }))
   $.ui.toast(`본 대화로 못 보냈어요: ${r.drop}`, { timeoutMs: 8000 })
