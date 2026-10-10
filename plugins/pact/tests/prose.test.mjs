@@ -111,3 +111,25 @@ test('probe.md keeps the conversation rules and calls its tools', () => {
 test('probe.md hands off to build.md on its last line', () => {
   assert.equal(read('skills/pact/probe.md').trimEnd().split('\n').at(-1), '다음: build.md');
 });
+
+test('build.md checks git, uses worker and reviewer, records Rulings', () => {
+  const text = read('skills/pact/build.md');
+  for (const s of ['git-state.mjs', 'pact:worker', 'pact:reviewer', 'BLOCKED', 'Ruling:', 'pact/<slug>']) {
+    assert.ok(text.includes(s), s);
+  }
+  assert.match(text, /set-status <명세> building/);
+  assert.equal(text.trimEnd().split('\n').at(-1), '다음: verify.md');
+});
+
+test('verify.md runs the verifier, builds the report, merges locally and asks only before push', () => {
+  const text = read('skills/pact/verify.md');
+  for (const s of ['pact:verifier', 'report.mjs', 'merge --no-ff', 'push']) assert.ok(text.includes(s), s);
+  assert.match(text, /set-status <명세> done/);
+});
+
+test('build and verify never ask the user to review a plan or pick an execution mode', () => {
+  for (const f of ['build.md', 'verify.md']) {
+    const text = read(`skills/pact/${f}`);
+    for (const s of ['계획을 검토', '실행 방식']) assert.ok(!text.includes(s), `${f} contains ${s}`);
+  }
+});
