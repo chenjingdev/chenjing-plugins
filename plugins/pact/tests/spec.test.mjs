@@ -126,3 +126,12 @@ test('CLI: new creates a spec from the template, lint and set-status work on it'
   assert.equal(lint.status, 1);
   assert.match(lint.stdout, /F1: 태그가 없습니다/);
 });
+
+test('CLI: run-dir prints .pact/<slug>/ for a spec and creates it', () => {
+  const d = tmp();
+  const file = spawnSync('node', [CLI, 'new', d, '출결 대시보드'], { encoding: 'utf8' }).stdout.trim();
+  const r = spawnSync('node', [CLI, 'run-dir', file], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), path.join(d, '.pact', '출결-대시보드'));
+  assert.ok(existsSync(path.join(d, '.pact', '.gitignore')));
+});

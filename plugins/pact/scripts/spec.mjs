@@ -4,6 +4,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ensureRunDir } from './paths.mjs';
 
 export const STATUSES = ['draft', 'approved', 'building', 'verifying', 'done'];
 const TAGS = ['사용자', 'AI 가정'];
@@ -94,6 +95,13 @@ export function newSpecPath(projectDir, topic, date) {
   return file;
 }
 
+// docs/pact/2026-10-10-출결.md → 프로젝트 폴더와 slug '출결'
+export function specRunDir(specFile) {
+  const projectDir = path.resolve(path.dirname(specFile), '..', '..');
+  const slug = path.basename(specFile, '.md').replace(/^\d{4}-\d{2}-\d{2}-/, '');
+  return ensureRunDir(projectDir, slug);
+}
+
 function today() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -104,7 +112,8 @@ const USAGE = `사용법:
   spec.mjs new <projectDir> <주제>     명세 파일을 만들고 경로를 출력
   spec.mjs status <명세>               status 값을 출력
   spec.mjs set-status <명세> <값>      status를 바꿈 (${STATUSES.join(', ')})
-  spec.mjs lint <명세>                 형식 문제를 줄마다 출력, 있으면 종료 코드 1`;
+  spec.mjs lint <명세>                 형식 문제를 줄마다 출력, 있으면 종료 코드 1
+  spec.mjs run-dir <명세>              실행 산출물 폴더 .pact/<slug>/를 만들고 경로를 출력`;
 
 function main([cmd, ...args]) {
   if (cmd === 'new' && args.length >= 2) {
@@ -135,6 +144,10 @@ function main([cmd, ...args]) {
     const problems = lintSpec(readFileSync(args[0], 'utf8'));
     for (const p of problems) console.log(p);
     return problems.length ? 1 : 0;
+  }
+  if (cmd === 'run-dir' && args[0]) {
+    console.log(specRunDir(args[0]));
+    return 0;
   }
   console.error(USAGE);
   return 2;

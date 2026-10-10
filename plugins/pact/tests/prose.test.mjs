@@ -87,3 +87,27 @@ test('verifier writes results.json with scenario kinds including newcomer', () =
   assert.ok(text.includes('newcomer'));
   assert.ok(text.includes('results.json'));
 });
+
+test('SKILL.md description says when to use it, without forcing words', () => {
+  const fm = frontmatter(read('skills/pact/SKILL.md'));
+  assert.equal(fm.name, 'pact');
+  for (const w of ['MUST', '반드시', 'always']) assert.ok(!fm.description.includes(w), `description contains ${w}`);
+});
+
+test('SKILL.md routes by every status and has the light path', () => {
+  const text = read('skills/pact/SKILL.md');
+  assert.ok(text.includes('가벼운 길'));
+  for (const s of ['draft', 'approved', 'building', 'verifying', 'done']) assert.ok(text.includes(`\`${s}\``), s);
+});
+
+test('probe.md keeps the conversation rules and calls its tools', () => {
+  const text = read('skills/pact/probe.md');
+  for (const s of ['한 메시지에 질문 하나', '[사용자]', '[AI 가정]', 'checklist.mjs', 'gallery.mjs', 'pact:spec-checker']) {
+    assert.ok(text.includes(s), s);
+  }
+  assert.match(text, /set-status <명세> approved/);
+});
+
+test('probe.md hands off to build.md on its last line', () => {
+  assert.equal(read('skills/pact/probe.md').trimEnd().split('\n').at(-1), '다음: build.md');
+});
