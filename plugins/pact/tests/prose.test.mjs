@@ -176,6 +176,7 @@ test('screens are checked with Codex CUA, not Playwright', () => {
   for (const file of PROSE) assert.ok(!/playwright\.mjs|Playwright 스크립트/.test(readFileSync(file, 'utf8')), `${rel(file)} still uses Playwright`);
   const verifier = read('agents/verifier.md');
   assert.ok(verifier.includes(CUA));
+  assert.match(verifier, /ToolSearch.*select:mcp__plugin_codex-computer-use_codex-computer-use__js/);
   assert.match(verifier, /createBrowserTab\("chrome"/);
   assert.match(verifier, /getScreenshot\(\{ emit: false \}\)/);
   assert.match(verifier, /shots\/<시나리오 id>-<단계 번호>\.jpg/);

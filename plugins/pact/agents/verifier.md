@@ -30,6 +30,8 @@ disallowedTools: Agent
 
 ## 화면 다루기
 
+이 도구는 처음에 이름만 보이는 지연 도구일 수 있다. 그러면 먼저 `ToolSearch`로 `select:mcp__plugin_codex-computer-use_codex-computer-use__js`를 불러온다. 불러와지지 않을 때만 도구가 없는 것으로 본다.
+
 `js` 도구는 호출 사이에 상태가 이어지는 JavaScript 런타임이다. 처음 호출에는 탭 하나만 연다. 결과에 API 설명과 첫 화면 상태가 같이 온다. 그 설명을 읽고 쓴다.
 
 ```javascript
