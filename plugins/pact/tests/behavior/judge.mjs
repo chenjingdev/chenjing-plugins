@@ -60,16 +60,22 @@ const globRe = (glob) =>
 
 const specFiles = (work) => files(path.join(work, 'docs', 'pact')).filter((f) => f.endsWith('.md')).map((f) => path.join(work, 'docs', 'pact', f));
 
-function openAiAssumptions(text) {
+// 사용자가 화면에서 보는 줄: 접힌 <details> 안은 빼고 여는 줄만 남긴다.
+function openLines(text) {
   let inside = 0;
-  let n = 0;
-  for (const line of text.split('\n')) {
-    inside += (line.match(/<details/g) ?? []).length;
-    if (!inside && /^\s*-\s+[FR]\d+.*\[AI 가정\]\s*$/.test(line)) n++;
+  const open = [];
+  for (const line of text.trimEnd().split('\n')) {
+    const opens = (line.match(/<details/g) ?? []).length;
+    if (!inside || opens) open.push(line);
+    inside += opens;
     inside -= (line.match(/<\/details>/g) ?? []).length;
     if (inside < 0) inside = 0;
   }
-  return n;
+  return open;
+}
+
+function openAiAssumptions(text) {
+  return openLines(text).filter((line) => /^\s*-\s+[FR]\d+.*\[AI 가정\]\s*$/.test(line)).length;
 }
 
 export function judge(check, transcript, workdir, fixtureDir) {
@@ -113,7 +119,7 @@ export function judge(check, transcript, workdir, fixtureDir) {
     }
     case 'specMaxLines': {
       const specs = specFiles(workdir);
-      return specs.length > 0 && specs.every((f) => readFileSync(f, 'utf8').trimEnd().split('\n').length <= check.max);
+      return specs.length > 0 && specs.every((f) => openLines(readFileSync(f, 'utf8')).length <= check.max);
     }
     case 'specOpenAiAssumptionsMax': {
       const specs = specFiles(workdir);

@@ -156,3 +156,16 @@ test('verify commits the spec before merging and has a no-browser fallback', () 
   assert.match(verify, /종료 코드가 0이 아니면/);
   assert.equal(verify.trimEnd().split('\n').at(-1), '다음: 끝 — 사용자에게 보고서를 보여 준다');
 });
+
+test('one question means one question mark: no follow-up question tacked on', () => {
+  assert.match(read('skills/pact/SKILL.md'), /물음표는 하나/);
+  assert.match(read('skills/pact/probe.md'), /물음표는 하나/);
+});
+
+test('spec size is given in numbers the behavior test checks, and the template shows the fold', () => {
+  const probe = read('skills/pact/probe.md');
+  assert.match(probe, /펼친 부분은 40줄/);
+  assert.match(probe, /펼쳐 두는 `\[AI 가정\]` 항목은 5개까지/);
+  assert.match(probe, /검수를 반영한 뒤에도/);
+  assert.match(read('skills/pact/spec-template.md'), /<details><summary>/);
+});

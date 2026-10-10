@@ -117,6 +117,8 @@ test('spec checks: a clean short spec passes, lint errors, length and open assum
   assert.equal(judge({ kind: 'specOpenAiAssumptionsMax', max: 5 }, [], work, tmp()), true);
   writeFileSync(file, SPEC('x\n'.repeat(40)));
   assert.equal(judge({ kind: 'specMaxLines', max: 40 }, [], work, tmp()), false);
+  writeFileSync(file, SPEC(`<details><summary>나머지 가정</summary>\n\n${'- R9 규칙 [AI 가정]\n'.repeat(40)}</details>\n`));
+  assert.equal(judge({ kind: 'specMaxLines', max: 40 }, [], work, tmp()), true, 'folded lines are off-screen');
   writeFileSync(file, SPEC().replace(' [사용자]', ''));
   assert.equal(judge({ kind: 'specLint' }, [], work, tmp()), false);
 });
