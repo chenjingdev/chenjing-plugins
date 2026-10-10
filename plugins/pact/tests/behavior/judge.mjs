@@ -36,6 +36,9 @@ const NEXT_STAGE = /checklist\.mjs|spec\.mjs new/;
 const movedOn = (turn) =>
   turn.flatMap(contentOf).some((c) => c.type === 'tool_use' && NEXT_STAGE.test(JSON.stringify(c.input ?? {})));
 
+// 이 턴에서 대화(probe 1단계)가 끝났나: 정리를 제안했거나 다음 단계로 넘어갔다.
+export const wrappedUp = (transcript, i) => WRAP_OFFER.test(replyOf(transcript, i)) || movedOn(transcript.at(i) ?? []);
+
 function files(dir, base = dir) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((name) => {
@@ -83,7 +86,7 @@ export function judge(check, transcript, workdir, fixtureDir) {
       let asked = 0;
       for (let i = 0; i < transcript.length; i++) {
         const reply = replyOf(transcript, i);
-        if (WRAP_OFFER.test(reply) || movedOn(transcript[i])) break;
+        if (wrappedUp(transcript, i)) break;
         if (countQuestions(reply) > 0) asked++;
       }
       return asked <= check.max;

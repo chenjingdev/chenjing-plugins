@@ -18,5 +18,6 @@
       "kind": "questionsBeforeWrapOffer",
       "max": 6
     }
-  ]
+  ],
+  "stopOnWrapUp": true
 }

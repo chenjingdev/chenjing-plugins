@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { judge, replyOf, countQuestions, hitLimit } from './behavior/judge.mjs';
+import { judge, replyOf, countQuestions, hitLimit, wrappedUp } from './behavior/judge.mjs';
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'pact-judge-'));
 const say = (text) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
@@ -123,4 +123,10 @@ test('spec checks: a clean short spec passes, lint errors, length and open assum
 
 test('an unknown check kind throws so a typo in a scenario is not a silent pass', () => {
   assert.throws(() => judge({ kind: 'nope' }, [], tmp(), tmp()));
+});
+
+test('wrappedUp marks the turn where the conversation ended', () => {
+  const t = T([say('누가 써요?')], [say('이 정도면 정리해도 될까요?')]);
+  assert.equal(wrappedUp(t, 0), false);
+  assert.equal(wrappedUp(t, 1), true);
 });

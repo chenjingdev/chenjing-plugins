@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSyn
 import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { judge, hitLimit } from './judge.mjs';
+import { judge, hitLimit, wrappedUp } from './judge.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACT = path.resolve(HERE, '..', '..');
@@ -153,6 +153,8 @@ async function runOnce(scenario, variant, n, bin, resume) {
       break;
     }
     if (!result || code !== 0) break;
+    // stopOnWrapUp: 대화가 끝난 뒤의 턴은 판정에 쓰지 않으므로 보내지 않는다(승인으로 읽혀 build까지 가는 비용을 막음).
+    if (scenario.stopOnWrapUp && wrappedUp(transcript, -1)) break;
   }
   const outDir = path.join(HERE, 'out', scenario.name);
   mkdirSync(outDir, { recursive: true });
