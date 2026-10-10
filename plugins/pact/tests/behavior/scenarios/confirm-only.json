@@ -1,0 +1,10 @@
+{
+  "name": "confirm-only",
+  "scene": "확인만 받는 질문 — 알아서 정하라고 하면 기본안을 내놓는다",
+  "fixture": "tiny-web",
+  "turns": ["팀 회의 일정 잡는 웹앱 만들고 싶어", "그냥 알아서 정해"],
+  "checks": [
+    { "kind": "replyNotMatch", "pattern": "(괜찮(을까요|죠)|맞(나요|죠))\\?$" },
+    { "kind": "replyMatch", "pattern": "(정할게요|정했어요|정해 ?둘게요|하겠습니다|할게요|기본안|이렇게|제안|로 갈게요|으로 가겠)" }
+  ]
+}

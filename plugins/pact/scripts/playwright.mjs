@@ -1,24 +1,30 @@
 #!/usr/bin/env node
 // verify 단계의 브라우저 도구. 프로젝트에 Playwright가 있으면 그것을 쓰고, 없으면 pact 전용 폴더에 한 번 설치한다.
 // 프로젝트의 package.json은 건드리지 않는다. JSON 결과만 stdout으로, 안내와 설치 로그는 stderr로 보낸다.
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-export const PLAYWRIGHT_VERSION = '1.55.0';
+// 1.55.0은 Node 26에서 브라우저 압축 해제가 멈춰서 1.63.0으로 올렸다.
+export const PLAYWRIGHT_VERSION = '1.63.0';
 
 const found = (root) => {
   const dir = path.join(root, 'node_modules', 'playwright');
-  return existsSync(path.join(dir, 'package.json')) ? dir : null;
+  try {
+    return { dir, version: JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8')).version };
+  } catch {
+    return null;
+  }
 };
 
 export function resolvePlaywright(projectDir, dataDir) {
   const own = found(projectDir);
-  if (own) return { source: 'project', modulePath: own };
+  if (own) return { source: 'project', modulePath: own.dir };
+  // pact가 깐 것은 지금 버전일 때만 쓴다. 예전 버전이면 없는 것으로 보고 다시 깐다.
   const pact = found(path.join(dataDir, 'playwright'));
-  if (pact) return { source: 'pact', modulePath: pact };
+  if (pact?.version === PLAYWRIGHT_VERSION) return { source: 'pact', modulePath: pact.dir };
   return null;
 }
 

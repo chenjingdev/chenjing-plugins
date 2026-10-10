@@ -5,7 +5,7 @@
 ## 1. 준비
 
 1. `node <pact>/scripts/spec.mjs set-status <명세> verifying`
-2. 화면이 있는 결과물이면 `node <pact>/scripts/playwright.mjs ensure <worktree>`. 처음이라 설치가 필요하면 `Playwright 1.55.0과 Chromium을 … 설치합니다` 안내 줄이 나온다. 그 줄을 그대로 사용자에게 보이고 진행한다. 출력의 JSON(`source`, `modulePath`)을 verifier에 넘긴다.
+2. 화면이 있는 결과물이면 `node <pact>/scripts/playwright.mjs ensure <worktree>`. 처음이라 설치가 필요하면 `Playwright <버전>과 Chromium을 … 설치합니다` 안내 줄이 나온다. 그 줄을 그대로 사용자에게 보이고 진행한다. 출력의 JSON(`source`, `modulePath`)을 verifier에 넘긴다.
 3. 대상을 실행한다. 개발 서버라면 worktree에서 백그라운드로 띄우고 URL을 확인한다. 화면이 없으면 실행 명령을 정한다.
 
 ## 2. 검수

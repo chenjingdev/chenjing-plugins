@@ -1,0 +1,22 @@
+{
+  "name": "question-budget",
+  "scene": "실패 장면 1 — 질문 피로 (정리 제안까지 질문 수)",
+  "fixture": "tiny-web",
+  "turns": [
+    "팀 회의 일정 잡는 웹앱 만들고 싶어",
+    "우리 팀 6명이 쓸 거야",
+    "응",
+    "글쎄 잘 모르겠어",
+    "그냥 간단하게",
+    "음 그거 좋아",
+    "응 그렇게",
+    "몰라 너가 봐서",
+    "음"
+  ],
+  "checks": [
+    {
+      "kind": "questionsBeforeWrapOffer",
+      "max": 6
+    }
+  ]
+}

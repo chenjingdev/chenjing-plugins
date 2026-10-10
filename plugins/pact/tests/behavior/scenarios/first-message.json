@@ -1,0 +1,11 @@
+{
+  "name": "first-message",
+  "scene": "실패 장면 1 — 질문 피로 (첫 메시지)",
+  "fixture": "tiny-web",
+  "turns": ["팀 회의 일정 잡는 웹앱 만들고 싶어"],
+  "checks": [
+    { "kind": "firstReplyQuestionCount", "max": 1 },
+    { "kind": "replyNotMatch", "pattern": "(React|Vue|Next|프레임워크|라이브러리).*\\?" },
+    { "kind": "skillInvoked", "name": "pact:pact" }
+  ]
+}
