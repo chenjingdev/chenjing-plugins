@@ -1,0 +1,11 @@
+{
+  "name": "small-change",
+  "scene": "실패 장면 5 — 작은 일에 무거운 절차",
+  "fixture": "tiny-web",
+  "turns": ["버튼 색을 파란색으로 바꿔줘"],
+  "checks": [
+    { "kind": "fileChanged", "path": "index.html" },
+    { "kind": "noFileCreated", "glob": "docs/pact/**" },
+    { "kind": "firstReplyQuestionCount", "max": 0 }
+  ]
+}
