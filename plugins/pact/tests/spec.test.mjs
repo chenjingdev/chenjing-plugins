@@ -135,3 +135,35 @@ test('CLI: run-dir prints .pact/<slug>/ for a spec and creates it', () => {
   assert.equal(r.stdout.trim(), path.join(d, '.pact', '출결-대시보드'));
   assert.ok(existsSync(path.join(d, '.pact', '.gitignore')));
 });
+
+test('lintSpec catches unnumbered items, duplicate ids and a missing 공통 규칙 section', () => {
+  const p = lintSpec(GOOD.replace('- F1 오늘', '- F1 오늘').replace('## 공통 규칙\n- R1 삭제 전 확인 팝업 [AI 가정]\n', '- 로그인 화면 [사용자]\n- F1 중복 [사용자]\n'));
+  assert.ok(p.includes('번호가 없는 항목: 로그인 화면 [사용자] (F<n> 또는 R<n>을 붙이세요)'), p.join('|'));
+  assert.ok(p.includes('F1: 번호가 겹칩니다'), p.join('|'));
+  assert.ok(p.includes('## 공통 규칙 섹션이 없습니다'), p.join('|'));
+});
+
+test('a tag may carry its source after a colon', () => {
+  const s = GOOD.replace('[사용자]', '[사용자: 10/8 회의]');
+  assert.deepEqual(lintSpec(s), []);
+  assert.equal(parseSpec(s).items[0].tag, '사용자');
+  assert.ok(lintSpec(GOOD.replace('[사용자]', '[사용자 10/8]')).some((x) => x.startsWith('F1: 알 수 없는 태그')));
+});
+
+test('lintSpec flags an untouched template and isTemplate tells an abandoned draft', async () => {
+  const { isTemplate } = await import('../scripts/spec.mjs');
+  const d = tmp();
+  const file = spawnSync('node', [CLI, 'new', d, '회의'], { encoding: 'utf8' }).stdout.trim();
+  const text = readFileSync(file, 'utf8');
+  assert.ok(lintSpec(text).includes('아직 틀 그대로입니다: F1'), lintSpec(text).join('|'));
+  assert.equal(isTemplate(text), true);
+  assert.equal(isTemplate(GOOD), false);
+});
+
+test('CLI: run-dir of a same-day duplicate spec gets its own -2 folder', () => {
+  const d = tmp();
+  spawnSync('node', [CLI, 'new', d, '출결']);
+  const second = spawnSync('node', [CLI, 'new', d, '출결'], { encoding: 'utf8' }).stdout.trim();
+  assert.ok(second.endsWith('-출결-2.md'), second);
+  assert.equal(spawnSync('node', [CLI, 'run-dir', second], { encoding: 'utf8' }).stdout.trim(), path.join(d, '.pact', '출결-2'));
+});

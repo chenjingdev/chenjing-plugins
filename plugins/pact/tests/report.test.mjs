@@ -75,3 +75,15 @@ test('CLI writes report.html and prints the summary and path', () => {
   assert.match(r.stdout, /report\.html/);
   assert.match(readFileSync(path.join(dir, 'report.html'), 'utf8'), /S2 제목/);
 });
+
+test('CLI explains a missing or broken results.json in Korean', () => {
+  const dir = tmp();
+  let r = spawnSync('node', [CLI, dir], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /results\.json이 없습니다/);
+  assert.doesNotMatch(r.stderr, /ENOENT/);
+  writeFileSync(path.join(dir, 'results.json'), '{ 깨짐');
+  r = spawnSync('node', [CLI, dir], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /results\.json을 읽지 못했습니다/);
+});

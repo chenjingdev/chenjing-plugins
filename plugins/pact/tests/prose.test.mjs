@@ -153,7 +153,7 @@ test('build resumes an existing worktree instead of recreating it, and scopes wo
 test('verify commits the spec before merging and has a no-browser fallback', () => {
   const verify = read('skills/pact/verify.md');
   assert.ok(verify.indexOf('진행 기록') > 0 && verify.indexOf('진행 기록') < verify.indexOf('merge --no-ff'));
-  assert.match(verify, /종료 코드가 0이 아니면/);
+  assert.match(verify, /화면 없이/);
   assert.equal(verify.trimEnd().split('\n').at(-1), '다음: 끝 — 사용자에게 보고서를 보여 준다');
 });
 
@@ -168,4 +168,37 @@ test('spec size is given in numbers the behavior test checks, and the template s
   assert.match(probe, /펼쳐 두는 `\[AI 가정\]` 항목은 5개까지/);
   assert.match(probe, /검수를 반영한 뒤에도/);
   assert.match(read('skills/pact/spec-template.md'), /<details><summary>/);
+});
+
+const CUA = 'mcp__plugin_codex-computer-use_codex-computer-use__js';
+
+test('screens are checked with Codex CUA, not Playwright', () => {
+  for (const file of PROSE) assert.ok(!/playwright\.mjs|Playwright 스크립트/.test(readFileSync(file, 'utf8')), `${rel(file)} still uses Playwright`);
+  const verifier = read('agents/verifier.md');
+  assert.ok(verifier.includes(CUA));
+  assert.match(verifier, /createBrowserTab\("chrome"/);
+  assert.match(verifier, /getScreenshot\(\{ emit: false \}\)/);
+  assert.match(verifier, /shots\/<시나리오 id>-<단계 번호>\.jpg/);
+  assert.match(verifier, /tab\.close\(\)/);
+  assert.match(verifier, /화면 없이/);
+  assert.match(read('skills/pact/verify.md'), /Codex CUA/);
+  assert.match(read('skills/pact/SKILL.md'), /Codex CUA/);
+});
+
+test('deferred minors: worktree leftovers, cross-platform open, merge message, reply wait, stopping the server', () => {
+  const verify = read('skills/pact/verify.md');
+  assert.match(verify, /`--force`는 쓰지 않는다/);
+  assert.match(verify, /merge --no-ff --no-edit/);
+  const skill = read('skills/pact/SKILL.md');
+  assert.match(skill, /xdg-open/);
+  assert.match(skill, /틀 그대로/);
+  assert.match(read('skills/pact/build.md'), /답은 알림으로 온다/);
+  assert.match(read('skills/pact/probe.md'), /서버를 멈춘다: /);
+});
+
+test('deferred minors: description says only when, worker wording, read-only agents keep Bash to reading', () => {
+  const d = frontmatter(read('skills/pact/SKILL.md')).description;
+  assert.ok(!d.includes('가늠'), 'description should say when, not how');
+  assert.ok(!read('agents/worker.md').includes('짐작하지'));
+  for (const a of ['agents/spec-checker.md', 'agents/reviewer.md']) assert.match(read(a), /Bash는 읽기와 시험 실행에만/);
 });

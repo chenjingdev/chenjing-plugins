@@ -75,7 +75,7 @@ function openLines(text) {
 }
 
 function openAiAssumptions(text) {
-  return openLines(text).filter((line) => /^\s*-\s+[FR]\d+.*\[AI 가정\]\s*$/.test(line)).length;
+  return openLines(text).filter((line) => /^\s*-\s+[FR]\d+.*\[AI 가정(:[^\]]*)?\]\s*$/.test(line)).length;
 }
 
 export function judge(check, transcript, workdir, fixtureDir) {

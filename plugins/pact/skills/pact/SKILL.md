@@ -1,6 +1,6 @@
 ---
 name: pact
-description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라고 할 때(앱, 기능, 화면, 스크립트, 버그 수정), 또는 /pact:pact로 부를 때. 크기를 먼저 가늠해 작은 일은 바로 처리한다.
+description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라고 할 때(앱, 기능, 화면, 스크립트, 버그 수정), 또는 /pact:pact로 부를 때.
 ---
 
 # pact
@@ -11,11 +11,15 @@ description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라�
 
 이 스킬의 Base directory에서 두 단계 위가 pact 폴더다. 아래에서 `<pact>`라고 쓴다. 스크립트는 `node <pact>/scripts/<이름>.mjs`로 부른다. 하위 에이전트는 `pact:spec-checker`, `pact:worker`, `pact:reviewer`, `pact:verifier`다.
 
+화면 확인에는 Codex CUA 도구(`mcp__plugin_codex-computer-use_codex-computer-use__js`)를 쓴다. 이 도구가 없으면 화면 없이 확인한다.
+
+페이지나 보고서를 사용자에게 열어 줄 때 macOS는 `open`, Linux는 `xdg-open`, Windows는 `start ""`를 쓴다. 아래에서 `open`이라고 쓴 곳은 모두 이것이다.
+
 ## 시작할 때
 
 ### 1. 진행 중인 명세가 있나
 
-대상 프로젝트의 `docs/pact/*.md`에서 status가 `done`이 아닌 명세를 찾는다. 상태는 `node <pact>/scripts/spec.mjs status <명세>`로 본다.
+대상 프로젝트의 `docs/pact/*.md`에서 status가 `done`이 아닌 명세를 찾는다. 상태는 `node <pact>/scripts/spec.mjs status <명세>`로 본다. `draft`인데 `spec.mjs lint`가 기능 항목마다 `아직 틀 그대로입니다`를 내면 틀 그대로 버려진 초안이다. 진행 중으로 보지 않고 이어 할지 묻지도 않는다. 같은 주제를 다시 시작하면 그 파일을 채워 쓴다.
 
 지금 요청이 그 명세를 이어 가는 것이면 status대로 간다.
 
@@ -46,7 +50,7 @@ description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라�
 
 1. 무엇을 어떻게 바꿀지 한 줄로 알린다.
 2. 직접 고친다. 명세 파일, worktree, 하위 에이전트는 쓰지 않는다.
-3. 관련된 확인을 하나 한다. 테스트나 명령을 돌리고, 화면을 바꿨으면 그 화면 스크린샷을 한 장 찍는다(`node <pact>/scripts/playwright.mjs ensure <프로젝트>`로 Playwright를 준비).
+3. 관련된 확인을 하나 한다. 테스트나 명령을 돌리고, 화면을 바꿨으면 Codex CUA로 그 화면을 열어 스크린샷을 한 장 본다. 도구가 없으면 스크린샷 없이 확인하고 그렇다고 한 줄 알린다.
 4. 결과를 채팅으로 알린다. 보고서 파일은 만들지 않는다.
 
 ## 지금 단계 보이기

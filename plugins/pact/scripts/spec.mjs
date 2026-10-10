@@ -26,6 +26,7 @@ export function parseSpec(text) {
   }
   const sections = {};
   const items = [];
+  const unnumbered = [];
   let current = null;
   for (const line of body.split(/\r?\n/)) {
     const h = /^##\s+(.+?)\s*$/.exec(line);
@@ -38,18 +39,23 @@ export function parseSpec(text) {
     sections[current] += (sections[current] ? '\n' : '') + line;
     if (!ITEM_SECTIONS.includes(current)) continue;
     const it = /^-\s+([FR]\d+)\b\s*(.*?)\s*$/.exec(line);
-    if (!it) continue;
+    if (!it) {
+      if (/^-\s+\S/.test(line)) unnumbered.push(line.replace(/^-\s+/, '').trim());
+      continue;
+    }
     const t = /\s*\[([^\]]*)\]$/.exec(it[2]);
     const rawTag = t ? t[1] : null;
+    // [사용자: 10/8 회의]처럼 콜론 뒤에 출처를 붙여도 된다.
+    const baseTag = rawTag?.replace(/:.*$/, '').trim() ?? null;
     items.push({
       id: it[1],
       text: t ? it[2].slice(0, t.index).trim() : it[2],
-      tag: TAGS.includes(rawTag) ? rawTag : null,
+      tag: TAGS.includes(baseTag) ? baseTag : null,
       rawTag,
       section: current,
     });
   }
-  return { frontmatter, sections, items };
+  return { frontmatter, sections, items, unnumbered };
 }
 
 export function lintSpec(text) {
@@ -58,12 +64,28 @@ export function lintSpec(text) {
   const status = spec.frontmatter.status;
   if (!status) problems.push('status가 없습니다');
   else if (!STATUSES.includes(status)) problems.push(`status 값이 잘못됐습니다: ${status}`);
-  if (!('기능' in spec.sections)) problems.push('## 기능 섹션이 없습니다');
+  for (const section of ITEM_SECTIONS) {
+    if (!(section in spec.sections)) problems.push(`## ${section} 섹션이 없습니다`);
+  }
+  const seen = new Set();
   for (const item of spec.items) {
+    if (seen.has(item.id)) problems.push(`${item.id}: 번호가 겹칩니다`);
+    seen.add(item.id);
     if (item.rawTag === null) problems.push(`${item.id}: 태그가 없습니다 ([사용자] 또는 [AI 가정])`);
     else if (item.tag === null) problems.push(`${item.id}: 알 수 없는 태그 [${item.rawTag}]`);
+    if (PLACEHOLDER.test(item.text)) problems.push(`아직 틀 그대로입니다: ${item.id}`);
   }
+  for (const line of spec.unnumbered) problems.push(`번호가 없는 항목: ${line} (F<n> 또는 R<n>을 붙이세요)`);
   return problems;
+}
+
+// spec-template.md의 <기능 한 줄> 같은 자리표시자가 남은 항목
+const PLACEHOLDER = /<[^>]+>/;
+
+// 기능 항목이 하나도 채워지지 않은 명세: probe를 시작만 하고 버린 초안이다.
+export function isTemplate(text) {
+  const features = parseSpec(text).items.filter((i) => i.section === '기능');
+  return features.length > 0 && features.every((i) => PLACEHOLDER.test(i.text));
 }
 
 export function setStatus(text, status) {

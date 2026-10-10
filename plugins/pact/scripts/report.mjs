@@ -86,7 +86,18 @@ function main([runDir]) {
     console.error('사용법: report.mjs <run-dir>   (<run-dir>/results.json을 읽어 report.html을 만듦)');
     return 2;
   }
-  const results = JSON.parse(readFileSync(path.join(runDir, 'results.json'), 'utf8'));
+  const file = path.join(runDir, 'results.json');
+  if (!existsSync(file)) {
+    console.error(`results.json이 없습니다: ${file} — verifier가 결과를 쓰지 않았습니다`);
+    return 1;
+  }
+  let results;
+  try {
+    results = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    console.error(`results.json을 읽지 못했습니다: ${err.message}`);
+    return 1;
+  }
   const { html, summary } = renderReport(results, { runDir });
   const out = path.join(runDir, 'report.html');
   writeFileSync(out, html);

@@ -30,7 +30,7 @@
 3. `node <pact>/scripts/checklist.mjs render <items.json> <run-dir>`
 4. `node <pact>/scripts/checklist.mjs serve <run-dir>`를 백그라운드로 실행하고, 출력된 `페이지: http://127.0.0.1:<포트>/`를 `open`으로 연다. 채팅에는 페이지에서 고르거나 채팅으로 답해도 된다고 한 줄 알린다.
 5. 서버가 끝나면 `<run-dir>/checklist.txt`의 `기능: …` 줄이 답이다. 시간 초과로 끝났으면 채팅으로 받는다.
-6. 채팅 답이 페이지보다 우선한다. 채팅으로 먼저 답이 오면 서버를 멈춘다.
+6. 채팅 답이 페이지보다 우선한다. 채팅으로 먼저 답이 오면 서버를 멈춘다: 4에서 띄운 백그라운드 작업을 멈추거나(TaskStop), 그 프로세스를 `kill`한다. 그냥 두어도 시간이 지나면 스스로 끝난다.
 
 ## 3. 구조 고르기
 

@@ -31,7 +31,7 @@
    - `## 완료 기준`: 돌릴 명령과 기대 결과
 2. 답장의 상태를 본다. `DONE_WITH_CONCERNS`면 걱정을 읽고 검토자에게 같이 넘긴다.
 3. `pact:reviewer`에 지시, worker 보고서 경로, base/head SHA, 관련 명세 항목을 넘긴다.
-4. 판정이 `고칠 것 있음`이면 같은 worker에 SendMessage로 지적을 넘긴다. 새 worker를 띄우지 않는다. 두 번째 검토에서도 고칠 것이 있으면 당신이 직접 고친다.
+4. 판정이 `고칠 것 있음`이면 같은 worker에 SendMessage로 지적을 넘긴다. 새 worker를 띄우지 않는다. SendMessage의 답은 알림으로 온다. 확인하려고 다시 묻거나 기다리는 명령을 돌리지 않는다. 두 번째 검토에서도 고칠 것이 있으면 당신이 직접 고친다.
 
 ## BLOCKED가 오면
 
