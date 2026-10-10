@@ -130,3 +130,9 @@ test('wrappedUp marks the turn where the conversation ended', () => {
   assert.equal(wrappedUp(t, 0), false);
   assert.equal(wrappedUp(t, 1), true);
 });
+
+test('agentNotInvoked fails when a build agent was dispatched', () => {
+  const agent = (type) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent', input: { subagent_type: type } }] } });
+  assert.equal(judge({ kind: 'agentNotInvoked', name: 'pact:worker' }, T([agent('pact:spec-checker')]), tmp(), tmp()), true);
+  assert.equal(judge({ kind: 'agentNotInvoked', name: 'pact:worker' }, T([say('a')], [agent('pact:worker')]), tmp(), tmp()), false);
+});

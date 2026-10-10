@@ -11,12 +11,16 @@
     "음 그거 좋아",
     "응 그렇게",
     "몰라 너가 봐서",
-    "음"
+    "좋아"
   ],
   "checks": [
     {
       "kind": "questionsBeforeWrapOffer",
       "max": 6
+    },
+    {
+      "kind": "agentNotInvoked",
+      "name": "pact:worker"
     }
   ],
   "stopOnWrapUp": true

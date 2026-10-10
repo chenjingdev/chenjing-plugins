@@ -82,6 +82,11 @@ export function judge(check, transcript, workdir, fixtureDir) {
       return new RegExp(check.pattern, 'm').test(replyOf(transcript, check.turn));
     case 'skillInvoked':
       return transcript.flat().flatMap(contentOf).some((c) => c.type === 'tool_use' && c.name === 'Skill' && c.input?.skill === check.name);
+    case 'agentNotInvoked':
+      return !transcript
+        .flat()
+        .flatMap(contentOf)
+        .some((c) => c.type === 'tool_use' && (c.name === 'Agent' || c.name === 'Task') && c.input?.subagent_type === check.name);
     case 'questionsBeforeWrapOffer': {
       let asked = 0;
       for (let i = 0; i < transcript.length; i++) {

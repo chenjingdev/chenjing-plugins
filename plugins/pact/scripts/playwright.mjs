@@ -33,6 +33,14 @@ function run(cmd, args) {
   if (r.error || r.status !== 0) throw new Error(`실패: ${cmd} ${args.join(' ')}`);
 }
 
+// 패키지가 있어도 브라우저를 내려받지 않았을 수 있다(@playwright/test만 쓰는 프로젝트 등).
+function hasBrowser(modulePath) {
+  const r = spawnSync(process.execPath, ['-e', `process.stdout.write(require(${JSON.stringify(modulePath)}).chromium.executablePath())`], {
+    encoding: 'utf8',
+  });
+  return r.status === 0 && Boolean(r.stdout) && existsSync(r.stdout);
+}
+
 function ensure(projectDir) {
   const dataDir = process.env.CLAUDE_PLUGIN_DATA || path.join(homedir(), '.pact');
   let pw = resolvePlaywright(projectDir, dataDir);
@@ -48,6 +56,15 @@ function ensure(projectDir) {
     run(process.execPath, [path.join(prefix, 'node_modules', 'playwright', 'cli.js'), 'install', 'chromium']);
     pw = resolvePlaywright(projectDir, dataDir);
     if (!pw) throw new Error(`설치했지만 Playwright를 찾지 못했습니다: ${prefix}`);
+  }
+  if (!hasBrowser(pw.modulePath)) {
+    if (process.env.PACT_NO_INSTALL === '1') {
+      console.error(`Playwright는 있지만 Chromium이 없고 PACT_NO_INSTALL=1이라 내려받지 않습니다 (${pw.modulePath})`);
+      return 2;
+    }
+    console.error('Chromium을 내려받습니다 (처음 한 번, 수백 MB)');
+    run(process.execPath, [path.join(pw.modulePath, 'cli.js'), 'install', 'chromium']);
+    if (!hasBrowser(pw.modulePath)) throw new Error('Chromium을 내려받았지만 실행 파일을 찾지 못했습니다');
   }
   console.log(JSON.stringify(pw));
   return 0;

@@ -133,3 +133,26 @@ test('build and verify never ask the user to review a plan or pick an execution 
     for (const s of ['계획을 검토', '실행 방식']) assert.ok(!text.includes(s), `${f} contains ${s}`);
   }
 });
+
+test('delegation is not approval: probe asks for the one approval separately', () => {
+  const probe = read('skills/pact/probe.md');
+  assert.ok(probe.includes('위임은 승인이 아니다'));
+  assert.ok(!probe.includes('바로 시작해도'), 'skip line must not read as "start building"');
+  assert.match(read('skills/pact/SKILL.md'), /명세 승인은 확인 질문이 아니라 계약/);
+  assert.match(read('skills/pact/build.md'), /status가 `draft`면 build하지 않는다/);
+});
+
+test('build resumes an existing worktree instead of recreating it, and scopes workers to absolute worktree paths', () => {
+  const build = read('skills/pact/build.md');
+  assert.match(build, /`<run-dir>\/wt`가 이미 있으면/);
+  assert.match(build, /worktree 안의 절대 경로/);
+  assert.match(build, /`untracked`/);
+  assert.match(read('agents/worker.md'), /worktree 밖.*읽기만/);
+});
+
+test('verify commits the spec before merging and has a no-browser fallback', () => {
+  const verify = read('skills/pact/verify.md');
+  assert.ok(verify.indexOf('진행 기록') > 0 && verify.indexOf('진행 기록') < verify.indexOf('merge --no-ff'));
+  assert.match(verify, /종료 코드가 0이 아니면/);
+  assert.equal(verify.trimEnd().split('\n').at(-1), '다음: 끝 — 사용자에게 보고서를 보여 준다');
+});

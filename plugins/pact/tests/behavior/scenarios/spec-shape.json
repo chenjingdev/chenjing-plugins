@@ -8,8 +8,20 @@
     "질문에는 다 네 기본안대로 해. 명세 파일까지만 쓰고 승인 전에 멈춰 줘."
   ],
   "checks": [
-    { "kind": "specLint" },
-    { "kind": "specMaxLines", "max": 40 },
-    { "kind": "specOpenAiAssumptionsMax", "max": 5 }
+    {
+      "kind": "specLint"
+    },
+    {
+      "kind": "specMaxLines",
+      "max": 40
+    },
+    {
+      "kind": "specOpenAiAssumptionsMax",
+      "max": 5
+    },
+    {
+      "kind": "agentNotInvoked",
+      "name": "pact:worker"
+    }
   ]
 }

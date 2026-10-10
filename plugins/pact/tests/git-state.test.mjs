@@ -14,7 +14,7 @@ const git = (cwd, ...args) =>
   spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd });
 
 test('a plain folder is not a repo', () => {
-  assert.deepEqual(gitState(tmp()), { repo: false, branch: null, dirty: false });
+  assert.deepEqual(gitState(tmp()), { repo: false, branch: null, dirty: false, changed: [], untracked: [] });
 });
 
 test('a fresh commit is clean, an edit makes it dirty', () => {
@@ -23,13 +23,28 @@ test('a fresh commit is clean, an edit makes it dirty', () => {
   writeFileSync(path.join(d, 'a.txt'), '1');
   git(d, 'add', '.');
   git(d, 'commit', '-q', '-m', 'init');
-  assert.deepEqual(gitState(d), { repo: true, branch: 'main', dirty: false });
+  assert.deepEqual(gitState(d), { repo: true, branch: 'main', dirty: false, changed: [], untracked: [] });
   writeFileSync(path.join(d, 'a.txt'), '2');
   assert.equal(gitState(d).dirty, true);
+  assert.deepEqual(gitState(d).changed, ['a.txt']);
+});
+
+test('untracked files are listed but do not make the tree dirty', () => {
+  const d = tmp();
+  git(d, 'init', '-q', '-b', 'main');
+  writeFileSync(path.join(d, 'a.txt'), '1');
+  git(d, 'add', '.');
+  git(d, 'commit', '-q', '-m', 'init');
+  writeFileSync(path.join(d, '.env'), 'X=1');
+  writeFileSync(path.join(d, '메모 1.txt'), 'x');
+  const s = gitState(d);
+  assert.equal(s.dirty, false);
+  assert.deepEqual(s.changed, []);
+  assert.deepEqual(s.untracked.sort(), ['.env', '메모 1.txt']);
 });
 
 test('CLI prints the state as JSON', () => {
   const r = spawnSync('node', [CLI, tmp()], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout), { repo: false, branch: null, dirty: false });
+  assert.deepEqual(JSON.parse(r.stdout), { repo: false, branch: null, dirty: false, changed: [], untracked: [] });
 });

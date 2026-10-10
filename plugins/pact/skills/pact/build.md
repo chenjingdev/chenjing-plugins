@@ -2,13 +2,19 @@
 
 승인된 명세를 만든다. 계획은 당신이 안에서만 쓰고, 사용자에게 승인받지 않는다. 사용자가 이미 승인한 것은 명세다.
 
+## 0. 들어오기 전에
+
+- 명세 status가 `draft`면 build하지 않는다. 승인을 받지 않은 것이니 `probe.md` 5로 돌아간다.
+- `node <pact>/scripts/spec.mjs run-dir <명세>`로 run-dir을 얻는다. `<run-dir>/wt`가 이미 있으면 이어 하는 중이다(중단됐거나 verify에서 되돌아왔다). 1·2를 건너뛰고 `<run-dir>/plan.md`와 `<run-dir>/tasks/*-report.md`를 읽은 뒤, 남은 작업이나 verify가 넘긴 실패부터 3으로 이어 간다.
+
 ## 1. 작업 공간 준비
 
 1. `node <pact>/scripts/git-state.mjs <프로젝트>`로 확인한다.
    - `repo:false`면 멈추고 알린다: "git 저장소가 아니라 격리 작업을 할 수 없습니다 — git init 할까요?"
-   - `dirty:true`면 `git status --porcelain`으로 어느 파일인지 본다. 이번 명세 파일 하나뿐이면 그 파일만 커밋한다(`docs(pact): <주제> 명세`). 다른 파일이 걸려 있으면 그 파일 목록을 알리고 멈춘다. 사용자의 작업을 섞지 않기 위해서다.
+   - `changed`(추적 중인 파일의 변경)가 이번 명세 파일 하나뿐이면 그 파일만 커밋한다(`docs(pact): <주제> 명세`). 다른 파일이 있으면 그 목록을 알리고 멈춘다. 사용자의 작업을 섞지 않기 위해서다.
+   - `untracked`(미추적 파일)는 worktree로 섞이지 않으니 멈추지 않는다.
 2. `node <pact>/scripts/spec.mjs set-status <명세> building`
-3. `node <pact>/scripts/spec.mjs run-dir <명세>`로 run-dir을 얻고, `git worktree add <run-dir>/wt -b pact/<slug>`로 격리된 작업 공간을 만든다. 코드는 모두 이 worktree에서 바뀐다. 명세 파일은 메인 작업 트리에 있는 것을 고친다.
+3. `git worktree add <run-dir>/wt -b pact/<slug>`로 격리된 작업 공간을 만든다. 코드는 모두 이 worktree에서 바뀐다. 명세 파일은 메인 작업 트리에 있는 것만 고친다.
 
 ## 2. 작업 나누기
 
@@ -21,7 +27,7 @@
 1. `pact:worker`에 네 칸 지시를 넘긴다.
    - `## 목표`: 이 작업이 끝나면 무엇이 되나
    - `## 맥락`: 관련 명세 항목을 태그째(`[사용자]`, `[AI 가정]`) 그대로, 구조 판정, 앞 작업이 만든 것, worktree 경로, run-dir과 작업 번호
-   - `## 범위`: 건드려도 되는 파일과 건드리면 안 되는 것
+   - `## 범위`: 건드려도 되는 파일과 건드리면 안 되는 것. 경로는 worktree 안의 절대 경로로 적는다. 하위 에이전트는 메인 프로젝트 폴더에서 시작하므로 상대 경로를 쓰면 메인 작업 트리를 고치게 된다.
    - `## 완료 기준`: 돌릴 명령과 기대 결과
 2. 답장의 상태를 본다. `DONE_WITH_CONCERNS`면 걱정을 읽고 검토자에게 같이 넘긴다.
 3. `pact:reviewer`에 지시, worker 보고서 경로, base/head SHA, 관련 명세 항목을 넘긴다.

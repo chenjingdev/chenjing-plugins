@@ -8,11 +8,25 @@ const git = (dir, ...args) => {
   return r.error || r.status !== 0 ? null : r.stdout.trim();
 };
 
+// dirty는 추적 중인 파일의 변경만 본다. .env나 메모 같은 미추적 파일은 worktree로 섞이지도 합치기를 막지도 않으므로
+// untracked로 따로 알려 주기만 한다.
 export function gitState(dir) {
-  if (git(dir, 'rev-parse', '--is-inside-work-tree') !== 'true') return { repo: false, branch: null, dirty: false };
+  if (git(dir, 'rev-parse', '--is-inside-work-tree') !== 'true') return { repo: false, branch: null, dirty: false, changed: [], untracked: [] };
   const branch = git(dir, 'symbolic-ref', '--short', '-q', 'HEAD') || null;
-  const dirty = Boolean(git(dir, 'status', '--porcelain'));
-  return { repo: true, branch, dirty };
+  const r = spawnSync('git', ['status', '--porcelain=v1', '-z'], { cwd: dir, encoding: 'utf8' });
+  const entries = (r.stdout ?? '').split('\0').filter(Boolean);
+  const changed = [];
+  const untracked = [];
+  for (let i = 0; i < entries.length; i++) {
+    const code = entries[i].slice(0, 2);
+    const file = entries[i].slice(3);
+    if (code === '??') untracked.push(file);
+    else {
+      changed.push(file);
+      if (code.includes('R') || code.includes('C')) i++; // 이름 바꾸기는 원래 이름이 다음 항목에 온다
+    }
+  }
+  return { repo: true, branch, dirty: changed.length > 0, changed, untracked };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

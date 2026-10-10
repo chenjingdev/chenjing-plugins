@@ -10,10 +10,12 @@ import { resolvePlaywright, PLAYWRIGHT_VERSION } from '../scripts/playwright.mjs
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(here, '..', 'scripts', 'playwright.mjs');
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'pact-pw-'));
-const fakePlaywright = (root, version = PLAYWRIGHT_VERSION) => {
+// 가짜 playwright: chromium.executablePath()가 browser 경로를 돌려준다(기본은 실제로 있는 파일).
+const fakePlaywright = (root, version = PLAYWRIGHT_VERSION, browser = CLI) => {
   const dir = path.join(root, 'node_modules', 'playwright');
   mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'playwright', version }));
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'playwright', version, main: 'index.js' }));
+  writeFileSync(path.join(dir, 'index.js'), `module.exports = { chromium: { executablePath: () => ${JSON.stringify(browser)} } };`);
   return dir;
 };
 
@@ -61,4 +63,15 @@ test("an outdated pact-owned copy counts as missing so ensure reinstalls it; a p
   const project = tmp();
   const dir = fakePlaywright(project, '1.0.0');
   assert.deepEqual(resolvePlaywright(project, data), { source: 'project', modulePath: dir });
+});
+
+test("ensure with a project's playwright but no browser downloaded asks to install (exit 2 under PACT_NO_INSTALL)", () => {
+  const project = tmp();
+  fakePlaywright(project, PLAYWRIGHT_VERSION, path.join(project, 'no-such-browser'));
+  const r = spawnSync('node', [CLI, 'ensure', project], {
+    encoding: 'utf8',
+    env: { ...process.env, PACT_NO_INSTALL: '1', CLAUDE_PLUGIN_DATA: tmp() },
+  });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /Chromium/);
 });
