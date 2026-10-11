@@ -193,6 +193,8 @@ test('arrows compare with the previous round, pairing checks by kind and argumen
   const b4 = row(v4, 's', checkKey(B)).cells.pact;
   assert.deepEqual([b4.delta.dir, b4.delta.amount, b4.delta.pct], ['up', 10, true]);
   assert.equal(cellText(a2).delta, '▲2');
+  assert.equal(cellText(a2).prev, '직전 3/5');
+  assert.equal(cellText(row(v1, 's', checkKey(A)).cells.pact).prev, null);
   assert.equal(cellText(b2).delta, '▼2');
   assert.equal(cellText(a4).delta, '±0');
   assert.equal(cellText(b4).delta, '▲10%p');
@@ -318,12 +320,25 @@ test('buildBoard writes board.html next to the rounds and the CLI prints its pat
   assert.equal(cli.stdout.trim(), path.join(out, 'board.html'));
 });
 
-test('the CLI imports old records when there are no rounds yet, and says so when there is nothing to show', () => {
+test('the CLI imports old records as the first round and builds the page; with nothing to import it says so and exits 1', () => {
   const empty = tmp();
   const none = spawnSync('node', [boardCli, empty], { encoding: 'utf8' });
   assert.equal(none.status, 1);
   assert.match(none.stderr, /쌓인 판이 없/);
   assert.ok(!existsSync(path.join(empty, 'board.html')));
+
+  const out = tmp();
+  writeRecord(out, 'confirm-only', 'control', 1, null, ['이렇게 정할게요.']);
+  const res = spawnSync('node', [boardCli, out], { encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /이전 기록 모음 판으로 가져옴/);
+  assert.equal(res.stdout.trim(), path.join(out, 'board.html'));
+  const html = readFileSync(path.join(out, 'board.html'), 'utf8');
+  const data = JSON.parse(/<script type="application\/json" id="data">([\s\S]*?)<\/script>/.exec(html)[1]);
+  assert.equal(data.rounds.length, 1);
+  assert.equal(data.rounds[0].kind, 'legacy');
+  assert.equal(data.rounds[0].attempts[0].scenario, 'confirm-only');
+  assert.ok(data.rounds[0].attempts[0].conversation.some((c) => c.text === '이렇게 정할게요.'));
 });
 
 test('an empty round list still renders a page that says there is nothing yet', () => {

@@ -124,14 +124,15 @@ export function buildViews(rounds) {
 
 // ---- 페이지에서도 쓰는 순수 함수(문자열로 페이지에 그대로 넣는다. 바깥 이름을 쓰지 말 것) ----
 
-// 칸에 쓸 글자: 4/5, ▲1, 한도 1, 불가 2
+// 칸에 쓸 글자: 4/5, 직전 3/5, ▲1, 한도 1, 불가 2
 export function cellText(c) {
   const notes = [];
   if (c.limited) notes.push('한도 ' + c.limited);
   if (c.undecidable) notes.push('불가 ' + c.undecidable);
   let delta = null;
   if (c.delta) delta = (c.delta.dir === 'up' ? '▲' : c.delta.dir === 'down' ? '▼' : '±') + c.delta.amount + (c.delta.pct && c.delta.dir !== 'same' ? '%p' : '');
-  return { score: c.passed + '/' + c.valid, delta, deltaDir: c.delta ? c.delta.dir : null, notes, red: Boolean(c.red) };
+  const prev = c.delta ? '직전 ' + c.delta.prevPassed + '/' + c.delta.prevValid : null;
+  return { score: c.passed + '/' + c.valid, prev, delta, deltaDir: c.delta ? c.delta.dir : null, notes, red: Boolean(c.red) };
 }
 
 // text 안에서 needles가 처음 나오는 자리를 겹치지 않게 묶어, 강조할 조각과 아닌 조각으로 나눈다.
@@ -296,6 +297,7 @@ table.grid { border-collapse: collapse; width: 100%; }
 .cellbtn.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
 .cellbtn.red { background: var(--red-bg); border-color: var(--red-line); color: var(--red-text); }
 .score { font-weight: 700; font-variant-numeric: tabular-nums; }
+.prev { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .delta { font-size: 12px; font-variant-numeric: tabular-nums; }
 .delta.up { color: var(--up); } .delta.down { color: var(--down); } .delta.same { color: var(--muted); }
 .note { font-size: 12px; color: var(--muted); border: 1px dashed var(--line); border-radius: 4px; padding: 0 4px; }
@@ -332,7 +334,6 @@ details.fold.err summary { color: var(--red-text); }
 
 // 페이지 스크립트. 사용자 글은 textContent로만 넣는다(innerHTML을 쓰지 않는다). 백틱과 ${ 를 쓰지 말 것.
 const PAGE_JS = String.raw`
-'use strict';
 const DATA = JSON.parse(document.getElementById('data').textContent);
 const KIND_NAME = { legacy: '이전 기록 모음', rejudge: '다시 판정', new: '' };
 const VARIANT_NAME = { pact: 'pact', control: '대조군' };
@@ -394,6 +395,7 @@ function cellNode(round, row, variant) {
     'button',
     { type: 'button', class: 'cellbtn' + (c.red ? ' red' : '') + (on ? ' sel' : ''), 'aria-pressed': on ? 'true' : 'false', title: prev, onclick: () => select(row.scenario, variant, row.checkKey) },
     h('span', { class: 'score' }, t.score),
+    t.prev && h('span', { class: 'prev' }, t.prev),
     t.delta && h('span', { class: 'delta ' + t.deltaDir }, t.delta),
     t.notes.map((n) => h('span', { class: 'note' }, n)),
     t.red && h('span', { class: 'flag' }, '✗ 미달'),
@@ -565,6 +567,7 @@ export function renderBoard(data) {
 </main>
 <script type="application/json" id="data">${embedJson(data)}</script>
 <script>
+'use strict';
 ${shared}
 ${PAGE_JS}
 </script>
@@ -574,10 +577,11 @@ ${PAGE_JS}
 }
 
 export function buildBoard(outDir) {
-  const html = renderBoard(collectBoard(outDir));
+  const data = collectBoard(outDir);
+  const html = renderBoard(data);
   const file = path.join(outDir, 'board.html');
   writeFileSync(file, html);
-  return { file, bytes: Buffer.byteLength(html), rounds: listRounds(outDir).length };
+  return { file, bytes: Buffer.byteLength(html), rounds: data.rounds.length };
 }
 
 // ---- CLI ----
