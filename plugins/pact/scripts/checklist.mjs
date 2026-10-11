@@ -111,9 +111,10 @@ function serve(runDir) {
       res.writeHead(404).end();
     });
     server.listen(0, '127.0.0.1', () => console.log(`페이지: http://127.0.0.1:${server.address().port}/`));
+    // 시간 초과는 오류가 아니다. 0으로 끝내야 백그라운드 작업이 "실패"로 알려지지 않는다.
     timer = setTimeout(() => {
-      console.error('시간 초과 — 채팅으로 기능 범위를 알려 주세요');
-      finish(1);
+      console.log('시간 초과 — 채팅으로 기능 범위를 알려 주세요');
+      finish(0);
     }, timeoutMs);
   });
 }

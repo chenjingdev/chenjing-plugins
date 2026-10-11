@@ -103,7 +103,8 @@ test('serve gives up after PACT_CHECKLIST_TIMEOUT_MS and asks for the chat inste
   writeFileSync(path.join(dir, 'checklist.html'), renderChecklist(INPUT));
   const { url, exited } = startServe(dir, { PACT_CHECKLIST_TIMEOUT_MS: '200' });
   url.catch(() => {});
-  const { code, err } = await exited;
-  assert.equal(code, 1);
-  assert.match(err, /시간 초과 — 채팅으로 기능 범위를 알려 주세요/);
+  const { code, out } = await exited;
+  assert.equal(code, 0);
+  assert.match(out, /시간 초과 — 채팅으로 기능 범위를 알려 주세요/);
+  assert.ok(!existsSync(path.join(dir, 'checklist.txt')));
 });

@@ -230,3 +230,30 @@ test('no single-default confirm questions: offer real directions with a recommen
   assert.match(skill, /기본안 하나를 내밀고 맞는지 묻는 것도 확인 질문/);
   assert.match(read('skills/pact/probe.md'), /"맞음"밖에 할 말이 없는 질문/);
 });
+
+test('first end-to-end run: friction fixes stay in the guidance', () => {
+  const probe = read('skills/pact/probe.md');
+  assert.match(probe, /\*\*맡겼을 때\.\*\*/);
+  assert.match(probe, /스케치 없이 정했다\(위임\)/);
+  assert.match(probe, /페이지를 열기 전에 채팅으로 먼저 알린다/);
+  assert.match(probe, /오류가 아니다/);
+  assert.match(probe, /— <이유> \[AI 가정\]/);
+  assert.match(probe, /\(AI 제안에 동의\)/);
+  assert.match(probe, /검수자도 틀린다/);
+  assert.match(read('skills/pact/spec-template.md'), /— <이유> \[AI 가정\]/);
+  const checker = read('agents/spec-checker.md');
+  assert.match(checker, /\(AI 제안에 동의\)/);
+  assert.match(checker, /확인 안 함/);
+  const build = read('skills/pact/build.md');
+  assert.match(build, /`untracked`\(미추적 파일\)에 있든 그 파일만 커밋한다/);
+  assert.match(build, /세 번째 검토는 없다/);
+  assert.match(build, /무엇을 맡겼는지 한 줄/);
+  assert.match(read('skills/pact/SKILL.md'), /무엇을 하는지 쉬운 말로 한 줄/);
+  const verify = read('skills/pact/verify.md');
+  assert.match(verify, /cua\.getState\(\)/);
+  assert.match(verify, /처음부터 다시 돌리지 않는다/);
+  assert.match(verify, /results-round<n>\.json/);
+  const verifier = read('agents/verifier.md');
+  assert.match(verifier, /## 다시 검수/);
+  assert.match(verifier, /화면 도구 없음/);
+});
