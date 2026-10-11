@@ -1,7 +1,7 @@
 // run.mjs를 가짜 claude로 끝까지 돌려, 판이 out/runs/에 쌓이는지 본다(비용 없음).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -36,13 +36,23 @@ if (n >= 5) {
   return bin;
 }
 
-test('run.mjs saves a round (pass without conversation, fail with, limited marked) and exits 3 on a limit', () => {
+// 시험이 만드는 작업 폴더·임시 파일까지 dir 안에 모이도록 TMPDIR도 dir 안으로 돌린다.
+const made = [];
+after(() => made.forEach((d) => rmSync(d, { recursive: true, force: true })));
+function world() {
   const dir = mkdtempSync(path.join(tmpdir(), 'pact-e2e-'));
+  made.push(dir);
+  mkdirSync(path.join(dir, 'tmp'));
   const profile = path.join(dir, 'profile');
   mkdirSync(profile);
   writeFileSync(path.join(profile, '.claude.json'), JSON.stringify({ oauthAccount: { id: 'x' } }));
   const out = path.join(dir, 'out');
-  const env = { ...process.env, PACT_TEST_CLAUDE: fakeClaude(dir), PACT_TEST_PROFILE: profile, PACT_TEST_OUT: out };
+  const env = { ...process.env, TMPDIR: path.join(dir, 'tmp'), PACT_TEST_CLAUDE: fakeClaude(dir), PACT_TEST_PROFILE: profile, PACT_TEST_OUT: out };
+  return { dir, out, env };
+}
+
+test('run.mjs saves a round (pass without conversation, fail with, limited marked) and exits 3 on a limit', () => {
+  const { out, env } = world();
   const res = spawnSync('node', [run, 'confirm-only', '--runs', '3', '--variant', 'control', '--concurrency', '1'], { encoding: 'utf8', env });
   assert.equal(res.status, 3, res.stderr);
   assert.match(res.stderr, /판 저장/);
@@ -79,4 +89,31 @@ test('run.mjs saves a round (pass without conversation, fail with, limited marke
   assert.equal(rejudged.runs, 2);
   assert.ok(rejudged.attempts.every((x) => x.reused));
   assert.deepEqual(rejudged.attempts[1].results.map((x) => x.pass), [false, false, true]);
+});
+
+test('run.mjs imports the old records as the first round before overwriting them, only when no round exists yet', () => {
+  const { out, env } = world();
+  const old = path.join(out, 'confirm-only', 'control-1.jsonl');
+  mkdirSync(path.dirname(old), { recursive: true });
+  const meta = { type: 'pact-test', scenario: 'confirm-only', variant: 'control', n: 1, workdir: path.join(out, 'gone') };
+  const say = (text, _turn) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] }, _turn });
+  writeFileSync(old, [meta, say('옛 답', 0), say('옛 답', 1)].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const past = new Date('2026-01-02T03:04:05Z');
+  utimesSync(old, past, past);
+
+  const res = spawnSync('node', [run, 'confirm-only', '--runs', '1', '--variant', 'control'], { encoding: 'utf8', env });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /이전 기록 모음 판으로 가져옴/);
+  const [legacy, fresh] = listRounds(out);
+  assert.equal(legacy.kind, 'legacy');
+  assert.equal(legacy.at, '2026-01-02T03:04:05.000Z');
+  assert.equal(legacy.attempts.length, 1);
+  assert.ok(legacy.attempts[0].conversation.some((m) => m.text === '옛 답')); // 덮어쓰기 전의 기록을 판정했다
+  assert.equal(fresh.kind, 'new');
+  assert.match(readFileSync(old, 'utf8'), /정할게요/); // jsonl은 새 시험이 덮어썼다
+
+  // 판이 이미 있으면 다시 가져오지 않는다.
+  const again = spawnSync('node', [run, 'confirm-only', '--runs', '1', '--variant', 'control'], { encoding: 'utf8', env });
+  assert.doesNotMatch(again.stderr, /가져옴/);
+  assert.equal(listRounds(out).filter((r) => r.kind === 'legacy').length, 1);
 });

@@ -117,7 +117,8 @@ export function buildRound({ kind, at, scenarios, variants, runs, pactFingerprin
     scenarios: scenarios.map((s) => s.name),
     variants,
     runs,
-    pact: { fingerprint: pactFingerprint ?? null },
+    // pact를 돌리지 않은 판(대조군만)에는 지침 지문이 의미 없다.
+    pact: { fingerprint: variants.includes('pact') ? pactFingerprint ?? null : null },
     defs: Object.fromEntries(scenarios.map((s) => [s.name, { scene: s.scene, fixture: s.fixture, turns: s.turns, checks: s.checks }])),
     attempts: attempts.map((a) => ({
       scenario: a.scenario.name,
@@ -138,12 +139,18 @@ export function saveRound(outDir, round) {
   const dir = roundsDir(outDir);
   mkdirSync(dir, { recursive: true });
   const base = round.at.replace(/[-:]/g, '').replace(/\.\d+/, '');
-  let id = base;
-  for (let i = 2; existsSync(path.join(dir, `${id}.json`)); i++) id = `${base}-${i}`;
-  const saved = { id, ...round };
-  const file = path.join(dir, `${id}.json`);
-  writeFileSync(file, JSON.stringify(saved, null, 1) + '\n');
-  return { ...saved, file };
+  for (let i = 1; ; i++) {
+    const id = i === 1 ? base : `${base}-${i}`;
+    const saved = { id, ...round };
+    const file = path.join(dir, `${id}.json`);
+    try {
+      writeFileSync(file, JSON.stringify(saved, null, 1) + '\n', { flag: 'wx' });
+    } catch (e) {
+      if (e.code === 'EEXIST') continue;
+      throw e;
+    }
+    return { ...saved, file };
+  }
 }
 
 export function listRounds(outDir) {
@@ -151,7 +158,14 @@ export function listRounds(outDir) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(readFileSync(path.join(dir, f), 'utf8')))
+    .flatMap((f) => {
+      try {
+        return [JSON.parse(readFileSync(path.join(dir, f), 'utf8'))];
+      } catch (e) {
+        console.error(`경고: 깨진 판 파일을 건너뜀: ${path.join(dir, f)} (${e.message})`);
+        return [];
+      }
+    })
     .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
 }
 

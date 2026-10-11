@@ -1,6 +1,6 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,7 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { judgeChecks, compactConversation, buildRound, saveRound, listRounds, importLegacy, fingerprint, guidelineHash } from './behavior/runs.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const tmp = () => mkdtempSync(path.join(tmpdir(), 'pact-runs-'));
+const made = [];
+const tmp = () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'pact-runs-'));
+  made.push(dir);
+  return dir;
+};
+after(() => made.forEach((d) => rmSync(d, { recursive: true, force: true })));
 const say = (text) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
 const done = (text) => ({ type: 'result', subtype: 'success', result: text });
 
@@ -117,6 +123,21 @@ test('buildRound/saveRound: failed attempts keep their conversation, passing one
   const again = saveRound(out, round);
   assert.equal(again.id, '20261011T010203Z-2');
   assert.equal(listRounds(out).length, 2);
+});
+
+test('a round without the pact variant has no guideline fingerprint', () => {
+  const r = buildRound({ kind: 'new', at: new Date(), scenarios: [scenario], variants: ['control'], runs: 1, pactFingerprint: 'abc', attempts: [attempt('control', 1, true)] });
+  assert.equal(r.pact.fingerprint, null);
+});
+
+test('listRounds skips a broken round file with a warning and returns the rest', () => {
+  const out = tmp();
+  saveRound(out, buildRound({ kind: 'new', at: new Date(), scenarios: [scenario], variants: ['pact'], runs: 1, pactFingerprint: 'x', attempts: [attempt('pact', 1, true)] }));
+  writeFileSync(path.join(out, 'runs', 'broken.json'), '{ 깨짐');
+  const res = spawnSync('node', ['--input-type=module', '-e', `import { listRounds } from ${JSON.stringify(new URL('./behavior/runs.mjs', import.meta.url).href)}; console.log(listRounds(${JSON.stringify(out)}).length)`], { encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout.trim(), '1');
+  assert.match(res.stderr, /깨진 판 파일/);
 });
 
 test('a resumed run where every valid attempt was reused is a rejudge round', () => {

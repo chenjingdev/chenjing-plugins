@@ -11,7 +11,7 @@ import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hitLimit, wrappedUp } from './judge.mjs';
-import { judgeChecks, fingerprint as fingerprintOf, guidelineHash, buildRound, saveRound, defaultOutDir } from './runs.mjs';
+import { judgeChecks, fingerprint as fingerprintOf, guidelineHash, buildRound, saveRound, listRounds, importLegacy, defaultOutDir } from './runs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACT = path.resolve(HERE, '..', '..');
@@ -210,6 +210,12 @@ async function main() {
     console.error(`CLAUDE_CONFIG_DIR=${PROFILE} claude 로 한 번 /login 하세요`);
     return 2;
   }
+  // 아직 판이 없으면, 이번 시험이 jsonl을 덮어쓰기 전에 옛 기록을 첫 판으로 가져온다. 기록이 없으면 아무것도 만들지 않는다.
+  if (!listRounds(OUT).length) {
+    const legacy = importLegacy(OUT);
+    if (legacy.created) console.error(`옛 기록 ${legacy.attempts}개를 이전 기록 모음 판으로 가져옴: ${legacy.file}`);
+  }
+  const pactFingerprint = guidelineHash(PACT); // 시작할 때 한 번만 계산한다(도중에 지침 파일이 바뀌어도 이 판의 지문은 시작 시점 것)
   const variants = opts.variant === 'both' ? ['pact', 'control'] : [opts.variant];
   const bin = fakeBin();
   const jobs = [];
@@ -228,12 +234,13 @@ async function main() {
   const round = saveRound(
     OUT,
     buildRound({
+      // --resume 1이어도 새로 돌린 회차가 하나라도 있으면 'new'. 한도가 아닌 회차가 전부 옛 기록을 다시 판정만 한 경우에만 'rejudge'.
       kind: opts.resume && valid.length && valid.every((x) => x.reused) ? 'rejudge' : 'new',
       at: new Date(),
       scenarios,
       variants,
       runs: opts.runs,
-      pactFingerprint: guidelineHash(PACT),
+      pactFingerprint,
       attempts: results.map((x) => ({ scenario: x.s, variant: x.v, n: x.n, limited: x.limited, reused: x.reused, fingerprint: x.fingerprint, results: x.results, transcript: x.transcript })),
     }),
   );
