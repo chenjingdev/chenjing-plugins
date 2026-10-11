@@ -5,3 +5,20 @@ resume-draft.md
 .proto/
 *-workspace/
 plugins/baton/.claude-plugin/types/
+
+# Codex Computer Use development artifacts
+plugins/codex-computer-use/__pycache__/
+plugins/codex-computer-use/*.py[cod]
+plugins/codex-computer-use/.env
+plugins/codex-computer-use/.env.*
+!plugins/codex-computer-use/.env.example
+plugins/codex-computer-use/workspace/
+plugins/codex-computer-use/state/
+plugins/codex-computer-use/logs/
+plugins/codex-computer-use/*.sock
+plugins/codex-computer-use/*.log
+plugins/codex-computer-use/node_modules/
+plugins/codex-computer-use/*.app/
+plugins/codex-computer-use/*.tar.gz
+plugins/codex-computer-use/*.zip
+tests/codex-computer-use/__pycache__/

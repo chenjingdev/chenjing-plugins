@@ -6,7 +6,6 @@ It connects only to an explicitly selected private Unix WebSocket endpoint.
 All observations go to the MCP protocol stream; stderr contains fixed,
 content-free event names only.
 """
-import argparse
 import asyncio
 import json
 import logging
@@ -23,7 +22,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.4.0'
+VERSION = '0.4.1'
 PORTWARDEN_RELAY = Path.home()/'dev/portwarden/scripts/cua-runtime-proxy.mjs'
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
@@ -558,22 +557,3 @@ async def serve(adapter, control_factory=None):
             loop.remove_signal_handler(signum)
             signal.signal(signum, handler)
     return cleanup
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--socket', type=Path, required=True, help='Explicit existing Codex app-server Unix listener; no server fallback.')
-    parser.add_argument('--server', default='cua_repl', help='Exact configured MCP server name on the new host thread.')
-    args = parser.parse_args()
-    if not args.server or not args.server.strip():
-        parser.error('--server must not be empty')
-    try:
-        cleanup = asyncio.run(serve(HostMcp(None, args.socket, args.server)))
-    except (Exception, KeyboardInterrupt):
-        sys.stderr.write('codex-computer-use: stopped_or_transport_failure\n')
-        return 1
-    return 0 if cleanup['owned_thread_unsubscribe'] != 'unconfirmed' and cleanup['connection_close'] == 'confirmed' else 1
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())

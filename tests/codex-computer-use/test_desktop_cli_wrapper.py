@@ -15,8 +15,8 @@ import types
 import unittest
 from unittest.mock import patch
 
-HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("host_wrapper", HERE / "desktop_cli_wrapper.py")
+PLUGIN_ROOT = Path(__file__).resolve().parents[2] / 'plugins/codex-computer-use'
+spec = importlib.util.spec_from_file_location("host_wrapper", PLUGIN_ROOT / "desktop_cli_wrapper.py")
 wrapper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wrapper)
 PRIMARY = ["-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled", "-c",
@@ -105,7 +105,7 @@ class LifecycleTests(unittest.TestCase):
         self.native.write_text(FAKE)
         self.native.chmod(0o700)
         self.launcher = self.root / "desktop_cli_wrapper.py"
-        self.launcher.write_text((HERE/'desktop_cli_wrapper.py').read_text())
+        self.launcher.write_text((PLUGIN_ROOT/'desktop_cli_wrapper.py').read_text())
         self.proxy = self.root / "unix_ws_stdio.py"
         self.proxy.write_text(FAKE_STDIO)
         self.log = self.root / "events.jsonl"

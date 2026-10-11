@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('host_mcp', HERE / 'host_mcp.py')
+PLUGIN_ROOT = Path(__file__).resolve().parents[2] / 'plugins/codex-computer-use'
+spec = importlib.util.spec_from_file_location('host_mcp', PLUGIN_ROOT / 'host_mcp.py')
 bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
 
@@ -249,13 +249,14 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(proxy.tools, TOOLS)
 
     async def test_release_version_and_server_identity_are_advertised_consistently(self):
+        version = json.loads((PLUGIN_ROOT / '.claude-plugin/plugin.json').read_text())['version']
         adapter, proxy, output, _, _ = self.fixture()
         await self.initialize(adapter)
         self.assertEqual(output[-1]['result']['serverInfo'], {
-            'name': 'codex-computer-use', 'version': '0.4.0'})
+            'name': 'codex-computer-use', 'version': version})
         initialized = next(m for m in proxy.received if m.get('method') == 'initialize')
         self.assertEqual(initialized['params']['clientInfo'], {
-            'name': 'claude_codex_computer_use', 'title': 'Claude Codex Computer Use', 'version': '0.4.0'})
+            'name': 'claude_codex_computer_use', 'title': 'Claude Codex Computer Use', 'version': version})
 
     async def test_image_text_errors_and_all_result_metadata_are_semantically_preserved(self):
         result = {'content': [{'type': 'text', 'text': 'PRIVATE_RESULT'},
