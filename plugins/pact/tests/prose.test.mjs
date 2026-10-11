@@ -203,3 +203,30 @@ test('deferred minors: description says only when, worker wording, read-only age
   assert.ok(!read('agents/worker.md').includes('짐작하지'));
   for (const a of ['agents/spec-checker.md', 'agents/reviewer.md']) assert.match(read(a), /Bash는 읽기와 시험 실행에만/);
 });
+
+test('probe spreads a wide feature map first, then goes down branch by branch, then narrows', () => {
+  const probe = read('skills/pact/probe.md');
+  const order = ['## 1. 넓게 펼치기', '## 2. 타고 내려가기', '## 3. 좁히기', 'checklist.mjs render', '## 5. 명세 작성'].map((s) => probe.indexOf(s));
+  order.forEach((at, k) => assert.ok(at > (k ? order[k - 1] : -1), `step ${k} out of order`));
+  assert.ok(probe.includes('`- <갈래>: <아이디어> · <아이디어> · <아이디어>`'));
+  assert.match(probe, /갈래는 5~8개/);
+  assert.match(probe, /기능 전체를 펼쳐 보이기 전에는 한 기능으로 깊이 들어가지 않는다/);
+  assert.match(probe, /방향 2~3개/);
+  assert.match(probe, /"group"/);
+  for (const gone of ['예시 답 목록을 붙이지 않는다', '실제 장면을 묻는 열린 질문']) assert.ok(!probe.includes(gone), gone);
+  assert.match(probe, /추천 뒤에 "괜찮을까요\?"를 붙이지 않는다/);
+});
+
+test('the spec stays short: later-round branches on one line, decision log left for after approval', () => {
+  const probe = read('skills/pact/probe.md');
+  assert.ok(probe.includes('`- 다음 판 후보: <갈래>, <갈래>` 한 줄로'));
+  assert.match(probe, /`## 결정 기록`은 비워 둔다/);
+});
+
+test('no single-default confirm questions: offer real directions with a recommendation instead', () => {
+  const skill = read('skills/pact/SKILL.md');
+  assert.ok(!skill.includes('틀린 거나 빠진 게 있어요?'));
+  assert.match(skill, /방향 2~3개/);
+  assert.match(skill, /기본안 하나를 내밀고 맞는지 묻는 것도 확인 질문/);
+  assert.match(read('skills/pact/probe.md'), /"맞음"밖에 할 말이 없는 질문/);
+});

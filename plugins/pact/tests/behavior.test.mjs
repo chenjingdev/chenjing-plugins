@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { judge, replyOf, countQuestions, hitLimit, wrappedUp } from './behavior/judge.mjs';
+import { fileURLToPath } from 'node:url';
+import { judge, replyOf, countQuestions, hitLimit, wrappedUp, mapBranches } from './behavior/judge.mjs';
 
+const here = path.dirname(fileURLToPath(import.meta.url));
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'pact-judge-'));
 const say = (text) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
 const skill = (name) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Skill', input: { skill: name } }] } });
@@ -65,6 +67,40 @@ test('questionsBeforeWrapOffer counts asking turns until the wrap-up offer', () 
   const checklist = { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'node x/scripts/checklist.mjs render a b' } }] } };
   const movedOn = [[say('a?')], [say('b?')], [say('c?')], [checklist, say('기능 범위예요. 다 포함할까요?')], [say('어느 쪽?')], [say('승인할까요?')], [say('시작할까요?')], [say('또?')]];
   assert.equal(judge({ kind: 'questionsBeforeWrapOffer', max: 6 }, movedOn, tmp(), tmp()), true);
+});
+
+test('firstReplyBranches counts map lines with two or more ideas in the first reply', () => {
+  const map = [
+    '질문 없이 바로 명세로 가도 돼요.',
+    '- 시간 모으기: 되는 시간 고르기 · 안 되는 시간 빼기 · 선호 표시',
+    '- 겹치는 시간: 다 되는 시간 · 한 명만 빠지는 시간',
+    '- 확정과 알림: 확정 버튼, 캘린더 초대',
+    '* **공유 (제안)**: 링크 · QR',
+    '- 반복 회의: 매주 같은 시간 / 다음 회차 자동',
+    '- 쓰는 사람: 6명',
+    '어느 갈래부터 볼까요?',
+  ].join('\n');
+  assert.equal(mapBranches(map), 5, 'a one-idea line is not a branch');
+  assert.equal(judge({ kind: 'firstReplyBranches', min: 5 }, T([say(map)], [say('a')]), tmp(), tmp()), true);
+  assert.equal(judge({ kind: 'firstReplyBranches', min: 5 }, T([say('언제 쓰세요?')], [say(map)]), tmp(), tmp()), false);
+});
+
+test('repliesMatchingMax counts the turns whose reply matches', () => {
+  const pattern = '(틀린 거나|틀리거나) 빠진';
+  const twice = T([say('기본안은 A예요. 틀리거나 빠진 게 있어요?')], [say('B로 갈게요.')], [say('기본안은 C예요. 틀린 거나 빠진 게 있어요?')]);
+  assert.equal(judge({ kind: 'repliesMatchingMax', pattern, max: 1 }, twice, tmp(), tmp()), false);
+  assert.equal(judge({ kind: 'repliesMatchingMax', pattern, max: 2 }, twice, tmp(), tmp()), true);
+});
+
+test('the confirm-question pattern in the scenarios catches single-default confirms, not choice questions', () => {
+  const scenario = JSON.parse(readFileSync(path.join(here, 'behavior', 'scenarios', 'wide-first.json'), 'utf8'));
+  const re = new RegExp(scenario.checks.find((c) => c.kind === 'repliesMatchingMax').pattern, 'm');
+  for (const confirm of ['기본안은 A예요. 틀리거나 빠진 게 있어요?', '추천은 2번이에요. 괜찮을까요?', '이렇게 정리했어요.\n이게 맞나요?', '이대로 갈까요?']) {
+    assert.ok(re.test(confirm), confirm);
+  }
+  for (const choice of ['어느 방식이 팀에 맞을까요?', '팀이 평소 뭘로 소통하는지에 달린 문제인데, 어느 쪽이 맞을까요?', '어느 갈래부터 내려가 볼까요?']) {
+    assert.ok(!re.test(choice), choice);
+  }
 });
 
 test('noFileCreated and fileChanged compare the work dir with the fixture', () => {
@@ -137,4 +173,14 @@ test('agentNotInvoked fails when a build agent was dispatched', () => {
   const agent = (type) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent', input: { subagent_type: type } }] } });
   assert.equal(judge({ kind: 'agentNotInvoked', name: 'pact:worker' }, T([agent('pact:spec-checker')]), tmp(), tmp()), true);
   assert.equal(judge({ kind: 'agentNotInvoked', name: 'pact:worker' }, T([say('a')], [agent('pact:worker')]), tmp(), tmp()), false);
+});
+
+test('spec checks also find a spec written under a new app folder, but not the worktree copy', () => {
+  const work = tmp();
+  mkdirSync(path.join(work, 'app', 'docs', 'pact'), { recursive: true });
+  writeFileSync(path.join(work, 'app', 'docs', 'pact', '2026-10-10-회의.md'), SPEC());
+  assert.equal(judge({ kind: 'specLint' }, [], work, tmp()), true);
+  mkdirSync(path.join(work, '.pact', 'x', 'wt', 'docs', 'pact'), { recursive: true });
+  writeFileSync(path.join(work, '.pact', 'x', 'wt', 'docs', 'pact', 'bad.md'), 'not a spec');
+  assert.equal(judge({ kind: 'specLint' }, [], work, tmp()), true, 'worktree copy is ignored');
 });

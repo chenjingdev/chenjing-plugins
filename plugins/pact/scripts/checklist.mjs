@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// probe 단계의 기능 체크리스트 페이지. 짐작한 기능은 체크된 채로, AI 제안은 체크 해제에 (제안)과 이유를 달아 보여 주고,
-// 사용자가 고른 결과 한 줄을 일회용 로컬 서버로 받는다. 받지 못하면 채팅으로 돌아간다.
+// probe 단계의 기능 체크리스트 페이지. 고른 기능은 체크된 채로, AI 제안은 체크 해제에 (제안)과 이유를 달아
+// 지도의 갈래(group)별로 묶어 보여 주고, 사용자가 고른 결과 한 줄을 일회용 로컬 서버로 받는다. 받지 못하면 채팅으로 돌아간다.
 import http from 'node:http';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -9,19 +9,33 @@ import { pathToFileURL } from 'node:url';
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+const row = (it) => {
+  const note = it.note ? ` <span class="note">— ${esc(it.note)}</span>` : '';
+  const why = it.suggested ? ` <span class="sug">(제안) ${esc(it.reason)}</span>` : '';
+  return `<label class="row"><input type="checkbox" class="feat" value="${esc(it.label)}"${it.suggested ? '' : ' checked'}> ${esc(it.label)}${note}${why}</label>`;
+};
+
+// 같은 갈래의 항목은 처음 나온 자리에 모은다. 갈래가 없는 항목은 제목 없이 맨 앞 묶음이 된다.
+function byGroup(items) {
+  const groups = new Map();
+  for (const it of items ?? []) {
+    const name = it.group ?? '';
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(it);
+  }
+  return [...groups];
+}
+
 export function renderChecklist({ title, items }) {
-  const rows = (items ?? [])
-    .map((it) => {
-      const note = it.note ? ` <span class="note">— ${esc(it.note)}</span>` : '';
-      const why = it.suggested ? ` <span class="sug">(제안) ${esc(it.reason)}</span>` : '';
-      return `<label class="row"><input type="checkbox" class="feat" value="${esc(it.label)}"${it.suggested ? '' : ' checked'}> ${esc(it.label)}${note}${why}</label>`;
-    })
+  const rows = byGroup(items)
+    .map(([name, list]) => (name ? `<h2>${esc(name)}</h2>\n` : '') + list.map(row).join('\n'))
     .join('\n');
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} — 기능 범위</title>
 <style>
   body { font: 15px/1.6 system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; color: #222; background: #fff; }
+  h2 { font-size: 16px; margin: 20px 0 4px; }
   .row { display: block; padding: 6px 0; border-bottom: 1px solid #eee; }
   .note { color: #666; } .sug { color: #a15c00; font-size: 13px; }
   textarea { width: 100%; height: 64px; margin-top: 12px; font: inherit; }
@@ -29,7 +43,7 @@ export function renderChecklist({ title, items }) {
   button { font: inherit; padding: 6px 16px; margin-top: 8px; }
 </style></head><body>
 <h1>${esc(title)}</h1>
-<p>만들 기능을 고르세요. 체크된 것은 대화에서 짐작한 기능이고, <span class="sug">(제안)</span>은 AI가 더하자고 하는 기능입니다.</p>
+<p>이번에 만들 기능을 고르세요. 체크된 것은 대화에서 고른 기능이고, <span class="sug">(제안)</span>은 지도에 있던 다른 아이디어나 AI가 더하자고 하는 기능입니다.</p>
 ${rows}
 <p><label>+ 직접 추가: <input type="text" id="extra" placeholder="쉼표로 여러 개"></label></p>
 <textarea id="result" readonly></textarea>

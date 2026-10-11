@@ -19,6 +19,11 @@
       "max": 6
     },
     {
+      "kind": "repliesMatchingMax",
+      "pattern": "(틀린 거나|틀리거나) 빠진|^(?!.*(어느|어떤|무엇|뭘|뭐|누구|언제)).*(맞(나요|죠|을까요)|괜찮(을까요|죠)|이대로 (갈|진행할|할)까요)\\?",
+      "max": 1
+    },
+    {
       "kind": "agentNotInvoked",
       "name": "pact:worker"
     }

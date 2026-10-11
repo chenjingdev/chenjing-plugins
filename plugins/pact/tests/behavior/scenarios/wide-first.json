@@ -1,0 +1,29 @@
+{
+  "name": "wide-first",
+  "scene": "한 기능에 매달림 — 기능 지도를 펼치기 전에 한 갈래로 파고들고, 기본안 하나씩 확인받음",
+  "fixture": "memory-idea",
+  "turns": [
+    "메모에 적어 둔 새 메모리 시스템 설계해 보자",
+    "지금 건 그냥 검색 엔진 같아서 진짜 사람 같은 기억을 갖고 싶어. 번뜩이는 아이디어를 주거나, 잊힌 기억이 어느 순간 튀어나오거나, 사람들 사이 관계를 알아서 파악하는 거. 지금은 프로젝트 기억이 다 섞이는 것도 불편해.",
+    "맞음"
+  ],
+  "checks": [
+    {
+      "kind": "firstReplyBranches",
+      "min": 5
+    },
+    {
+      "kind": "firstReplyQuestionCount",
+      "max": 1
+    },
+    {
+      "kind": "repliesMatchingMax",
+      "pattern": "(틀린 거나|틀리거나) 빠진|^(?!.*(어느|어떤|무엇|뭘|뭐|누구|언제)).*(맞(나요|죠|을까요)|괜찮(을까요|죠)|이대로 (갈|진행할|할)까요)\\?",
+      "max": 0
+    },
+    {
+      "kind": "agentNotInvoked",
+      "name": "pact:worker"
+    }
+  ]
+}

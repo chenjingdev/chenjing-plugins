@@ -5,7 +5,7 @@
 // 사용 한도에 걸린 회차는 실패로 세지 않고, 한도를 만나면 새 회차를 띄우지 않고 종료 코드 3으로 끝낸다.
 // pact 변형만 --plugin-dir로 pact를 싣는다. 대조군에서도 실패가 안 나오는 검사는 지침이 필요 없다는 뜻이다.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, existsSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, existsSync, chmodSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -65,6 +65,21 @@ function workdirFor(fixture) {
   git('add', '.');
   git('commit', '-q', '-m', 'fixture');
   return dir;
+}
+
+// 시험 중에 백그라운드로 띄운 서버는 claude의 프로세스 그룹 밖에 있어 남는다. 작업 폴더 안에서 도는 프로세스를 끈다.
+function reap(workdir) {
+  const root = realpathSync(workdir);
+  const out = spawnSync('lsof', ['-a', '-d', 'cwd', '-Fpn'], { encoding: 'utf8' }).stdout ?? '';
+  let pid = 0;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('p')) pid = Number(line.slice(1));
+    else if (line.startsWith('n') && pid && pid !== process.pid && line.slice(1).startsWith(root)) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
+  }
 }
 
 function runTurn({ prompt, cwd, sessionId, variant, env }) {
@@ -171,6 +186,7 @@ async function runOnce(scenario, variant, n, bin, resume) {
     // stopOnWrapUp: 대화가 끝난 뒤의 턴은 판정에 쓰지 않으므로 보내지 않는다(승인으로 읽혀 build까지 가는 비용을 막음).
     if (scenario.stopOnWrapUp && wrappedUp(transcript, -1)) break;
   }
+  reap(cwd);
   const outDir = path.join(HERE, 'out', scenario.name);
   mkdirSync(outDir, { recursive: true });
   const lines = [{ type: 'pact-test', scenario: scenario.name, variant, n, workdir: cwd, fingerprint: fingerprint(scenario, variant) }];

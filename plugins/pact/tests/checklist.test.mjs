@@ -35,6 +35,27 @@ test('renderChecklist checks inferred items and leaves suggestions unchecked wit
   assert.doesNotMatch(html, /<b>엑셀/);
 });
 
+test('renderChecklist groups items under their map branch, in first-seen order', () => {
+  const html = renderChecklist({
+    title: '회의 일정',
+    items: [
+      { group: '시간 모으기', label: '되는 시간 고르기' },
+      { group: '알림', label: '확정 알림', suggested: true, reason: '확정을 놓치기 쉽다' },
+      { group: '시간 모으기', label: '시간대 자동 맞춤' },
+      { group: '<i>공유</i>', label: '링크 공유' },
+    ],
+  });
+  const heads = [...html.matchAll(/<h2>(.*?)<\/h2>/g)].map((m) => m[1]);
+  assert.deepEqual(heads, ['시간 모으기', '알림', '&lt;i&gt;공유&lt;/i&gt;']);
+  const at = (s) => html.indexOf(s);
+  assert.ok(at('시간대 자동 맞춤') < at('<h2>알림</h2>'), 'same branch stays together');
+  assert.equal(html.match(/<input type="checkbox"/g).length, 4);
+});
+
+test('renderChecklist without groups renders no branch headings', () => {
+  assert.doesNotMatch(renderChecklist(INPUT), /<h2>/);
+});
+
 test('render CLI writes checklist.html into the run dir', () => {
   const dir = tmp();
   const input = path.join(dir, 'in.json');

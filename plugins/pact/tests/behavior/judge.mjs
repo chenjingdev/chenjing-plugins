@@ -30,7 +30,12 @@ export function hitLimit(transcript) {
   return transcript.flat().some((e) => e?.type === 'result' && LIMIT.test(String(e.result ?? '')));
 }
 
-const WRAP_OFFER = /이 정도면|정리해도 될까|정리할까요|정리해 ?볼까|정리하면 될까|명세(를|로) (써|쓸|정리|작성)/;
+// 기능 지도의 갈래 줄: "- <갈래>: <아이디어> · <아이디어>". 아이디어가 둘 이상 붙은 줄만 센다.
+export function mapBranches(text) {
+  return text.split('\n').filter((line) => /^\s*[-*]\s+[^:：\n]{1,40}[:：]\s*\S.*[·,，/]/.test(line)).length;
+}
+
+const WRAP_OFFER =/이 정도면|정리해도 될까|정리할까요|정리해 ?볼까|정리하면 될까|명세(를|로) (써|쓸|정리|작성)/;
 // 정리 제안 없이 다음 단계(기능 체크리스트, 명세 만들기)로 넘어간 턴도 대화가 끝난 것으로 본다.
 const NEXT_STAGE = /checklist\.mjs|spec\.mjs new/;
 const movedOn = (turn) =>
@@ -58,7 +63,11 @@ const globRe = (glob) =>
       '$',
   );
 
-const specFiles = (work) => files(path.join(work, 'docs', 'pact')).filter((f) => f.endsWith('.md')).map((f) => path.join(work, 'docs', 'pact', f));
+// 새 앱을 하위 폴더에 만들면 명세도 그 아래 docs/pact에 생긴다. worktree(.pact/…/wt) 안의 사본은 뺀다.
+const specFiles = (work) =>
+  files(work)
+    .filter((f) => /(^|\/)docs\/pact\/[^/]+\.md$/.test(f) && !f.startsWith('.pact/'))
+    .map((f) => path.join(work, f));
 
 // 사용자가 화면에서 보는 줄: 접힌 <details> 안은 빼고 여는 줄만 남긴다.
 function openLines(text) {
@@ -82,6 +91,12 @@ export function judge(check, transcript, workdir, fixtureDir) {
   switch (check.kind) {
     case 'firstReplyQuestionCount':
       return countQuestions(replyOf(transcript, 0)) <= check.max;
+    case 'firstReplyBranches':
+      return mapBranches(replyOf(transcript, 0)) >= check.min;
+    case 'repliesMatchingMax': {
+      const re = new RegExp(check.pattern, 'm');
+      return transcript.filter((_, i) => re.test(replyOf(transcript, i))).length <= check.max;
+    }
     case 'replyNotMatch':
       return !new RegExp(check.pattern, 'm').test(replyOf(transcript, check.turn));
     case 'replyMatch':
