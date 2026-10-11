@@ -5,7 +5,7 @@
 ## 1. 준비
 
 1. `node <pact>/scripts/spec.mjs set-status <명세> verifying`
-2. 화면이 있는 결과물은 verifier가 Codex CUA로 사용자의 Chrome에서 직접 써 보고 스크린샷을 남긴다. 따로 설치할 것은 없다. verifier를 부르기 전에 메인 세션이 `await cua.getState()`를 한 번 불러 Chrome이 `browsers`에 있는지 본다. 없거나 `errors`가 있으면 그 오류를 사용자에게 한 줄 알리고, verifier에게 "화면 도구 없음"과 오류를 넘긴다. 그러면 verifier는 화면 없이(명령과 HTTP 요청으로) 검수하고 보고서에 그 이유를 적는다.
+2. 화면이 있는 결과물은 verifier가 Codex CUA로 사용자의 Chrome에서 직접 써 보고 스크린샷을 남긴다. 따로 설치할 것은 없다. verifier를 부르기 전에 메인 세션이 `await cua.getState()`를 한 번 불러 Chrome이 `browsers`에 있는지 본다. 없거나 `errors`가 있으면 그 오류를 사용자에게 한 줄 알리고(세션을 새로 열면 될 수 있다는 것도 덧붙인다. 세션이 열린 뒤 CUA 플러그인이 바뀌면 이 세션의 연결만 낡는다), verifier에게 "화면 도구 없음"과 오류를 넘긴다. 그러면 verifier는 화면 없이(명령과 HTTP 요청으로) 검수하고 보고서에 그 이유를 적는다.
 3. 대상을 실행한다. 개발 서버라면 worktree에서 백그라운드로 띄우고 URL을 확인한다. 화면이 없으면 실행 명령을 정한다.
 
 ## 2. 검수
