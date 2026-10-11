@@ -52,8 +52,9 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
 cd plugins/pact
 node --test tests/                          # 스크립트와 지침 파일 정적 검사
 node tests/behavior/run.mjs all --runs 5    # 실패 장면 행동 시험 (pact vs 대조군)
+node tests/behavior/board.mjs               # 결과판만 다시 만들기 → tests/behavior/out/board.html
 ```
 
-행동 시험은 깨끗한 프로필(`PACT_TEST_PROFILE`, 기본 `~/.bench/_claude`)에서 `claude -p`로 돌린다. 처음이면 `CLAUDE_CONFIG_DIR=~/.bench/_claude claude`로 한 번 `/login` 한다. 결과 transcript는 `tests/behavior/out/`에 남는다.
+행동 시험은 깨끗한 프로필(`PACT_TEST_PROFILE`, 기본 `~/.bench/_claude`)에서 `claude -p`로 돌린다. 처음이면 `CLAUDE_CONFIG_DIR=~/.bench/_claude claude`로 한 번 `/login` 한다. 결과 transcript는 `tests/behavior/out/`에 남고, 돌릴 때마다 판정 결과가 판(`out/runs/`)으로 쌓인다. 시험이 끝나면(사용 한도로 끝나도) `out/board.html` 결과판이 새로 만들어지고 stderr에 `결과판: <경로>`가 나온다. 서버 없이 브라우저로 파일을 열면 된다: 장면·검사별 통과율 표, 칸을 누르면 실패한 회차의 대화.
 
 설계와 근거는 `docs/superpowers/specs/2026-10-10-pact-design.md`에 있다.

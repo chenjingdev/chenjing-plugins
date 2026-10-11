@@ -2,18 +2,21 @@
 // 실패 장면 행동 시험. 깨끗한 프로필에서 claude -p로 시나리오를 돌리고 판정해 통과율 표를 낸다.
 //   node tests/behavior/run.mjs <scenario|all> [--runs 5] [--variant pact|control|both] [--concurrency 3] [--resume 1]
 // --resume 1이면 out/에 있는 유효한 transcript는 다시 돌리지 않고 다시 판정만 한다.
+// 돌릴 때마다 판정 결과를 out/runs/<id>.json 판 하나로 쌓고(runs.mjs), 결과판 out/board.html을 새로 만든다(board.mjs). 한도로 끝나도 같다.
 // 사용 한도에 걸린 회차는 실패로 세지 않고, 한도를 만나면 새 회차를 띄우지 않고 종료 코드 3으로 끝낸다.
 // pact 변형만 --plugin-dir로 pact를 싣는다. 대조군에서도 실패가 안 나오는 검사는 지침이 필요 없다는 뜻이다.
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, existsSync, chmodSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { judge, hitLimit, wrappedUp } from './judge.mjs';
+import { hitLimit, wrappedUp } from './judge.mjs';
+import { buildBoard } from './board.mjs';
+import { judgeChecks, fingerprint as fingerprintOf, guidelineHash, buildRound, saveRound, listRounds, importLegacy, defaultOutDir } from './runs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACT = path.resolve(HERE, '..', '..');
+const OUT = defaultOutDir();
 const PROFILE = process.env.PACT_TEST_PROFILE || path.join(homedir(), '.bench', '_claude');
 const TURN_TIMEOUT_MS = Number(process.env.PACT_TEST_TURN_TIMEOUT_MS) || 15 * 60 * 1000;
 const CLAUDE = process.env.PACT_TEST_CLAUDE || 'claude';
@@ -121,28 +124,11 @@ function runTurn({ prompt, cwd, sessionId, variant, env }) {
   });
 }
 
-function judgeAll(scenario, transcript, cwd, fixture) {
-  return scenario.checks.map((check) => {
-    try {
-      return judge(check, transcript, cwd, fixture);
-    } catch (e) {
-      if (/알 수 없는 check/.test(e.message)) throw e;
-      return false;
-    }
-  });
-}
+const judgeAll = judgeChecks;
 
 // 보내는 턴이나 pact 지침(skills, agents)이 바뀌면 옛 transcript는 다시 쓰지 않는다.
 // 검사(checks)만 바뀐 것은 다시 판정하면 되고, 대조군은 pact 지침과 상관없다.
-function fingerprint(scenario, variant) {
-  const { checks, ...asSent } = scenario;
-  const h = createHash('sha256').update(JSON.stringify(asSent));
-  if (variant === 'control') return h.digest('hex').slice(0, 16);
-  const walk = (dir) =>
-    readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
-  for (const f of [...walk(path.join(PACT, 'skills')), ...walk(path.join(PACT, 'agents'))].sort()) h.update(readFileSync(f));
-  return h.digest('hex').slice(0, 16);
-}
+const fingerprint = (scenario, variant) => fingerprintOf(PACT, scenario, variant);
 
 function loadPrevious(file, scenario, variant) {
   if (!existsSync(file)) return null;
@@ -158,9 +144,9 @@ function loadPrevious(file, scenario, variant) {
 
 async function runOnce(scenario, variant, n, bin, resume) {
   const fixture = path.join(HERE, 'fixtures', scenario.fixture);
-  const outFile = path.join(HERE, 'out', scenario.name, `${variant}-${n}.jsonl`);
+  const outFile = path.join(OUT, scenario.name, `${variant}-${n}.jsonl`);
   const previous = resume ? loadPrevious(outFile, scenario, variant) : null;
-  if (previous) return { r: judgeAll(scenario, previous.transcript, previous.cwd, fixture), reused: true };
+  if (previous) return { results: judgeAll(scenario, previous.transcript, previous.cwd, fixture), transcript: previous.transcript, fingerprint: fingerprint(scenario, variant), reused: true };
   if (limited) return { limited: true };
   const cwd = workdirFor(fixture);
   const env = {
@@ -187,13 +173,14 @@ async function runOnce(scenario, variant, n, bin, resume) {
     if (scenario.stopOnWrapUp && wrappedUp(transcript, -1)) break;
   }
   reap(cwd);
-  const outDir = path.join(HERE, 'out', scenario.name);
+  const outDir = path.join(OUT, scenario.name);
   mkdirSync(outDir, { recursive: true });
-  const lines = [{ type: 'pact-test', scenario: scenario.name, variant, n, workdir: cwd, fingerprint: fingerprint(scenario, variant) }];
+  const stamp = fingerprint(scenario, variant);
+  const lines = [{ type: 'pact-test', scenario: scenario.name, variant, n, workdir: cwd, fingerprint: stamp }];
   transcript.forEach((events, turn) => events.forEach((e) => lines.push({ ...e, _turn: turn })));
   writeFileSync(outFile, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
-  if (hitLimit(transcript)) return { limited: true };
-  return { r: judgeAll(scenario, transcript, cwd, fixture) };
+  if (hitLimit(transcript)) return { limited: true, transcript, fingerprint: stamp };
+  return { results: judgeAll(scenario, transcript, cwd, fixture), transcript, fingerprint: stamp };
 }
 
 async function pool(jobs, size) {
@@ -224,6 +211,12 @@ async function main() {
     console.error(`CLAUDE_CONFIG_DIR=${PROFILE} claude 로 한 번 /login 하세요`);
     return 2;
   }
+  // 아직 판이 없으면, 이번 시험이 jsonl을 덮어쓰기 전에 옛 기록을 첫 판으로 가져온다. 기록이 없으면 아무것도 만들지 않는다.
+  if (!listRounds(OUT).length) {
+    const legacy = importLegacy(OUT);
+    if (legacy.created) console.error(`옛 기록 ${legacy.attempts}개를 이전 기록 모음 판으로 가져옴: ${legacy.file}`);
+  }
+  const pactFingerprint = guidelineHash(PACT); // 시작할 때 한 번만 계산한다(도중에 지침 파일이 바뀌어도 이 판의 지문은 시작 시점 것)
   const variants = opts.variant === 'both' ? ['pact', 'control'] : [opts.variant];
   const bin = fakeBin();
   const jobs = [];
@@ -232,12 +225,33 @@ async function main() {
   const results = await pool(
     jobs.map((job) => async () => {
       const out = await runOnce(job.s, job.v, job.n, bin, opts.resume);
-      const mark = out.limited ? '한도' : out.r.map((x) => (x ? 'O' : 'X')).join('') + (out.reused ? ' (이전 결과)' : '');
+      const mark = out.limited ? '한도' : out.results.map((x) => (x.pass ? 'O' : 'X')).join('') + (out.reused ? ' (이전 결과)' : '');
       console.error(`[${++finished}/${jobs.length}] ${job.s.name} ${job.v} #${job.n}: ${mark}`);
       return { ...job, ...out };
     }),
     opts.concurrency,
   );
+  const valid = results.filter((x) => !x.limited);
+  const round = saveRound(
+    OUT,
+    buildRound({
+      // --resume 1이어도 새로 돌린 회차가 하나라도 있으면 'new'. 한도가 아닌 회차가 전부 옛 기록을 다시 판정만 한 경우에만 'rejudge'.
+      kind: opts.resume && valid.length && valid.every((x) => x.reused) ? 'rejudge' : 'new',
+      at: new Date(),
+      scenarios,
+      variants,
+      runs: opts.runs,
+      pactFingerprint,
+      attempts: results.map((x) => ({ scenario: x.s, variant: x.v, n: x.n, limited: x.limited, reused: x.reused, fingerprint: x.fingerprint, results: x.results, transcript: x.transcript })),
+    }),
+  );
+  console.error(`판 저장: ${round.file}`);
+  // 결과판은 보기 위한 것이라, 만들다 실패해도 시험 결과와 종료 코드는 그대로 둔다.
+  try {
+    console.error(`결과판: ${buildBoard(OUT).file}`);
+  } catch (e) {
+    console.error(`결과판을 만들지 못함: ${e.message} (node tests/behavior/board.mjs 로 다시 만들 수 있음)`);
+  }
   console.log('| 시나리오 | 검사 | ' + variants.join(' | ') + ' |');
   console.log('|---|---|' + variants.map(() => '---|').join(''));
   let ok = true;
@@ -245,7 +259,7 @@ async function main() {
     s.checks.forEach((c, i) => {
       const cells = variants.map((v) => {
         const mine = results.filter((x) => x.s === s && x.v === v && !x.limited);
-        const pass = mine.filter((x) => x.r[i]).length;
+        const pass = mine.filter((x) => x.results[i].pass).length;
         if (v === 'pact' && (mine.length < opts.runs || pass < Math.ceil(mine.length * 0.8))) ok = false;
         return `${pass}/${mine.length}`;
       });
