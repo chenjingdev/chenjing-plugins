@@ -124,15 +124,41 @@ export function buildViews(rounds) {
 
 // ---- 페이지에서도 쓰는 순수 함수(문자열로 페이지에 그대로 넣는다. 바깥 이름을 쓰지 말 것) ----
 
-// 칸에 쓸 글자: 4/5, 직전 3/5, ▲1, 한도 1, 불가 2
+// 칸에 쓸 글자: 4/5, 직전 3/5, ▲1, 한도 1, 불가 2.
+// 유효 회차가 하나도 없으면 0/0 대신 점수 없이(score null, muted) "판정 불가 n"·"한도 n"만 낸다.
 export function cellText(c) {
   const notes = [];
+  if (!c.valid) {
+    if (c.undecidable) notes.push('판정 불가 ' + c.undecidable);
+    if (c.limited) notes.push('한도 ' + c.limited);
+    return { score: null, prev: null, delta: null, deltaDir: null, notes, red: false, muted: true };
+  }
   if (c.limited) notes.push('한도 ' + c.limited);
   if (c.undecidable) notes.push('불가 ' + c.undecidable);
   let delta = null;
   if (c.delta) delta = (c.delta.dir === 'up' ? '▲' : c.delta.dir === 'down' ? '▼' : '±') + c.delta.amount + (c.delta.pct && c.delta.dir !== 'same' ? '%p' : '');
   const prev = c.delta ? '직전 ' + c.delta.prevPassed + '/' + c.delta.prevValid : null;
-  return { score: c.passed + '/' + c.valid, prev, delta, deltaDir: c.delta ? c.delta.dir : null, notes, red: Boolean(c.red) };
+  return { score: c.passed + '/' + c.valid, prev, delta, deltaDir: c.delta ? c.delta.dir : null, notes, red: Boolean(c.red), muted: false };
+}
+
+// 고른 판과 칸을 주소 해시로: #round=<판 id>&cell=<[장면, 변형, 검사 키]를 JSON으로>
+export function encodeHash(round, cell) {
+  const params = cell ? { round, cell: JSON.stringify([cell.scenario, cell.variant, cell.key]) } : { round };
+  return '#' + new URLSearchParams(params).toString();
+}
+
+// 알아볼 수 없는 부분은 null로 돌려준다(그러면 기본값을 쓴다).
+export function decodeHash(hash) {
+  const params = new URLSearchParams(String(hash).replace(/^#/, ''));
+  const round = params.get('round') || null;
+  let cell = null;
+  try {
+    const v = JSON.parse(params.get('cell'));
+    if (Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'string')) cell = { scenario: v[0], variant: v[1], key: v[2] };
+  } catch (e) {
+    cell = null;
+  }
+  return { round, cell };
 }
 
 // text 안에서 needles가 처음 나오는 자리를 겹치지 않게 묶어, 강조할 조각과 아닌 조각으로 나눈다.
@@ -295,6 +321,7 @@ table.grid { border-collapse: collapse; width: 100%; }
 .cellbtn { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px; cursor: pointer; display: inline-flex; flex-wrap: nowrap; gap: 2px 8px; align-items: baseline; text-align: left; }
 .cellbtn:hover { border-color: var(--accent); }
 .cellbtn.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cellbtn.muted { color: var(--muted); background: var(--fold-bg); }
 .cellbtn.red { background: var(--red-bg); border-color: var(--red-line); color: var(--red-text); }
 .score { font-weight: 700; font-variant-numeric: tabular-nums; }
 .prev { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -356,7 +383,7 @@ function fmtTime(iso) {
   const d = new Date(iso);
   if (isNaN(d)) return iso;
   const p = (n) => String(n).padStart(2, '0');
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
 }
 const roundById = (id) => DATA.rounds.find((r) => r.id === id);
 const current = () => roundById(state.roundId);
@@ -393,8 +420,8 @@ function cellNode(round, row, variant) {
   const prev = c.delta ? '직전 판(' + fmtTime(roundById(c.delta.prevId).at) + ') ' + c.delta.prevPassed + '/' + c.delta.prevValid : '비교할 직전 판 없음';
   const btn = h(
     'button',
-    { type: 'button', class: 'cellbtn' + (c.red ? ' red' : '') + (on ? ' sel' : ''), 'aria-pressed': on ? 'true' : 'false', title: prev, onclick: () => select(row.scenario, variant, row.checkKey) },
-    h('span', { class: 'score' }, t.score),
+    { type: 'button', class: 'cellbtn' + (c.red ? ' red' : '') + (t.muted ? ' muted' : '') + (on ? ' sel' : ''), 'aria-pressed': on ? 'true' : 'false', title: prev, onclick: () => select(row.scenario, variant, row.checkKey) },
+    t.score != null && h('span', { class: 'score' }, t.score),
     t.prev && h('span', { class: 'prev' }, t.prev),
     t.delta && h('span', { class: 'delta ' + t.deltaDir }, t.delta),
     t.notes.map((n) => h('span', { class: 'note' }, n)),
@@ -439,6 +466,9 @@ function select(scenario, variant, key) {
   state.n = null;
   renderTable();
   renderPanel();
+  syncHash(true);
+  // 좁은 화면에서는 패널이 표 아래에 있으니 눌렀을 때 따라간다.
+  if (state.sel && window.matchMedia('(max-width: 900px)').matches) $('#panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function statusOf(a, r) {
@@ -446,7 +476,7 @@ function statusOf(a, r) {
   if (!r || r.pass === null) return 'unk';
   return r.pass ? 'pass' : 'fail';
 }
-const STATUS_MARK = { limit: '한도', unk: '불가', pass: '✓', fail: '✗' };
+const STATUS_MARK = { limit: '한도', unk: '판정 불가', pass: '✓', fail: '✗' };
 
 function renderPanel() {
   const box = $('#panel');
@@ -473,8 +503,8 @@ function renderPanel() {
   const chosen = order.find((i) => i.a.n === state.n);
   const kids = [
     h('h2', null, row.scene + ' · ' + VARIANT_NAME[sel.variant]),
-    h('p', { class: 'sub' }, h('code', null, row.checkLabel), ' — ' + t.score + (t.notes.length ? ' (' + t.notes.join(', ') + ')' : '')),
-    failing.length ? h('p', { class: 'okline', style: 'color:var(--red-text)' }, '실패한 회차 ' + failing.length + '개') : h('p', { class: 'okline' }, '실패 없음 — 회차를 골라 대화를 볼 수 있습니다'),
+    h('p', { class: 'sub' }, h('code', null, row.checkLabel), ' — ' + (t.score != null ? t.score + (t.notes.length ? ' (' + t.notes.join(', ') + ')' : '') : t.notes.join(', '))),
+    t.muted ? h('p', { class: 'okline', style: 'color:var(--muted)' }, cell.undecidable ? '판정 불가 — 작업 폴더가 지워져 다시 판정할 수 없음' : '사용 한도로 돌리지 못해 판정한 회차가 없음') : failing.length ? h('p', { class: 'okline', style: 'color:var(--red-text)' }, '실패한 회차 ' + failing.length + '개') : h('p', { class: 'okline' }, '실패 없음 — 회차를 골라 대화를 볼 수 있습니다'),
     h(
       'div',
       { class: 'tabs', role: 'tablist' },
@@ -495,7 +525,7 @@ function conversationNode(round, scenario, info) {
   const { a, r, status } = info;
   const wrap = h('div', { class: 'convo' });
   const lead = [];
-  if (r) lead.push(h('div', { class: 'reason ' + (status === 'fail' ? 'bad' : status === 'pass' ? 'good' : '') }, STATUS_MARK[status] + ' ' + r.reason));
+  if (r) lead.push(h('div', { class: 'reason ' + (status === 'fail' ? 'bad' : status === 'pass' ? 'good' : '') }, (status === 'unk' ? '' : STATUS_MARK[status] + ' ') + r.reason));
   if (a.limited) lead.push(h('p', { class: 'empty' }, '사용 한도로 돌리지 못한 회차라 대화가 없습니다.'));
   else if (!a.conversation) lead.push(h('p', { class: 'empty' }, '이 회차의 대화는 남아 있지 않습니다. 통과한 회차의 대화는 마지막 판에만 남습니다.'));
   if (!a.conversation) return h('div', null, lead);
@@ -522,19 +552,43 @@ function conversationNode(round, scenario, info) {
   return h('div', null, lead, wrap);
 }
 
-function setRound(id) {
-  state.roundId = id;
-  state.n = null;
+function syncHash(push) {
+  const hash = encodeHash(state.roundId, state.sel);
+  if (hash === location.hash) return;
+  try {
+    history[push ? 'pushState' : 'replaceState'](null, '', hash);
+  } catch (e) {}
+}
+
+function render() {
   renderPicker();
   renderTable();
   renderPanel();
+}
+
+function setRound(id) {
+  state.roundId = id;
+  state.n = null;
+  render();
+  syncHash(true);
+}
+
+// 주소 해시가 가리키는 판·칸으로. 없는 판이면 최근 판, 없는 칸이면 칸 없이.
+function applyHash() {
+  const want = decodeHash(location.hash);
+  state.roundId = want.round && roundById(want.round) ? want.round : DATA.rounds[DATA.rounds.length - 1].id;
+  state.sel = want.cell;
+  state.n = null;
+  render();
 }
 
 if (!DATA.rounds.length) {
   document.getElementById('app').replaceChildren(h('p', { class: 'empty', style: 'padding:16px' }, '쌓인 판이 없습니다. 시험을 돌리면 여기에 보입니다.'));
 } else {
   $('#round').addEventListener('change', (e) => setRound(e.target.value));
-  setRound(DATA.rounds[DATA.rounds.length - 1].id);
+  window.addEventListener('popstate', applyHash);
+  applyHash();
+  if (location.hash) syncHash(false);
 }
 `;
 
@@ -544,7 +598,7 @@ const PARA_SEP = String.fromCharCode(0x2029);
 const embedJson = (value) => JSON.stringify(value).replace(/</g, '\\u003c').split(LINE_SEP).join('\\u2028').split(PARA_SEP).join('\\u2029');
 
 export function renderBoard(data) {
-  const shared = [cellText, markSegments, placeMatches].map((f) => f.toString()).join('\n');
+  const shared = [cellText, encodeHash, decodeHash, markSegments, placeMatches].map((f) => f.toString()).join('\n');
   const empty = data.rounds.length === 0;
   return `<!doctype html>
 <html lang="ko">
@@ -576,8 +630,7 @@ ${PAGE_JS}
 `;
 }
 
-export function buildBoard(outDir) {
-  const data = collectBoard(outDir);
+export function buildBoard(outDir, data = collectBoard(outDir)) {
   const html = renderBoard(data);
   const file = path.join(outDir, 'board.html');
   writeFileSync(file, html);
@@ -587,15 +640,18 @@ export function buildBoard(outDir) {
 // ---- CLI ----
 function cli(argv) {
   const outDir = path.resolve(argv[0] ?? defaultOutDir());
-  if (!listRounds(outDir).length) {
+  let data = collectBoard(outDir);
+  if (!data.rounds.length) {
     const legacy = importLegacy(outDir);
-    if (legacy.created) console.error(`옛 기록 ${legacy.attempts}개를 이전 기록 모음 판으로 가져옴: ${legacy.file}`);
-    else {
+    if (legacy.created) {
+      console.error(`옛 기록 ${legacy.attempts}개를 이전 기록 모음 판으로 가져옴: ${legacy.file}`);
+      data = collectBoard(outDir);
+    } else {
       console.error(`쌓인 판이 없습니다: ${outDir} (${legacy.reason}). 시험을 한 번 돌리세요.`);
       return 1;
     }
   }
-  console.log(buildBoard(outDir).file);
+  console.log(buildBoard(outDir, data).file);
   return 0;
 }
 

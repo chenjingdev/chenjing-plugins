@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { threshold, checkKey, tally, buildViews, collectBoard, renderBoard, buildBoard, markSegments, placeMatches, cellText } from './behavior/board.mjs';
+import { threshold, checkKey, tally, buildViews, collectBoard, renderBoard, buildBoard, markSegments, placeMatches, cellText, encodeHash, decodeHash } from './behavior/board.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const boardCli = path.join(here, 'behavior', 'board.mjs');
@@ -345,4 +345,39 @@ test('an empty round list still renders a page that says there is nothing yet', 
   const html = renderBoard(collectBoard(tmp()));
   assert.match(html, /<script type="application\/json" id="data">/);
   assert.match(html, /쌓인 판이 없습니다/);
+});
+
+test('a cell with no valid attempt shows only "판정 불가 n" / "한도 n" without a 0/0 score', () => {
+  const r = round({
+    id: 'r',
+    variants: ['pact'],
+    defs: { s: def([A, C]) },
+    attempts: [0, 1, 2, 3, 4].map((i) => att('s', 'pact', i + 1, [true, null])).concat([lim('s', 'pact', 6)]),
+  });
+  const c = cellText(tally(r, 's', 'pact', checkKey(C)));
+  assert.deepEqual([c.score, c.muted, c.red, c.notes], [null, true, false, ['판정 불가 5', '한도 1']]);
+  // 유효 회차가 있으면 지금처럼 4/5 옆에 "불가 n"
+  const mixed = round({ id: 'm', variants: ['pact'], defs: { s: def([C]) }, attempts: [att('s', 'pact', 1, [true]), att('s', 'pact', 2, [null])] });
+  const m = cellText(tally(mixed, 's', 'pact', checkKey(C)));
+  assert.deepEqual([m.score, m.muted, m.notes], ['1/1', false, ['불가 1']]);
+  const onlyLimited = cellText(tally(round({ id: 'l', variants: ['pact'], defs: { s: def([A]) }, attempts: [lim('s', 'pact', 1)] }), 's', 'pact', checkKey(A)));
+  assert.deepEqual([onlyLimited.score, onlyLimited.muted, onlyLimited.notes], [null, true, ['한도 1']]);
+});
+
+test('the address hash round-trips the chosen round and cell, and survives odd characters', () => {
+  const cell = { scenario: 's 1', variant: 'pact', key: checkKey({ kind: 'replyMatch', pattern: '정&해=요#' }) };
+  const hash = encodeHash('20261011T010203Z', cell);
+  assert.match(hash, /^#round=20261011T010203Z&cell=/);
+  assert.deepEqual(decodeHash(hash), { round: '20261011T010203Z', cell });
+  assert.deepEqual(decodeHash(encodeHash('r1', null)), { round: 'r1', cell: null });
+  for (const bad of ['', '#', '#cell=%E0%A4%A', '#round=r1&cell=notjson', '#round=r1&cell=%5B1%5D']) assert.deepEqual(decodeHash(bad), { round: bad.includes('round=r1') ? 'r1' : null, cell: null }, bad);
+});
+
+test('a broken round file warns once per board run', () => {
+  const out = tmp();
+  writeRounds(out, [round({ id: 'r1', defs: { s: def([A]) }, attempts: [att('s', 'pact', 1, [true])] })]);
+  writeFileSync(path.join(out, 'runs', 'broken.json'), '{ nope');
+  const res = spawnSync('node', [boardCli, out], { encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal((res.stderr.match(/깨진 판 파일/g) ?? []).length, 1, res.stderr);
 });
