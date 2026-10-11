@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { judge, replyOf, countQuestions, hitLimit, wrappedUp, mapBranches } from './behavior/judge.mjs';
+import { judge, explain, replyOf, countQuestions, hitLimit, wrappedUp, mapBranches } from './behavior/judge.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'pact-judge-'));
@@ -183,4 +183,117 @@ test('spec checks also find a spec written under a new app folder, but not the w
   mkdirSync(path.join(work, '.pact', 'x', 'wt', 'docs', 'pact'), { recursive: true });
   writeFileSync(path.join(work, '.pact', 'x', 'wt', 'docs', 'pact', 'bad.md'), 'not a spec');
   assert.equal(judge({ kind: 'specLint' }, [], work, tmp()), true, 'worktree copy is ignored');
+});
+
+test('explain: judge is explain().pass, and a failed question count lists the question sentences', () => {
+  const t = T([say('누가 써요? 언제 쓰세요?\n- 예: "다들 돼요?" 돌리기\n어디서요?')]);
+  const check = { kind: 'firstReplyQuestionCount', max: 1 };
+  const r = explain(check, t, tmp(), tmp());
+  assert.equal(r.pass, false);
+  assert.equal(judge(check, t, tmp(), tmp()), r.pass);
+  assert.equal(r.reason, '물음표 3 > 1');
+  assert.deepEqual(r.match, [
+    { turn: 0, text: '누가 써요?' },
+    { turn: 0, text: '언제 쓰세요?' },
+    { turn: 0, text: '어디서요?' },
+  ]);
+  for (const m of r.match) assert.ok(replyOf(t, 0).includes(m.text), 'text is verbatim from the reply');
+  const ok = explain({ kind: 'firstReplyQuestionCount', max: 5 }, t, tmp(), tmp());
+  assert.equal(ok.pass, true);
+  assert.ok(ok.reason.length > 0, 'a passing check still has a reason');
+});
+
+test('explain: questionsBeforeWrapOffer reports the asking turns with their question sentences', () => {
+  const t = T([say('a 인가요?')], [say('설명만.')], [say('b 인가요? c 인가요?')], [say('이 정도면 정리해도 될까요?')]);
+  const r = explain({ kind: 'questionsBeforeWrapOffer', max: 1 }, t, tmp(), tmp());
+  assert.equal(r.pass, false);
+  assert.equal(r.reason, '질문한 턴 2 > 1');
+  assert.deepEqual(r.match, [
+    { turn: 0, text: 'a 인가요?' },
+    { turn: 2, text: 'b 인가요?' },
+    { turn: 2, text: 'c 인가요?' },
+  ]);
+});
+
+test('explain: a forbidden pattern reports the turn and the matching line', () => {
+  const t = T([say('시작할게요.')], [say('좋아요.\nReact로 할까요?\n끝.')]);
+  const r = explain({ kind: 'replyNotMatch', pattern: '(React|Vue).*\\?', turn: 1 }, t, tmp(), tmp());
+  assert.equal(r.pass, false);
+  assert.equal(r.reason, '턴 1 답에 금지 패턴이 걸림');
+  assert.deepEqual(r.match, [{ turn: 1, text: 'React로 할까요?' }]);
+  const clean = explain({ kind: 'replyNotMatch', pattern: 'Vue' }, t, tmp(), tmp());
+  assert.equal(clean.pass, true);
+  assert.deepEqual(clean.match, []);
+  const miss = explain({ kind: 'replyMatch', pattern: '정할게요' }, t, tmp(), tmp());
+  assert.equal(miss.pass, false);
+  assert.equal(miss.reason, '패턴을 찾지 못함');
+  assert.deepEqual(miss.match, []);
+});
+
+test('explain: repliesMatchingMax lists the matching line of every matching turn', () => {
+  const pattern = '틀리거나 빠진';
+  const t = T([say('A예요.\n틀리거나 빠진 게 있어요?')], [say('B.')], [say('틀리거나 빠진 게 있어요?')]);
+  const r = explain({ kind: 'repliesMatchingMax', pattern, max: 1 }, t, tmp(), tmp());
+  assert.equal(r.pass, false);
+  assert.match(r.reason, /2 > 1/);
+  assert.deepEqual(r.match.map((m) => m.turn), [0, 2]);
+  assert.equal(r.match[0].text, '틀리거나 빠진 게 있어요?');
+});
+
+test('explain: firstReplyBranches reports the count and the branch lines', () => {
+  const map = '- 시간: 가 · 나\n- 확정: 다 · 라\n- 하나: 마\n끝';
+  const r = explain({ kind: 'firstReplyBranches', min: 5 }, T([say(map)]), tmp(), tmp());
+  assert.equal(r.pass, false);
+  assert.equal(r.reason, '갈래 2 < 5');
+  assert.deepEqual(r.match, [
+    { turn: 0, text: '- 시간: 가 · 나' },
+    { turn: 0, text: '- 확정: 다 · 라' },
+  ]);
+});
+
+test('explain: skill and agent checks give a reason and no match', () => {
+  const r = explain({ kind: 'skillInvoked', name: 'pact:pact' }, T([say('a')]), tmp(), tmp());
+  assert.deepEqual(r, { pass: false, reason: 'pact:pact 스킬을 부르지 않음', match: [] });
+  const a = { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Agent', input: { subagent_type: 'pact:worker' } }] } };
+  const g = explain({ kind: 'agentNotInvoked', name: 'pact:worker' }, T([a]), tmp(), tmp());
+  assert.equal(g.pass, false);
+  assert.deepEqual(g.match, []);
+  assert.ok(g.reason.includes('pact:worker'));
+});
+
+test('explain: file checks name the file and leave match empty', () => {
+  const fixture = tmp();
+  writeFileSync(path.join(fixture, 'index.html'), 'a');
+  const work = tmp();
+  writeFileSync(path.join(work, 'index.html'), 'a');
+  const same = explain({ kind: 'fileChanged', path: 'index.html' }, [], work, fixture);
+  assert.deepEqual(same, { pass: false, reason: 'index.html가 바뀌지 않음', match: [] });
+  mkdirSync(path.join(work, 'docs', 'pact'), { recursive: true });
+  writeFileSync(path.join(work, 'docs', 'pact', 'x.md'), 'x');
+  writeFileSync(path.join(work, 'docs', 'pact', 'y.md'), 'y');
+  const made = explain({ kind: 'noFileCreated', glob: 'docs/pact/**' }, [], work, fixture);
+  assert.deepEqual(made, { pass: false, reason: '새로 생긴 파일: docs/pact/x.md, docs/pact/y.md', match: [] });
+});
+
+test('explain: spec checks give numbers or the first lint error, with no match', () => {
+  const work = tmp();
+  const none = explain({ kind: 'specMaxLines', max: 40 }, [], work, tmp());
+  assert.deepEqual(none, { pass: false, reason: '명세 파일 없음', match: [] });
+  mkdirSync(path.join(work, 'docs', 'pact'), { recursive: true });
+  const file = path.join(work, 'docs', 'pact', '2026-10-10-회의.md');
+  writeFileSync(file, SPEC('x\n'.repeat(40)));
+  const lines = SPEC('x\n'.repeat(40)).trimEnd().split('\n').length;
+  const long = explain({ kind: 'specMaxLines', max: 40 }, [], work, tmp());
+  assert.equal(long.pass, false);
+  assert.equal(long.reason, `펼친 줄 ${lines} > 40`);
+  assert.deepEqual(long.match, []);
+  const many = Array.from({ length: 6 }, (_, i) => `- R${i + 2} 규칙 [AI 가정]\n`).join('');
+  writeFileSync(file, SPEC(many));
+  const ai = explain({ kind: 'specOpenAiAssumptionsMax', max: 5 }, [], work, tmp());
+  assert.equal(ai.reason, '펼친 AI 가정 7 > 5');
+  writeFileSync(file, SPEC().replace(' [사용자]', ''));
+  const lint = explain({ kind: 'specLint' }, [], work, tmp());
+  assert.equal(lint.pass, false);
+  assert.equal(lint.reason, 'F1: 태그가 없습니다 ([사용자] 또는 [AI 가정])');
+  assert.deepEqual(lint.match, []);
 });
