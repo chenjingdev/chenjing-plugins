@@ -1,0 +1,266 @@
+#!/usr/bin/python3
+"""Prototype CLI override: original Desktop backend + Unix WebSocket stdio.
+
+No JSON-RPC bodies are read or rewritten here. This script is unactivated;
+Desktop must explicitly select it as CODEX_CLI_PATH on a later launch.
+"""
+import fcntl
+import json
+import math
+import os
+from pathlib import Path
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import uuid
+
+PRIMARY_PLUGIN_KEY = "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled="
+NON_LAUNCH_COMMANDS = frozenset(("proxy", "daemon", "generate-ts", "generate-json-schema"))
+
+
+def is_primary_launch(arguments):
+    """Match this installed Desktop build, excluding auxiliary CLI commands."""
+    index = 0
+    while index < len(arguments):
+        item = arguments[index]
+        if item in ("-c", "--config", "--enable", "--disable"):
+            index += 2
+        elif item.startswith(("--config=", "--enable=", "--disable=")) or item.startswith("-c="):
+            index += 1
+        else:
+            break
+    if index >= len(arguments) or arguments[index] != "app-server":
+        return False
+    tail = arguments[index + 1:]
+    if any(item in NON_LAUNCH_COMMANDS for item in tail):
+        return False
+    if any(item in ("--help", "-h", "--listen") or item.startswith("--listen=") for item in tail):
+        return False
+    return "--analytics-default-enabled" in tail and any(item.startswith(PRIMARY_PLUGIN_KEY) for item in arguments)
+
+
+def _positive_timeout(environment, name, default):
+    try:
+        value = float(environment.get(name, default))
+    except (TypeError, ValueError):
+        raise RuntimeError("Invalid launcher timeout configuration.") from None
+    if not math.isfinite(value) or not 0 < value <= 60:
+        raise RuntimeError("Invalid launcher timeout configuration.")
+    return value
+
+
+def _private_directory(path):
+    path.mkdir(parents=True, mode=0o700, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise RuntimeError("The explicit launcher state directory must be owned and private (0700).")
+
+
+def _write_metadata(path, data):
+    # Only our owned PIDs, native executable path, and endpoint lifecycle appear.
+    descriptor, temporary = tempfile.mkstemp(prefix=".host-", dir=str(path.parent))
+    try:
+        with os.fdopen(descriptor, "w") as output:
+            json.dump(data, output, separators=(",", ":"))
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def _require_private_parent(path):
+    info = path.parent.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise RuntimeError("The endpoint parent must be owned and private (0700).")
+
+
+def _secure_owned_socket(path):
+    """Accept the native CLI's owned alias only to an owned private socket."""
+    _require_private_parent(path)
+    info = path.lstat()
+    if info.st_uid != os.getuid() or not (stat.S_ISSOCK(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+        raise RuntimeError("The newly owned endpoint has an invalid type or owner.")
+    target = path.resolve(strict=True) if stat.S_ISLNK(info.st_mode) else path
+    _require_private_parent(target)
+    target_info = target.lstat()
+    if not stat.S_ISSOCK(target_info.st_mode) or target_info.st_uid != os.getuid():
+        raise RuntimeError("The resolved endpoint must be an owned Unix socket.")
+    os.chmod(target, 0o600)
+    target_info = target.lstat()
+    if not stat.S_ISSOCK(target_info.st_mode) or target_info.st_uid != os.getuid() or stat.S_IMODE(target_info.st_mode) != 0o600:
+        raise RuntimeError("The resolved socket permissions could not be verified.")
+    return target
+
+
+def _wait_for_owned_socket(path, backend, stop, timeout):
+    deadline = time.monotonic() + timeout
+    while not stop.is_set():
+        if backend.poll() is not None:
+            raise RuntimeError("The original owned backend exited during startup.")
+        try:
+            _secure_owned_socket(path)
+        except FileNotFoundError:
+            pass
+        else:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("The owned backend startup deadline expired.")
+        stop.wait(min(0.05, remaining))
+    raise RuntimeError("Desktop shutdown interrupted owned backend startup.")
+
+
+def _stop_owned(children, timeout):
+    """Signal only exact Popen children, never groups or shared native services."""
+    deadline = time.monotonic() + timeout
+    clean = True
+    for child in children:
+        if child is not None and child.poll() is None:
+            try:
+                child.terminate()
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                clean = False
+    remaining = max(0.0, deadline - time.monotonic())
+    grace_end = time.monotonic() + remaining * 0.65
+    for child in children:
+        if child is None:
+            continue
+        try:
+            child.wait(timeout=max(0.0, grace_end - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            pass
+    for child in children:
+        if child is not None and child.poll() is None:
+            try:
+                child.kill()
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                clean = False
+    for child in children:
+        if child is None:
+            continue
+        try:
+            child.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            clean = False
+    return clean and all(child is None or child.returncode is not None for child in children)
+
+
+def launch(native, arguments, environment, state_dir):
+    """Own one original backend; framing bridge carries Desktop's untouched stdio."""
+    startup_timeout = _positive_timeout(environment, "CODEX_HOST_CUA_STARTUP_TIMEOUT", 15)
+    shutdown_timeout = _positive_timeout(environment, "CODEX_HOST_CUA_SHUTDOWN_TIMEOUT", 8)
+    _private_directory(state_dir)
+    lock_path = state_dir / "owner.lock"
+    if lock_path.exists() and lock_path.is_symlink():
+        raise RuntimeError("The owned launcher lock must not be a symlink.")
+    lock = lock_path.open("a+")
+    os.chmod(lock_path, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        raise RuntimeError("Another primary launcher owns this explicit endpoint lease.") from None
+    instance_dir = state_dir / ("run-" + uuid.uuid4().hex[:12])
+    instance_dir.mkdir(mode=0o700)
+    endpoint = instance_dir / "rpc.sock"
+    # The native CLI creates its own short socket and an owned alias when needed.
+    metadata_path = state_dir / "host.json"
+    record = {"schema_version": 1, "status": "starting", "owner_pid": os.getpid(),
+              "backend_pid": None, "desktop_proxy_pid": None, "socket_path": str(endpoint),
+              "native_cli": str(native), "mechanism": "original_app_server_unix_websocket",
+              "operational_readiness": "not_checked"}
+    stop = threading.Event()
+    caught_signal = [None]
+    previous = {}
+    backend = desktop_proxy = None
+    exit_status = 1
+    def request_stop(signum, frame):
+        if caught_signal[0] is None:
+            caught_signal[0] = signum
+        stop.set()
+    try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous[signum] = signal.signal(signum, request_stop)
+        # All original argv, env, and cwd are preserved. Only listen is added.
+        backend = subprocess.Popen([str(native), *arguments, "--listen", "unix://" + str(endpoint)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=None,
+            env=environment, cwd=os.getcwd(), close_fds=True)
+        record["backend_pid"] = backend.pid
+        _write_metadata(metadata_path, record)
+        _wait_for_owned_socket(endpoint, backend, stop, startup_timeout)
+        desktop_proxy = subprocess.Popen([sys.executable, str(Path(__file__).with_name("unix_ws_stdio.py")),
+                                         "--socket", str(endpoint)],
+            stdin=None, stdout=None, stderr=None, env=environment, cwd=os.getcwd(), close_fds=True)
+        record.update(status="ready", desktop_proxy_pid=desktop_proxy.pid)
+        _write_metadata(metadata_path, record)
+        while not stop.is_set():
+            try:
+                exit_status = desktop_proxy.wait(timeout=0.1)
+                break
+            except subprocess.TimeoutExpired:
+                if backend.poll() is not None:
+                    raise RuntimeError("The original owned backend exited while Desktop proxy was active.")
+        if caught_signal[0] is not None:
+            exit_status = 128 + caught_signal[0]
+    finally:
+        clean = _stop_owned((desktop_proxy, backend), shutdown_timeout)
+        record.update(status="closed" if clean else "cleanup_unconfirmed",
+                      backend_reaped=backend is None or backend.returncode is not None,
+                      desktop_proxy_reaped=desktop_proxy is None or desktop_proxy.returncode is not None)
+        _write_metadata(metadata_path, record)
+        if clean:
+            try:
+                if endpoint.is_socket() or endpoint.is_symlink():
+                    endpoint.unlink()
+                instance_dir.rmdir()
+            except OSError:
+                pass
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+        lock.close()
+        if not clean:
+            exit_status = 1
+    return exit_status if exit_status >= 0 else 128 - exit_status
+
+
+def main(arguments=None, environment=None):
+    arguments = list(sys.argv[1:] if arguments is None else arguments)
+    environment = dict(os.environ if environment is None else environment)
+    configured_native = environment.get("CODEX_HOST_CUA_NATIVE_CLI")
+    if configured_native:
+        native = Path(configured_native).expanduser().resolve()
+    else:
+        from runtime_paths import discover_installation
+        native = discover_installation(environment).native_cli
+    if not native.is_file() or not os.access(native, os.X_OK) or native == Path(__file__).resolve():
+        raise RuntimeError("The exact original native CLI path is missing, not executable, or recursive.")
+    state_value = environment.get("CODEX_HOST_CUA_STATE_DIR", "")
+    if not state_value or not is_primary_launch(arguments):
+        # Version/schema/auxiliary commands retain exact original execution.
+        os.execve(str(native), [str(native), *arguments], environment)
+    state_dir = Path(state_value).expanduser()
+    if not state_dir.is_absolute():
+        raise RuntimeError("The explicit launcher state directory must be absolute.")
+    return launch(native, arguments, environment, state_dir)
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (OSError, RuntimeError):
+        # Do not print exception values, environment, argv, or RPC data.
+        print("Desktop host launcher could not complete; inspect metadata and owned process state.", file=sys.stderr)
+        raise SystemExit(1)

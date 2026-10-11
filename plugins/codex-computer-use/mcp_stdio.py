@@ -1,0 +1,83 @@
+#!/usr/bin/python3
+"""Installed plugin entry point: connect only to the Codex-owned private host."""
+import asyncio
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+from host_mcp import HostMcp, serve, BridgeFailure
+from portwarden_control import PortwardenControl
+from runtime_paths import default_state, installation_from_native_cli, InstallationError
+
+DEFAULT_STATE = default_state()
+
+
+def read_host_registry(state):
+    if not state.is_absolute():
+        raise BridgeFailure('The configured Codex host state path must be absolute.')
+    parent = state.lstat()
+    path = state/'host.json'
+    info = path.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.getuid()
+            or stat.S_IMODE(parent.st_mode) & 0o077
+            or not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) & 0o077):
+        raise BridgeFailure('The Codex host registry is not private and owned.')
+    data = json.loads(path.read_text())
+    if (not isinstance(data, dict) or data.get('schema_version') != 1
+            or data.get('status') != 'ready'
+            or data.get('mechanism') != 'original_app_server_unix_websocket'):
+        raise BridgeFailure('The Codex Desktop host launcher is not ready. No runtime was started.')
+    for field in ('owner_pid', 'backend_pid', 'desktop_proxy_pid'):
+        pid = data.get(field)
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            raise BridgeFailure('The Codex host registry has no valid owned process binding.')
+        try:
+            os.kill(pid, 0)
+        except (ProcessLookupError, PermissionError):
+            raise BridgeFailure('The registered Codex host process is no longer available.') from None
+    value = data.get('socket_path')
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        raise BridgeFailure('The registered Codex Unix endpoint is invalid.')
+    # HostMcp performs the endpoint ownership/mode and native plugin checks.
+    return data
+
+
+def endpoint_from_registry(state):
+    return Path(read_host_registry(state)['socket_path'])
+
+
+async def main():
+    # Resolve on initialize, so a missing host yields a real MCP error instead
+    # of quietly spawning an independent CUA process or inventing tool schemas.
+    state = Path(os.environ.get('CODEX_HOST_CUA_STATE_DIR', str(DEFAULT_STATE)))
+    class RegisteredHost(HostMcp):
+        async def boot(self):
+            try:
+                registry = read_host_registry(state)
+                self.rpc.socket_path = Path(registry['socket_path'])
+                self.native_cua_root = None
+                if isinstance(registry.get('native_cli'), str):
+                    try:
+                        self.native_cua_root = installation_from_native_cli(registry['native_cli']).cua_root
+                    except InstallationError:
+                        # Bundled plugin identity remains independently checked.
+                        # A user relay requires a verifiable original runtime.
+                        pass
+            except BridgeFailure:
+                raise
+            except (OSError, ValueError):
+                raise BridgeFailure('Start Codex with the prepared host launcher before using this MCP plugin. No runtime was started.') from None
+            await super().boot()
+    adapter = RegisteredHost(None, Path('/unconfigured-codex-host'), 'cua_repl')
+    cleanup = await serve(adapter, control_factory=PortwardenControl)
+    return 0 if cleanup['owned_thread_unsubscribe'] != 'unconfirmed' and cleanup['connection_close'] == 'confirmed' else 1
+
+
+if __name__ == '__main__':
+    try:
+        raise SystemExit(asyncio.run(main()))
+    except (Exception, KeyboardInterrupt):
+        print('Codex host MCP stopped or unavailable.', file=sys.stderr)
+        raise SystemExit(1)

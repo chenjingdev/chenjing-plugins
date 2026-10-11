@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "codex-computer-use": {
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/start-mcp.sh",
+      "args": []
+    }
+  }
+}
