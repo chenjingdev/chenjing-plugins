@@ -1,6 +1,6 @@
 {
   "name": "baton",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "답 형식(첫 문단·접히는 설명·내 차례), 내 차례 모으기, 옆 패널(내 차례·곁대화), 토론. /baton on으로 고른 터미널 대화형 세션에서만 켜진다. 명령: /baton, /baton-side, /baton-e, /baton-debate",
   "author": {
     "name": "chenjing"

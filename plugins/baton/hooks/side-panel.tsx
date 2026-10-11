@@ -476,7 +476,7 @@ export function registerSide(on: On, options: PluginOptions): void {
     )
   })
 
-  // 사용자 차례 줄은 본문에서 빠지고 이 패널에만 뜬다(answer-blocks). open-asks가 항목을 올릴 틈을 두고 연다
+  // 물을 것·볼 것 줄은 본문에서 빠지고 이 패널에만 뜬다(answer-blocks). open-asks가 항목을 올릴 틈을 두고 연다
   on('turn.complete', { reason: 'answer' }, async ($, e, next) => {
     if (!(await live($))) return next(e)
     const done = await next(e)

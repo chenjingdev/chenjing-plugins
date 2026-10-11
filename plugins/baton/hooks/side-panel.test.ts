@@ -1,4 +1,4 @@
-import { test, expect } from 'claude-code/testing'
+import { test, expect, mock } from 'claude-code/testing'
 
 import { fakeSession, turnOn, RUN } from './testkit'
 import type { Engine, TestBody } from 'claude-code/testing'
@@ -120,6 +120,36 @@ test('answers go through the prompt box, and sending them closes their items in 
   expect(await ui.find({ key: 'todo-btn-1' })).toBe(undefined)
   expect(await ui.find({ key: 'todo-btn-2' })).toBe(undefined)
   expect(await ui.find({ text: '내 차례 0' })).not.toBe(undefined)
+})
+
+// 2026-10-11 사용자 "답이 필요없는 질문인데 사이드로옴": 다르게 한 것 줄 하나만 남긴 답이 내 차례에 [답하기] 항목을 올리고 패널을 열었다
+test('an answer that only says what was done differently leaves nothing to answer and opens no panel; a question does', async ($, on) => {
+  fakeSession(on)
+  const clock = mock.clock(on)
+  const opened: string[] = []
+  let modelCalls = 0
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', (_$, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true } }
+  })
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('model.complete', () => {
+    modelCalls += 1
+    return { value: { isAnswered: true, text: '{"closed":[],"new":[]}', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
+  })
+  const list = async () => (await $.command.run({ command: 'baton-side', args: 'list', ...RUN })).text
+  await turnOn($)
+  await $.turn.complete({ answer: '고쳤어요.\n\n다르게 한 것: 요청 밖의 일로, 비어 있던 `data/claude-bridge` 폴더를 지웠어요.', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' })
+  // 패널은 판정이 끝날 때까지 1.5초마다 보고 연다(최대 20번)
+  await clock.advance(30000)
+  expect(await list()).toContain('내 차례 없음')
+  expect(modelCalls).toBe(0)
+  expect(opened).toEqual([])
+  await $.turn.complete({ answer: '고쳤어요.\n\n물을 것: 커밋할까요?\n다르게 한 것: 빈 폴더를 지웠어요.', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't2' })
+  await clock.advance(30000)
+  expect(await list()).toContain('내 차례 1개\n1. 커밋할까요?')
+  expect(opened).toEqual(['side-chat'])
 })
 
 test('q starts a side question in the prompt box', async ($, on) => {

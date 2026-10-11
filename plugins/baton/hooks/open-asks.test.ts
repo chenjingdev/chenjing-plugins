@@ -27,19 +27,19 @@ test('judgment parsing tolerates fences and drops junk', () => {
   expect(parseJudgment('{"new":["a","b","c","d"]}')?.added.length).toBe(3)
 })
 
-test('the user-turn lines go up as they are, outside code blocks', () => {
+test('question and look lines go up as they are, outside code blocks; what was done differently does not', () => {
   const answer = '결론이에요.\n\n설명: 길게.\n\n**물을 것:** 세 가지를 같이 적용할까요?\n- 볼 것: /short 출력\n다르게 한 것: 접기도 바꿨어요.\n```\n물을 것: 코드 안\n```'
-  expect(labeledAsks(answer)).toEqual(['세 가지를 같이 적용할까요?', '볼 것: /short 출력', '다르게 한 것: 접기도 바꿨어요.'])
+  expect(labeledAsks(answer)).toEqual(['세 가지를 같이 적용할까요?', '볼 것: /short 출력'])
   expect(labeledAsks('물을 것 없음')).toEqual([])
   expect(labeledAsks('물을 것:   ')).toEqual([])
 })
 
-test('the judge is told which items were already taken from this answer', () => {
+test('the judge is told which items were already taken from this answer, and not to make questions of what was done differently', () => {
   const p = judgePrompt([], 'q', 'a', 1, ['볼 것: X'])
   expect(p).toContain('- 볼 것: X')
-  expect(p).toContain('"볼 것:"이나 "다르게 한 것:"으로 시작하는 항목은')
+  expect(p).toContain('"볼 것:"으로 시작하는 항목은')
+  expect(p).toContain('"다르게 한 것:" 줄(한 일을 알리기만 한다)은 넣지 않는다')
 })
-
 test('an unanswered question counts a skip; an answered one closes', () => {
   const b: Book = { items: [ask(1, 'A를 적용할까요?'), ask(2, 'B로 갈까요?')], closed: [], seq: 2 }
   const next = apply(b, [1, 2], [2], ['C를 켤까요?'], 3, 100, true)

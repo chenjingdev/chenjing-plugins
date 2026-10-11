@@ -19,11 +19,24 @@ test('an answer splits into answer, explanation and user turn', () => {
     answer: '네, 둘 다 켜져요.',
     explain: '새 프로세스에서 확인했어요.\n두 번째 줄.',
     turn: '물을 것: 데스크톱에도 켤까요?\n볼 것: /blocks 출력',
+    notice: '',
   })
 })
 
 test('without markers everything stays in the answer', () => {
-  expect(splitBlocks('그냥 답이에요.\n둘째 줄.')).toEqual({ answer: '그냥 답이에요.\n둘째 줄.', explain: '', turn: '' })
+  expect(splitBlocks('그냥 답이에요.\n둘째 줄.')).toEqual({ answer: '그냥 답이에요.\n둘째 줄.', explain: '', turn: '', notice: '' })
+})
+
+// 2026-10-11 사용자 "답이 필요없는 질문인데 사이드로옴": 다르게 한 것은 답할 것이 없어 내 차례로 보내지 않고 본문에 남긴다
+test('what was done differently is a notice kept apart from the user turn, wherever it sits', () => {
+  const text = '고쳤어요.\n\n설명: 길게.\n\n물을 것: 커밋할까요?\n다르게 한 것: 요청 밖의 일로 빈 폴더를 지웠어요.\n- **다르게 한 것:** 사용률을 더했어요.\n볼 것: /api/gateway 출력'
+  expect(splitBlocks(text)).toEqual({
+    answer: '고쳤어요.',
+    explain: '길게.',
+    turn: '물을 것: 커밋할까요?\n볼 것: /api/gateway 출력',
+    notice: '다르게 한 것: 요청 밖의 일로 빈 폴더를 지웠어요.\n- **다르게 한 것:** 사용률을 더했어요.',
+  })
+  expect(splitBlocks('했어요.\n```\n다르게 한 것: 코드 안\n```').notice).toBe('')
 })
 
 test('labels inside code blocks do not split; bold labels do', () => {
@@ -45,7 +58,7 @@ test('counting and keys ignore whitespace and code', () => {
 
 test('user-turn lines leave one note in the body', () => {
   expect(turnNote('물을 것: A를 할까요?\n볼 것: B\n물을 것: C?')).toBe('↩ 물을 것 2 · 볼 것 1 → 옆 패널 내 차례 (/baton-side)')
-  expect(turnNote('- **다르게 한 것:** D')).toBe('↩ 다르게 한 것 1 → 옆 패널 내 차례 (/baton-side)')
+  expect(turnNote('- **볼 것:** D')).toBe('↩ 볼 것 1 → 옆 패널 내 차례 (/baton-side)')
 })
 
 test('the rule tells the turn lines to stand alone', () => {
@@ -57,6 +70,18 @@ test('/baton-e picks the last answer, /baton-e 2 the one before', () => {
   expect(pickRecent(['a', 'b', 'c'], '2')).toBe('b')
   expect(pickRecent(['a', 'b', 'c'], '4')).toBe(undefined)
   expect(pickRecent(['a'], 'x')).toBe(undefined)
+})
+
+test('the body keeps what was done differently under the folded explanation; the panel note counts only questions and things to look at', async ($, on) => {
+  fakeSession(on)
+  await turnOn($)
+  const mount = (text: string) => $.ui.mount({ plugin: 'baton', surface: 'terminal', component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+  const both = await mount('고쳤어요.\n\n설명:\n- 확인한 것: 테스트\n\n물을 것: 커밋할까요?\n다르게 한 것: 요청 밖의 일로 빈 폴더를 지웠어요.')
+  expect((await both.find({ key: 'notice' }))?.text).toBe('다르게 한 것: 요청 밖의 일로 빈 폴더를 지웠어요.')
+  expect((await both.find({ type: 'Text', text: '↩' }))?.text).toBe('↩ 물을 것 1 → 옆 패널 내 차례 (/baton-side)')
+  const noticeOnly = await mount('고쳤어요.\n\n설명:\n- 확인한 것: 테스트\n\n다르게 한 것: 요청 밖의 일로 빈 폴더를 지웠어요.')
+  expect(await noticeOnly.find({ key: 'notice' })).not.toBe(undefined)
+  expect(await noticeOnly.find({ type: 'Text', text: '↩' })).toBe(undefined)
 })
 
 test('/baton-e says so when no answer has an explanation yet', async ($, on) => {

@@ -4,7 +4,8 @@ import type {EngineInterface, On, PluginOptions } from 'claude-code'
 import { enter, isKnown, isLive, SESSIONS, settle } from './live'
 import type { Ask, AsksStats as Stats, Book } from '../types'
 
-// Claude가 사용자에게 넘긴 일(물을 것·볼 것·다르게 한 것)을 모아 두고, 입력창 아래 줄 끝에 개수를 보인다. 목록은 옆 패널의 내 차례(side-panel).
+// Claude가 사용자에게 넘긴 일(물을 것·볼 것)을 모아 두고, 입력창 아래 줄 끝에 개수를 보인다. 목록은 옆 패널의 내 차례(side-panel).
+// 다르게 한 것은 답할 것이 없는 알림이라 모으지 않는다: 본문에 남는다(answer-blocks).
 // 턴이 끝날 때마다 작은 모델이 판정한다: 이번 메시지로 답한 질문은 닫고, 이번 답의 새 질문은 더한다.
 
 const BOOK = { plugin: 'baton', key: 'book' } as const
@@ -64,7 +65,7 @@ export function shorten(s: string, n = 300): string {
 const sameKey = (s: string) => s.replace(/[\s?？.!,·…"'“”]/g, '')
 
 export const JUDGE_SYSTEM =
-  '너는 대화에서 Claude가 사용자에게 넘긴 일(질문, 볼 것, 다르게 한 것) 가운데 아직 끝나지 않은 것을 관리한다. 대화에 없는 내용을 만들지 않는다. JSON 한 줄만 출력한다.'
+  '너는 대화에서 Claude가 사용자에게 넘긴 일(질문, 볼 것) 가운데 아직 끝나지 않은 것을 관리한다. 대화에 없는 내용을 만들지 않는다. JSON 한 줄만 출력한다.'
 
 export function judgePrompt(open: readonly Ask[], request: string | undefined, answer: string, turnNo: number, taken: readonly string[] = []): string {
   const list = open.length
@@ -86,8 +87,8 @@ export function judgePrompt(open: readonly Ask[], request: string | undefined, a
     answer.replace(CODE, '[코드 블록]').slice(0, 6000),
     '',
     '두 가지를 판정하라.',
-    'closed: 위 목록에서 이번 턴으로 끝난 질문의 번호. 사용자가 답했거나 골랐거나 거절·보류한 것, Claude가 이번 답에서 이미 처리한 것, 상황이 바뀌어 더 물을 필요가 없어진 것. "ㅇㅇ" "ㄱㄱ" "해봐"처럼 짧은 답은 직전 답의 질문에 대한 답으로 본다. 사용자가 다른 얘기를 했거나 그 질문에 대해 되묻기만 했으면 닫지 않는다. "볼 것:"이나 "다르게 한 것:"으로 시작하는 항목은 사용자가 이번 메시지를 보냈고 그 항목에 되묻거나 반대하지 않았으면 닫는다.',
-    'new: 이번 Claude 답에서 사용자가 답하거나 골라야 다음으로 넘어가는데 "물을 것:" 줄로 쓰지 않은 질문. "할까요?" "어느 쪽으로 할까요?" 같은 것. 수사적 질문, 이번 메시지에서 이미 답한 것, 목록이나 이미 잡은 항목에 있는 것은 넣지 않는다. 최대 3개. 각각 60자 안에서, 이것만 봐도 무엇에 관한 질문인지 알도록 대상 이름을 넣고, 원문보다 단정하지 않게 쓴다.',
+    'closed: 위 목록에서 이번 턴으로 끝난 질문의 번호. 사용자가 답했거나 골랐거나 거절·보류한 것, Claude가 이번 답에서 이미 처리한 것, 상황이 바뀌어 더 물을 필요가 없어진 것. "ㅇㅇ" "ㄱㄱ" "해봐"처럼 짧은 답은 직전 답의 질문에 대한 답으로 본다. 사용자가 다른 얘기를 했거나 그 질문에 대해 되묻기만 했으면 닫지 않는다. "볼 것:"으로 시작하는 항목은 사용자가 이번 메시지를 보냈고 그 항목에 되묻거나 반대하지 않았으면 닫는다.',
+    'new: 이번 Claude 답에서 사용자가 답하거나 골라야 다음으로 넘어가는데 "물을 것:" 줄로 쓰지 않은 질문. "할까요?" "어느 쪽으로 할까요?" 같은 것. 수사적 질문, 이번 메시지에서 이미 답한 것, 목록이나 이미 잡은 항목에 있는 것, "다르게 한 것:" 줄(한 일을 알리기만 한다)은 넣지 않는다. 최대 3개. 각각 60자 안에서, 이것만 봐도 무엇에 관한 질문인지 알도록 대상 이름을 넣고, 원문보다 단정하지 않게 쓴다.',
     '출력 형식: {"closed":[번호],"new":["질문"]}',
   ].join('\n')
 }
@@ -109,8 +110,8 @@ export function parseJudgment(text: string): Judgment | undefined {
   }
 }
 
-// 사용자 차례 줄(물을 것·볼 것·다르게 한 것)은 모델 판정을 기다리지 않고 바로 띠에 올린다
-const TURN_LINE = /^(물을 것|볼 것|다르게 한 것)\s*[:：]\s*/
+// 사용자 차례 줄(물을 것·볼 것)은 모델 판정을 기다리지 않고 바로 띠에 올린다. 다르게 한 것 줄은 올리지 않는다
+const TURN_LINE = /^(물을 것|볼 것)\s*[:：]\s*/
 
 export function labeledAsks(answer: string): string[] {
   const out: string[] = []
@@ -158,7 +159,7 @@ export function carryKey(cwd: string): string {
   return `carry:${cwd}`
 }
 
-// 넘길 것은 답을 기다리는 질문뿐이다. 볼 것·다르게 한 것은 알림이라 넘기지 않는다
+// 넘길 것은 답을 기다리는 질문뿐이다. 볼 것은 알림이라 넘기지 않는다(0.7.2까지 모은 다르게 한 것도)
 export function toCarry(b: Book): Carried[] {
   return b.items
     .filter(a => !/^(볼 것|다르게 한 것):/.test(a.text))
@@ -211,7 +212,7 @@ export function restore(b: Book, back: readonly Ask[]): Book {
   return { ...b, items: [...back.filter(a => !have.has(sameKey(a.text))), ...b.items].sort((x, y) => x.id - y.id) }
 }
 
-// "볼 것"과 "다르게 한 것"은 알림이라 다음 답이 나오면 닫는다. 답을 기다리는 건 "물을 것"뿐이다
+// "볼 것"은 알림이라 다음 답이 나오면 닫는다(0.7.2까지 모은 "다르게 한 것"도 이때 닫힌다). 답을 기다리는 건 "물을 것"뿐이다
 export function supersede(b: Book, now: number): Book {
   const isNotice = (a: Ask) => /^(볼 것|다르게 한 것):/.test(a.text)
   const gone = b.items.filter(isNotice)

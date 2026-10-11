@@ -3,7 +3,8 @@ import type { EngineInterface, On } from 'claude-code'
 
 import { enter, isKnown, isLive, OFF_TEXT, SESSIONS, settle } from './live'
 // 답을 세 덩어리로 쓰게 한다: 물은 것에 대한 답, 접혀 보이는 "설명:", 사용자 차례(물을 것·볼 것·다르게 한 것).
-// 길이 제한은 두지 않는다: 설명은 접혀 있고, 사용자 차례는 본문에서 빠져 옆 패널(side-panel)의 내 차례에 뜬다.
+// 길이 제한은 두지 않는다: 설명은 접혀 있고, 물을 것·볼 것은 본문에서 빠져 옆 패널(side-panel)의 내 차례에 뜬다.
+// 다르게 한 것은 답할 것이 없는 알림이라 본문 끝에 남긴다. 0.7.2까지는 이것도 내 차례에 올라 [답하기]가 붙고 패널이 열렸다(2026-10-11 사용자 "답이 필요없는 질문인데 사이드로옴").
 // 2026-10-06 벤치마크에서 접힌 설명이 다음 판단에 필요한 단서·숫자를 숨겨서, 그것들은 첫 문단에 쓰게 했다.
 // 2026-10-08 첫 문단 끝에 설명에 든 것의 이름을 대게 했다: 필요한 것이 접혔을 때 주제를 알린 비율 2/24 → 19/21(A3 벤치).
 const EXPANDED = { plugin: 'baton', key: 'expanded' } as const
@@ -18,7 +19,7 @@ export function ruleText(): string {
     '- 사용자는 접힌 설명을 펼치지 않고 첫 문단과 사용자 차례 줄만 보고 다음 말을 정한다. 그래서 결론에 붙는 단서(확인 못 함·추정·실패·위험)와 사용자가 판단에 쓸 숫자는 첫 문단에 쓴다. 물을 것에 답하는 데 필요한 선택지별 차이는 첫 문단이나 그 물을 것 줄에 쓴다.',
     '- "설명:"으로 시작하는 문단: 그 밖의 것(근거, 과정, 실제로 확인한 것과 결과, 배경). 사용자 화면에서는 접혀 있어 펼쳐야 보인다. 설명은 "- 이름: 내용" 항목으로 쓴다. 화면에서는 접힌 설명 위에 그 이름들이 목차로 뜨니, 첫 문단에 "설명에는 …이 있어요" 같은 목차 문장은 쓰지 않는다.',
     '- 마지막 줄들은 사용자 차례다: "물을 것:"(사용자가 답하거나 고를 것), "볼 것:"(사용자가 직접 보고 판단할 것), "다르게 한 것:"(요청과 다르게 했거나 요청 밖에서 한 일). 해당하는 줄만, 줄마다 한 문장.',
-    '- 사용자 차례 줄은 본문에는 보이지 않고 옆 패널의 "내 차례"에만 따로 뜬다. 그래서 그 줄만 읽어도 무엇에 관한 것인지 알도록 대상 이름을 넣고, "위·아래·이것"처럼 본문을 가리키는 말을 쓰지 않는다.',
+    '- 물을 것·볼 것 줄은 본문에는 보이지 않고 옆 패널의 "내 차례"에만 따로 뜨고, 다르게 한 것 줄은 접힌 설명 아래에 보인다. 그래서 사용자 차례 줄은 그 줄만 읽어도 무엇에 관한 것인지 알도록 대상 이름을 넣고, "위·아래·이것"처럼 본문을 가리키는 말을 쓰지 않는다.',
     '- 굵은 글씨와 제목은 쓰지 않는다. 단서와 근거는 지우지 않는다.',
     '- 작업 중간에 쓰는 글은 한 줄로 쓴다.',
   ].join('\n')
@@ -27,14 +28,16 @@ export function ruleText(): string {
 // 규칙을 받은 대화에서 /baton off를 하면 다음 입력에 한 번 붙인다
 export const OFF_RULE = '사용자가 이 세션에서 baton을 껐다. 앞에서 받은 "답 형식 (answer-blocks)" 규칙은 이제 따르지 않는다.'
 
-const TURN_LABEL = /^\s*(?:[-*•]\s*)?(?:\*\*)?(?:물을 것|볼 것|다르게 한 것)(?:\*\*)?\s*[:：]/
+// 옆 패널로 가는 사용자 차례 줄(물을 것·볼 것)과 본문에 남는 알림 줄(다르게 한 것)
+const TURN_LABEL = /^\s*(?:[-*•]\s*)?(?:\*\*)?(?:물을 것|볼 것)(?:\*\*)?\s*[:：]/
+const NOTICE_LABEL = /^\s*(?:[-*•]\s*)?(?:\*\*)?다르게 한 것(?:\*\*)?\s*[:：]/
 const EXPLAIN_LABEL = /^\s*(?:\*\*)?설명(?:\*\*)?\s*[:：]\s*(?:\*\*)?\s*/
 
-export type Blocks = { answer: string; explain: string; turn: string }
+export type Blocks = { answer: string; explain: string; turn: string; notice: string }
 
-// 첫 표시 줄 앞은 답. 그 뒤로는 "설명:" 줄부터 설명, 사용자 차례 이름이 붙은 줄부터 사용자 차례. 코드 블록 안은 나누지 않는다
+// 첫 표시 줄 앞은 답. 그 뒤로는 "설명:" 줄부터 설명, 물을 것·볼 것 줄부터 사용자 차례, 다르게 한 것 줄부터 알림. 코드 블록 안은 나누지 않는다
 export function splitBlocks(text: string): Blocks {
-  const out: Record<keyof Blocks, string[]> = { answer: [], explain: [], turn: [] }
+  const out: Record<keyof Blocks, string[]> = { answer: [], explain: [], turn: [], notice: [] }
   let section: keyof Blocks = 'answer'
   let inCode = false
   for (const line of text.split('\n')) {
@@ -45,17 +48,19 @@ export function splitBlocks(text: string): Blocks {
       continue
     }
     if (!inCode && TURN_LABEL.test(line)) section = 'turn'
+    else if (!inCode && NOTICE_LABEL.test(line)) section = 'notice'
     if (/^\s*```/.test(line)) inCode = !inCode
     out[section].push(line)
   }
-  return { answer: out.answer.join('\n').trim(), explain: out.explain.join('\n').trim(), turn: out.turn.join('\n').trim() }
+  const joined = (k: keyof Blocks) => out[k].join('\n').trim()
+  return { answer: joined('answer'), explain: joined('explain'), turn: joined('turn'), notice: joined('notice') }
 }
 
 // 본문에서 뺀 사용자 차례 줄을 대신하는 한 줄: 무엇이 몇 개 옆 패널로 갔는지
 export function turnNote(turn: string): string {
   const counts: Record<string, number> = {}
   for (const line of turn.split('\n')) {
-    const m = line.match(/^\s*(?:[-*•]\s*)?(?:\*\*)?(물을 것|볼 것|다르게 한 것)(?:\*\*)?\s*[:：]/)
+    const m = line.match(/^\s*(?:[-*•]\s*)?(?:\*\*)?(물을 것|볼 것)(?:\*\*)?\s*[:：]/)
     if (m?.[1]) counts[m[1]] = (counts[m[1]] ?? 0) + 1
   }
   const parts = Object.entries(counts).map(([k, n]) => `${k} ${n}`)
@@ -149,7 +154,7 @@ export function registerBlocks(on: On): void {
     return r
   })
 
-  // 설명 덩어리는 접어서 한 줄 버튼으로만 보인다. 설명이 없는 답은 엔진이 그대로 그린다
+  // 설명 덩어리는 접어서 한 줄 버튼으로만 보인다. 설명도 옆 패널로 갈 줄도 없는 답은 엔진이 그대로 그린다(다르게 한 것 줄은 원래 본문에 남는다)
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!(await live($))) return next(e)
     const b = splitBlocks(e.props.text)
@@ -170,7 +175,8 @@ export function registerBlocks(on: On): void {
       if (index.length) parts.push(<Text key="index" dimColor wrap="wrap">{`설명 목차: ${index.join(' · ')}`}</Text>)
       parts.push(<Button key={`open-${key}`} label={`설명 펼치기 (${countChars(b.explain)}자) /baton-e`} variant="primary" onPress={toggle} />)
     }
-    // 사용자 차례 줄은 옆 패널(side-panel)의 내 차례로 보내고, 본문에는 한 줄만 남긴다
+    // 다르게 한 것 줄은 답한 일의 일부라 본문에 그대로 둔다. 물을 것·볼 것 줄은 옆 패널(side-panel)의 내 차례로 보내고, 본문에는 한 줄만 남긴다
+    if (b.notice) parts.push(<Markdown key="notice" text={clip(b.notice)} />)
     if (b.turn) parts.push(<Text key="turn" dimColor>{turnNote(b.turn)}</Text>)
     return <Box flexDirection="column">{parts}</Box>
   })
