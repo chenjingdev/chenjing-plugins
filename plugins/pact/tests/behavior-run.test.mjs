@@ -56,6 +56,11 @@ test('run.mjs saves a round (pass without conversation, fail with, limited marke
   const res = spawnSync('node', [run, 'confirm-only', '--runs', '3', '--variant', 'control', '--concurrency', '1'], { encoding: 'utf8', env });
   assert.equal(res.status, 3, res.stderr);
   assert.match(res.stderr, /판 저장/);
+  // 한도로 끝나도 결과판을 새로 만들고 경로를 알린다.
+  assert.ok(res.stderr.includes(`결과판: ${path.join(out, 'board.html')}`), res.stderr);
+  const board = readFileSync(path.join(out, 'board.html'), 'utf8');
+  assert.match(board, /행동 시험 결과판/);
+  assert.match(board, /"limited":true/);
 
   const rounds = listRounds(out);
   assert.equal(rounds.length, 1);
@@ -89,6 +94,11 @@ test('run.mjs saves a round (pass without conversation, fail with, limited marke
   assert.equal(rejudged.runs, 2);
   assert.ok(rejudged.attempts.every((x) => x.reused));
   assert.deepEqual(rejudged.attempts[1].results.map((x) => x.pass), [false, false, true]);
+  // 다시 판정한 판도 결과판에 쌓인다: 판 2개, 통과한 1번 회차의 대화는 jsonl에서 채워진다.
+  const again2 = readFileSync(path.join(out, 'board.html'), 'utf8');
+  const data = JSON.parse(/<script type="application\/json" id="data">([\s\S]*?)<\/script>/.exec(again2)[1]);
+  assert.equal(data.rounds.length, 2);
+  assert.ok(data.rounds[1].attempts[0].conversation.some((c) => c.type === 'text' && c.text === '이렇게 정할게요.'));
 });
 
 test('run.mjs imports the old records as the first round before overwriting them, only when no round exists yet', () => {

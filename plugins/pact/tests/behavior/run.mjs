@@ -2,7 +2,7 @@
 // 실패 장면 행동 시험. 깨끗한 프로필에서 claude -p로 시나리오를 돌리고 판정해 통과율 표를 낸다.
 //   node tests/behavior/run.mjs <scenario|all> [--runs 5] [--variant pact|control|both] [--concurrency 3] [--resume 1]
 // --resume 1이면 out/에 있는 유효한 transcript는 다시 돌리지 않고 다시 판정만 한다.
-// 돌릴 때마다 판정 결과를 out/runs/<id>.json 판 하나로 쌓는다(runs.mjs). 한도로 끝나도 판은 저장한다.
+// 돌릴 때마다 판정 결과를 out/runs/<id>.json 판 하나로 쌓고(runs.mjs), 결과판 out/board.html을 새로 만든다(board.mjs). 한도로 끝나도 같다.
 // 사용 한도에 걸린 회차는 실패로 세지 않고, 한도를 만나면 새 회차를 띄우지 않고 종료 코드 3으로 끝낸다.
 // pact 변형만 --plugin-dir로 pact를 싣는다. 대조군에서도 실패가 안 나오는 검사는 지침이 필요 없다는 뜻이다.
 import { spawn, spawnSync } from 'node:child_process';
@@ -11,6 +11,7 @@ import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hitLimit, wrappedUp } from './judge.mjs';
+import { buildBoard } from './board.mjs';
 import { judgeChecks, fingerprint as fingerprintOf, guidelineHash, buildRound, saveRound, listRounds, importLegacy, defaultOutDir } from './runs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -245,6 +246,12 @@ async function main() {
     }),
   );
   console.error(`판 저장: ${round.file}`);
+  // 결과판은 보기 위한 것이라, 만들다 실패해도 시험 결과와 종료 코드는 그대로 둔다.
+  try {
+    console.error(`결과판: ${buildBoard(OUT).file}`);
+  } catch (e) {
+    console.error(`결과판을 만들지 못함: ${e.message} (node tests/behavior/board.mjs 로 다시 만들 수 있음)`);
+  }
   console.log('| 시나리오 | 검사 | ' + variants.join(' | ') + ' |');
   console.log('|---|---|' + variants.map(() => '---|').join(''));
   let ok = true;

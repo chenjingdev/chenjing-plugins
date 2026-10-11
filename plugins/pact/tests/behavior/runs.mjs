@@ -170,7 +170,7 @@ export function listRounds(outDir) {
 }
 
 // ---- 옛 기록 가져오기 ----
-function readRecord(file) {
+export function readRecord(file) {
   const lines = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const meta = lines[0];
   if (meta?.type !== 'pact-test') throw new Error('pact-test 메타가 없음');
