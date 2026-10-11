@@ -154,13 +154,13 @@ export function explain(check, transcript, workdir, fixtureDir) {
       const turn = norm(transcript, check.turn);
       const lines = matchedLines(replyOf(transcript, check.turn), check.pattern);
       return lines.length
-        ? verdict(false, `턴 ${turn} 답에 금지 패턴이 걸림`, inTurn(turn, lines))
-        : verdict(true, `턴 ${turn} 답에 금지 패턴이 없음`);
+        ? verdict(false, `${turn + 1}번째 답에 금지 패턴이 걸림`, inTurn(turn, lines))
+        : verdict(true, `${turn + 1}번째 답에 금지 패턴이 없음`);
     }
     case 'replyMatch': {
       const turn = norm(transcript, check.turn);
       const lines = matchedLines(replyOf(transcript, check.turn), check.pattern);
-      return lines.length ? verdict(true, `턴 ${turn} 답에서 패턴을 찾음`, inTurn(turn, lines)) : verdict(false, '패턴을 찾지 못함');
+      return lines.length ? verdict(true, `${turn + 1}번째 답에서 패턴을 찾음`, inTurn(turn, lines)) : verdict(false, `${turn + 1}번째 답에서 패턴을 찾지 못함`);
     }
     case 'skillInvoked': {
       const pass = transcript.flat().flatMap(contentOf).some((c) => c.type === 'tool_use' && c.name === 'Skill' && c.input?.skill === check.name);

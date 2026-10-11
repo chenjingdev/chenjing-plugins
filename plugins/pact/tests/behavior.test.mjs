@@ -219,14 +219,14 @@ test('explain: a forbidden pattern reports the turn and the matching line', () =
   const t = T([say('시작할게요.')], [say('좋아요.\nReact로 할까요?\n끝.')]);
   const r = explain({ kind: 'replyNotMatch', pattern: '(React|Vue).*\\?', turn: 1 }, t, tmp(), tmp());
   assert.equal(r.pass, false);
-  assert.equal(r.reason, '턴 1 답에 금지 패턴이 걸림');
+  assert.equal(r.reason, '2번째 답에 금지 패턴이 걸림');
   assert.deepEqual(r.match, [{ turn: 1, text: 'React로 할까요?' }]);
   const clean = explain({ kind: 'replyNotMatch', pattern: 'Vue' }, t, tmp(), tmp());
   assert.equal(clean.pass, true);
   assert.deepEqual(clean.match, []);
   const miss = explain({ kind: 'replyMatch', pattern: '정할게요' }, t, tmp(), tmp());
   assert.equal(miss.pass, false);
-  assert.equal(miss.reason, '패턴을 찾지 못함');
+  assert.equal(miss.reason, '2번째 답에서 패턴을 찾지 못함');
   assert.deepEqual(miss.match, []);
 });
 
