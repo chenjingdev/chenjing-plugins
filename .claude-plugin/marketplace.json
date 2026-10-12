@@ -46,11 +46,6 @@
       ]
     },
     {
-      "name": "optiview",
-      "description": "지금 보고 있는 터미널의 Claude 답을 옆의 작은 읽기 창에서 봅니다. 문장은 그대로 두고 긴 답은 결론만 펼치고 섹션은 접습니다. 끝에서 묻는 말은 강조합니다. cmux에서는 클릭한 분할을 따라갑니다. Claude Code 전용.",
-      "source": "./plugins/optiview/plugin"
-    },
-    {
       "name": "baton",
       "description": "답 형식(첫 문단·접히는 설명·내 차례), 내 차례 모으기, 옆 패널(내 차례·곁대화), 두 Claude 토론을 묶은 mod. /baton on으로 고른 터미널 대화형 세션에서만 켜진다. Claude Code 전용.",
       "source": "./plugins/baton"
