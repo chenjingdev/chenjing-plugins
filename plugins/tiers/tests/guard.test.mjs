@@ -58,8 +58,18 @@ test('delegate on: main Edit above the small-edit limit is denied with a short h
   assert.match(reason, /\/tiers:delegate off/);
   // short on purpose: the brief template belongs to the brief check, not to every denied edit
   assert.ok(reason.split('\n').length <= 2, `${reason.split('\n').length} lines: ${reason}`);
-  assert.ok(reason.length <= 300, `${reason.length} chars: ${reason}`);
+  assert.ok(reason.length <= 600, `${reason.length} chars: ${reason}`);
   assert.doesNotMatch(reason, /완료 기준|Escape hatches/);
+});
+
+test('delegate on: the denied-edit note offers prose in delegate.json as the other way out', () => {
+  const r = run(main('Write', { file_path: 'plan.html', content: 'x' }), { cfg: ON });
+  assert.equal(decision(r), 'deny');
+  const reason = r.out.hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /`prose`/);
+  assert.match(reason, /delegate\.json/);
+  assert.match(reason, /absolute path ending in \//);
+  assert.ok(reason.split('\n').length <= 2, `${reason.split('\n').length} lines: ${reason}`);
 });
 
 test('delegate on: a small main Edit is allowed; replace_all is not', () => {
@@ -227,6 +237,37 @@ test('prose: an empty list turns the rule off; a malformed one falls back to the
   assert.equal(run(sub('Edit', { file_path: 'notes.txt', old_string: 'x', new_string: 'y' }), { cfg: { ...ON, prose: ['.md'] } }).out, null);
 });
 
+test('prose: a folder entry makes everything under it the main session\'s, whatever the extension', () => {
+  const cfg = { ...ON, prose: ['.md', '/x/docs/'] };
+  assert.equal(run(main('Write', { file_path: '/x/docs/a.html', content: 'x'.repeat(300) }), { cfg }).out, null);
+  assert.equal(run(main('Bash', { command: 'cp foo /x/docs/a.html' }), { cfg }).out, null);
+  assert.equal(run(main('Bash', { command: "sed '1d;$d' r > /x/docs/a.html" }), { cfg }).out, null);
+  assert.equal(decision(run(main('Write', { file_path: '/x/other/a.html', content: 'x' }), { cfg })), 'deny');
+  // ~ is expanded on both sides, so either spelling of the same folder matches
+  const home = { ...ON, prose: ['.md', '~/docs/'] };
+  assert.equal(run(main('Write', { file_path: path.join(homedir(), 'docs', 'a.html'), content: 'x' }), { cfg: home }).out, null);
+  assert.equal(run(main('Write', { file_path: '~/docs/a.html', content: 'x' }), { cfg: home }).out, null);
+  assert.equal(decision(run(main('Write', { file_path: path.join(homedir(), 'other', 'a.html'), content: 'x' }), { cfg: home })), 'deny');
+});
+
+test('prose: a folder entry is the main session\'s side only — the worker is still held to extensions', () => {
+  const cfg = { ...ON, prose: ['.md', '/x/docs/'] };
+  assert.equal(run(sub('Write', { file_path: '/x/docs/a.html', content: 'x' }), { cfg }).out, null);
+  assert.equal(run(sub('Bash', { command: 'echo x > /x/docs/a.html' }), { cfg }).out, null);
+  assert.equal(decision(run(sub('Write', { file_path: '/x/docs/a.md', content: 'x' }), { cfg })), 'deny');
+});
+
+test('prose: a folder entry that is not an absolute path ending in / falls back to the defaults', () => {
+  for (const prose of [['.md', '/x/docs'], ['.md', 'docs/'], ['.md', '~docs']]) {
+    const cfg = { ...ON, prose };
+    const label = JSON.stringify(prose);
+    // the defaults are back: .txt is prose again even though the list did not name it...
+    assert.equal(run(main('Write', { file_path: 'notes.txt', content: 'x'.repeat(300) }), { cfg }).out, null, label);
+    // ...and the folder buys nothing
+    assert.equal(decision(run(main('Write', { file_path: '/x/docs/a.html', content: 'x' }), { cfg })), 'deny', label);
+  }
+});
+
 test('prose: the switch still governs it — off means the worker writes prose too', () => {
   assert.equal(run(sub('Edit', { file_path: 'README.md', old_string: 'x', new_string: 'y' }), { cfg: OFF }).out, null);
   assert.equal(run(sub('Bash', { command: 'echo x > README.md' }), { cfg: OFF }).out, null);
@@ -283,6 +324,25 @@ test('delegate on: a complete brief passes, is pinned, and is logged to handoffs
   assert.match(body, /agent_type: tiers:worker/);
   assert.match(body, /# Brief/);
   assert.match(body, /--json flag/);
+});
+
+test('delegate on: a brief past max_brief_chars is denied — the deliverable does not belong in it', () => {
+  const big = `${FULL_BRIEF}\n${'z'.repeat(9000)}`;
+  const r = run(main('Agent', { subagent_type: 'tiers:worker', prompt: big }), { cfg: ON });
+  assert.equal(decision(r), 'deny');
+  const reason = r.out.hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, new RegExp(`is ${big.length} chars, limit 8000`));
+  assert.match(reason, /`prose`/);
+  assert.match(reason, /delegate\.json/);
+  assert.match(reason, /max_brief_chars/);
+  // 0 turns the size check off
+  const off = run(main('Agent', { subagent_type: 'tiers:worker', prompt: big }), { cfg: { ...ON, max_brief_chars: 0 } });
+  assert.equal(decision(off), 'allow');
+  // the four-section check comes first: a huge brief missing sections is denied for the sections
+  const thin = run(main('Agent', { subagent_type: 'tiers:worker', prompt: `## Goal\n${'z'.repeat(9000)}` }), { cfg: ON });
+  assert.match(thin.out.hookSpecificOutput.permissionDecisionReason, /범위 \(Scope\)/);
+  // and a subagent's own brief is not size-checked, same as it is not section-checked
+  assert.equal(decision(run(sub('Agent', { subagent_type: 'tiers:worker', prompt: big }), { cfg: ON })), 'allow');
 });
 
 test('brief check accepts bold/colon labels and English headings; subagent callers are not checked', () => {

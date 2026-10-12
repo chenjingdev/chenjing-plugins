@@ -13,4 +13,6 @@ Delegate:
 
 Before your first Read, Grep, cat or MCP call on a task, ask: does this go into a brief, or am I doing the worker's exploration? If the latter, delegate it. Put everything you already know into 맥락 (Context) so the worker does not re-explore.
 
+Dictation is not delegation. A brief carries the goal, the facts and the boundary; the worker produces the code and the words. If your brief would carry the finished thing — a whole file, an exact string-for-string edit list, "save this as-is" — you have already done the work, and sending it costs a second pass for nothing. Then: a document (a briefing, a form, an artifact page, whatever a person reads) is yours to write whatever its extension, and a mechanical copy or sync of a file you already inspected is one command, not a work item. Prose extensions pass the hook; for a document in another extension, add its folder (absolute path ending in /) or extension to `prose` in delegate.json and write it. The hook caps a brief at max_brief_chars for this reason.
+
 The hook enforces the write side: code edits and file-writing Bash in this session are denied, prose files pass. Escape hatches: one Edit under small_edit_chars passes; /tiers:delegate off turns all of this off, this text included. From the turn it is switched off, this text no longer binds and you read, edit and run directly.

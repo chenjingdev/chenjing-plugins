@@ -9,10 +9,14 @@
 //   3. prose is the other way round: files whose extension is in `prose` (.md/.mdx/.rst/.txt by
 //      default) are the main session's to write, so the main session may edit them — anywhere but
 //      this hook's own data dir — and `tiers:worker` may not, anywhere but tmp. Only
-//      `tiers:worker` — every other subagent passes as before.
+//      `tiers:worker` — every other subagent passes as before. A `prose` entry may also be a folder
+//      (absolute or ~-rooted, ending in /): everything under it is the main session's whatever the
+//      extension, so an .html briefing stops looking like code. Session side only, not the worker's.
 //   4. brief check + handoff log: worker/general-purpose briefs must carry goal/context/scope/done;
 //      accepted briefs and every report the worker returns (one section per stop, so a
 //      SendMessage follow-up lands in the same file) are written to ${CLAUDE_PLUGIN_DATA}/handoffs/.
+//      A brief longer than `max_brief_chars` (8000, 0 = off) is denied: a brief carries the goal and
+//      the facts, not the finished deliverable — dictating one is a document the session should write.
 //   5. role: at SessionStart (startup/resume/clear/compact) skills/delegate/references/role.md is injected as context.
 // `enabled: false` → PreToolUse emits nothing at all, pinning included. SubagentStop still closes
 // out a handoff started while it was on (`log`). Writes to the guard's own delegate.json are
@@ -27,11 +31,18 @@ const crypto = require('crypto');
 const DEFAULTS = {
   model: 'opus', enabled: false, pin: 'all', small_edit_chars: 200, log: true,
   // human-facing text: the main session writes it, the worker doesn't. [] turns the rule off.
+  // Entries are extensions (.md) or folders (absolute or ~-rooted, ending in /; session side only).
   prose: ['.md', '.mdx', '.rst', '.txt'],
+  // the longest brief the main session may hand a worker. Past it the brief carries the deliverable,
+  // not just the job. 0 turns the check off.
+  max_brief_chars: 8000,
 };
 const WORKER_RE = /(^|:)worker$/;
 const GENERIC_TYPES = new Set(['', 'general-purpose', 'claude']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+// a `prose` entry: an extension (.md) or a folder — absolute or ~-rooted, ending in /.
+const PROSE_EXT_RE = /^\.\S+$/;
+const PROSE_DIR_RE = /^(?:~|\/).*\/$/;
 
 const SECTIONS = [
   // (?![\p{L}\p{N}]) = "end of word" for both Korean and Latin (\b only knows ASCII).
@@ -87,10 +98,15 @@ function loadConfig() {
   cfg.enabled = Boolean(cfg.enabled);
   if (!['all', 'worker'].includes(cfg.pin)) cfg.pin = 'all';
   cfg.small_edit_chars = Number(cfg.small_edit_chars) || 0;
-  // extensions, lower-cased, each starting with a dot. [] is a valid answer (rule off); anything
-  // else malformed (a string, a bare "md") falls back to the defaults rather than silently to off.
-  const prose = Array.isArray(cfg.prose) ? cfg.prose.map((x) => String(x).trim().toLowerCase()) : null;
-  cfg.prose = prose && prose.every((x) => /^\.\S+$/.test(x)) ? prose : DEFAULTS.prose.slice();
+  cfg.max_brief_chars = Number(cfg.max_brief_chars) || 0;
+  // extensions (lower-cased, dot-led) and folders (absolute or ~-rooted, slash-ended), split into
+  // two lists. [] is a valid answer (rule off); anything else malformed (a string, a bare "md", a
+  // relative folder, one with no trailing slash) falls back to the defaults, not silently to off.
+  const prose = Array.isArray(cfg.prose) ? cfg.prose.map((x) => String(x).trim()) : null;
+  const entries = prose && prose.every((x) => PROSE_EXT_RE.test(x) || PROSE_DIR_RE.test(x))
+    ? prose : DEFAULTS.prose.slice();
+  cfg.prose = entries.filter((x) => PROSE_EXT_RE.test(x)).map((x) => x.toLowerCase());
+  cfg.prose_dirs = entries.filter((x) => !PROSE_EXT_RE.test(x)).map(expandTilde);
   cfg.config_paths = configPaths();
   cfg.data_prefixes = dataDirPrefixes();
   return cfg;
@@ -145,6 +161,12 @@ function analyzeBrief(text) {
 }
 
 // ---------- bash write detection ----------
+// `~/docs/` and `/Users/me/docs/` name the same folder; compare them expanded, on both sides.
+function expandTilde(tok) {
+  const t = String(tok);
+  const home = String(os.homedir() || '').replace(/\/+$/, '');
+  return home && (t === '~' || t.startsWith('~/')) ? home + t.slice(1) : t;
+}
 function hasPrefix(tok, prefixes) {
   const t = String(tok).replace(/^['"]|['"]$/g, '');
   return prefixes.some((p) => t.startsWith(p) || t === p.replace(/\/$/, ''));
@@ -161,11 +183,21 @@ function isProsePath(tok, cfg) {
   const t = String(tok).replace(/^['"]|['"]$/g, '').toLowerCase();
   return exts.some((ext) => t.length > ext.length && t.endsWith(ext));
 }
+// a folder the user declared prose: everything under it is human-facing text whatever the
+// extension, so an .html 공문 or briefing stops reading as code. The MAIN session's side only —
+// the worker stays on extensions, which need no per-project guessing.
+function isProseDir(tok, cfg) {
+  const dirs = (cfg && cfg.prose_dirs) || [];
+  if (!dirs.length || !tok) return false;
+  const t = expandTilde(String(tok).replace(/^['"]|['"]$/g, ''));
+  return dirs.some((d) => t.startsWith(d));
+}
 // prose the MAIN session may write: anywhere except the hook's own data dir. A handoff record is a
 // .md file, but it is the hook's, not a document — delegate.json is the one exception there, and it
 // is checked before this.
 function sessionProse(tok, cfg) {
-  return isProsePath(tok, cfg) && !hasPrefix(tok, (cfg && cfg.data_prefixes) || dataDirPrefixes());
+  return (isProsePath(tok, cfg) || isProseDir(tok, cfg))
+    && !hasPrefix(tok, (cfg && cfg.data_prefixes) || dataDirPrefixes());
 }
 // prose the WORKER may not write: anywhere except tmp. A scratch note under /tmp or in the agent's
 // scratchpad is not a human-facing document.
@@ -360,11 +392,28 @@ function bashProseWrite(cmd, cfg) {
 }
 
 // ---------- messages ----------
-// One line, deliberately. A denied edit only has to teach two things: it is not yours to make, and
-// `tiers:worker` makes it. The four-section template belongs to the brief check below — that is the
-// moment a model actually needs it — and the worker agent's own description carries it too.
-function delegateNote() {
-  return 'Hand it to the tiers:worker subagent instead (Agent, subagent_type "tiers:worker") with a brief, then verify the diff yourself; /tiers:delegate off turns this guard off.';
+// One line, deliberately. A denied edit only has to teach three things: it is not yours to make,
+// `tiers:worker` makes it, and — if what you are holding is a finished document rather than an
+// implementation — `prose` is the door, not a dictation brief. The four-section template belongs to
+// the brief check below, and the worker agent's own description carries it too.
+function delegateNote(cfg) {
+  const conf = ((cfg && cfg.config_paths) || configPaths())[0];
+  return 'Hand it to the tiers:worker subagent instead (Agent, subagent_type "tiers:worker") with a brief, then verify the diff yourself. '
+    + 'If you already hold the finished text, it is a document, not implementation: add its extension or folder (absolute path ending in /) to `prose` in '
+    + `${conf} and write it yourself; /tiers:delegate off turns this guard off.`;
+}
+// The brief-size deny. Three ways out, in the order they should be taken: write it yourself (it is a
+// document), split it (it is a spec), raise the limit (it really is one job that big).
+function briefSizeNote(type, len, cfg) {
+  const conf = ((cfg && cfg.config_paths) || configPaths())[0];
+  return [
+    `[tiers delegate] The brief for ${type} is ${len} chars, limit ${cfg.max_brief_chars}. A brief carries the goal, the facts and the boundary — not the deliverable.`,
+    'If you already hold the finished text or the exact edits, it is a document, not implementation: write it yourself. '
+      + 'Prose extensions pass; for anything else add the file\'s extension or folder (absolute path ending in /) to `prose` in '
+      + `${conf} — that file is always writable.`,
+    'If it is a large spec, split it into work items, one worker each.',
+    'Raising max_brief_chars in the same file is the third way, and the last.',
+  ].join('\n');
 }
 // The mirror image, for the worker. Same shape: whose job it is, and where the work goes instead.
 // "## Docs for the session" is the section the worker agent's own prompt tells it to write.
@@ -475,6 +524,11 @@ function handlePreToolUse(input, cfg) {
           'Put what you already know into 맥락 (Context) — the worker starts with no memory of this conversation.',
         ].join('\n'));
       }
+      // Four sections and still enormous: the brief is carrying the deliverable, not the job.
+      const len = String(ti.prompt || '').length;
+      if (cfg.max_brief_chars > 0 && len > cfg.max_brief_chars) {
+        return deny(briefSizeNote(type || 'general-purpose', len, cfg));
+      }
     }
     if (cfg.log && isWorker) {
       try { writeHandoff(input, type, effective.model); } catch (e) { logError(e); }
@@ -511,13 +565,13 @@ function handlePreToolUse(input, cfg) {
       const size = String(ti.old_string || '').length + String(ti.new_string || '').length;
       if (size <= cfg.small_edit_chars) return;
     }
-    return deny(`[tiers delegate] ${tool} blocked in the main session — you plan and verify here, you don't implement.\n${delegateNote()}`);
+    return deny(`[tiers delegate] ${tool} blocked in the main session — you plan and verify here, you don't implement.\n${delegateNote(cfg)}`);
   }
 
   if (tool === 'Bash') {
     const op = bashWriteViolation(ti.command || '', cfg);
     if (op) {
-      return deny(`[tiers delegate] Bash write blocked in the main session (matched: ${op}). Reads, git status/log/diff, tests and /tmp writes are fine.\n${delegateNote()}`);
+      return deny(`[tiers delegate] Bash write blocked in the main session (matched: ${op}). Reads, git status/log/diff, tests and /tmp writes are fine.\n${delegateNote(cfg)}`);
     }
   }
 }
@@ -557,4 +611,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { analyzeBrief, bashWriteViolation, bashProseWrite, isProsePath, sessionProse, workerProse, loadConfig, handlePreToolUse, handleSessionStart };
+module.exports = { analyzeBrief, bashWriteViolation, bashProseWrite, isProsePath, isProseDir, sessionProse, workerProse, loadConfig, handlePreToolUse, handleSessionStart };
