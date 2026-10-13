@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import plistlib
 
-PUBLIC_PLUGIN_ID = 'codex-computer-use@chenjing-plugins'
+PUBLIC_PLUGIN_ID = 'cua@chenjing-plugins'
 APP_ENV = 'CODEX_CUA_APP_PATH'
 
 

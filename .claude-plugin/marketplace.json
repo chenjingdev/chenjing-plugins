@@ -6,9 +6,9 @@
   },
   "plugins": [
     {
-      "name": "codex-computer-use",
+      "name": "cua",
       "description": "Mac 전용 Codex CUA 연결기. Claude Code에서 설치된 Codex의 브라우저·앱 제어를 사용합니다. Codex 앱 필요 · 비공식 실험 버전.",
-      "source": "./plugins/codex-computer-use"
+      "source": "./plugins/cua"
     },
     {
       "name": "resume",

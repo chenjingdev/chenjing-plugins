@@ -16,7 +16,7 @@ import tempfile
 import time
 
 sys.dont_write_bytecode = True
-PLUGIN_ID = 'codex-computer-use@chenjing-plugins'
+PLUGIN_ID = 'cua@chenjing-plugins'
 MARKER = '# codex-cua authored command v1'
 DEPENDENCY = 'websockets==12.0'
 
@@ -66,7 +66,7 @@ def validated_plugin_root(path, version=None):
     manifest_path = path/'.claude-plugin/plugin.json'
     manifest = json.loads(manifest_path.read_text())
     if (path.stat().st_uid != os.getuid() or manifest_path.stat().st_uid != os.getuid()
-            or manifest.get('name') != 'codex-computer-use'
+            or manifest.get('name') != 'cua'
             or not isinstance(manifest.get('version'), str)
             or (version is not None and manifest['version'] != version)
             or not all((path/name).is_file() for name in ('setup.py', 'runtime_paths.py', 'start-mcp.sh'))):
@@ -86,7 +86,7 @@ def resolve_plugin_root(home=None):
                 raise RuntimeError('The public plugin registration is invalid.')
             records = [item for item in records if isinstance(item, dict) and item.get('scope') == 'user']
             if len(records) != 1 or not isinstance(records[0].get('installPath'), str):
-                raise RuntimeError('Install one user-scoped codex-computer-use@chenjing-plugins plugin.')
+                raise RuntimeError('Install one user-scoped cua@chenjing-plugins plugin.')
             return validated_plugin_root(records[0]['installPath'], records[0].get('version'))
     binding = private_json(support_root(home)/'source.json')
     if (not isinstance(binding, dict) or binding.get('schema_version') != 1

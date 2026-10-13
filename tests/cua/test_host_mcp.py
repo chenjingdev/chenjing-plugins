@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2] / 'plugins/codex-computer-use'
+PLUGIN_ROOT = Path(__file__).resolve().parents[2] / 'plugins/cua'
 spec = importlib.util.spec_from_file_location('host_mcp', PLUGIN_ROOT / 'host_mcp.py')
 bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
@@ -253,7 +253,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         adapter, proxy, output, _, _ = self.fixture()
         await self.initialize(adapter)
         self.assertEqual(output[-1]['result']['serverInfo'], {
-            'name': 'codex-computer-use', 'version': version})
+            'name': 'cua', 'version': version})
         initialized = next(m for m in proxy.received if m.get('method') == 'initialize')
         self.assertEqual(initialized['params']['clientInfo'], {
             'name': 'claude_codex_computer_use', 'title': 'Claude Codex Computer Use', 'version': version})

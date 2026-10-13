@@ -30,7 +30,7 @@ class SetupTests(unittest.TestCase):
     def make_plugin(self, directory, version):
         path = self.home/directory
         (path/'.claude-plugin').mkdir(parents=True)
-        (path/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'codex-computer-use', 'version': version}))
+        (path/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': version}))
         for name in ('runtime_paths.py', 'start-mcp.sh'):
             (path/name).write_text('fixture')
         (path/'setup.py').write_text(Path(setup.__file__).read_text())
@@ -51,7 +51,7 @@ class SetupTests(unittest.TestCase):
         second = self.make_plugin('cache/0.4.1', '0.4.1')
         for path, version in ((first, '0.4.0'), (second, '0.4.1')):
             self.registry({setup.PLUGIN_ID: [{'scope': 'user', 'installPath': str(path), 'version': version}],
-                           'codex-computer-use@unrelated': [{'scope': 'user', 'installPath': '/bad'}]})
+                           'cua@unrelated': [{'scope': 'user', 'installPath': '/bad'}]})
             self.assertEqual(setup.resolve_plugin_root(self.home), path)
 
     def test_invalid_public_registration_never_uses_source_fallback(self):

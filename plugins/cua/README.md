@@ -1,4 +1,4 @@
-# Codex Computer Use for Claude Code
+# CUA for Claude Code
 
 Claude Code에서 Mac의 앱과 브라우저를 Codex CUA로 조작하는 플러그인입니다. **macOS 전용 · 비공식 실험 버전**입니다.
 
@@ -12,20 +12,30 @@ Claude Code에서 Mac의 앱과 브라우저를 Codex CUA로 조작하는 플러
 
 ```sh
 claude plugin marketplace add chenjingdev/chenjing-plugins
-claude plugin install codex-computer-use@chenjing-plugins --scope user
+claude plugin install cua@chenjing-plugins --scope user
 ```
 
 Claude Code의 새 대화에서 다음을 실행합니다.
 
 ```text
-/codex-computer-use:setup
+/cua:setup
 ```
 
-Claude가 설치와 연결을 점검합니다. 이후 **“Codex CUA로 이 앱을 확인해 줘”**처럼 요청하면 됩니다. 연결이 끊겼다면 **“CUA 연결 복구해 줘”**라고 요청합니다.
+Claude가 설치와 연결을 점검합니다. 이후 **“cua 써서 이 앱을 확인해 줘”**처럼 요청하면 됩니다. 연결이 끊겼다면 **“CUA 연결 복구해 줘”**라고 요청합니다.
 
 Codex가 이미 켜져 있어 연결 방식 변경이 필요하면 Claude가 안내합니다. 진행 중인 작업을 마치고 앱을 정상 종료한 다음 연결용 실행 명령으로 열어야 합니다. 앱을 강제로 종료하지 않습니다.
 
 ## 관리
+
+이전 `codex-computer-use` 플러그인에서 옮길 때는 마켓플레이스를 갱신하고 이전 플러그인을 제거한 뒤 새 이름으로 설치합니다. 연결용 로컬 명령 `codex-cua`는 그대로 사용하며, 새 설정을 실행하면 연결 대상이 `cua`로 갱신됩니다.
+
+```sh
+claude plugin marketplace update chenjing-plugins
+claude plugin uninstall codex-computer-use@chenjing-plugins --scope user
+claude plugin install cua@chenjing-plugins --scope user
+```
+
+새 Claude Code 대화에서 `/cua:setup`을 실행합니다.
 
 설정 스킬이 설치한 명령은 AI가 사용할 수 있으며, 직접 실행할 수도 있습니다.
 
@@ -38,7 +48,7 @@ Codex가 이미 켜져 있어 연결 방식 변경이 필요하면 Claude가 안
 
 ```sh
 claude plugin marketplace update chenjing-plugins
-claude plugin update codex-computer-use@chenjing-plugins --scope user
+claude plugin update cua@chenjing-plugins --scope user
 ~/.local/bin/codex-cua setup
 ```
 
@@ -46,7 +56,7 @@ claude plugin update codex-computer-use@chenjing-plugins --scope user
 
 ```sh
 ~/.local/bin/codex-cua uninstall
-claude plugin uninstall codex-computer-use@chenjing-plugins --scope user
+claude plugin uninstall cua@chenjing-plugins --scope user
 ```
 
 ## 알아둘 점

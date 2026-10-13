@@ -8,7 +8,7 @@ import unittest
 def main():
     sys.dont_write_bytecode = True
     tests = Path(__file__).resolve().parent
-    plugin = tests.parents[1] / 'plugins/codex-computer-use'
+    plugin = tests.parents[1] / 'plugins/cua'
     sys.path.insert(0, str(plugin))
     suite = unittest.defaultTestLoader.discover(str(tests), pattern='test_*.py')
     result = unittest.TextTestRunner(verbosity=2).run(suite)

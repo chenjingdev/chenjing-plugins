@@ -22,7 +22,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.4.1'
+VERSION = '0.5.0'
 PORTWARDEN_RELAY = Path.home()/'dev/portwarden/scripts/cua-runtime-proxy.mjs'
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
@@ -240,7 +240,7 @@ class HostMcp:
     @staticmethod
     def log_stderr(event):
         # All call sites use authored fixed strings, never exception/result text.
-        sys.stderr.write('codex-computer-use: ' + event + '\n')
+        sys.stderr.write('cua: ' + event + '\n')
         sys.stderr.flush()
 
     def reply(self, ident, result=None, error=None):
@@ -396,7 +396,7 @@ class HostMcp:
                 requested_protocol = params.get('protocolVersion')
                 protocol_version = requested_protocol if requested_protocol in ('2025-06-18', '2025-11-25') else '2025-06-18'
                 self.reply(ident, {'protocolVersion': protocol_version, 'capabilities': {'tools': {}},
-                    'serverInfo': {'name': 'codex-computer-use', 'version': VERSION},
+                    'serverInfo': {'name': 'cua', 'version': VERSION},
                     'instructions': 'Tools execute on this connection\'s new Codex-hosted ephemeral thread. This adapter does not start a runtime or reuse another thread. Call turn_ended with an empty object; the adapter supplies only its owned lifecycle scope.'})
             elif method == 'ping':
                 self.reply(ident, {})

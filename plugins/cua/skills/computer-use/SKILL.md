@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: Use the installed Codex Computer Use MCP to inspect and operate Mac desktop apps and browsers from Claude Code. Use when the user requests GUI work through Codex CUA.
+description: Use the installed CUA MCP to inspect and operate Mac desktop apps and browsers from Claude Code. Use when the user asks to use CUA, including requests like "cua 써서", or requests GUI work through Codex CUA.
 ---
 
 # Mac computer use

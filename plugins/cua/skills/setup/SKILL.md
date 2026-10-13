@@ -1,9 +1,9 @@
 ---
 name: setup
-description: Install, diagnose, or reconnect this macOS Codex Computer Use plugin for Claude Code. Use for initial setup, a missing Codex host, or a plugin connection failure.
+description: Install, diagnose, or reconnect the macOS CUA plugin for Claude Code. Use for initial setup, a missing Codex host, or a plugin connection failure.
 ---
 
-# Set up Codex Computer Use
+# Set up CUA
 
 This plugin connects to an existing Codex desktop host on the same Mac. Read
 `${CLAUDE_PLUGIN_ROOT}/README.md` for the current installation contract.

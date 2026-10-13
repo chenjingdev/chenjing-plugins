@@ -30,7 +30,7 @@ disallowedTools: Agent
 
 ## 돌리기
 
-- 웹 화면이면 Codex CUA 도구 `mcp__plugin_codex-computer-use_codex-computer-use__js`로 사용자의 Chrome에서 직접 써 본다. 단계마다 `shots/<시나리오 id>-<단계 번호>.jpg` 스크린샷을 남긴다. 모든 시나리오의 모든 단계에 스크린샷이 있어야 사용자가 보고서만 보고 판단할 수 있다. 아래 "화면 다루기"를 따른다.
+- 웹 화면이면 Codex CUA 도구 `mcp__plugin_cua_cua__js`로 사용자의 Chrome에서 직접 써 본다. 단계마다 `shots/<시나리오 id>-<단계 번호>.jpg` 스크린샷을 남긴다. 모든 시나리오의 모든 단계에 스크린샷이 있어야 사용자가 보고서만 보고 판단할 수 있다. 아래 "화면 다루기"를 따른다.
 - 화면이 없는 결과물(CLI, 라이브러리, 스크립트)이면 명령을 실행하고 단계의 `output`에 출력과 종료 코드를 적는다. `shot`은 `null`로 둔다.
 - 결과는 `pass`, `fail`, `doubt` 중 하나다. 명세대로 동작하지만 사용자가 당황할 것 같으면 `doubt`로 두고 `note`에 이유를 적는다.
 
@@ -38,7 +38,7 @@ disallowedTools: Agent
 
 메인 세션이 "화면 도구 없음"을 넘겼으면 이 도구를 부르지 않고 바로 화면 없이 검수한다. 받은 오류를 첫 시나리오의 `note`에 적는다.
 
-이 도구는 처음에 이름만 보이는 지연 도구일 수 있다. 그러면 먼저 `ToolSearch`로 `select:mcp__plugin_codex-computer-use_codex-computer-use__js`를 불러온다. 불러와지지 않을 때만 도구가 없는 것으로 본다.
+이 도구는 처음에 이름만 보이는 지연 도구일 수 있다. 그러면 먼저 `ToolSearch`로 `select:mcp__plugin_cua_cua__js`를 불러온다. 불러와지지 않을 때만 도구가 없는 것으로 본다.
 
 `js` 도구는 호출 사이에 상태가 이어지는 JavaScript 런타임이다. 처음 호출에는 탭 하나만 연다. 결과에 API 설명과 첫 화면 상태가 같이 온다. 그 설명을 읽고 쓴다.
 
