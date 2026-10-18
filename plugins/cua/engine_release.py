@@ -17,8 +17,8 @@ import re
 import stat
 import uuid
 
-from engine_core import SESSION_ID
-from engine_records import remove_sessions
+from engine_core import SESSION_ID, iso
+from engine_records import remember_released, remove_sessions
 from engine_status import build_view
 
 TITLE = 'Release an ended CUA session'
@@ -63,7 +63,7 @@ def refusal(view, session, user):
     if not isinstance(session, str) or not SESSION_ID.match(session):
         return 'not_found'
     for record in view.records:
-        if record.live and session in record.sessions():
+        if record.live and session in record.live_sessions():
             return 'session_live'
     entry = next((item for item in view.maybe_left if item['session_id'] == session), None)
     if entry is None:
@@ -204,11 +204,15 @@ def release_sessions(ctx, sessions, user=False, view=None, options=None):
         results[session] = result
         if result['released']:
             for record in view.records:
-                if not record.live and session in record.open_sessions:
-                    try:
+                if session not in record.open_sessions:
+                    continue
+                try:
+                    if not record.live:
                         remove_sessions(ctx.state_dir, ctx.uid, record, {session})
-                    except OSError:
-                        pass
+                    else:       # a live writer's record is not ours to rewrite: remember the release instead
+                        remember_released(ctx.state_dir, ctx.uid, record.writer, session, iso(ctx.clock()))
+                except OSError:
+                    pass
     return results
 
 

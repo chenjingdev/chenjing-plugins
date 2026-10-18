@@ -1,6 +1,7 @@
 """Reading and cleaning bridge and relay records, the activity log and the control sockets."""
 import json
 import os
+import stat
 import time
 import unittest
 
@@ -90,6 +91,91 @@ class LoadingTests(EngineCase):
         self.assertIsNone(record.number('app_server_pid'))
         self.assertIsNone(record.time('last_call_at'))
         self.assertEqual(record.number('pid'), 5151)
+
+
+class LiveSessionTests(EngineCase):
+    def load(self):
+        return {record.kind: record for record in records.load_records(self.state.root, UID)}
+
+    def test_a_bridge_serves_its_current_session_and_a_relay_all_of_its_open_scopes(self):
+        self.state.bridge('a1', 4242, NOW-900, session_id=SESSION_B, scopes=[State.scope(SESSION_A), State.scope(SESSION_B)])
+        self.state.relay('b2', 5151, NOW-800, scopes=[State.scope(SESSION_A), State.scope(SESSION_C)])
+        found = self.load()
+        self.assertEqual(found['bridge'].live_sessions(), {SESSION_B})
+        self.assertEqual(found['bridge'].sessions(), {SESSION_A, SESSION_B})        # everything it lists, for attribution
+        self.assertEqual(found['relay'].live_sessions(), {SESSION_A, SESSION_C})
+
+    def test_a_bridge_that_never_connected_serves_nothing(self):
+        self.state.bridge('a1', 4242, NOW-900, session_id=None, scopes=[State.scope(SESSION_A)])
+        self.assertEqual(self.load()['bridge'].live_sessions(), set())
+
+
+class ReleaseTimeoutTests(EngineCase):
+    def test_at_least_thirteen_seconds_and_five_more_for_every_open_scope(self):
+        for count in (0, 1, 2, 3, 4, 10):
+            self.state.bridge('t%d' % count, 4000+count, NOW-900,
+                              scopes=[State.scope(SESSION_A, turn='turn-%d' % number) for number in range(count)])
+        by_count = {len(record.scopes): record for record in records.load_records(self.state.root, UID)}
+        self.assertEqual([records.release_timeout(by_count[count]) for count in (0, 1, 2, 3, 4, 10)],
+                         [13.0, 13.0, 13.0, 18.0, 23.0, 53.0])
+
+
+class ReleasedMemoryTests(EngineCase):
+    WRITER = 'bridge-4242-%d' % (NOW-900)
+    OTHER = 'relay-5151-%d' % (NOW-800)
+
+    def remember(self, writer, session, stamp=NOW):
+        return records.remember_released(self.state.root, UID, writer, session, iso(stamp))
+
+    def test_released_pairs_are_kept_in_a_private_file_with_identifiers_and_times_only(self):
+        self.assertEqual(records.read_released(self.state.root, UID), set())
+        self.assertTrue(self.remember(self.WRITER, SESSION_A))
+        self.assertTrue(self.remember(self.WRITER, SESSION_B, NOW+1))
+        self.assertTrue(self.remember(self.WRITER, SESSION_A, NOW+2))               # the same pair again is one pair
+        self.assertEqual(records.read_released(self.state.root, UID), {(self.WRITER, SESSION_A), (self.WRITER, SESSION_B)})
+        path = self.state.root/records.RELEASED_FILE
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+        data = json.loads(path.read_text())
+        self.assertEqual(data['schema_version'], 1)
+        self.assertEqual([sorted(item) for item in data['released']], [['released_at', 'session_id', 'writer']]*2)
+        self.assertEqual({item['released_at'] for item in data['released']}, {iso(NOW+1), iso(NOW+2)})
+        self.assertEqual([item.name for item in self.state.root.iterdir() if item.name.startswith('.')], [])
+
+    def test_the_pairs_of_records_that_are_gone_are_forgotten_and_nothing_else(self):
+        self.remember(self.WRITER, SESSION_A)
+        self.remember(self.OTHER, SESSION_B)
+        self.assertFalse(records.forget_released(self.state.root, UID, {self.WRITER, self.OTHER}))
+        self.assertTrue(records.forget_released(self.state.root, UID, {self.WRITER}))
+        self.assertEqual(records.read_released(self.state.root, UID), {(self.WRITER, SESSION_A)})
+        self.assertFalse(records.forget_released(self.state.root, UID, {self.WRITER}))
+        self.assertFalse(records.forget_released(self.root/'missing', UID, set()))
+
+    def test_a_damaged_foreign_or_unsafe_file_is_an_empty_memory(self):
+        path = self.state.root/records.RELEASED_FILE
+        good = {'writer': self.WRITER, 'session_id': SESSION_A, 'released_at': iso(NOW)}
+        for content in ('{broken', '[]', json.dumps({'schema_version': 2, 'released': [good]}),
+                        json.dumps({'schema_version': 1, 'released': 'x'}),
+                        json.dumps({'schema_version': 1, 'released': ['text', {'writer': 'evil', 'session_id': SESSION_A},
+                                                                     {'writer': self.WRITER, 'session_id': '../x'}]})):
+            path.write_text(content)
+            os.chmod(path, 0o600)
+            self.assertEqual(records.read_released(self.state.root, UID), set(), content)
+        path.write_text(json.dumps({'schema_version': 1, 'released': [good]}))
+        os.chmod(path, 0o644)
+        self.assertEqual(records.read_released(self.state.root, UID), set())          # others could have written it
+        os.chmod(path, 0o600)
+        self.assertEqual(records.read_released(self.state.root, UID), {(self.WRITER, SESSION_A)})
+        path.rename(self.state.root/'real.json')
+        path.symlink_to(self.state.root/'real.json')
+        self.assertEqual(records.read_released(self.state.root, UID), set())          # a link is not followed
+
+    def test_a_state_directory_that_cannot_be_trusted_is_neither_read_nor_written(self):
+        self.remember(self.WRITER, SESSION_A)
+        self.state.root.chmod(0o755)
+        self.assertEqual(records.read_released(self.state.root, UID), set())
+        self.assertFalse(self.remember(self.OTHER, SESSION_B))
+        self.state.root.chmod(0o700)
+        self.assertEqual(records.read_released(self.state.root, UID), {(self.WRITER, SESSION_A)})
 
 
 class ControlTests(EngineCase):

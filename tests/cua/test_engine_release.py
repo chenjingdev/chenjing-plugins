@@ -197,6 +197,52 @@ class RefusalTests(ReleaseCase):
         self.assertTrue(all(call['arguments']['session_id'] == OWN_THREAD for call in self.hosts[0].calls))
 
 
+class OldHostScopeTests(ReleaseCase):
+    """The same bridge on its second host: session D is its own, session C is what it left on the first."""
+    WRITER = 'bridge-4242-%d' % (NOW-900)
+
+    def live_bridge(self):
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        return self.state.bridge('a1', 4242, NOW-900, owner_pid=500, cwd='/work/x', session_id=SESSION_D, cleanup='open',
+                                 scopes=[State.scope(SESSION_C, first=at(2000), last=at(1900)), State.scope(SESSION_D)])
+
+    def test_the_current_session_is_live_and_the_older_scope_is_released_without_the_users_click(self):
+        self.live_bridge()
+        results = self.release([SESSION_D, SESSION_C])
+        self.assertEqual(results[SESSION_D], {'released': False, 'reason': 'session_live', 'tab_count': None})
+        self.assertEqual(results[SESSION_C], {'released': True, 'reason': None, 'tab_count': 3})
+        sessions = {call['_meta']['x-codex-turn-metadata']['session_id'] for call in self.calls() if call['tool'] == 'js'}
+        self.assertEqual(sessions, {SESSION_C})
+
+    def test_the_release_is_remembered_the_live_record_is_left_alone_and_it_is_never_repeated(self):
+        directory = self.live_bridge()
+        before = (directory/'bridge.json').read_bytes()
+        self.assertTrue(self.release([SESSION_C])[SESSION_C]['released'])
+        self.assertEqual((directory/'bridge.json').read_bytes(), before)
+        data = json.loads((self.state.root/'engine-released.json').read_text())
+        self.assertEqual([(item['writer'], item['session_id']) for item in data['released']], [(self.WRITER, SESSION_C)])
+        self.assertEqual(oct((self.state.root/'engine-released.json').stat().st_mode & 0o777), '0o600')
+        hosts = len(self.hosts)
+        self.assertEqual(self.release([SESSION_C])[SESSION_C]['reason'], 'not_found')
+        self.assertEqual(len(self.hosts), hosts)                                       # no connection, no browser call
+
+    def test_a_failed_release_is_not_remembered_and_can_be_tried_again(self):
+        self.live_bridge()
+        self.tools['turn_ended'] = AsyncMock(return_value={'isError': True, 'content': []})
+        self.assertEqual(self.release([SESSION_C])[SESSION_C]['reason'], 'cleanup_not_confirmed')
+        self.assertFalse((self.state.root/'engine-released.json').exists())
+        self.tools['turn_ended'] = ends_quietly
+        self.assertTrue(self.release([SESSION_C])[SESSION_C]['released'])
+
+    def test_a_session_a_live_relay_serves_is_live_whoever_else_lists_it(self):
+        self.live_bridge()
+        self.add_runtime(2000, NOW-890)
+        self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_C)])
+        self.assertEqual(self.release([SESSION_C])[SESSION_C]['reason'], 'session_live')
+        self.assertEqual(self.hosts, [])
+
+
 class HostTests(ReleaseCase):
     def test_no_host_is_not_running_and_nothing_is_started(self):
         self.dead()

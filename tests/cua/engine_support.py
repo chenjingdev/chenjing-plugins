@@ -58,6 +58,7 @@ class Machine:
         self.ignore_term = set()   # pids that survive SIGTERM
         self.deny = set()          # pids the engine may not signal
         self.quit_delay = 1.0      # seconds until the app is gone after the quit event; None: it refuses
+        self.quit_status = 0       # exit status of the quit event; non-zero: it was refused or cancelled (-128)
         self.launch_delay = 1.0    # seconds until the app is running after `open`; None: it never comes back
         self.open_status = 0
         self.app_processes = []    # (pid, command) restored by `open`
@@ -116,7 +117,7 @@ class Machine:
             if tool == '/usr/bin/osascript':
                 if self.quit_delay is not None:
                     self.later(self.quit_delay, self.close_app)
-                return types.SimpleNamespace(returncode=0, stdout='')
+                return types.SimpleNamespace(returncode=self.quit_status, stdout='')
             if tool == '/usr/bin/open':
                 if self.open_status == 0 and self.launch_delay is not None:
                     self.later(self.launch_delay, self.open_app)
@@ -421,12 +422,19 @@ class EngineCase(unittest.TestCase):
         return {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready', 'wrapper': 'ready',
                 'relay_files': 'ready'}
 
+    def stable_launcher(self):
+        """Where the stable copy of the relay launcher lives for this temporary home."""
+        return str(self.home/'.local/share/codex-cua/relay/node-repl-relay')
+
     def write_host(self, status='ready', owner=1000, backend=1100, proxy=1200, relay=False, relay_reason=None,
-                   socket_path=None, age=300, **extra):
+                   socket_path=None, age=300, relay_launcher=Ellipsis, **extra):
+        # A host that started the relay names the stable launcher; one that did not, names none.
+        if relay_launcher is Ellipsis:
+            relay_launcher = self.stable_launcher() if relay is True else None
         data = {'schema_version': 1, 'status': status, 'owner_pid': owner, 'backend_pid': backend,
                 'desktop_proxy_pid': proxy, 'socket_path': socket_path or str(self.host_dir/'run/rpc.sock'),
                 'native_cli': str(self.native), 'mechanism': 'original_app_server_unix_websocket',
-                'operational_readiness': 'not_checked', 'relay': relay, 'relay_launcher': None,
+                'operational_readiness': 'not_checked', 'relay': relay, 'relay_launcher': relay_launcher,
                 'relay_reason': relay_reason}
         data.update(extra)
         path = self.host_dir/'host.json'

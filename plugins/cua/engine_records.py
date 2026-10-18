@@ -25,6 +25,12 @@ WRITER = re.compile(r'^(bridge|relay)-([0-9]{1,10})-([0-9]{1,12})$')
 TOOL = re.compile(r'^[A-Za-z0-9_.:-]{1,64}$')
 MAX_RECORD_BYTES = 256*1024
 ACTIVITY_TAIL_BYTES = 512*1024
+RELEASED_FILE = 'engine-released.json'
+# A release answer comes after 2.5 s for a running call and then up to 5 s for every open scope (a bridge has no
+# overall cap, a relay stops at 10 s); the connection itself is quick.
+MIN_RELEASE_REPLY = 13.0
+RELEASE_BASE = 3.0
+RELEASE_PER_SCOPE = 5.0
 Scope = namedtuple('Scope', 'session_id first last')
 
 
@@ -91,6 +97,14 @@ class Record:
         if self.kind == 'bridge' and self.current_session:
             found.add(self.current_session)
         return found
+
+    def live_sessions(self):
+        """The sessions this record's writer is serving right now: a bridge's current thread, a relay's open scopes.
+
+        Other open scopes of a live bridge belong to hosts it has left (after a reconnect); it cannot end them."""
+        if self.kind == 'bridge':
+            return {self.current_session} if self.current_session else set()
+        return set(self.open_sessions)
 
     def last_scope_time(self, session_id):
         """When the session's scopes were last touched in this record, or None when the record does not say."""
@@ -196,13 +210,17 @@ class ControlError(Exception):
         self.kind = kind
 
 
-def control_request(record, action, uid, timeout=14.0, connect_timeout=2.0):
+def release_timeout(record):
+    """Seconds to wait for the answer of a `release`: at least 13, more with every scope the record has open."""
+    return max(MIN_RELEASE_REPLY, RELEASE_BASE+RELEASE_PER_SCOPE*len(record.scopes))
+
+
+def control_request(record, action, uid, timeout=MIN_RELEASE_REPLY, connect_timeout=2.0):
     """One request to a live writer's control socket: one JSON line out, one JSON line in.
 
     The request carries the writer's pid and start time; a writer that does not recognise them, or does not
-    know the action, closes the connection without an answer (no_answer). A relay needs up to 12.5 s for a
-    `release` (2.5 s for a running call, then 4 s per scope within 10 s), so the reply timeout of that kind of
-    request is at least 13 s; a `status` request would pass a short one."""
+    know the action, closes the connection without an answer (no_answer). A `release` takes long (see
+    release_timeout); a `status` request would pass a short timeout."""
     path = control_socket(record, uid)
     if path is None:
         raise ControlError('missing')
@@ -322,6 +340,73 @@ def remove_sessions(state_dir, uid, record, sessions):
         else:
             delete_record_directory(fresh, uid)
         return True
+
+
+def read_released(state_dir, uid):
+    """{(writer, session_id)} the engine released successfully while the writer's own record still lists them.
+
+    A live writer's record is never rewritten, so the engine remembers here what it has already done and does not
+    repeat a browser call for the same session. An unreadable or foreign file is an empty memory."""
+    if not private_directory(state_dir, uid):
+        return set()
+    try:
+        descriptor = os.open(state_dir/RELEASED_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+                             | getattr(os, 'O_NONBLOCK', 0))
+    except OSError:
+        return set()
+    try:
+        info = os.fstat(descriptor)
+        if not _private(info, uid, stat.S_ISREG) or info.st_size > MAX_RECORD_BYTES:
+            return set()
+        data = json.loads(os.read(descriptor, MAX_RECORD_BYTES+1).decode('utf-8'))
+    except (OSError, ValueError, UnicodeError):
+        return set()
+    finally:
+        os.close(descriptor)
+    entries = data.get('released') if isinstance(data, dict) and data.get('schema_version') == 1 else None
+    return {(item['writer'], item['session_id']) for item in entries if isinstance(item, dict)
+            and isinstance(item.get('writer'), str) and WRITER.match(item['writer'])
+            and _valid_session(item.get('session_id'))} if isinstance(entries, list) else set()
+
+
+def _write_released(state_dir, pairs, stamps):
+    data = {'schema_version': 1, 'released': [
+        {'writer': writer, 'session_id': session, 'released_at': stamps.get((writer, session))}
+        for writer, session in sorted(pairs)]}
+    _write_atomic(state_dir/RELEASED_FILE, data)
+
+
+def _released_stamps(state_dir, uid):
+    try:
+        data = json.loads((state_dir/RELEASED_FILE).read_text())
+        return {(item['writer'], item['session_id']): item.get('released_at') for item in data['released']}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def remember_released(state_dir, uid, writer, session_id, released_at):
+    """Note that `session_id`, listed by the live record of `writer`, was released."""
+    if not private_directory(state_dir, uid):
+        return False
+    with state_lock(state_dir):
+        pairs, stamps = read_released(state_dir, uid), _released_stamps(state_dir, uid)
+        pairs.add((writer, session_id))
+        stamps[(writer, session_id)] = released_at
+        _write_released(state_dir, pairs, stamps)
+        return True
+
+
+def forget_released(state_dir, uid, writers):
+    """Drop what is remembered about records that are gone; `writers` are those that still exist."""
+    pairs = read_released(state_dir, uid)
+    if not any(writer not in writers for writer, _ in pairs):
+        return False
+    with state_lock(state_dir):
+        pairs, stamps = read_released(state_dir, uid), _released_stamps(state_dir, uid)
+        kept = {pair for pair in pairs if pair[0] in writers}
+        if kept != pairs:
+            _write_released(state_dir, kept, stamps)
+        return kept != pairs
 
 
 def prune(state_dir, uid, record, droppable=(), now=None, min_age=0):

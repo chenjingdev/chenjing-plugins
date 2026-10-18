@@ -112,7 +112,7 @@ class HostRegistryTests(EngineCase):
 
     def test_no_registry_is_missing(self):
         self.machine.add(5, 1, '/bin/x')
-        self.assertEqual(self.host(), inventory.Host('missing', None, None, False, None))
+        self.assertEqual(self.host(), inventory.Host('missing', None, None, False, None, None))
 
     def test_ready_needs_the_registry_to_say_ready_and_all_three_processes_to_be_alive(self):
         self.alive(1000, 1100, 1200)
@@ -153,6 +153,15 @@ class HostRegistryTests(EngineCase):
         self.host_dir.chmod(0o755)
         self.assertEqual(self.host().state, 'unknown')
         self.host_dir.chmod(0o700)
+
+    def test_the_launcher_the_wrapper_recorded_is_read_and_anything_else_is_ignored(self):
+        self.alive(1000, 1100, 1200)
+        self.write_host(relay=True)
+        self.assertEqual(self.host().relay_launcher, self.stable_launcher())
+        self.write_host(relay=False)
+        self.assertIsNone(self.host().relay_launcher)
+        self.write_host(relay=True, relay_launcher=['not', 'a', 'path'])
+        self.assertIsNone(self.host().relay_launcher)
 
     def test_a_state_directory_given_as_a_relative_path_is_not_read(self):
         self.alive(1000, 1100, 1200)

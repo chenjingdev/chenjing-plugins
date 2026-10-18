@@ -14,14 +14,14 @@ import subprocess
 
 from engine_core import CONNECTION_ID, REASON
 from engine_inventory import app_pids, find_installation, lookup, read_host, same_process, snapshot
-from engine_records import ControlError, control_request
+from engine_records import ControlError, control_request, release_timeout
 from engine_release import release_sessions
 from engine_status import build_view
 
-RELEASE_TIMEOUT = 14.0     # a relay needs up to 12.5 s: 2.5 s for a running call, then 4 s per scope within 10 s
 STOP_GRACE = 8.0
 KILL_WAIT = 3.0
 QUIT_TIMEOUT = 30.0
+QUIT_REFUSED_GRACE = 3.0     # after a quit event that was answered with an error, Codex may still be on its way out
 HOST_CLOSE_TIMEOUT = 15.0
 LAUNCH_TIMEOUT = 20.0
 POLL = 0.2
@@ -38,9 +38,9 @@ def release_one(ctx, conn, timeout=None):
 
     nothing is True when a verified writer answered that it holds no scope: there was nothing to release, which
     is not a failure. When no verified endpoint exists nothing can be said, and that is no_trusted_scope too."""
-    timeout = RELEASE_TIMEOUT if timeout is None else timeout
     if conn.record is None or not conn.can_release:
         return Release(False, 'no_trusted_scope', 0, False)
+    timeout = release_timeout(conn.record) if timeout is None else timeout
     try:
         reply = control_request(conn.record, 'release', ctx.uid, timeout=timeout)
     except ControlError as error:
@@ -198,12 +198,20 @@ def stop_connection(ctx, wanted, force=False):
 
 
 def stop_group(ctx, group, force=False):
-    """Group stop covers claude and codex connections only; cmux-cua and the rest are never connections."""
+    """Group stop covers claude and codex connections only; cmux-cua and the rest are never connections.
+
+    "Codex only" leaves alone every codex connection that has no session (R8): without a relay a runtime that no
+    record covers may serve a Claude conversation, so it is neither released nor signalled. Each is reported as
+    `unattributed` and counts neither as stopped nor as failed. `all` and a single connection do stop them."""
     view = build_view(ctx, with_folders=False, with_checks=False)
     conns = [conn for conn in view.connections if group == 'all' or conn.agent == group]
-    results = stop_connections(ctx, conns, force, view.protected_pids())
-    stopped = sum(1 for item in results if item['stopped'])
-    return {'ok': stopped == len(results), 'stopped': stopped, 'failed': len(results)-stopped, 'results': results}
+    skipped = [conn for conn in conns if group == 'codex' and conn.session_id is None]
+    done = {item['connection_id']: item for item in stop_connections(
+        ctx, [conn for conn in conns if conn not in skipped], force, view.protected_pids())}
+    results = [{'connection_id': conn.id, 'stopped': False, 'released': False, 'reason': 'unattributed'}
+               if conn in skipped else done[conn.id] for conn in conns]
+    stopped = sum(1 for item in done.values() if item['stopped'])
+    return {'ok': stopped == len(done), 'stopped': stopped, 'failed': len(done)-stopped, 'results': results}
 
 
 # --- restart Codex ----------------------------------------------------------------------------------------
@@ -223,12 +231,24 @@ def restart_codex(ctx, quit_timeout=QUIT_TIMEOUT, host_timeout=HOST_CLOSE_TIMEOU
     running_host = host.registry if host.state in ('ready', 'starting') else None
     previous_host = [running_host.get(key) for key in ('owner_pid', 'backend_pid', 'desktop_proxy_pid')] if running_host else []
     try:
-        ctx.run(['/usr/bin/osascript', '-e', 'tell application id "%s" to quit' % installation.bundle_id], timeout=10)
+        quit_event = ctx.run(['/usr/bin/osascript', '-e', 'tell application id "%s" to quit' % installation.bundle_id], timeout=10)
     except subprocess.TimeoutExpired:
-        pass    # a quit confirmation can keep the call open; the wait below decides
+        quit_event = None    # a quit confirmation can keep the call open; the wait below decides
     except OSError:
         return {'ok': False, 'reason': 'quit_cancelled'}
-    deadline = ctx.clock()+quit_timeout
+    try:
+        return _wait_and_reopen(ctx, installation, previous_host, quit_event, quit_timeout, host_timeout, launch_timeout)
+    except Exception:
+        # The process list (or anything else) failed after the quit event went out: Codex may be closed, and the
+        # answer says it did not come back, so the app offers to open it.
+        return {'ok': False, 'reason': 'relaunch_failed'}
+
+
+def _wait_and_reopen(ctx, installation, previous_host, quit_event, quit_timeout, host_timeout, launch_timeout):
+    # A quit that was answered with an error (cancelled, refused) is given only a moment: the app may still be on its
+    # way out, because it also answers with an error when it ends before it replies.
+    refused = quit_event is not None and quit_event.returncode != 0
+    deadline = ctx.clock()+(QUIT_REFUSED_GRACE if refused else quit_timeout)
     while app_pids(snapshot(ctx), installation, ctx.uid):
         if ctx.clock() >= deadline:
             return {'ok': False, 'reason': 'quit_cancelled'}

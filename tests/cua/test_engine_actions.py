@@ -3,10 +3,12 @@ import json
 import signal
 import subprocess
 import time
+import types
 import unittest
 from unittest.mock import patch
 
 import engine_actions
+import engine_status
 from engine_support import ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, EngineCase, State, at
 
 BRIDGE_ID = 'claude-4242-%d' % (NOW-900)
@@ -114,12 +116,58 @@ class ReleaseTests(ActionCase):
     def test_a_writer_that_is_too_slow_times_out(self):
         self.codex_relay(DONE)
         self.servers[-1].handler = lambda request: time.sleep(1.5) or DONE
-        with patch.object(engine_actions, 'RELEASE_TIMEOUT', 0.3):
+        with patch.object(engine_actions, 'release_timeout', return_value=0.3):
             self.assertEqual(self.release(RELAY_ID)['reason'], 'timeout')
 
-    def test_a_relay_has_time_to_finish_a_release(self):
-        # 2.5 s waiting for a running call, then up to 10 s: the reply timeout has to be longer than that.
-        self.assertGreaterEqual(engine_actions.RELEASE_TIMEOUT, 13)
+    def waited_for(self, scopes, kind='bridge'):
+        """The reply timeout a release of a record with this many open scopes is given."""
+        seen = []
+
+        def reply(record, action, uid, timeout=None, **kwargs):
+            seen.append((action, timeout))
+            return {'released': True, 'reason': None, 'scope_count': len(record.scopes)}
+        if kind == 'bridge':
+            directory, _ = self.bridge_with_runtime(scopes=False)
+            self.update(directory, 'bridge', scopes=[State.scope(SESSION_A, turn='turn-%d' % number)
+                                                     for number in range(scopes)], cleanup='open' if scopes else 'none')
+            self.writer(directory, 4242, NOW-900, DONE)
+            wanted = BRIDGE_ID
+        else:
+            self.add_runtime(3000, NOW-2000)
+            directory = self.state.relay('r2', 3001, NOW-2000, root_pid=3000, runtime_pid=3002,
+                                         scopes=[State.scope(SESSION_B, turn='turn-%d' % number) for number in range(scopes)])
+            self.writer(directory, 3001, NOW-2000, DONE)
+            wanted = RELAY_ID
+        with patch.object(engine_actions, 'control_request', side_effect=reply):
+            self.assertTrue(self.release(wanted)['ok'])
+        [(action, timeout)] = seen
+        self.assertEqual(action, 'release')
+        return timeout
+
+    def test_the_reply_timeout_grows_with_the_open_scopes_for_bridges_and_relays_alike(self):
+        # A bridge waits 2.5 s for a running call and then up to 5 s for every open scope, with no overall cap.
+        for kind in ('bridge', 'relay'):
+            self.setUp()
+            self.assertEqual(self.waited_for(0, kind), 13.0, kind)
+            self.setUp()
+            self.assertEqual(self.waited_for(1, kind), 13.0, kind)
+            self.setUp()
+            self.assertGreaterEqual(self.waited_for(4, kind), 23.0, kind)
+            self.setUp()
+            self.assertEqual(self.waited_for(7, kind), 38.0, kind)
+
+    def test_stop_waits_as_long_for_the_release_as_release_does(self):
+        seen = []
+
+        def reply(record, action, uid, timeout=None, **kwargs):
+            seen.append(timeout)
+            return DONE
+        directory, _ = self.bridge_with_runtime(scopes=False)
+        self.update(directory, 'bridge', scopes=[State.scope(SESSION_A, turn='turn-%d' % number) for number in range(4)])
+        self.writer(directory, 4242, NOW-900, DONE)
+        with patch.object(engine_actions, 'control_request', side_effect=reply):
+            engine_actions.stop_connection(self.ctx(), BRIDGE_ID)
+        self.assertGreaterEqual(seen[0], 23.0)
 
 
 class ReleaseEndedTests(ActionCase):
@@ -211,6 +259,26 @@ class SessionReleaseInEndedTests(ActionCase):
         result = engine_actions.release_ended(self.ctx())
         self.assertEqual(result['results'], [{'connection_id': 'claude-7001-%d' % (NOW-5000), 'released': False, 'reason': 'not_running'}])
         self.assertEqual(self.hosts, [])
+
+    def live_bridge_with_old_scope(self):
+        """A live bridge that is on its second host: its current session D, and an open scope of session C from the first."""
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        return self.state.bridge('a1', 4242, NOW-900, owner_pid=500, cwd='/work/x', session_id=SESSION_D, cleanup='open',
+                                 scopes=[State.scope(SESSION_C, first=at(2000), last=at(1900)), State.scope(SESSION_D)])
+
+    def test_the_scope_a_live_bridge_left_behind_on_an_earlier_host_is_released_once_and_its_record_is_not_touched(self):
+        directory = self.live_bridge_with_old_scope()
+        before = (directory/'bridge.json').read_bytes()
+        result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result, {'ok': True, 'results': [{'connection_id': BRIDGE_ID, 'released': True, 'reason': None}]})
+        called = {call['_meta']['x-codex-turn-metadata']['session_id'] for host in self.hosts for call in host.calls}
+        self.assertIn(SESSION_C, called)
+        self.assertNotIn(SESSION_D, called)                           # the live session is never touched
+        self.assertEqual((directory/'bridge.json').read_bytes(), before)     # a live writer's record is not rewritten
+        hosts = len(self.hosts)
+        self.assertEqual(engine_actions.release_ended(self.ctx()), {'ok': True, 'results': []})
+        self.assertEqual(len(self.hosts), hosts)                      # not even a connection for the second time
 
     def test_the_order_is_connections_first_then_dead_bridges(self):
         self.add_runtime(3000, NOW-2000, parent=1)
@@ -393,8 +461,55 @@ class GroupStopTests(ActionCase):
         self.assertEqual({pid for pid, _ in self.machine.signals}, {4242, 4300})
         self.machine.signals.clear()
         result = engine_actions.stop_group(self.ctx(), 'codex')
-        self.assertEqual({pid for pid, _ in self.machine.signals}, {3001, 4000})
-        self.assertEqual(sorted(item['connection_id'] for item in result['results']), sorted([RELAY_ID, UNRECORDED_ID]))
+        # The runtime that no record covers (4000) may serve a Claude conversation while the relay is off: it is
+        # neither released nor signalled, and it is listed as unattributed.
+        self.assertEqual({pid for pid, _ in self.machine.signals}, {3001})
+        by_id = {item['connection_id']: item for item in result['results']}
+        self.assertEqual(sorted(by_id), sorted([RELAY_ID, UNRECORDED_ID]))
+        self.assertEqual(by_id[UNRECORDED_ID], {'connection_id': UNRECORDED_ID, 'stopped': False, 'released': False,
+                                                'reason': 'unattributed'})
+        self.assertEqual(by_id[RELAY_ID], {'connection_id': RELAY_ID, 'stopped': True, 'released': True, 'reason': None})
+        self.assertEqual((result['ok'], result['stopped'], result['failed']), (True, 1, 0))
+        self.assertIn(4000, self.machine.procs)
+
+    def unattributed_relay(self):
+        """A live relay with no open scope, so no session: it may well serve a Claude conversation that just released."""
+        self.add_runtime(3000, NOW-2000)
+        directory = self.state.relay('r2', 3001, NOW-2000, root_pid=3000, runtime_pid=3002, cwd='/work/codex', scopes=[])
+        return self.writer(directory, 3001, NOW-2000, DONE)
+
+    def test_codex_only_neither_releases_nor_signals_a_connection_without_a_session_even_when_it_could_be(self):
+        writer = self.unattributed_relay()
+        self.watch(3001)
+        result = engine_actions.stop_group(self.ctx(), 'codex')
+        self.assertEqual(result, {'ok': True, 'stopped': 0, 'failed': 0, 'results': [
+            {'connection_id': RELAY_ID, 'stopped': False, 'released': False, 'reason': 'unattributed'}]})
+        self.assertEqual((writer.requests, self.machine.signals, self.events), ([], [], []))
+
+    def test_all_and_a_single_connection_still_stop_a_connection_without_a_session(self):
+        writer = self.unattributed_relay()
+        self.assertEqual(engine_actions.stop_group(self.ctx(), 'all')['stopped'], 1)
+        self.assertEqual(len(writer.requests), 1)
+        self.assertEqual(self.machine.signals, [(3001, signal.SIGTERM)])
+        self.setUp()
+        self.unattributed_relay()
+        self.assertEqual(engine_actions.stop_connection(self.ctx(), RELAY_ID),
+                         {'ok': True, 'stopped': True, 'released': True, 'reason': None})
+
+    def test_skipped_entries_keep_their_place_and_do_not_count_as_failures(self):
+        self.world()
+        self.machine.ignore_term.add(3001)                    # a real failure next to the skipped one
+        order = [item['id'] for item in engine_status.status(self.ctx())['connections'] if item['agent'] == 'codex']
+        result = engine_actions.stop_group(self.ctx(), 'codex')
+        self.assertEqual([item['connection_id'] for item in result['results']], order)
+        self.assertEqual((result['ok'], result['stopped'], result['failed']), (False, 0, 1))
+        self.assertEqual({item['reason'] for item in result['results']}, {'unattributed', 'timeout'})
+
+    def test_claude_only_never_skips_a_bridge_that_has_no_record(self):
+        self.add_bridge(4300, 500, NOW-700, command=self.commands.old_bridge)
+        result = engine_actions.stop_group(self.ctx(), 'claude')
+        self.assertEqual((result['stopped'], result['failed']), (1, 0))
+        self.assertEqual(self.machine.signals, [(4300, signal.SIGTERM)])
 
     def test_a_runtime_that_belongs_to_a_claude_connection_is_not_stopped_by_codex_only(self):
         directory, relay_dir = self.bridge_with_runtime()
@@ -492,6 +607,46 @@ class RestartTests(ActionCase):
                 raise OSError('no osascript')
             return self.machine.run(argv, timeout=timeout, environment=environment)
         self.assertEqual(engine_actions.restart_codex(self.context(run=run)), {'ok': False, 'reason': 'quit_cancelled'})
+
+    def test_a_quit_that_is_refused_at_once_is_cancelled_after_a_moment_not_after_the_whole_wait(self):
+        self.machine.quit_status = 1             # -128: the user pressed Cancel in the app's own dialog
+        self.machine.quit_delay = None
+        began = self.machine.now
+        self.assertEqual(self.restart(), {'ok': False, 'reason': 'quit_cancelled'})
+        self.assertLess(self.machine.now-began, 10)                  # not the 30 s of a quit that is still pending
+        self.assertGreater(engine_actions.QUIT_TIMEOUT, 10)
+        self.assertEqual(self.tools(), ['/usr/bin/osascript'])
+        self.assertEqual(self.machine.signals, [])
+        self.assertIn(1000, self.machine.procs)
+
+    def test_a_quit_event_that_failed_only_because_the_app_ended_before_it_replied_still_reopens_codex(self):
+        self.machine.quit_status = 1             # osascript's own error (-609) when the app ends in the middle of the event
+        self.machine.quit_delay = 0.5
+        self.assertEqual(self.restart(), {'ok': True, 'reason': None})
+        self.assertEqual(self.tools(), ['/usr/bin/osascript', '/usr/bin/open'])
+
+    def failing_ps_after(self, trigger, failure):
+        """restart_codex with a process list that fails once `trigger` (a tool path) has been run."""
+        original, triggered = self.machine.run, []
+
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == trigger:
+                triggered.append(True)
+            if argv[0] == '/bin/ps' and triggered:
+                if failure == 'empty':
+                    return types.SimpleNamespace(returncode=1, stdout='')
+                raise failure
+            return original(argv, timeout=timeout, environment=environment)
+        return engine_actions.restart_codex(self.context(run=run))
+
+    def test_a_process_list_that_fails_after_the_quit_or_the_open_is_a_failed_relaunch_never_a_crash(self):
+        for failure in (subprocess.TimeoutExpired(['ps'], 5), OSError('no ps'), 'empty'):
+            for trigger in ('/usr/bin/osascript', '/usr/bin/open'):
+                self.setUp()
+                self.machine.add(1300, 1, '/bin/x')
+                self.assertEqual(self.failing_ps_after(trigger, failure), {'ok': False, 'reason': 'relaunch_failed'},
+                                 (failure, trigger))
+                self.assertEqual(self.machine.signals, [])
 
     def test_codex_is_opened_only_after_its_old_host_finished_closing(self):
         self.machine.add(1100, 1000, self.commands.app_server)

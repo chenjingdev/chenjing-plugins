@@ -1,11 +1,13 @@
 """The status the menu bar app reads: every contract field, attribution of runtimes, states, leases and activity."""
 import json
 import re
+import shutil
 import unittest
 
+import engine_records
 import engine_status
 from engine_core import iso
-from engine_support import APP_VERSION, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, EngineCase, State, at
+from engine_support import APP_VERSION, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase, State, at
 
 TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'codex', 'host', 'setup', 'connections', 'leases',
             'other_tools', 'screen', 'activity']
@@ -133,6 +135,16 @@ class RelaySetupTests(StatusCase):
 
     def test_a_relay_flag_of_a_closed_host_is_not_active(self):
         self.assertEqual(self.relay_state(False, True, 'ready'), 'inactive')
+
+    def test_the_host_must_name_this_plugins_launcher_to_count_as_having_the_relay(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world(relay=True)
+        self.assertEqual(self.status()['setup']['relay'], 'active')
+        missing = lambda ctx: {**self.default_checks(ctx), 'relay_files': 'missing'}
+        for launcher in (None, '/somewhere/else/node-repl-relay', self.stable_launcher()+'x', ''):
+            self.write_host(relay=True, relay_launcher=launcher)
+            self.assertEqual(self.status()['setup']['relay'], 'inactive', launcher)
+            self.assertEqual(self.status(checks=missing)['setup']['relay'], 'unavailable', launcher)
 
 
 class AttributionTests(StatusCase):
@@ -310,6 +322,95 @@ class AttributionTests(StatusCase):
         [connection] = self.status()['connections']
         self.assertEqual((connection['agent'], connection['state'], connection['owner_pid'], connection['owner_alive']),
                          ('claude', 'ended', 500, False))
+
+
+class OldHostScopeTests(StatusCase):
+    """A live bridge that went to a new host keeps open scopes of the old one, which it cannot end any more."""
+    ID = 'claude-4242-%d' % (NOW-900)
+    WRITER = 'bridge-4242-%d' % (NOW-900)
+
+    def live_bridge(self, **fields):
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        data = dict(owner_pid=500, cwd='/work/x', session_id=SESSION_D, cleanup='open',
+                    scopes=[State.scope(SESSION_C, first=at(2000), last=at(1900)), State.scope(SESSION_D)])
+        data.update(fields)
+        return self.state.bridge('a1', 4242, NOW-900, **data)
+
+    def left(self):
+        return self.status()['leases']['maybe_left']
+
+    def test_the_scope_of_an_earlier_session_may_have_been_left_but_the_current_session_is_not_listed(self):
+        self.start_world()
+        self.live_bridge()
+        status = self.status()
+        self.assertEqual(status['leases']['maybe_left'], [{
+            'session_id': SESSION_C, 'agent': 'claude', 'connection_id': self.ID, 'cwd': '/work/x', 'ended_at': None,
+            'releasable': True}])
+        [connection] = status['connections']
+        self.assertEqual((connection['id'], connection['session_id'], connection['state']), (self.ID, SESSION_D, 'active'))
+
+    def test_a_bridge_that_is_still_on_its_first_host_lists_nothing(self):
+        self.start_world()
+        self.live_bridge(scopes=[State.scope(SESSION_D, turn='turn-1'), State.scope(SESSION_D, turn='turn-2')])
+        self.assertEqual(self.left(), [])
+
+    def test_not_releasable_without_a_ready_host_or_while_a_live_relay_still_serves_the_session(self):
+        self.start_world()
+        self.live_bridge()
+        self.machine.remove(1200)
+        self.assertFalse(self.left()[0]['releasable'])
+        self.machine.add(1200, 1000, '/bin/proxy')
+        self.assertTrue(self.left()[0]['releasable'])
+        self.add_runtime(2000, NOW-890)
+        self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_C)])
+        [entry] = self.left()
+        self.assertEqual((entry['session_id'], entry['releasable']), (SESSION_C, False))
+
+    def test_an_old_scope_that_ended_before_chrome_started_is_dropped_and_the_bridge_record_is_left_alone(self):
+        self.start_world()
+        directory = self.live_bridge()
+        before = (directory/'bridge.json').read_bytes()
+        self.machine.add(5000, 1, self.commands.chrome, start=NOW-100)
+        self.assertEqual(self.left(), [])
+        self.assertEqual((directory/'bridge.json').read_bytes(), before)
+
+    def test_what_was_released_is_remembered_in_the_engines_own_file_and_not_listed_again(self):
+        self.start_world()
+        directory = self.live_bridge()
+        before = (directory/'bridge.json').read_bytes()
+        engine_records.remember_released(self.state.root, UID, self.WRITER, SESSION_C, iso(NOW))
+        self.assertEqual(self.left(), [])
+        self.assertEqual((directory/'bridge.json').read_bytes(), before)             # a live writer's record is never rewritten
+
+    def test_a_remembered_pair_is_for_that_writer_only(self):
+        self.start_world()
+        self.live_bridge()
+        engine_records.remember_released(self.state.root, UID, 'bridge-9999-%d' % (NOW-900), SESSION_C, iso(NOW))
+        self.assertEqual([entry['session_id'] for entry in self.left()], [SESSION_C])
+
+    def test_the_memory_of_a_record_that_is_gone_is_dropped_by_the_next_status(self):
+        self.start_world()
+        directory = self.live_bridge()
+        engine_records.remember_released(self.state.root, UID, self.WRITER, SESSION_C, iso(NOW))
+        self.status()
+        self.assertEqual(engine_records.read_released(self.state.root, UID), {(self.WRITER, SESSION_C)})
+        shutil.rmtree(directory)
+        self.status()
+        self.assertEqual(engine_records.read_released(self.state.root, UID), set())
+
+    def test_when_that_bridge_later_dies_the_remembered_scope_stays_hidden_and_a_record_with_only_remembered_scopes_goes(self):
+        self.start_world()
+        directory = self.live_bridge()
+        engine_records.remember_released(self.state.root, UID, self.WRITER, SESSION_C, iso(NOW))
+        self.machine.remove(4242)                                                     # the bridge ended without cleanup
+        self.assertEqual([entry['session_id'] for entry in self.left()], [SESSION_D])
+        self.assertTrue(directory.exists())                                            # session D is still open in it
+        engine_records.remember_released(self.state.root, UID, self.WRITER, SESSION_D, iso(NOW))
+        self.assertEqual(self.left(), [])
+        self.assertFalse(directory.exists())
+        self.status()
+        self.assertEqual(engine_records.read_released(self.state.root, UID), set())
 
 
 class StateTests(StatusCase):

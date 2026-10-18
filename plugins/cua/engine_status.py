@@ -11,7 +11,7 @@ import re
 
 from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, IDLE_SECONDS, SCHEMA_VERSION, connection_id, iso)
 from engine_inventory import (collect, is_app_server, is_cua_repl, mark_live, working_folders)
-from engine_records import control_socket, load_records, prune, read_activity
+from engine_records import (control_socket, forget_released, load_records, prune, read_activity, read_released)
 
 PRUNE_MIN_AGE = 60
 
@@ -285,16 +285,31 @@ class View:
     # --- leases that may have been left behind --------------------------------------------------------
 
     def _leases(self):
-        inv, dead = self.inv, self.dead
+        """Sessions whose leases may have been left behind.
+
+        They come from dead records, and from a live bridge's open scopes of sessions that are no longer its current
+        one: those belong to a host it has left, and the bridge cannot end them any more. A live writer's record is
+        never touched, so what the engine has already released is remembered in its own file."""
+        inv = self.inv
         listed = set()
         for record in self.live:
-            listed |= record.sessions()
+            listed |= record.live_sessions()
+        released = read_released(self.ctx.state_dir, self.ctx.uid)
         found = {}
-        for record in dead:
+
+        def note(record, session):
+            if (record.writer, session) in released:
+                return
+            entry = found.setdefault(session, {'records': [], 'last': None})
+            entry['records'].append(record)
+            entry['last'] = _later(entry['last'], record.last_scope_time(session))
+        for record in self.dead:
             for session in record.open_sessions:
-                entry = found.setdefault(session, {'records': [], 'last': None})
-                entry['records'].append(record)
-                entry['last'] = _later(entry['last'], record.last_scope_time(session))
+                note(record, session)
+        for record in self.live_bridges:
+            for session in record.open_sessions:
+                if session != record.current_session:
+                    note(record, session)
         chrome = inv.chrome_started
         stale = set()
         for session, entry in found.items():
@@ -308,7 +323,9 @@ class View:
                 continue
             records = entry['records']
             primary = max(records, key=lambda record: (record.kind == 'bridge', record.last_scope_time(session) or 0))
-            exited = primary.time('updated_at') if primary.data.get('cleanup') == 'not_confirmed' else None
+            exited = None
+            if not primary.live and primary.data.get('cleanup') == 'not_confirmed':
+                exited = primary.time('updated_at')
             entries.append({'session_id': session, 'agent': primary.agent, 'connection_id': primary.connection_id,
                             'cwd': primary.path('cwd'), 'ended_at': iso(exited),
                             'releasable': ready and session not in listed,
@@ -317,10 +334,11 @@ class View:
                             'needs_user': all(record.kind == 'relay' for record in records)})
         entries.sort(key=lambda item: (-item['last'], item['session_id']))
         self.maybe_left = entries
-        for record in dead:
+        for record in self.dead:
             sessions = set(record.open_sessions)
-            if sessions <= stale:
-                self.prunable.append((record, stale & sessions))
+            gone = {session for session in sessions if session in stale or (record.writer, session) in released}
+            if sessions <= gone:
+                self.prunable.append((record, gone))
 
     # --- lookups -------------------------------------------------------------------------------------
 
@@ -332,12 +350,17 @@ class View:
         return self.inv.protected_pids(owners)
 
     def prune(self):
-        """Delete dead records that hold nothing a release could still act on."""
+        """Delete dead records that hold nothing a release could still act on, and forget what was released for
+        records that are gone."""
         for record, droppable in self.prunable:
             try:
                 prune(self.ctx.state_dir, self.ctx.uid, record, droppable, self.now, PRUNE_MIN_AGE)
             except OSError:
                 pass
+        try:
+            forget_released(self.ctx.state_dir, self.ctx.uid, {record.writer for record in self.records})
+        except OSError:
+            pass
 
     # --- the status ----------------------------------------------------------------------------------
 
@@ -350,8 +373,9 @@ class View:
 
     def _setup(self):
         checks, host = self.inv.checks, self.inv.host
-        if host.state == 'ready' and host.relay:
-            relay = 'active'          # the running host started the relay
+        launcher = self.ctx.setup.support_root(self.ctx.home)/'relay'/'node-repl-relay'
+        if host.state == 'ready' and host.relay and host.relay_launcher == str(launcher):
+            relay = 'active'          # the running host started this plugin's relay
         elif checks.get('relay_files') != 'ready':
             relay = 'unavailable'     # the next start would have no relay: its stable copy is missing or invalid
         else:

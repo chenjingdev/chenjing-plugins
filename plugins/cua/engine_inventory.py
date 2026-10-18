@@ -27,7 +27,7 @@ _CMUX = re.compile(r'^/.*/cmux-cua(?:\s+([A-Za-z][\w-]*))?\s*$')
 _CHROME = re.compile(r'^/.*?/(Google Chrome(?: Beta| Dev| Canary)?|Chromium)\.app/Contents/MacOS/\1(?:\s|$)')
 CUA_REPL_SCRIPT = '/@oai/cua-repl/bin/cua-repl.mjs'
 Proc = namedtuple('Proc', 'pid ppid uid start rss_kb command')
-Host = namedtuple('Host', 'state since registry relay relay_reason')
+Host = namedtuple('Host', 'state since registry relay relay_reason relay_launcher')
 
 
 def parse_ps(text):
@@ -120,14 +120,14 @@ def read_host(ctx, procs):
     """State of the Codex host registry (host.json in the host state directory)."""
     directory = ctx.host_state_dir
     if not directory.is_absolute():
-        return Host('unknown', None, None, False, None)       # the bridge refuses such a path too
+        return Host('unknown', None, None, False, None, None)       # the bridge refuses such a path too
     path = directory/'host.json'
     try:
         info = os.lstat(path)
     except FileNotFoundError:
-        return Host('missing', None, None, False, None)
+        return Host('missing', None, None, False, None, None)
     except OSError:
-        return Host('unknown', None, None, False, None)
+        return Host('unknown', None, None, False, None, None)
     since = info.st_mtime
     try:
         parent = os.lstat(directory)
@@ -139,7 +139,7 @@ def read_host(ctx, procs):
         data = None
     if (not isinstance(data, dict) or data.get('schema_version') != 1
             or data.get('mechanism') != 'original_app_server_unix_websocket'):
-        return Host('unknown', since, None, False, None)
+        return Host('unknown', since, None, False, None, None)
 
     def alive(pid):
         proc = procs.get(pid) if isinstance(pid, int) and not isinstance(pid, bool) else None
@@ -148,19 +148,20 @@ def read_host(ctx, procs):
     # relay_reason is a fixed code word (stable_copy, unknown_field, ...) that says why the wrapper left the relay out.
     code = data.get('relay_reason')
     code = code if isinstance(code, str) and REASON.match(code) and not relay else None
+    launcher = data.get('relay_launcher') if isinstance(data.get('relay_launcher'), str) else None
     status = data.get('status')
     pids = [data.get(key) for key in ('owner_pid', 'backend_pid', 'desktop_proxy_pid')]
     if status == 'ready':
         socket_path = data.get('socket_path')
         if (not isinstance(socket_path, str) or not os.path.isabs(socket_path)
                 or any(not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0 for pid in pids)):
-            return Host('unknown', since, None, relay, code)
-        return Host('ready' if all(alive(pid) for pid in pids) else 'closed', since, data, relay, code)
+            return Host('unknown', since, None, relay, code, launcher)
+        return Host('ready' if all(alive(pid) for pid in pids) else 'closed', since, data, relay, code, launcher)
     if status == 'starting':
-        return Host('starting' if alive(pids[0]) else 'closed', since, data, relay, code)
+        return Host('starting' if alive(pids[0]) else 'closed', since, data, relay, code, launcher)
     if status in ('closed', 'cleanup_unconfirmed'):
-        return Host('closed', since, data, relay, code)
-    return Host('unknown', since, None, relay, code)
+        return Host('closed', since, data, relay, code, launcher)
+    return Host('unknown', since, None, relay, code, launcher)
 
 
 # --- the Codex app ----------------------------------------------------------------------------------------
