@@ -47,7 +47,10 @@ struct SpecButton: View {
         Button(role: spec.isDestructive ? .destructive : nil) {
             send(spec.action)
         } label: {
+            // One line always: a narrow row once broke 강제 종료 in two.
             Text(spec.title)
+                .lineLimit(1)
+                .fixedSize()
         }
         .buttonStyle(RowButtonStyle(isDestructive: spec.isDestructive))
         .disabled(!spec.isEnabled || waiting)

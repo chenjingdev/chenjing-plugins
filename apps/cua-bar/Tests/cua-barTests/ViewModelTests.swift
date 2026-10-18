@@ -352,6 +352,38 @@ struct ViewModelTests {
         #expect(model.isWaiting(onConnection: "anything") == false)
     }
 
+    @Test func whatEndsTheEndedOnesOrStopsOneGroupMakesOnlyThoseRowsWait() async throws {
+        // S18: 끝난 연결 끄기 once spun the release of a live connection it never touches.
+        var status = try Fixtures.status("status-ready")
+        status.connections[0].state = .ended
+        let claude = status.connections[0].id, codex = status.connections[1].id
+        let engine = FakeEngineClient(status: status)
+        let model = makeModel(engine)
+        await model.refresh()
+        await model.waitForBackgroundWork()
+
+        let first = AsyncGate()
+        engine.configure { $0.actionGate = first }
+        defer { first.open() }
+        let ending = Task { await model.perform(.stopEnded) }
+        #expect(await waitUntil { engine.calls.contains(.stopConnection(claude, force: false)) })
+        #expect(model.isWaiting(onConnection: claude))
+        #expect(model.isWaiting(onConnection: codex) == false, "a live connection is not one of the ended ones")
+        first.open()
+        _ = await ending.value
+
+        let second = AsyncGate()
+        engine.configure { $0.actionGate = second }
+        defer { second.open() }
+        let group = Task { await model.perform(.stopGroup(.codex, force: false)) }
+        #expect(await waitUntil { engine.calls.contains(.stopGroup(.codex, force: false)) })
+        #expect(model.isWaiting(onConnection: codex))
+        #expect(model.isWaiting(onConnection: claude) == false, "Codex만 leaves the Claude rows alone")
+        second.open()
+        _ = await group.value
+        #expect(model.isWaiting(onConnection: codex) == false)
+    }
+
     // MARK: Results
 
     @Test func aFinishedActionLeavesAOneLineBanner() async throws {

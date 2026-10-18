@@ -73,6 +73,8 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var refusedReleaseIDs: Set<String> = []
     /// The automatic cleanup (F5) is running: the buttons that would touch what it releases wait.
     @Published private(set) var isCleaningUp = false
+    /// The ended connections the automatic cleanup is releasing, while it runs.
+    private var cleaningIDs: Set<String> = []
     /// cmux-cua connections whose normal stop ran out of time (R17): their row offers 강제 종료.
     @Published private(set) var stopTimedOutIDs: Set<String> = []
 
@@ -486,9 +488,20 @@ final class CUABarViewModel: ObservableObject {
 
     // MARK: Actions
 
-    /// True while something that touches this connection (or every connection) is running.
+    /// True while something that touches this connection is running: an action on it or on a group
+    /// it is in, or the automatic cleanup when it is one of the ended connections being released.
+    /// A row the last status does not have waits for anything wide.
     func isWaiting(onConnection id: String) -> Bool {
-        inFlight.contains { $0.connectionID == id || $0.isWide }
+        if isCleaningUp && cleaningIDs.contains(id) { return true }
+        guard let connection = lastStatus?.connection(withID: id) else {
+            return inFlight.contains { $0.connectionID == id || $0.isWide }
+        }
+        return inFlight.contains { $0.touches(connection) }
+    }
+
+    /// What a row's buttons say on hover while the automatic cleanup releases its connection.
+    func cleanupHelp(onConnection id: String) -> String? {
+        isCleaningUp && cleaningIDs.contains(id) ? Self.cleanupBusyHelp : nil
     }
 
     /// Runs one button's action with no question, shows its result, and reads the status again at once.
@@ -726,6 +739,7 @@ final class CUABarViewModel: ObservableObject {
         // Its time limit grows with what this status says it has to get through.
         let load = ReleaseEndedLoad(status: status)
         let endedIDs = status.connections.filter { CleanupPlanner.isCandidate($0) }.map(\.id)
+        cleaningIDs = Set(endedIDs)
         isCleaningUp = true
         automaticCleanupTask = Task { [weak self] in
             guard let self else { return }
@@ -733,19 +747,22 @@ final class CUABarViewModel: ObservableObject {
             // Tried, whatever came of it: the card now stops these instead of releasing them again.
             self.releaseTriedIDs.formUnion(endedIDs)
             self.automaticCleanupTask = nil
+            self.cleaningIDs = []
             self.isCleaningUp = false
             await self.refresh()
         }
     }
 
     /// True while the automatic cleanup runs and this action would touch what it is releasing:
-    /// the release or stop of ended connections (the card's fix, 끝난 연결 놓아주기), the card's
-    /// release of leftover sessions, and a Claude session's 콕 집어 풀기. Restart, setup and the
-    /// rest release nothing and do not wait.
+    /// the release or stop of ended connections (the card's fix, 끝난 연결 놓아주기), a row's
+    /// release or stop of one connection the cleanup releases, the card's release of leftover
+    /// sessions, and a Claude session's 콕 집어 풀기. Restart, setup and the rest release nothing
+    /// the cleanup does and do not wait.
     func waitsForAutomaticCleanup(_ action: CUAAction) -> Bool {
         guard isCleaningUp else { return false }
         switch action {
         case .releaseEnded, .stopEnded, .releaseLeftover: return true
+        case .releaseConnection(let id), .retryRelease(let id), .stopConnection(let id, _): return cleaningIDs.contains(id)
         case .releaseSession(let id, _): return isClaudeSession(id)
         default: return false
         }

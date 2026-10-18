@@ -134,6 +134,15 @@ struct ReviewRound2Tests {
         for action: CUAAction in [.restartCodex, .runSetup, .stopGroup(.all, force: false), .releaseConnection(status.connections[1].id)] {
             #expect(!rig.model.waitsForAutomaticCleanup(action), "\(action)")
         }
+        // S18: the row of the ended connection it releases waits too, and says why; the live one does not.
+        let ended = status.connections[0].id, live = status.connections[1].id
+        #expect(rig.model.isWaiting(onConnection: ended))
+        #expect(rig.model.cleanupHelp(onConnection: ended) == "자동 정리 중이에요")
+        for action: CUAAction in [.releaseConnection(ended), .stopConnection(ended, force: true), .retryRelease(ended)] {
+            #expect(rig.model.waitsForAutomaticCleanup(action), "\(action)")
+        }
+        #expect(!rig.model.isWaiting(onConnection: live))
+        #expect(rig.model.cleanupHelp(onConnection: live) == nil)
 
         // A press that still arrives does not run and is not queued.
         #expect(rig.model.send(.releaseEnded) == nil)
@@ -150,6 +159,8 @@ struct ReviewRound2Tests {
         #expect(!rig.model.isCleaningUp)
         #expect(!rig.model.fixIsBusy)
         #expect(rig.model.cleanupHelp(for: .releaseEnded) == nil)
+        #expect(!rig.model.isWaiting(onConnection: ended))
+        #expect(rig.model.cleanupHelp(onConnection: ended) == nil)
         #expect(rig.engine.calls.filter { $0 != .status } == [.releaseEnded], "only the cleanup's own call, and nothing after it")
     }
 

@@ -18,6 +18,7 @@ struct ConnectionsTabView: View {
                             ForEach(group.rows) { row in
                                 ConnectionRowView(
                                     row: row, waiting: model.isWaiting(onConnection: row.id),
+                                    waitingHelp: model.cleanupHelp(onConnection: row.id),
                                     refused: model.refusedReleaseIDs.contains(row.id)) { model.send($0) }
                             }
                         }
@@ -38,6 +39,8 @@ struct ConnectionsTabView: View {
 struct ConnectionRowView: View {
     var row: ConnectionRow
     var waiting: Bool
+    /// Said on hover while the automatic cleanup releases this connection.
+    var waitingHelp: String?
     /// The engine refused to release it twice (R15): the row says so and offers 다시 하기.
     var refused = false
     var send: (CUAAction) -> Void
@@ -73,7 +76,9 @@ struct ConnectionRowView: View {
                     }
                     HStack(spacing: 4) {
                         if waiting { ProgressView().controlSize(.small) }
-                        ForEach(refused ? row.refusedButtons : row.buttons) { SpecButton(spec: $0, waiting: waiting, send: send) }
+                        ForEach(refused ? row.refusedButtons : row.buttons) {
+                            SpecButton(spec: $0, waiting: waiting, waitingHelp: waitingHelp, send: send)
+                        }
                     }
                 }
             }

@@ -52,10 +52,23 @@ enum CUAAction: Hashable, Sendable {
         }
     }
 
-    /// Actions that touch several connections or Codex itself; every row waits for them.
+    /// Actions that touch several connections or Codex itself; the group buttons wait for them.
     var isWide: Bool {
         switch self {
         case .releaseEnded, .stopGroup, .stopEnded, .restartCodex, .releaseLeftover, .runSetup: true
+        default: false
+        }
+    }
+
+    /// Whether running it touches `connection`, so that row's buttons wait for it. What ends the
+    /// ended ones touches only ended connections, and a group stop only its group.
+    func touches(_ connection: Connection) -> Bool {
+        switch self {
+        case .releaseConnection(let id), .retryRelease(let id), .stopConnection(let id, _): id == connection.id
+        case .releaseEnded, .stopEnded, .releaseLeftover: connection.state == .ended
+        case .stopGroup(.claude, _): connection.agent == .claude
+        case .stopGroup(.codex, _): connection.agent == .codex
+        case .stopGroup(.all, _), .restartCodex, .runSetup: true
         default: false
         }
     }

@@ -333,3 +333,14 @@ struct PopoverSnapshotTests {
         _ = model
     }
 }
+
+@MainActor
+struct ButtonLineTests {
+    /// S18: 강제 종료 once broke in two in a narrow row. A title keeps its one line however little room there is.
+    @Test func aButtonTitleStaysOnOneLineInANarrowRow() throws {
+        let spec = ButtonSpec(title: "강제 종료", action: .stopConnection("x", force: true), isDestructive: true, help: "")
+        let free = try #require(Snapshot.bitmap(of: SpecButton(spec: spec) { _ in }))
+        let narrow = try #require(Snapshot.bitmap(of: SpecButton(spec: spec) { _ in }.frame(width: 24)))
+        #expect(narrow.size.height == free.size.height)
+    }
+}
