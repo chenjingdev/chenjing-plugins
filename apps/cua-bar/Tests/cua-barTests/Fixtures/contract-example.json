@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-18T12:00:00Z",
+  "plugin": {"version": "0.7.0"},
+  "codex": {
+    "installed": true,
+    "app_path": "/Applications/ChatGPT.app",
+    "app_version": "26.1013.40934",
+    "running": true,
+    "pids": [15400]
+  },
+  "host": {"state": "ready", "since": "2026-10-18T11:58:00Z"},
+  "setup": {
+    "command": "ready",
+    "dependencies": "ready",
+    "login_environment": "ready",
+    "wrapper": "ready",
+    "relay": "active"
+  },
+  "connections": [
+    {
+      "id": "claude-12345-1792320000",
+      "agent": "claude",
+      "state": "active",
+      "pid": 12345,
+      "owner_pid": 11111,
+      "owner_alive": true,
+      "cwd": "/Users/chenjing/dev/x",
+      "started_at": "2026-10-18T11:59:00Z",
+      "memory_bytes": 73400320,
+      "last_call_at": "2026-10-18T11:59:58Z",
+      "idle_seconds": 2,
+      "session_id": "019a1b2c-...",
+      "busy": false,
+      "can_release": true,
+      "can_stop": true
+    }
+  ],
+  "leases": {
+    "readable": false,
+    "items": [],
+    "maybe_left": [
+      {"session_id": "019a...", "agent": "claude", "connection_id": "claude-222-1792310000",
+       "cwd": "/Users/chenjing/dev/y", "ended_at": "2026-10-18T11:40:00Z", "releasable": true}
+    ]
+  },
+  "other_tools": [
+    {"name": "cmux-cua", "running": true, "pids": [11807, 11812],
+     "clients": [{"id": "cmux-12892-1792310808", "pid": 12221, "mcp_pid": 12892, "agent": "claude",
+                  "cwd": "/Users/chenjing/dev/z", "started_at": "2026-10-18T00:46:48Z", "can_stop": true}]}
+  ],
+  "screen": {"active_connection_id": "claude-12345-1792320000", "last_call_at": "2026-10-18T11:59:58Z"},
+  "activity": [
+    {"at": "2026-10-18T11:59:58Z", "connection_id": "claude-12345-1792320000", "agent": "claude",
+     "tool": "js", "ok": true, "ms": 1234}
+  ]
+}

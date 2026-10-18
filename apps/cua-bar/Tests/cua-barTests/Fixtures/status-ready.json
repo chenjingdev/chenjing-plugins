@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-18T12:00:00Z",
+  "plugin": {"version": "0.7.0"},
+  "codex": {"installed": true, "app_path": "/Applications/ChatGPT.app", "app_version": "26.1013.40934", "running": true, "pids": [15400]},
+  "host": {"state": "ready", "since": "2026-10-18T11:30:00Z"},
+  "setup": {"command": "ready", "dependencies": "ready", "login_environment": "ready", "wrapper": "ready", "relay": "active"},
+  "connections": [
+    {
+      "id": "claude-12345-1792320000", "agent": "claude", "state": "active", "pid": 12345, "owner_pid": 11111, "owner_alive": true,
+      "cwd": "/Users/chenjing/dev/computer-use", "started_at": "2026-10-18T09:39:00Z", "memory_bytes": 220200960,
+      "last_call_at": "2026-10-18T11:52:00Z", "idle_seconds": 480, "session_id": "019a1b2c-0001", "busy": false,
+      "can_release": true, "can_stop": true
+    },
+    {
+      "id": "codex-15888-1792319000", "agent": "codex", "state": "active", "pid": 15888, "owner_pid": 15400, "owner_alive": true,
+      "cwd": "/Users/chenjing/dev/new-chat", "started_at": "2026-10-18T10:35:00Z", "memory_bytes": 188743680,
+      "last_call_at": "2026-10-18T11:20:00Z", "idle_seconds": 1200, "session_id": "019a1b2c-0002", "busy": false,
+      "can_release": true, "can_stop": true
+    }
+  ],
+  "leases": {"readable": true, "items": [], "maybe_left": []},
+  "other_tools": [
+    {"name": "cmux-cua", "running": true, "pids": [11807, 11812], "clients": [{"pid": 12221, "agent": "claude", "cwd": "/Users/chenjing/dev/z"}]}
+  ],
+  "screen": {"active_connection_id": null, "last_call_at": "2026-10-18T11:52:00Z"},
+  "activity": [
+    {"at": "2026-10-18T11:52:00Z", "connection_id": "claude-12345-1792320000", "agent": "claude", "tool": "get_window_state", "ok": true, "ms": 312},
+    {"at": "2026-10-18T11:51:41Z", "connection_id": "claude-12345-1792320000", "agent": "claude", "tool": "js", "ok": true, "ms": 1234},
+    {"at": "2026-10-18T11:20:00Z", "connection_id": "codex-15888-1792319000", "agent": "codex", "tool": "click", "ok": false, "ms": 87}
+  ]
+}
