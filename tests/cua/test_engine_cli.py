@@ -178,6 +178,7 @@ class DiagnoseTests(CliCase):
         self.add_claude(501)
         self.machine.add(3500, 1, self.commands.cmux_serve)
         self.machine.add(3501, 501, self.commands.cmux_mcp)
+        self.machine.add(3502, 501, self.commands.cmux_mcp)          # a second connection of the same AI client
         self.machine.cwds[501] = str(self.home/'secret-project')
         self.state.activity([State.line('bridge-8001-%d' % (NOW-8000), 400-index, SESSION_A, tool='js', ms=100+index,
                                         ok=index % 2 == 1) for index in range(30)])
@@ -202,7 +203,7 @@ class DiagnoseTests(CliCase):
         self.assertIn('relay left out at the last Codex start: unknown_field', lines)
         self.assertIn('connections: 2 (claude 1, codex 1); active 1, idle 1, ended 0', lines)
         self.assertIn('leases: the list cannot be read; may be left behind: 1 (releasable now: 1)', lines)
-        self.assertIn('other tool: cmux-cua running, 1 process, 1 client (claude 1)', lines)
+        self.assertIn('other tool: cmux-cua running, 1 process, 2 connections (claude 2)', lines)
         operations = lines[lines.index('latest operations (newest first, 20 of 30):')+1:]
         self.assertEqual(len(operations), 20)
         self.assertTrue(all(re.match(r'^  \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ claude js (ok|failed) \d+ ms$', line) for line in operations))

@@ -67,7 +67,7 @@ def diagnose_text(ctx, view=None):
         clients = _count(tool['clients'], 'agent')
         lines.append('other tool: %s %s, %s, %s' % (
             tool['name'], 'running' if tool['running'] else 'not running', _plural(len(tool['pids']), 'process'),
-            _plural(len(tool['clients']), 'client') + (' (%s)' % ', '.join(
+            _plural(len(tool['clients']), 'connection') + (' (%s)' % ', '.join(
                 '%s %d' % (key or 'unknown', value) for key, value in sorted(clients.items(), key=str))
                 if clients else '')))
     if not status['other_tools']:
