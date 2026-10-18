@@ -33,6 +33,9 @@ runtime; do not invent APIs from ordinary Node.js or Playwright examples.
   since earlier handles may be gone.
 - If the host is unavailable, use the `setup` skill and `codex-cua doctor`.
   Retry discovery after reconnecting; do not replay uncertain clicks or submits.
+- Do not run `codex-cua release`, `release-session`, `stop` or `restart-codex`
+  yourself and never pass `--user`; point the user to the CUA Bar button or the
+  command instead.
 
 Codex's native engine handles operations, but Claude chooses the commands and
 does not inherit an existing Codex chat or its complete harness instructions.

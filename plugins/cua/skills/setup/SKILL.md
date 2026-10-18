@@ -14,13 +14,16 @@ This plugin connects to an existing Codex desktop host on the same Mac. Read
 2. Run `~/.local/bin/codex-cua doctor --probe --json` and read the summary. For
    diagnosis, `~/.local/bin/codex-cua status --json` (host, setup parts,
    connections) and `~/.local/bin/codex-cua diagnose` (plain text that is safe to
-   paste into a chat) only read; use them next to `doctor`.
+   paste into a chat) release and stop nothing (`status` only clears the records
+   of connections that are gone); use them next to `doctor`.
 3. After setup, a Codex that the user opens the usual way (Dock, Spotlight, after
-   an update) gets the host through the login environment, and the next CUA call
-   opens a closed Codex in the background. So:
+   an update) gets the host through the login environment. A closed Codex is
+   opened in the background when a new Claude conversation connects to CUA at its
+   start, and by the next CUA call after a lost connection. So:
    - If a host is already ready, use it.
-   - If Codex is closed, do not start it yourself. The first CUA call opens it in
-     the background (step 5); recheck the host after that.
+   - If Codex is closed, do not start it yourself. The fresh Claude session of
+     step 5 opens it in the background when its CUA connection starts; recheck the
+     host after that.
    - If Codex is running without the host (`status --json` shows `codex.running`
      while `host.state` is neither `ready` nor `starting`, usually because Codex
      was already open before setup), the user restarts it once: with CUA Bar's
@@ -40,3 +43,5 @@ Never replace a connection failure with a separately launched CUA engine, model
 proxy, changed permissions or automatic approval. The launcher preserves native
 model and permission settings. Do not print request payloads, screenshots, or
 secrets in diagnostic logs. Do not replay a failed GUI action during recovery.
+Do not run `release`, `release-session`, `stop` or `restart-codex` yourself and
+never pass `--user`; point the user to the CUA Bar button or the command instead.
