@@ -291,14 +291,18 @@ DECOY = 'TITLE_SENTINEL https://private.example/secret?token=SECRET_SENTINEL'
 class FakeHost:
     """The app-server side of the Unix WebSocket connection (what host_mcp.unix_connect would return)."""
 
-    def __init__(self, tools=None, thread_id=OWN_THREAD):
+    def __init__(self, tools=None, thread_id=OWN_THREAD, plugin_id=NATIVE_PLUGIN_ID):
         self.incoming = asyncio.Queue()
+        self.plugin_id = plugin_id
         self.received = []
         self.calls = []            # params of every mcpServer/tool/call
         self.closed = False
         self.thread_id = thread_id
         self.tasks = set()
         self.tools = tools or {}
+        self.hooks = {}            # method -> callable run before the host answers it
+        self.hang = set()          # methods the host never answers
+        self.errors = {}           # method -> JSON-RPC error the host answers with
 
     async def send(self, raw):
         if self.closed:
@@ -334,13 +338,20 @@ class FakeHost:
         method, ident = message.get('method'), message.get('id')
         if method is None or method == 'initialized':
             return
+        if method in self.hooks:
+            self.hooks[method]()
+        if method in self.hang:
+            await asyncio.sleep(3600)
+        if method in self.errors:
+            self.emit({'id': ident, 'error': self.errors[method]})
+            return
         if method == 'initialize':
             result = {'userAgent': 'fixture', 'codexHome': '/fixture/codex-home', 'platformFamily': 'unix',
                       'platformOs': 'macos'}
         elif method == 'thread/start':
             result = {'thread': {'id': self.thread_id, 'ephemeral': True}}
         elif method == 'mcpServerStatus/list':
-            result = {'data': [{'name': 'cua_repl', 'pluginId': NATIVE_PLUGIN_ID, 'runtimeStatus': 'connected',
+            result = {'data': [{'name': 'cua_repl', 'pluginId': self.plugin_id, 'runtimeStatus': 'connected',
                                 'tools': TOOLS, 'toolsError': None}], 'nextCursor': None}
         elif method == 'mcpServer/tool/call':
             params = message['params']
