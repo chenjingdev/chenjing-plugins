@@ -49,10 +49,9 @@ def endpoint_from_registry(state):
     return Path(read_host_registry(state)['socket_path'])
 
 
-async def main():
-    # Resolve on initialize. A closed app is opened as the original host; a
-    # failure stays a real MCP error instead of an independent CUA process.
-    state = Path(os.environ.get('CODEX_HOST_CUA_STATE_DIR', str(DEFAULT_STATE)))
+def build_adapter(state, **options):
+    # Resolve on initialize, and again whenever the host connection was lost. A closed app is opened as the
+    # original host; a failure stays a real MCP error instead of an independent CUA process.
     class RegisteredHost(HostMcp):
         async def boot(self):
             try:
@@ -76,8 +75,22 @@ async def main():
             except (OSError, ValueError):
                 raise BridgeFailure('Start Codex with the prepared host launcher before using this MCP plugin. No runtime was started.') from None
             await super().boot()
-    adapter = RegisteredHost(None, Path('/unconfigured-codex-host'), 'cua_repl')
-    cleanup = await serve(adapter, control_factory=BridgeControl)
+
+        def host_info(self):
+            # The registry the host wrote, but only when it still names the endpoint this connection is on.
+            try:
+                registry = read_host_registry(state)
+                if Path(registry['socket_path']) == self.rpc.socket_path:
+                    return {'pid': registry['backend_pid'], 'relay': registry.get('relay') is True}
+            except Exception:
+                pass
+            return {'pid': None, 'relay': False}
+    return RegisteredHost(None, Path('/unconfigured-codex-host'), 'cua_repl', **options)
+
+
+async def main():
+    state = Path(os.environ.get('CODEX_HOST_CUA_STATE_DIR', str(DEFAULT_STATE)))
+    cleanup = await serve(build_adapter(state), control_factory=BridgeControl)
     return 0 if cleanup['owned_thread_unsubscribe'] != 'unconfirmed' and cleanup['connection_close'] == 'confirmed' else 1
 
 

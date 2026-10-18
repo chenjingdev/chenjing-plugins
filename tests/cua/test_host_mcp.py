@@ -212,12 +212,15 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         await adapter.handle({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list', 'params': {}})
         lifecycle = next(tool for tool in output[-1]['result']['tools'] if tool['name'] == 'turn_ended')
         self.assertNotIn('required', lifecycle['inputSchema'])
+        ended = adapter.turn_id
         await adapter.handle({'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call',
                               'params': {'name': lifecycle['name'], 'arguments': {}}})
         self.assertEqual(output[-1]['result'], result)
         sent = next(m for m in proxy.received if m.get('method') == 'mcpServer/tool/call')
         self.assertEqual(sent['params']['arguments'], {
-            'hook_event_name': 'Stop', 'session_id': HOST_THREAD, 'turn_id': adapter.turn_id})
+            'hook_event_name': 'Stop', 'session_id': HOST_THREAD, 'turn_id': ended})
+        # The confirmed turn_ended ended that turn; the next call is made under a new one.
+        self.assertNotEqual(adapter.turn_id, ended)
         self.assertEqual(proxy.tools, TOOLS)
 
     async def test_release_version_and_server_identity_are_advertised_consistently(self):
@@ -280,11 +283,12 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output[-1]['error']['code'], -32602)
         self.assertFalse(any(m.get('method') == 'mcpServer/tool/call' for m in proxy.received))
         call['params']['arguments'] = {}
+        owned = adapter.turn_id
         await adapter.handle(call)
         sent = next(m for m in proxy.received if m.get('method') == 'mcpServer/tool/call')
-        self.assertEqual(sent['params']['arguments'], {'hook_event_name': 'Stop', 'session_id': HOST_THREAD, 'turn_id': adapter.turn_id})
+        self.assertEqual(sent['params']['arguments'], {'hook_event_name': 'Stop', 'session_id': HOST_THREAD, 'turn_id': owned})
         self.assertEqual(sent['params']['_meta'], {'thread_id': HOST_THREAD, 'threadId': HOST_THREAD,
-            'x-codex-turn-metadata': {'session_id': HOST_THREAD, 'turn_id': adapter.turn_id}})
+            'x-codex-turn-metadata': {'session_id': HOST_THREAD, 'turn_id': owned}})
 
     async def test_missing_socket_does_not_connect_or_spawn_anything(self):
         adapter, _, output, _, spawn = self.fixture()
