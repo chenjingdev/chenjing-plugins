@@ -9,7 +9,7 @@
     "running": true,
     "pids": [15400]
   },
-  "host": {"state": "ready", "since": "2026-10-18T11:58:00Z"},
+  "host": {"state": "ready", "since": "2026-10-18T11:58:00Z", "started_before_setup": false},
   "setup": {
     "command": "ready",
     "dependencies": "ready",

@@ -462,6 +462,13 @@ class View:
                 return 'starting'
         return inv.host.state
 
+    def started_before_setup(self):
+        """True when a launcher older than this setup started the running host: a restart of Codex applies it.
+
+        Every launcher since the relay reaches Claude's threads writes `relay_config` (null without a relay)."""
+        host = self.inv.host
+        return host.state == 'ready' and isinstance(host.registry, dict) and 'relay_config' not in host.registry
+
     def _codex(self):
         inv = self.inv
         installation = inv.installation
@@ -516,7 +523,8 @@ class View:
         return {'schema_version': SCHEMA_VERSION, 'generated_at': iso(self.now),
                 'plugin': {'version': self.ctx.plugin_version()},
                 'codex': self._codex(),
-                'host': {'state': self.host_state(), 'since': iso(host.since)},
+                'host': {'state': self.host_state(), 'since': iso(host.since),
+                         'started_before_setup': self.started_before_setup()},
                 'setup': self._setup(),
                 'connections': [conn.to_json() for conn in self.connections],
                 'leases': {'readable': False, 'items': [], 'maybe_left': self.maybe_left_json()},

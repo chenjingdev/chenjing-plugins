@@ -93,7 +93,8 @@ struct EngineClientIntegrationTests {
     @Test func aCommandThatNeverAnswersTimesOutAndIsStopped() async throws {
         let pidFile = FileManager.default.temporaryDirectory.appendingPathComponent("cua-bar-hang-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: pidFile) }
-        let rig = try rig(timeouts: EngineTimeouts(status: .milliseconds(600)), body: "echo $$ > '\(pidFile.path)'; exec /bin/sleep 30")
+        // Long enough for the script to write its pid while the whole suite keeps the machine busy.
+        let rig = try rig(timeouts: EngineTimeouts(status: .seconds(2)), body: "echo $$ > '\(pidFile.path)'; exec /bin/sleep 30")
         defer { rig.home.remove() }
         let started = Date()
         await #expect(throws: EngineError.timeout) { try await rig.client.status() }

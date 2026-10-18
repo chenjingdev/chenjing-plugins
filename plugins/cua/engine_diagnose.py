@@ -50,7 +50,8 @@ def diagnose_text(ctx, view=None):
                                               if codex['running'] else 'not running'))
     else:
         lines.append('codex app: not installed')
-    lines.append('host: %s%s' % (host['state'], ' since %s' % host['since'] if host['since'] else ''))
+    lines.append('host: %s%s%s' % (host['state'], ' since %s' % host['since'] if host['since'] else '',
+                                 ', started before this setup' if host['started_before_setup'] else ''))
     lines.append('setup: ' + ', '.join('%s=%s' % (key, setup[key]) for key in
                                        ('command', 'dependencies', 'login_environment', 'wrapper', 'relay')))
     reason = view.inv.host.relay_reason

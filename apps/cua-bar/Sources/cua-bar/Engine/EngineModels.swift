@@ -103,6 +103,8 @@ struct CodexInfo: Equatable, Sendable {
 struct HostInfo: Equatable, Sendable {
     var state: HostState = .unknown("")
     var since: Date?
+    /// A launcher older than this setup started the running host: restarting Codex applies the setup (S8).
+    var startedBeforeSetup = false
 }
 
 /// Raw states as the contract lists them (`ready`, `missing`, `broken`, ...); nil is unknown.
@@ -256,11 +258,12 @@ extension CodexInfo: Decodable {
 }
 
 extension HostInfo: Decodable {
-    private enum CodingKeys: String, CodingKey { case state, since }
+    private enum CodingKeys: String, CodingKey { case state, since, startedBeforeSetup = "started_before_setup" }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         state = HostState(raw: c.lenientString(.state))
         since = c.lenientDate(.since)
+        startedBeforeSetup = c.lenientBool(.startedBeforeSetup) ?? false
     }
 }
 

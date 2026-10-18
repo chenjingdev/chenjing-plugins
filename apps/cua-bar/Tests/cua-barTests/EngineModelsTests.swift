@@ -17,6 +17,7 @@ struct EngineModelsTests {
 
         #expect(status.host.state == .ready)
         #expect(status.host.since == Date(timeIntervalSince1970: 1_792_324_680))
+        #expect(status.host.startedBeforeSetup == false)
 
         #expect(status.setup.command == "ready")
         #expect(status.setup.dependencies == "ready")
@@ -126,6 +127,17 @@ struct EngineModelsTests {
         #expect(stranger.cwd == nil)
         #expect(stranger.canRelease == false)
         #expect(stranger.busy == false)
+    }
+
+    @Test func aHostFromBeforeTheSetupIsReadAndAnythingElseIsNot() throws {
+        func host(_ value: String) throws -> HostInfo {
+            let json = #"{"host": {"state": "ready", "since": null, "started_before_setup": \#(value)}}"#
+            return try JSONDecoder().decode(EngineStatus.self, from: Data(json.utf8)).host
+        }
+        #expect(try host("true").startedBeforeSetup)
+        #expect(try host("false").startedBeforeSetup == false)
+        #expect(try host(#""yes""#).startedBeforeSetup == false)
+        #expect(try host("null").startedBeforeSetup == false)
     }
 
     @Test func nullsMeanUnknownEverywhere() throws {

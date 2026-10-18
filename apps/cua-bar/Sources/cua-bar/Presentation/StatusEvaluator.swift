@@ -69,14 +69,22 @@ enum StatusEvaluator {
         }
         let counts = connectionCounts(in: status)
         let codexIsOffButStartable = status.codex.installed == true && !status.codex.running
+        // Not a problem (nothing is broken and the icon stays ready), but nothing else would say why
+        // the connections of a Codex from before the update cannot be released.
+        let restartApplies = status.codex.running && status.host.startedBeforeSetup
         return StatusSummary(
             icon: .ready, stateLabel: "준비됨",
             headline: counts.isEmpty ? "연결 없음" : "연결 " + counts,
-            nextStep: codexIsOffButStartable ? "없음 — Claude 대화를 열면 Codex가 뒤에서 켜져요" : "없음",
-            warning: nil, problem: nil,
+            nextStep: restartApplies ? restartAppliesStep
+                : codexIsOffButStartable ? "없음 — Claude 대화를 열면 Codex가 뒤에서 켜져요" : "없음",
+            warning: restartApplies ? restartAppliesWarning : nil, problem: nil,
             tooltip: "CUA 준비됨 · " + (counts.isEmpty ? "연결 없음" : counts),
             accessibilityLabel: IconState.ready.accessibilityDescription)
     }
+
+    /// For a Codex that a launcher older than this setup started (S8).
+    static let restartAppliesStep = "Codex를 다시 켜면 새 설정이 적용돼요"
+    static let restartAppliesWarning = "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 놓아줄 수 없을 수 있어요"
 
     /// The summary when the engine gave no usable status.
     ///

@@ -188,6 +188,11 @@ class DiagnoseTests(CliCase):
         self.assertEqual(status, 0)
         return text
 
+    def test_a_host_that_a_launcher_older_than_this_setup_started_says_so_on_its_line(self):
+        self.world()
+        self.write_host(relay=False, older_launcher=True)
+        self.assertIn('host: ready since %s, started before this setup' % iso(NOW-300), self.text().splitlines())
+
     def test_it_reports_versions_states_counts_other_tools_and_the_latest_operations(self):
         self.world()
         text = self.text()
@@ -286,7 +291,7 @@ class RealProcessTests(unittest.TestCase):
         self.assertEqual(list(status), ['schema_version', 'generated_at', 'plugin', 'codex', 'host', 'setup',
                                         'connections', 'leases', 'other_tools', 'screen', 'activity'])
         self.assertEqual(status['codex']['app_path'], str(self.app))
-        self.assertEqual(status['host'], {'state': 'missing', 'since': None})
+        self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False})
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})
         self.assertEqual(status['setup']['command'], 'missing')         # nothing is installed in the temporary home
         for connection in status['connections']:

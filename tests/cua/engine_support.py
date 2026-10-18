@@ -432,7 +432,7 @@ class EngineCase(unittest.TestCase):
         return str(self.home/'.local/share/codex-cua/relay/node-repl-relay')
 
     def write_host(self, status='ready', owner=1000, backend=1100, proxy=1200, relay=False, relay_reason=None,
-                   socket_path=None, age=300, relay_launcher=Ellipsis, **extra):
+                   socket_path=None, age=300, relay_launcher=Ellipsis, older_launcher=False, **extra):
         # A host that started the relay names the stable launcher; one that did not, names none.
         if relay_launcher is Ellipsis:
             relay_launcher = self.stable_launcher() if relay is True else None
@@ -441,6 +441,9 @@ class EngineCase(unittest.TestCase):
                 'native_cli': str(self.native), 'mechanism': 'original_app_server_unix_websocket',
                 'operational_readiness': 'not_checked', 'relay': relay, 'relay_launcher': relay_launcher,
                 'relay_reason': relay_reason}
+        # The launcher of this setup also writes the relay table; an older one did not.
+        if not older_launcher:
+            data['relay_config'] = {'command': '/x/node'} if relay is True else None
         data.update(extra)
         path = self.host_dir/'host.json'
         path.write_text(json.dumps(data))

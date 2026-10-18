@@ -38,7 +38,7 @@ class ShapeTests(StatusCase):
             (self.context().plugin_root/'.claude-plugin/plugin.json').read_text())['version']})
         self.assertEqual(status['codex'], {'installed': False, 'app_path': None, 'app_version': None, 'running': False,
                                            'pids': []})
-        self.assertEqual(status['host'], {'state': 'missing', 'since': None})
+        self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False})
         self.assertEqual(list(status['setup']), ['command', 'dependencies', 'login_environment', 'wrapper', 'relay'])
         self.assertEqual(status['connections'], [])
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})
@@ -58,7 +58,7 @@ class ShapeTests(StatusCase):
         status = self.status()
         self.assertEqual(status['codex'], {'installed': True, 'app_path': str(self.app), 'app_version': APP_VERSION,
                                            'running': True, 'pids': [1000]})
-        self.assertEqual(status['host'], {'state': 'ready', 'since': iso(NOW-300)})
+        self.assertEqual(status['host'], {'state': 'ready', 'since': iso(NOW-300), 'started_before_setup': False})
         self.assertEqual(status['setup'], {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready',
                                            'wrapper': 'ready', 'relay': 'active'})
         for connection in status['connections']:
@@ -130,6 +130,26 @@ class HostStartTests(StatusCase):
         self.machine.add(1200, 1000, '/usr/bin/python3 unix_ws_stdio.py --socket x', start=NOW-4)
         self.write_host(status='ready')
         self.assertEqual(self.status()['host']['state'], 'ready')
+
+
+class StartedBeforeSetupTests(StatusCase):
+    def test_a_host_from_an_older_launcher_says_a_restart_applies_the_setup(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world()
+        self.write_host(relay=True, older_launcher=True)
+        self.assertIs(self.status()['host']['started_before_setup'], True)
+        # Without its relay too (S8: the Codex from before the relay).
+        self.write_host(relay=False, older_launcher=True)
+        self.assertIs(self.status()['host']['started_before_setup'], True)
+
+    def test_a_host_from_this_launcher_or_no_ready_host_says_nothing(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world()
+        self.assertIs(self.status()['host']['started_before_setup'], False)
+        self.write_host(relay=False, relay_reason='stable_copy')
+        self.assertIs(self.status()['host']['started_before_setup'], False, 'a restart would not change it')
+        self.write_host(status='closed', older_launcher=True)
+        self.assertIs(self.status()['host']['started_before_setup'], False)
 
 
 class RelaySetupTests(StatusCase):

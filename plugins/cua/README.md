@@ -76,7 +76,7 @@ CUA Bar는 연결 상태를 보고 놓아주기·종료를 하는 macOS 메뉴 �
 
 중계기는 `~/.codex/config.toml`을 고치지 않습니다. Claude 대화의 런타임에는 Codex를 켜는 래퍼가 원래 `cua_repl` 정의를 읽어 그 앞에 끼웁니다. Codex 앱이 대화마다 보내는 `cua_repl` 설정에서는 런타임 경로 한 값만 중계기로 바꿔 전달하고, 예상한 값일 때만 바꾸며 나머지는 그대로 넘깁니다. 모델·권한·승인 설정은 건드리지 않습니다.
 
-중계기가 없어도 Codex는 켜집니다. 원래 정의를 읽지 못하거나 중계기가 깨졌으면 Codex는 중계기 없이 원래대로 켜집니다. 그때는 Codex 대화의 연결을 끄기 전에 탭을 놓지 못하고, 작업 중·쉼·세션 ID도 알 수 없습니다. 중계기 사본이 없거나 깨졌으면 CUA Bar가 문제로 알리고 **고치기**로 고칩니다(`/cua:setup`도 같은 일을 합니다). 원래 정의를 읽지 못해 중계기 없이 켜진 경우는 `status --json`의 `setup.relay`가 `inactive`로만 보이고 CUA Bar는 문제로 알리지 않습니다. 이유는 `codex-cua diagnose`의 `relay left out …` 줄에 나옵니다.
+중계기가 없어도 Codex는 켜집니다. 원래 정의를 읽지 못하거나 중계기가 깨졌으면 Codex는 중계기 없이 원래대로 켜집니다. 그때는 Codex 대화의 연결을 끄기 전에 탭을 놓지 못하고, 작업 중·쉼·세션 ID도 알 수 없습니다. 중계기 사본이 없거나 깨졌으면 CUA Bar가 문제로 알리고 **고치기**로 고칩니다(`/cua:setup`도 같은 일을 합니다). 원래 정의를 읽지 못해 중계기 없이 켜진 경우는 `status --json`의 `setup.relay`가 `inactive`로만 보이고 CUA Bar는 문제로 알리지 않습니다. 이유는 `codex-cua diagnose`의 `relay left out …` 줄에 나옵니다. 이번 설정보다 먼저 켜진 Codex는 `host.started_before_setup`이 `true`이고, CUA Bar 카드가 "Codex를 다시 켜면 새 설정이 적용돼요"라고 안내합니다. 그 전에는 연결 상태를 모르거나 놓아주지 못할 수 있습니다.
 
 ## 관리
 

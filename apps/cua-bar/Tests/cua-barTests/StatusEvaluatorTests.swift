@@ -46,6 +46,21 @@ struct StatusEvaluatorTests {
         #expect(summary.nextStep == "없음 — Claude 대화를 열면 Codex가 뒤에서 켜져요")
     }
 
+    @Test func aCodexFromBeforeTheUpdateIsStillReadyButTheCardSaysARestartAppliesTheSetup() throws {
+        // S8: its connections were all unknown and could not be released, and nothing said why.
+        var status = try healthy()
+        status.host.startedBeforeSetup = true
+        let summary = evaluate(status)
+        #expect(summary.icon == .ready)
+        #expect(summary.problem == nil, "nothing is broken: no alarm and no notification")
+        #expect(summary.nextStep == "Codex를 다시 켜면 새 설정이 적용돼요")
+        #expect(summary.warning == "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 놓아줄 수 없을 수 있어요")
+        // A Codex that is no longer running needs no restart.
+        status.codex.running = false
+        status.codex.pids = []
+        #expect(evaluate(status).warning == nil)
+    }
+
     @Test func endedConnectionsAreNotCountedAsConnected() throws {
         let status = try Fixtures.status("status-problem")
         // 1 Claude alive, 1 Codex idle; the ended Claude one is a problem, not a connection.
