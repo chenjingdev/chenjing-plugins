@@ -37,7 +37,8 @@ struct PopoverView: View {
                 .frame(height: Theme.listHeight)
 
             FooterView(
-                updatedText: model.updatedText, maintenance: maintenance, notifications: model.notificationPermission, quit: quit)
+                updatedText: model.updatedText, maintenance: maintenance, notifications: model.notificationPermission,
+                turnOnNotifications: { await model.turnOnNotifications() }, quit: quit)
         }
         .padding(Theme.padding)
         .frame(width: Theme.popoverWidth)

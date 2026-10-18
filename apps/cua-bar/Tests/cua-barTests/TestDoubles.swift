@@ -6,6 +6,9 @@ import Foundation
 final class FakeNotifier: Notifier, @unchecked Sendable {
     private let lock = NSLock()
     private var allowed: Bool
+    /// Set while nobody has answered: what asking turns the setting into. `.notDecided` is a
+    /// question the system does not show, as while the screen is locked.
+    private var answer: NotificationPermission?
     private var recordedDelivered: [AppNotification] = []
     private var recordedAttempts = 0
     private var recordedAuthorizationRequests = 0
@@ -20,21 +23,28 @@ final class FakeNotifier: Notifier, @unchecked Sendable {
 
     func setAllowed(_ value: Bool) { lock.withLock { allowed = value } }
 
+    /// Nobody has answered yet; the next question turns the setting into `answer`.
+    func setUndecided(answer: NotificationPermission) { lock.withLock { self.answer = answer } }
+
     func requestAuthorization() async -> Bool {
         lock.withLock {
             recordedAuthorizationRequests += 1
-            return allowed
+            if let answer, answer != .notDecided {
+                allowed = answer == .allowed
+                self.answer = nil
+            }
+            return answer == nil && allowed
         }
     }
 
     func permission() async -> NotificationPermission {
-        lock.withLock { allowed ? .allowed : .off }
+        lock.withLock { answer != nil ? .notDecided : allowed ? .allowed : .off }
     }
 
     func post(_ notification: AppNotification) async -> Bool {
         lock.withLock {
             recordedAttempts += 1
-            guard allowed else { return false }
+            guard answer == nil, allowed else { return false }
             recordedDelivered.append(notification)
             return true
         }

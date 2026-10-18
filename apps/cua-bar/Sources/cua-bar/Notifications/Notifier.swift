@@ -72,12 +72,14 @@ enum NotificationResponse: Equatable, Sendable {
     }
 }
 
-/// Where this app's notifications stand in System Settings. The system asks the person once; a
-/// question nobody answered, or a no, can then be changed only in System Settings.
+/// Where this app's notifications stand in System Settings. Until the person answers the system's
+/// question, the app can ask it again; System Settings list the app only once it was answered, and a
+/// no can then be changed only there.
 enum NotificationPermission: Equatable, Sendable {
     /// Alerts may be shown.
     case allowed
-    /// Not answered yet.
+    /// Not answered yet. Also an app that started while the screen was locked: its question failed
+    /// at once and was never shown.
     case notDecided
     /// Turned off for this app.
     case off
@@ -85,7 +87,7 @@ enum NotificationPermission: Equatable, Sendable {
     case unavailable
 
     /// The footer offers 알림 켜기 while notifications cannot be shown and the person can change that.
-    var offersSettings: Bool { self == .off || self == .notDecided }
+    var offersTurningOn: Bool { self == .off || self == .notDecided }
 
     /// Its line in the copied diagnosis.
     var diagnosisLine: String {

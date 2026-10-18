@@ -827,6 +827,16 @@ final class CUABarViewModel: ObservableObject {
         }
     }
 
+    /// 알림 켜기. While nobody has answered, the system's question is asked again: someone is at the
+    /// screen now, and System Settings do not list the app before an answer. True when System
+    /// Settings should open: the setting is off, or the question still went unanswered.
+    func turnOnNotifications() async -> Bool {
+        guard notificationPermission == .notDecided else { return true }
+        _ = await notifier.requestAuthorization()
+        notificationPermission = await notifier.permission()
+        return notificationPermission == .notDecided
+    }
+
     private func postDueNotifications(now: Date) {
         guard let status = lastStatus else { return }
         let due = notificationPlanner.due(

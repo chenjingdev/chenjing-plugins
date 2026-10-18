@@ -8,6 +8,8 @@ struct FooterView: View {
     var maintenance: Maintenance?
     /// 알림 켜기 shows while notifications cannot be shown.
     var notifications: NotificationPermission = .unavailable
+    /// What 알림 켜기 does before System Settings; true when they should open.
+    var turnOnNotifications: () async -> Bool = { true }
     var quit: () -> Void
 
     var body: some View {
@@ -21,7 +23,9 @@ struct FooterView: View {
                     .foregroundStyle(.secondary)
                 if let maintenance {
                     NewVersionButton(releases: maintenance.releases, opener: maintenance.opener)
-                    if notifications.offersSettings { NotificationsButton(opener: maintenance.opener) }
+                    if notifications.offersTurningOn {
+                        NotificationsButton(permission: notifications, opener: maintenance.opener, turnOn: turnOnNotifications)
+                    }
                 }
                 Spacer(minLength: 4)
                 if let maintenance {
@@ -60,14 +64,19 @@ struct NewVersionButton: View {
     }
 }
 
-/// 알림 켜기: opens this app's notifications in System Settings. Without them nothing is lost (R21),
-/// so it only says so and shows where they are turned on.
+/// 알림 켜기: asks the system's question while nobody has answered it, else opens this app's
+/// notifications in System Settings. Without them nothing is lost (R21), so it only says so and
+/// shows where they are turned on.
 struct NotificationsButton: View {
+    var permission: NotificationPermission
     var opener: any URLOpening
+    var turnOn: () async -> Bool
 
     var body: some View {
         Button {
-            Task { _ = await opener.open(NotificationPermission.settingsURL) }
+            Task {
+                if await turnOn() { _ = await opener.open(NotificationPermission.settingsURL) }
+            }
         } label: {
             Text("알림 켜기")
                 .font(.system(size: 11, weight: .semibold))
@@ -77,7 +86,9 @@ struct NotificationsButton: View {
                 .background(Capsule().fill(Color.orange.opacity(0.14)))
         }
         .buttonStyle(.plain)
-        .help("알림이 꺼져 있어 문제는 아이콘과 카드로만 알려요. 눌러서 시스템 설정의 알림을 열어요")
+        .help(permission == .notDecided
+            ? "알림을 아직 허용하지 않아 문제는 아이콘과 카드로만 알려요. 누르면 macOS가 알림을 허용할지 물어요"
+            : "알림이 꺼져 있어 문제는 아이콘과 카드로만 알려요. 눌러서 시스템 설정의 알림을 열어요")
     }
 }
 

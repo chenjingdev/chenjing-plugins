@@ -205,14 +205,48 @@ struct NotificationViewModelTests {
         #expect(rig.pasteboard.copied.last == "codex-cua diagnose\n알림: 꺼짐\n")
     }
 
-    @Test func eachSettingHasItsLineAndOnlyOffOrUnansweredOffersTheSettings() {
+    @Test func eachSettingHasItsLineAndOnlyOffOrUnansweredOffersTurningThemOn() {
         #expect(NotificationPermission.allowed.diagnosisLine == "알림: 켜짐")
         #expect(NotificationPermission.notDecided.diagnosisLine == "알림: 아직 허용하지 않음")
         #expect(NotificationPermission.off.diagnosisLine == "알림: 꺼짐")
         #expect(NotificationPermission.unavailable.diagnosisLine == "알림: 쓸 수 없음")
-        #expect([NotificationPermission.allowed, .notDecided, .off, .unavailable].filter(\.offersSettings) == [.notDecided, .off])
+        #expect([NotificationPermission.allowed, .notDecided, .off, .unavailable].filter(\.offersTurningOn) == [.notDecided, .off])
         #expect(NotificationPermission.settingsURL.absoluteString.hasPrefix(
             "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id="))
+    }
+
+    @Test func anUnansweredQuestionIsAskedAgainFromTheFooterInsteadOfOpeningSettings() async throws {
+        // The app started while the screen was locked: its question failed at once.
+        let notifier = FakeNotifier()
+        notifier.setUndecided(answer: .notDecided)
+        let rig = await Rig(try codexProblem(), notifier: notifier, refresh: false)
+        rig.model.start()
+        await rig.model.waitForBackgroundWork()
+        rig.model.stop()
+        #expect(rig.model.notificationPermission == .notDecided)
+        // Someone at the screen presses 알림 켜기: the question shows and they allow it.
+        notifier.setUndecided(answer: .allowed)
+        #expect(await rig.model.turnOnNotifications() == false, "System Settings stay closed")
+        #expect(rig.model.notificationPermission == .allowed)
+        #expect(notifier.authorizationRequests == 2)
+    }
+
+    @Test func settingsOpenWhenNotificationsAreOffOrTheQuestionStillGoesUnanswered() async throws {
+        let notifier = FakeNotifier(allowed: false)
+        let rig = await Rig(try codexProblem(), notifier: notifier, refresh: false)
+        rig.model.setPopoverOpen(true)
+        await rig.model.waitForBackgroundWork()
+        #expect(rig.model.notificationPermission == .off)
+        #expect(await rig.model.turnOnNotifications())
+        #expect(notifier.authorizationRequests == 0, "a no is changed only in System Settings")
+
+        notifier.setUndecided(answer: .notDecided)
+        rig.model.setPopoverOpen(false)
+        rig.model.setPopoverOpen(true)
+        await rig.model.waitForBackgroundWork()
+        #expect(await rig.model.turnOnNotifications(), "the system did not show it")
+        #expect(notifier.authorizationRequests == 1)
+        #expect(rig.model.notificationPermission == .notDecided)
     }
 
     @Test func codexWithoutAHostIsPostedOnceAndTheCardShowsItToo() async throws {
