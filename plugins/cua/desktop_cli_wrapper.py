@@ -163,6 +163,18 @@ def _stop_owned(children, timeout):
     return clean and all(child is None or child.returncode is not None for child in children)
 
 
+def _relay_plan(native, arguments, environment):
+    """Decide whether the relay goes in front of the CUA runtime for this start: (plan, reason).
+
+    Every problem, however unexpected, means no relay and the backend starts exactly as it would without one.
+    """
+    try:
+        from relay_install import plan_relay
+        return plan_relay(native, arguments, environment, Path(__file__).resolve().parent)
+    except Exception:
+        return None, "unavailable"
+
+
 def launch(native, arguments, environment, state_dir):
     """Own one original backend; raise BackendNotStarted if it cannot even be started."""
     progress = {"backend": False}
@@ -190,6 +202,9 @@ def _launch(native, arguments, environment, state_dir, progress):
     except BlockingIOError:
         lock.close()
         raise RuntimeError("Another primary launcher owns this explicit endpoint lease.") from None
+    # The relay changes the backend's arguments only when the bundled definition was read and checked.
+    relay, relay_reason = _relay_plan(native, arguments, environment)
+    backend_arguments = relay.arguments if relay else list(arguments)
     instance_dir = state_dir / ("run-" + uuid.uuid4().hex[:12])
     instance_dir.mkdir(mode=0o700)
     endpoint = instance_dir / "rpc.sock"
@@ -198,7 +213,9 @@ def _launch(native, arguments, environment, state_dir, progress):
     record = {"schema_version": 1, "status": "starting", "owner_pid": os.getpid(),
               "backend_pid": None, "desktop_proxy_pid": None, "socket_path": str(endpoint),
               "native_cli": str(native), "mechanism": "original_app_server_unix_websocket",
-              "operational_readiness": "not_checked"}
+              "operational_readiness": "not_checked",
+              "relay": relay is not None, "relay_launcher": str(relay.launcher) if relay else None,
+              "relay_reason": relay_reason}
     try:
         # Still before anything is started: a state directory that cannot be written
         # must not cost Codex its backend.
@@ -220,7 +237,7 @@ def _launch(native, arguments, environment, state_dir, progress):
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, request_stop)
         # All original argv, env, and cwd are preserved. Only listen is added.
-        backend = subprocess.Popen([str(native), *arguments, "--listen", "unix://" + str(endpoint)],
+        backend = subprocess.Popen([str(native), *backend_arguments, "--listen", "unix://" + str(endpoint)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=None,
             env=environment, cwd=os.getcwd(), close_fds=True)
         progress["backend"] = True
@@ -228,7 +245,7 @@ def _launch(native, arguments, environment, state_dir, progress):
         _write_metadata(metadata_path, record)
         _wait_for_owned_socket(endpoint, backend, stop, startup_timeout)
         desktop_proxy = subprocess.Popen([sys.executable, str(Path(__file__).with_name("unix_ws_stdio.py")),
-                                         "--socket", str(endpoint)],
+                                         "--socket", str(endpoint), *(relay.proxy_arguments() if relay else [])],
             stdin=None, stdout=None, stderr=None, env=environment, cwd=os.getcwd(), close_fds=True)
         record.update(status="ready", desktop_proxy_pid=desktop_proxy.pid)
         _write_metadata(metadata_path, record)

@@ -33,6 +33,17 @@ def record(role):
     with log.open('a') as output:
         output.write(json.dumps({'role':role,'pid':os.getpid(),'argv':args,'cwd':os.getcwd(),
             'fixture_hash':hashlib.sha256(os.environ.get('FIXTURE_ENV','').encode()).hexdigest()})+'\n')
+if 'mcp' in args and 'get' in args:
+    # The launcher reads the effective CUA definition before it starts the backend. That is no launch.
+    sys.path.insert(0,os.environ.get('FIXTURE_TESTS_DIR',''))
+    definition=os.environ.get('FIXTURE_MCP_DEFINITION');mode=os.environ.get('FIXTURE_MCP_MODE','ok')
+    if not definition or mode=='exit':sys.exit(1)
+    if mode=='hang':time.sleep(30)
+    import fake_native_cli
+    with (log.parent/'mcp-get.jsonl').open('a') as output:
+        output.write(json.dumps({'argv':args,'fixture_hash':hashlib.sha256(os.environ.get('FIXTURE_ENV','').encode()).hexdigest()})+'\n')
+    print(json.dumps(fake_native_cli.mcp_get(args[:args.index('mcp')],json.load(open(definition)),ignore_override=mode=='ignore_override')))
+    sys.exit(0)
 if 'app-server' in args and 'proxy' in args:
     record('proxy')
     connection=socket.socket(socket.AF_UNIX);connection.connect(args[args.index('--sock')+1])
@@ -113,7 +124,7 @@ class LifecycleTests(unittest.TestCase):
         self.log = self.root / "events.jsonl"
         self.state = self.root / "state"
         self.environment = dict(os.environ)
-        self.environment.update({"CODEX_HOST_CUA_NATIVE_CLI":str(self.native),
+        self.environment.update({"HOME":str(self.root/"home"),"CODEX_HOST_CUA_NATIVE_CLI":str(self.native),
             "CODEX_HOST_CUA_STATE_DIR":str(self.state), "CODEX_HOST_CUA_STARTUP_TIMEOUT":"2",
             "CODEX_HOST_CUA_SHUTDOWN_TIMEOUT":"0.4", "FIXTURE_EVENT_FILE":str(self.log),
             "FIXTURE_ENV":"fixture-environment-value"})

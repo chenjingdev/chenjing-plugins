@@ -5,6 +5,8 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -198,6 +200,79 @@ class SetupTests(unittest.TestCase):
         self.assertTrue((self.root/'source.json').exists())
         with patch.object(setup.os, 'kill', side_effect=PermissionError), self.assertRaises(RuntimeError):
             setup.uninstall(self.home, {'CODEX_HOST_CUA_STATE_DIR': str(state)})
+
+    def with_relay_files(self):
+        shutil.copytree(Path(setup.__file__).parent/'relay', self.plugin/'relay')
+
+    def test_setup_copies_the_relay_files_to_the_support_directory(self):
+        self.with_relay_files()
+        with patch.object(setup, 'ensure_dependencies', return_value=self.root/'venv/bin/python3'):
+            setup.install_command(self.plugin, self.home)
+        directory = self.root/'relay'
+        for name in ('relay.mjs', 'node-repl-relay'):
+            self.assertEqual((directory/name).read_bytes(), (Path(setup.__file__).parent/'relay'/name).read_bytes())
+        self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE((directory/'node-repl-relay').stat().st_mode), 0o700)
+        self.assertEqual(setup.relay_status(self.home), 'ready')
+        # A second setup after a plugin update replaces what changed and nothing else.
+        (directory/'relay.mjs').write_text('stale')
+        with patch.object(setup, 'ensure_dependencies', return_value=self.root/'venv/bin/python3'):
+            setup.install_command(self.plugin, self.home)
+        self.assertEqual((directory/'relay.mjs').read_bytes(), (Path(setup.__file__).parent/'relay/relay.mjs').read_bytes())
+
+    def test_a_plugin_without_relay_files_still_sets_up_and_doctor_says_so(self):
+        with patch.object(setup, 'ensure_dependencies', return_value=self.root/'venv/bin/python3'):
+            setup.install_command(self.plugin, self.home)
+        self.assertTrue((self.home/'.local/bin/codex-cua').is_file())
+        self.assertFalse((self.root/'relay').exists())
+        self.assertEqual(setup.relay_status(self.home), 'missing')
+
+    def test_setup_says_whether_the_relay_files_are_in_place(self):
+        output = io.StringIO()
+        with patch.object(setup, 'install_command', return_value=Path('/fixture/codex-cua')), \
+             patch.object(setup, 'install_login_environment', return_value='ready'), \
+             patch.object(setup, 'relay_status', return_value='ready'), contextlib.redirect_stdout(output):
+            self.assertEqual(setup.main(['setup']), 0)
+        self.assertIn('Relay files: ready', output.getvalue().splitlines())
+
+    def test_doctor_reports_the_relay_files(self):
+        app, _, _ = fake_app(self.home/'Applications')
+        environment = {'CODEX_CUA_APP_PATH': str(app)}
+        report = lambda: setup.doctor(self.plugin, home=self.home, environment=environment)['relay']
+        self.assertEqual(report(), 'missing')
+        self.with_relay_files()
+        self.assertTrue(setup.install_relay(self.plugin, self.home))
+        self.assertEqual(report(), 'ready')
+        (self.root/'relay/relay.mjs').write_text('cut off')
+        self.assertEqual(report(), 'invalid')
+        (self.root/'relay/relay.mjs').unlink()
+        self.assertEqual(report(), 'missing')
+        with patch('relay_install.relay_files_status', side_effect=RuntimeError):
+            self.assertEqual(report(), 'invalid')
+
+    def test_uninstall_removes_the_relay_directory_and_still_finishes_when_that_fails(self):
+        for failing in (False, True):
+            self.root.mkdir(parents=True, mode=0o700, exist_ok=True)
+            self.bind()
+            self.with_relay_files() if not (self.plugin/'relay').exists() else None
+            self.assertTrue(setup.install_relay(self.plugin, self.home))
+            state = self.home/'state'
+            state.mkdir(exist_ok=True)
+            seen = []
+            real = shutil.rmtree
+            def remove(path, *args, **kwargs):
+                seen.append(((self.root/'relay').exists(), Path(path)))
+                return real(path, *args, **kwargs)
+            patches = [patch.object(setup, 'remove_login_environment'), patch.object(setup.shutil, 'rmtree', side_effect=remove)]
+            if failing:
+                patches.append(patch('relay_install.remove_relay_files', side_effect=OSError('PRIVATE')))
+            with contextlib.ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+                self.assertEqual(setup.uninstall(self.home, {'CODEX_HOST_CUA_STATE_DIR': str(state)}), 0)
+            self.assertFalse(self.root.exists())
+            # The relay directory goes on its own first; if that fails, the support directory takes it along anyway.
+            self.assertEqual([path for _, path in seen], [self.root] if failing else [self.root/'relay', self.root])
 
     def test_requested_probe_without_dependencies_is_failure_and_never_connects(self):
         with patch.object(setup, 'venv_ready', return_value=False), \
