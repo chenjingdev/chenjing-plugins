@@ -27,7 +27,9 @@ class PortwardenControl:
         socket = self.directory/'control.sock'
         self.server = await asyncio.start_unix_server(self.handle, path=str(socket), limit=2048)
         os.chmod(socket, 0o600)
-        birth = subprocess.check_output(['ps', '-p', str(os.getpid()), '-o', 'lstart='], text=True).strip()
+        # The C locale keeps lstart parseable on non-English systems.
+        birth = subprocess.check_output(['ps', '-p', str(os.getpid()), '-o', 'lstart='], text=True,
+                                        env=dict(os.environ, LC_ALL='C')).strip()
         started = datetime.datetime.strptime(birth, '%a %b %d %H:%M:%S %Y').timestamp()*1000
         record = {'schemaVersion': 1, 'relayKind': 'host-frontend', 'relayPid': os.getpid(),
                   'rootPid': os.getpid(), 'relayStartedAt': started, 'controlPath': str(socket)}

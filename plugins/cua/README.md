@@ -23,7 +23,12 @@ Claude Code의 새 대화에서 다음을 실행합니다.
 
 Claude가 설치와 연결을 점검합니다. 이후 **“cua 써서 이 앱을 확인해 줘”**처럼 요청하면 됩니다. 연결이 끊겼다면 **“CUA 연결 복구해 줘”**라고 요청합니다.
 
-Codex가 이미 켜져 있어 연결 방식 변경이 필요하면 Claude가 안내합니다. 진행 중인 작업을 마치고 앱을 정상 종료한 다음 연결용 실행 명령으로 열어야 합니다. 앱을 강제로 종료하지 않습니다.
+설정이 끝나면 Codex를 따로 준비하지 않아도 됩니다.
+
+- **앱을 평소처럼 켜도 됩니다.** 설정 때 로그인 항목(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`)이 등록돼, Dock이나 Spotlight로 연 Codex도 연결 가능한 방식으로 켜집니다.
+- **앱이 꺼져 있어도 됩니다.** Claude가 CUA에 연결할 때 Codex를 뒤에서 열고, 앞에 있던 앱으로 포커스를 돌려줍니다. 끄려면 `CODEX_HOST_CUA_AUTOSTART=0`을 지정합니다.
+- **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** 진행 중인 작업을 마치고 앱을 정상 종료(⌘Q)한 뒤 다시 열고, Claude Code에서 `/mcp`로 cua를 다시 연결합니다. 앱을 강제로 종료하지 않습니다.
+- Codex가 뒤에서 열리는 동안 로그인·권한·업데이트 창이 떠 있으면, 기다리다가 Codex를 앞으로 띄우고 안내합니다.
 
 ## 관리
 
@@ -41,7 +46,7 @@ claude plugin install cua@chenjing-plugins --scope user
 
 ```sh
 ~/.local/bin/codex-cua doctor --probe  # 연결 확인
-~/.local/bin/codex-cua start           # 연결 가능한 방식으로 Codex 실행
+~/.local/bin/codex-cua start           # 연결 가능한 방식으로 Codex 실행(보통은 필요 없음)
 ```
 
 업데이트는 다음 명령으로 적용합니다. 이미 열려 있던 Claude 대화는 작업을 마친 뒤 새로 엽니다.
@@ -52,7 +57,7 @@ claude plugin update cua@chenjing-plugins --scope user
 ~/.local/bin/codex-cua setup
 ```
 
-제거할 때는 진행 중인 Codex 작업을 마치고 앱을 정상 종료한 다음 실행합니다.
+제거할 때는 진행 중인 Codex 작업을 마치고 앱을 정상 종료한 다음 실행합니다. 로그인 항목과 등록한 설정값도 함께 지웁니다.
 
 ```sh
 ~/.local/bin/codex-cua uninstall

@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+import plistlib
 import shlex
 import shutil
 import stat
@@ -19,6 +20,8 @@ sys.dont_write_bytecode = True
 PLUGIN_ID = 'cua@chenjing-plugins'
 MARKER = '# codex-cua authored command v1'
 DEPENDENCY = 'websockets==12.0'
+LOGIN_LABEL = 'com.chenjingdev.codex-cua.env'
+FALLBACK_ENV = 'CODEX_CUA_FALLBACK_NATIVE'
 
 
 def support_root(home=None):
@@ -174,21 +177,76 @@ def install_command(plugin_root, home=None):
     # Atomic replace only after inspecting the previous authored command.
     write_private(target, command)
     target.chmod(0o700)
-    launcher = '#!/bin/sh\n'+MARKER+'\nexec '+shlex.quote(str(python))+' '+shlex.quote(str(root/'command.py'))+' --control ensure --exec-wrapper -- "$@"\n'
+    fallback = ''
+    try:
+        from runtime_paths import discover_installation
+        fallback = FALLBACK_ENV+'='+shlex.quote(str(discover_installation(home=home).native_cli))+' '
+    except Exception:
+        pass
+    # The app may select this launcher on every launch, so a broken plugin
+    # install falls back to the original CLI instead of stopping Codex.
+    launcher = '#!/bin/sh\n'+MARKER+'\n'+fallback+'exec '+shlex.quote(str(python))+' '+shlex.quote(str(root/'command.py'))+' --control ensure --exec-wrapper -- "$@"\n'
     write_private(root/'start-desktop-cli.sh', launcher)
     (root/'start-desktop-cli.sh').chmod(0o700)
     return target
 
 
 def app_processes(executable):
-    result = subprocess.run(['/bin/ps', '-axo', 'pid=,comm='], check=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5)
-    matches = []
-    for line in result.stdout.splitlines():
-        parts = line.strip().split(None, 1)
-        if len(parts) == 2 and parts[0].isdigit() and parts[1] == str(executable):
-            matches.append(int(parts[0]))
-    return matches
+    from host_autostart import app_processes as inventory
+    return inventory(executable)
+
+
+def login_agent_path(home=None):
+    return (Path.home() if home is None else Path(home))/'Library/LaunchAgents'/(LOGIN_LABEL+'.plist')
+
+
+def launchd_value(key):
+    result = subprocess.run(['/bin/launchctl', 'getenv', key], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, text=True, timeout=5)
+    return result.stdout.strip()
+
+
+def login_values(home=None, environment=None):
+    from host_autostart import launch_environment
+    return launch_environment(configured_state(environment, home), home=home)
+
+
+def login_environment_status(home=None, environment=None):
+    # A missing agent is reported without asking launchd.
+    if not login_agent_path(home).is_file():
+        return 'missing'
+    values = login_values(home, environment)
+    return 'ready' if all(launchd_value(key) == value for key, value in values.items()) else 'stale'
+
+
+def install_login_environment(home=None, environment=None):
+    """Let an ordinary Dock/Finder launch select the host launcher too."""
+    values = login_values(home, environment)
+    for key, value in values.items():
+        current = launchd_value(key)
+        if current and current != value:
+            return 'conflict'
+    path = login_agent_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    script = '; '.join('/bin/launchctl setenv '+shlex.quote(key)+' '+shlex.quote(value) for key, value in values.items())
+    write_private(path, plistlib.dumps({'Label': LOGIN_LABEL, 'ProgramArguments': ['/bin/sh', '-c', script],
+                                        'RunAtLoad': True}).decode())
+    for key, value in values.items():
+        subprocess.run(['/bin/launchctl', 'setenv', key, value], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    return 'ready'
+
+
+def remove_login_environment(home=None, environment=None):
+    path = login_agent_path(home)
+    if path.is_file():
+        if plistlib.loads(path.read_bytes()).get('Label') != LOGIN_LABEL:
+            raise RuntimeError('An unrelated login agent was preserved.')
+        path.unlink()
+    for key, value in login_values(home, environment).items():
+        if launchd_value(key) == value:
+            subprocess.run(['/bin/launchctl', 'unsetenv', key], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
 
 
 def configured_state(environment=None, home=None):
@@ -201,6 +259,7 @@ def start_host(plugin_root, environment=None, home=None):
     environment = dict(os.environ if environment is None else environment)
     from runtime_paths import discover_installation
     from mcp_stdio import read_host_registry
+    from host_autostart import launch_environment
     state = configured_state(environment, home)
     try:
         read_host_registry(state)
@@ -214,10 +273,13 @@ def start_host(plugin_root, environment=None, home=None):
         print('Finish your Codex work, quit the app normally, then run codex-cua start. This command does not quit the app.', file=sys.stderr)
         return 1
     install_command(plugin_root, home)
-    command = ['/usr/bin/open', '-a', str(installation.app_path),
-               '--env', 'CODEX_CLI_PATH='+str(support_root(home)/'start-desktop-cli.sh'),
-               '--env', 'CODEX_HOST_CUA_STATE_DIR='+str(state),
-               '--env', 'CODEX_HOST_CUA_NATIVE_CLI='+str(installation.native_cli)]
+    try:
+        install_login_environment(home, environment)
+    except Exception:
+        pass
+    command = ['/usr/bin/open', '-a', str(installation.app_path)]
+    for key, value in launch_environment(state, installation, home).items():
+        command += ['--env', key+'='+value]
     return subprocess.run(command, env=environment, timeout=15).returncode
 
 
@@ -286,6 +348,7 @@ def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None):
     environment = os.environ if environment is None else environment
     report = {'schema_version': 1, 'plugin_id': PLUGIN_ID, 'status': 'unavailable',
               'installation': 'not_checked', 'dependencies': 'missing', 'host': 'unavailable',
+              'login_environment': 'not_checked',
               'cua': 'not_checked', 'browser': 'not_checked', 'computer': 'not_checked',
               'operational_readiness': 'not_checked'}
     try:
@@ -297,6 +360,10 @@ def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None):
         report['app_version'] = info.get('CFBundleShortVersionString')
     except (InstallationError, OSError):
         pass
+    try:
+        report['login_environment'] = login_environment_status(home, environment)
+    except Exception:
+        report['login_environment'] = 'unknown'
     if venv_ready(support_root(home)):
         report['dependencies'] = 'ready'
         report['websockets_version'] = '12.0'
@@ -319,7 +386,8 @@ def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None):
     report['next_action'] = ('none' if report['status'] == 'checked' else
                              'complete_original_approval' if report['status'] == 'approval_required' else
                              'run_setup' if report['dependencies'] != 'ready' else
-                             'start_host_after_normal_app_quit' if registry is None else 'inspect_fresh_state')
+                             'run_setup' if report['login_environment'] in ('missing', 'stale') else
+                             'reopen_app_normally_or_reconnect_mcp' if registry is None else 'inspect_fresh_state')
     return report
 
 
@@ -347,6 +415,7 @@ def uninstall(home=None, environment=None):
     binding = private_json(root/'source.json')
     if binding.get('plugin_id') != PLUGIN_ID:
         raise RuntimeError('The support installation is not authored by this plugin.')
+    remove_login_environment(home, environment)
     target = home/'.local/bin/codex-cua'
     if target.exists() or target.is_symlink():
         info = target.lstat()
@@ -356,6 +425,12 @@ def uninstall(home=None, environment=None):
     shutil.rmtree(root)
     # App, original assets, live host state and Claude managed caches are untouched.
     return 0
+
+
+def exec_native_fallback(arguments):
+    native = os.environ.get(FALLBACK_ENV, '')
+    if native and Path(native).is_absolute() and os.path.isfile(native) and os.access(native, os.X_OK):
+        os.execve(native, [native, *arguments], dict(os.environ))
 
 
 def main(arguments=None):
@@ -378,18 +453,28 @@ def main(arguments=None):
         parser.error('--timeout must be finite, positive and at most 60 seconds')
     if sys.version_info < (3, 9) or sys.platform != 'darwin':
         raise RuntimeError('This plugin requires macOS and Python 3.9 or newer.')
-    plugin_root = resolve_plugin_root() if args.control else Path(__file__).resolve().parent
-    sys.path.insert(0, str(plugin_root))
+    try:
+        plugin_root = resolve_plugin_root() if args.control else Path(__file__).resolve().parent
+        sys.path.insert(0, str(plugin_root))
+        if args.command == 'ensure':
+            python = ensure_dependencies()
+            if args.exec_mcp or args.exec_wrapper:
+                script = plugin_root/('mcp_stdio.py' if args.exec_mcp else 'desktop_cli_wrapper.py')
+                environment = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
+                os.execve(str(python), [str(python), str(script), *remainder], environment)
+            return 0
+    except Exception:
+        if args.exec_wrapper:
+            exec_native_fallback(remainder)
+        raise
     if args.command in ('install', 'setup'):
         target = install_command(plugin_root)
         print('Installed authored command: '+str(target))
-        return 0
-    if args.command == 'ensure':
-        python = ensure_dependencies()
-        if args.exec_mcp or args.exec_wrapper:
-            script = plugin_root/('mcp_stdio.py' if args.exec_mcp else 'desktop_cli_wrapper.py')
-            environment = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-            os.execve(str(python), [str(python), str(script), *remainder], environment)
+        try:
+            status = install_login_environment()
+        except Exception:
+            status = 'failed'
+        print('Ordinary app launch as host: '+status)
         return 0
     if remainder:
         parser.error('unrecognized arguments')

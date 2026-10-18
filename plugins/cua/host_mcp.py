@@ -22,7 +22,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.5.0'
+VERSION = '0.6.0'
 PORTWARDEN_RELAY = Path.home()/'dev/portwarden/scripts/cua-runtime-proxy.mjs'
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.

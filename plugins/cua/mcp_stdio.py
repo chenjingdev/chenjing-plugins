@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+from host_autostart import AutostartFailure, ensure_host
 from host_mcp import HostMcp, serve, BridgeFailure
 from portwarden_control import PortwardenControl
 from runtime_paths import default_state, installation_from_native_cli, InstallationError
@@ -49,13 +50,18 @@ def endpoint_from_registry(state):
 
 
 async def main():
-    # Resolve on initialize, so a missing host yields a real MCP error instead
-    # of quietly spawning an independent CUA process or inventing tool schemas.
+    # Resolve on initialize. A closed app is opened as the original host; a
+    # failure stays a real MCP error instead of an independent CUA process.
     state = Path(os.environ.get('CODEX_HOST_CUA_STATE_DIR', str(DEFAULT_STATE)))
     class RegisteredHost(HostMcp):
         async def boot(self):
             try:
-                registry = read_host_registry(state)
+                try:
+                    registry = await asyncio.to_thread(ensure_host, state, read_host_registry)
+                except AutostartFailure as error:
+                    raise BridgeFailure(str(error)) from None
+                except InstallationError:
+                    raise BridgeFailure('Install Codex Desktop, or set CODEX_CUA_APP_PATH to its original app bundle.') from None
                 self.rpc.socket_path = Path(registry['socket_path'])
                 self.native_cua_root = None
                 if isinstance(registry.get('native_cli'), str):
