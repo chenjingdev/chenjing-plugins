@@ -214,8 +214,10 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('changed while the tests ran', done.stderr)
 
     def test_a_usage_error_exits_1_because_2_belongs_to_the_guard(self):
-        for arguments, said in ((['--no-such-option'], 'unrecognized arguments: --no-such-option'),
-                                (['--tests'], 'expected one argument')):
+        # The stand-in suite and home come first, so a parser that one day accepts these runs no real suite.
+        own = ['--tests', str(self.suite), '--real-home', str(self.home)]
+        for arguments, said in (([*own, '--no-such-option'], 'unrecognized arguments: --no-such-option'),
+                                ([*own[:3]], 'expected one argument')):
             with self.subTest(arguments=arguments):
                 done = subprocess.run([sys.executable, '-B', str(HERE/'run.py'), *arguments], stdout=subprocess.PIPE,
                                       stderr=subprocess.PIPE, text=True, timeout=60)
