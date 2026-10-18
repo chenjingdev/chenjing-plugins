@@ -37,6 +37,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             self?.apply(summary)
         }
         apply(model.summary)
+        // A click on a notification opens the popover (the person's own click, so R1 holds).
+        model.openPopoverHandler = { [weak self] in self?.showPopover() }
     }
 
     func remove() {
@@ -57,13 +59,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {
-        guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            showPopover()
         }
+    }
+
+    private func showPopover() {
+        guard let button = statusItem.button, !popover.isShown else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
     }
 
     // MARK: NSPopoverDelegate

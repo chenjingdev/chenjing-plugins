@@ -57,51 +57,6 @@ private struct SnapshotScene: View {
     }
 }
 
-@MainActor
-private enum Snapshot {
-    static func bitmap<V: View>(of view: V, dark: Bool = false) -> NSBitmapImageRep? {
-        _ = NSApplication.shared
-        let host = NSHostingView(rootView: view)
-        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        host.appearance = appearance
-        let size = host.fittingSize
-        host.frame = NSRect(origin: .zero, size: size)
-        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-        window.appearance = appearance
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
-        // Twice the pixels, so the PNG is as sharp as on a Retina screen.
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil, pixelsWide: Int(size.width) * 2, pixelsHigh: Int(size.height) * 2, bitsPerSample: 8,
-            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
-        else { return nil }
-        bitmap.size = size
-        host.cacheDisplay(in: host.bounds, to: bitmap)
-        return bitmap
-    }
-
-    static func write(_ bitmap: NSBitmapImageRep, named name: String, to directory: String) throws {
-        let folder = URL(fileURLWithPath: directory, isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try #require(bitmap.representation(using: .png, properties: [:])).write(to: folder.appendingPathComponent(name + ".png"))
-    }
-
-    /// Fraction of pixels that differ from the corner pixel: a blank render scores ~0.
-    static func inkRatio(_ bitmap: NSBitmapImageRep) -> Double {
-        guard let data = bitmap.bitmapData else { return 0 }
-        let bytes = bitmap.bytesPerRow, height = bitmap.pixelsHigh, width = bitmap.pixelsWide
-        let corner = Array(UnsafeBufferPointer(start: data, count: 4))
-        var different = 0
-        for y in stride(from: 0, to: height, by: 2) {
-            for x in stride(from: 0, to: width, by: 2) {
-                let pixel = data + y * bytes + x * 4
-                if abs(Int(pixel[0]) - Int(corner[0])) + abs(Int(pixel[1]) - Int(corner[1])) + abs(Int(pixel[2]) - Int(corner[2])) > 24 { different += 1 }
-            }
-        }
-        return Double(different) / Double((height / 2 + 1) * (width / 2 + 1))
-    }
-}
-
 /// Draws the popover for three situations. With `CUABAR_SNAPSHOT_DIR` set the PNGs are written
 /// there (A1-popover-ready.png, -working.png, -problem.png); `CUABAR_SNAPSHOT_EXTRA_DIR` adds
 /// every tab, and `CUABAR_SNAPSHOT_APPEARANCE=dark` renders dark mode.
@@ -131,6 +86,81 @@ struct PopoverSnapshotTests {
         if let directory = environment["CUABAR_SNAPSHOT_DIR"] {
             try Snapshot.write(bitmap, named: "A1-popover-\(name)", to: directory)
         }
+    }
+
+    /// A pending group-stop confirmation under the status card (A2-popover-confirm.png).
+    @Test func aPendingGroupStopConfirmationDraws() async throws {
+        let model = try await loadedModel("status-problem")
+        model.send(.stopGroup(.all, force: false))
+        #expect(model.confirmationPrompt?.title == "연결 3개를 끌까요?")
+        let withQuestion = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark))
+        #expect(NSApplication.shared.windows.allSatisfy { !$0.isVisible })
+        model.cancelPending()
+        let without = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark))
+        #expect(withQuestion.pixelsHigh > without.pixelsHigh, "the question takes room of its own")
+        if let directory = environment["CUABAR_SNAPSHOT_DIR"] {
+            try Snapshot.write(withQuestion, named: "A2-popover-confirm", to: directory)
+        }
+    }
+
+    /// The states the action layer adds, each drawn (and written when `CUABAR_SNAPSHOT_EXTRA_DIR` is set).
+    @Test func theActionStatesDraw() async throws {
+        func draw(_ name: String, _ model: CUABarViewModel) throws {
+            let bitmap = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark))
+            #expect(Snapshot.inkRatio(bitmap) > 0.1, "\(name) looks blank")
+            if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] { try Snapshot.write(bitmap, named: name, to: directory) }
+        }
+        let refused = ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0)
+        let ended = "claude-4001-1792300000"
+
+        // A refused release, asked about once more, then refused again: the row says so.
+        var rig = await Rig(try Fixtures.status("status-problem"))
+        rig.engine.configure { $0.releaseConnectionQueue = [refused, refused] }
+        await rig.model.send(.releaseConnection(ended))?.value
+        try draw("state-retry-question", rig.model)
+        await rig.model.confirmPending()
+        try draw("state-refused-row", rig.model)
+
+        // Force stop and restart, each with its question.
+        rig = await Rig(try Fixtures.status("status-problem"))
+        rig.model.send(.stopConnection("claude-12345-1792320000", force: true))
+        try draw("state-force-confirm", rig.model)
+        rig.model.send(.restartCodex)
+        try draw("state-restart-confirm", rig.model)
+        rig.model.cancelPending()
+
+        // A restart whose relaunch failed: the message has its own button.
+        rig.engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "relaunch_failed") }
+        rig.model.send(.restartCodex)
+        await rig.model.confirmPending()
+        try draw("state-relaunch-failed", rig.model)
+
+        // Ended connections nobody can release: the card stops them, after one question.
+        var status = try Fixtures.status("status-ready")
+        for index in status.connections.indices {
+            status.connections[index].state = .ended
+            status.connections[index].canRelease = false
+        }
+        rig = await Rig(status)
+        try draw("state-stop-ended-card", rig.model)
+        rig.model.send(.stopEnded)
+        try draw("state-stop-ended-confirm", rig.model)
+
+        // A pinpoint release that failed: its row says why, the guidance is open.
+        rig = await Rig(try Fixtures.status("status-problem"))
+        rig.engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: false, reason: "cleanup_not_confirmed") }
+        rig.model.selectedTab = .leases
+        await rig.model.perform(.releaseSession("019a1b2c-0009", user: true))
+        try draw("state-lease-failed", rig.model)
+
+        // The card's own release of leftover sessions was a partial success.
+        status = try Fixtures.status("status-ready")
+        status.leases.maybeLeft = [
+            LeftoverLease(sessionID: "019a-a", agent: .claude, connectionID: nil, cwd: "/Users/chenjing/dev/y", endedAt: Fixtures.now.addingTimeInterval(-300), releasable: true),
+            LeftoverLease(sessionID: "019a-b", agent: .codex, connectionID: nil, cwd: "/Users/chenjing/dev/z/app", endedAt: nil, releasable: true),
+        ]
+        rig = await Rig(status)
+        try draw("state-card-leftover", rig.model)
     }
 
     @Test func eachTabDrawsForTheProblemFixture() async throws {

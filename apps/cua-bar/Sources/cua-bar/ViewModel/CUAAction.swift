@@ -5,8 +5,8 @@ enum StopGroup: String, CaseIterable, Hashable, Sendable {
     case all, claude, codex
 }
 
-/// Everything a button in the popover can ask for. The view model runs these; confirmations,
-/// notifications and automatic cleanup (next task) wrap `CUABarViewModel.perform(_:)`.
+/// Everything a button in the popover can ask for. `CUABarViewModel.send(_:)` asks first when the
+/// action needs a confirmation, and `perform(_:)` runs it.
 enum CUAAction: Hashable, Sendable {
     // Engine actions (contract: "Actions").
     case releaseConnection(String)
@@ -20,8 +20,19 @@ enum CUAAction: Hashable, Sendable {
 
     // Fix buttons that are more than one engine call, or not an engine call at all.
     case runSetup
-    /// `release-session` for every leftover lease that has a session to aim at.
+    /// The status card's 놓아주기 for leftover leases: `release-session` (without `--user`) for
+    /// every Claude session the engine can aim at. Codex chat sessions are released only by a click
+    /// on their own row.
     case releaseLeftover
+    /// 끝난 연결 끄기: `stop --connection` for every ended connection the engine may stop. The fix
+    /// when no ended connection has a control endpoint to release through.
+    case stopEnded
+    /// 다시 하기: release one connection again after the engine refused (R15). Never asks again.
+    case retryRelease(String)
+    /// 안내 보기: select the 브라우저 점유 tab and open its guidance.
+    case showLeaseGuidance
+    /// Codex 열기, after a restart whose relaunch failed. Opens the app the person just chose to open.
+    case openCodex
     /// TODO(A3): open the page where Codex is downloaded.
     case openCodexDownload
     /// TODO(A3): install the Claude plugin (`cua@chenjing-plugins`).
@@ -34,7 +45,7 @@ enum CUAAction: Hashable, Sendable {
     /// The connection the action is aimed at, so its row's buttons can wait for it.
     var connectionID: String? {
         switch self {
-        case .releaseConnection(let id), .stopConnection(let id, _): id
+        case .releaseConnection(let id), .retryRelease(let id), .stopConnection(let id, _): id
         default: nil
         }
     }
@@ -42,7 +53,7 @@ enum CUAAction: Hashable, Sendable {
     /// Actions that touch several connections or Codex itself; every row waits for them.
     var isWide: Bool {
         switch self {
-        case .releaseEnded, .stopGroup, .restartCodex, .releaseLeftover, .runSetup: true
+        case .releaseEnded, .stopGroup, .stopEnded, .restartCodex, .releaseLeftover, .runSetup: true
         default: false
         }
     }

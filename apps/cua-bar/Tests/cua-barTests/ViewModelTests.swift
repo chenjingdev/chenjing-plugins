@@ -356,10 +356,11 @@ struct ViewModelTests {
 
     @Test func aFinishedActionLeavesAOneLineBanner() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        engine.configure { $0.releaseConnection = ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0) }
+        // (`request_in_flight` has a flow of its own, R15: it asks once more instead of showing a banner.)
+        engine.configure { $0.releaseConnection = ReleaseResult(ok: false, released: false, reason: "relay_unavailable", scopeCount: 0) }
         let model = makeModel(engine)
         let outcome = await model.perform(.releaseConnection("claude-1-1"))
-        #expect(outcome == ActionOutcome(kind: .failure, message: "놓지 못했어요 — 도구 호출이 아직 끝나지 않았어요"))
+        #expect(outcome == ActionOutcome(kind: .failure, message: "놓지 못했어요 — 중계기를 쓸 수 없어요"))
         #expect(model.banner?.outcome == outcome)
         model.dismissBanner()
         #expect(model.banner == nil)
@@ -422,9 +423,10 @@ struct ViewModelTests {
         #expect(outcome.kind == .failure)
     }
 
-    @Test func releasingLeftoversTriesEveryReleasableSessionOnce() async throws {
+    @Test func theCardsLeftoverReleaseTouchesOnlyClaudeSessionsWithoutUserAndGivesEachItsOwnResult() async throws {
         var status = try Fixtures.status("status-problem")
         status.leases.maybeLeft.append(LeftoverLease(sessionID: "019a-extra", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true))
+        status.leases.maybeLeft.append(LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true))
         let engine = FakeEngineClient(status: status)
         engine.configure {
             $0.releaseSessionByID["019a-extra"] = SessionReleaseResult(ok: true, released: false, reason: "cleanup_not_confirmed")
@@ -432,11 +434,21 @@ struct ViewModelTests {
         }
         let model = makeModel(engine)
         await model.refresh()
+        await model.waitForBackgroundWork()
         let outcome = await model.perform(.releaseLeftover)
-        // The Codex leftover has no session id and is not releasable: it is not attempted.
-        #expect(engine.calls.filter { if case .releaseSession = $0 { true } else { false } } == [.releaseSession("019a1b2c-0009", user: true), .releaseSession("019a-extra", user: true)])
-        #expect(outcome == ActionOutcome(kind: .warning, message: "남은 세션 2개 중 1개의 점유를 풀었어요 (탭 2개) — 정리가 확인되지 않았어요"))
+        // One after another, Claude sessions only, never `--user`. The Codex chat's session is left
+        // for its own row's 콕 집어 풀기, and so is the Codex leftover without a session.
+        #expect(engine.calls.filter { if case .releaseSession = $0 { true } else { false } }
+                == [.releaseSession("019a1b2c-0009", user: false), .releaseSession("019a-extra", user: false)])
+        #expect(outcome == ActionOutcome(kind: .warning, message: "남은 세션 2개 중 1개의 점유를 놓았어요 (탭 2개) — 나머지는 정리가 확인되지 않았어요"))
+        // Each session keeps its own result for its own row.
+        #expect(model.sessionResults["019a1b2c-0009"] == ActionOutcome(kind: .success, message: "탭 2개를 놓았어요"))
+        #expect(model.sessionResults["019a-extra"] == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 정리가 확인되지 않았어요"))
+        #expect(model.sessionResults["019a-codex"] == nil)
         #expect(model.failedSessionIDs == ["019a-extra"])
+        // The guidance is what the person needs next, so it is on screen.
+        #expect(model.selectedTab == .leases)
+        #expect(model.guidanceOpenByUser == true)
     }
 
     @Test func releasingLeftoversWithNothingToAimAtSaysSo() async throws {
@@ -444,7 +456,7 @@ struct ViewModelTests {
         let model = makeModel(engine)
         await model.refresh()
         let outcome = await model.perform(.releaseLeftover)
-        #expect(outcome == ActionOutcome(kind: .info, message: "하나씩 풀 수 있는 점유가 없어요"))
+        #expect(outcome == ActionOutcome(kind: .info, message: "Claude 대화의 점유 중 놓을 수 있는 것이 없어요"))
         #expect(engine.calls.filter { if case .releaseSession = $0 { true } else { false } }.isEmpty)
     }
 

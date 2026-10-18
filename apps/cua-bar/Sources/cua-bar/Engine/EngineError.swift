@@ -15,17 +15,21 @@ enum EngineError: Error, Equatable, Sendable {
     /// The document's `schema_version` is newer than this app understands.
     case unsupportedSchema(Int)
 
-    /// One short Korean line for the status card and for result banners.
+    /// One fixed Korean line for the status card and for result banners. The cases that carry
+    /// what the command printed (stderr can hold paths) never show it: the text stays in the value
+    /// for whoever debugs, and the person always reads the same sentence.
     var message: String {
         switch self {
-        case .pluginMissing: "CUA 플러그인이 없어요"
+        case .pluginMissing: "Claude 플러그인이 없어요"
         case .setupNeeded: "연결 설정이 아직 안 됐어요"
         case .timeout: "응답이 없어 기다리다 멈췄어요"
-        case .commandFailed(let code, let message):
-            message.isEmpty ? "명령이 오류로 끝났어요 (종료 코드 \(code))" : "명령이 오류로 끝났어요 (종료 코드 \(code)): \(message)"
-        case .launchFailed(let message): "명령을 실행하지 못했어요: \(message)"
-        case .invalidOutput: "출력을 읽지 못했어요"
-        case .unsupportedSchema(let version): "앱이 모르는 출력 판이에요 (schema \(version))"
+        case .commandFailed: "명령이 오류로 끝났어요"
+        case .launchFailed: "명령을 실행하지 못했어요"
+        case .invalidOutput: "명령의 출력을 읽지 못했어요"
+        case .unsupportedSchema: "앱이 모르는 출력 판이에요"
         }
     }
+
+    /// The engine's own reason word for a failure that is really "it took too long".
+    var reasonCode: String? { self == .timeout ? "timeout" : nil }
 }

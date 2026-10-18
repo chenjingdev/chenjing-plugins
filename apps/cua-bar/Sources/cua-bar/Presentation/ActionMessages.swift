@@ -11,12 +11,30 @@ struct ActionOutcome: Equatable, Sendable {
         case failure
     }
 
+    /// A button that goes with the message (열기 after a failed relaunch).
+    struct FollowUp: Equatable, Sendable {
+        var title: String
+        var action: CUAAction
+    }
+
     var kind: Kind
     var message: String
+    var followUp: FollowUp?
 }
 
+/// One connection's part in a stop: an entry of a group stop's `results`, or one `stop --connection`.
+struct StopItem: Equatable, Sendable {
+    var stopped: Bool
+    var released: Bool
+    var reason: String?
+}
+
+/// Plain Korean for what the engine answered. Nothing here shows text the command printed: the
+/// only words that reach the person are these.
 enum ActionMessages {
-    /// Plain text for the engine's `reason` (contract: "Reasons the app must handle").
+    static let unknownReason = "확인되지 않음"
+
+    /// One line per reason of the contract (and its later additions); anything else is unknown.
     static func reason(_ raw: String?) -> String {
         switch raw {
         case "request_in_flight": "도구 호출이 아직 끝나지 않았어요"
@@ -25,81 +43,198 @@ enum ActionMessages {
         case "cleanup_not_confirmed": "정리가 확인되지 않았어요"
         case "relay_unavailable": "중계기를 쓸 수 없어요"
         case "unsupported": "하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"
+        case "quit_cancelled": "Codex가 종료를 취소했어요"
+        case "not_running": "Codex가 켜져 있지 않아요"
+        case "relaunch_failed": "Codex를 다시 열지 못했어요"
+        case "timeout": "시간이 너무 오래 걸렸어요"
         case "needs_user": "Codex 대화의 점유는 직접 눌러야 풀 수 있어요"
         case "session_live": "살아 있는 연결이 아직 이 세션을 쓰고 있어요"
-        case "quit_cancelled": "Codex가 종료되지 않았어요 (종료를 취소했을 수 있어요)"
-        case "not_running": "켜져 있지 않아요"
-        case "relaunch_failed": "다시 열지 못했어요"
-        case "timeout": "시간이 너무 오래 걸렸어요"
-        default: "확인되지 않음"
+        case "unattributed": "주인을 몰라 끄지 않았어요"
+        case "protected": "앱이 건드리지 않는 프로세스예요"
+        case "unverified": "프로세스가 바뀌었거나 확인되지 않아 건드리지 않았어요"
+        case "permission_denied": "종료할 권한이 없어요"
+        default: unknownReason
         }
     }
 
+    /// The reasons behind several failures in one phrase: each distinct reason once, at most two.
+    static func why(_ reasons: [String?]) -> String {
+        var distinct: [String] = []
+        for raw in reasons {
+            let text = reason(raw)
+            if !distinct.contains(text) { distinct.append(text) }
+        }
+        switch distinct.count {
+        case 0: return unknownReason
+        case 1: return distinct[0]
+        case 2: return distinct[0] + ", " + distinct[1]
+        default: return distinct[0] + ", " + distinct[1] + " 외"
+        }
+    }
+
+    // MARK: Release
+
     static func releaseConnection(_ result: ReleaseResult) -> ActionOutcome {
-        if result.ok, result.released { return ActionOutcome(kind: .success, message: "놓아줬어요") }
-        if result.ok, result.reason == "no_trusted_scope" { return ActionOutcome(kind: .info, message: reason(result.reason)) }
+        if result.ok, result.released { return ActionOutcome(kind: .success, message: "놓았어요") }
+        if result.reason == "no_trusted_scope" { return ActionOutcome(kind: .info, message: reason(result.reason)) }
         return ActionOutcome(kind: .failure, message: "놓지 못했어요 — \(reason(result.reason))")
     }
 
+    /// Reads `ok` and every item: an `ok: false` answer with nothing in it is a failure, never
+    /// "no ended connections".
     static func releaseEnded(_ result: ReleaseEndedResult) -> ActionOutcome {
-        let total = result.results.count
-        guard total > 0 else { return ActionOutcome(kind: .info, message: "끝난 연결이 없어요") }
-        let released = result.results.filter(\.released).count
-        if released == total { return ActionOutcome(kind: .success, message: "끝난 연결 \(total)개를 놓아줬어요") }
-        let why = reason(result.results.first { !$0.released }?.reason)
-        if released == 0 { return ActionOutcome(kind: .failure, message: "끝난 연결 \(total)개를 놓지 못했어요 — \(why)") }
-        return ActionOutcome(kind: .warning, message: "끝난 연결 \(total)개 중 \(released)개를 놓아줬어요 — \(why)")
+        let items = result.results
+        guard !items.isEmpty else {
+            return result.ok
+                ? ActionOutcome(kind: .info, message: "끝난 연결이 없어요")
+                : ActionOutcome(kind: .failure, message: "놓지 못했어요 — \(reason(result.reason))")
+        }
+        let released = items.filter(\.released).count
+        let failed = items.count - released
+        if failed == 0 {
+            return result.ok
+                ? ActionOutcome(kind: .success, message: "끝난 연결 \(items.count)개를 놓았어요")
+                : ActionOutcome(kind: .warning, message: "끝난 연결 \(items.count)개를 놓았지만 마무리는 확인되지 않았어요")
+        }
+        let why = why(items.filter { !$0.released }.map(\.reason))
+        if released == 0 { return ActionOutcome(kind: .failure, message: "끝난 연결 \(items.count)개를 놓지 못했어요 — \(why)") }
+        return ActionOutcome(kind: .warning, message: "끝난 연결 \(items.count)개 중 \(released)개를 놓았어요 — 나머지는 \(why)")
     }
 
+    /// `release-session`: the engine counts the tabs it just released; that is a result, not a
+    /// guess at what is left.
     static func releaseSession(_ result: SessionReleaseResult) -> ActionOutcome {
         if result.ok, result.released {
-            // The engine counts the tabs it just released; that is a result, not a guess at what is left.
-            let tabs = result.tabCount.flatMap { $0 > 0 ? " (탭 \($0)개)" : nil } ?? ""
-            return ActionOutcome(kind: .success, message: "점유를 풀었어요\(tabs)")
+            return ActionOutcome(kind: .success, message: result.tabCount.map { "탭 \($0)개를 놓았어요" } ?? "놓았어요")
         }
         return ActionOutcome(kind: .failure, message: "풀지 못했어요 — \(reason(result.reason))")
     }
 
+    /// The status card's 놓아주기 for leftover leases: one `release-session` per Claude session.
+    /// The numbers count those sessions, never leases: with an unreadable lease list the app does
+    /// not know how many leases there are (R14).
+    static func releaseLeftovers(_ results: [SessionReleaseResult]) -> ActionOutcome {
+        guard !results.isEmpty else {
+            return ActionOutcome(kind: .info, message: "Claude 대화의 점유 중 놓을 수 있는 것이 없어요")
+        }
+        let done = results.filter { $0.ok && $0.released }
+        let tabText = done.contains { $0.tabCount != nil } ? " (탭 \(done.compactMap(\.tabCount).reduce(0, +))개)" : ""
+        if done.count == results.count {
+            return ActionOutcome(kind: .success, message: "남은 세션 \(results.count)개의 점유를 놓았어요\(tabText)")
+        }
+        let why = why(results.filter { !($0.ok && $0.released) }.map(\.reason))
+        if done.isEmpty {
+            return ActionOutcome(kind: .failure, message: "남은 세션 \(results.count)개의 점유를 놓지 못했어요 — \(why)")
+        }
+        return ActionOutcome(kind: .warning, message: "남은 세션 \(results.count)개 중 \(done.count)개의 점유를 놓았어요\(tabText) — 나머지는 \(why)")
+    }
+
+    // MARK: Stop
+
+    /// A normal stop is not blocked by a refused release (R15): the stop is reported as it is, and
+    /// the tabs the plugin could not release show up as 주인 없는 점유 on the next refresh.
     static func stopConnection(_ result: StopResult, force: Bool) -> ActionOutcome {
-        let how = force ? "강제로 껐" : "껐"
-        guard result.ok, result.stopped else {
+        let how = force ? "강제로 " : ""
+        guard result.stopped else {
             return ActionOutcome(kind: .failure, message: "끄지 못했어요 — \(reason(result.reason))")
         }
-        // Stopped but the tabs were not confirmed released: they show up under 브라우저 점유 (F4).
-        if !result.released {
-            return ActionOutcome(kind: .warning, message: "\(how)지만 점유를 놓았는지는 확인되지 않았어요 — 브라우저 점유 탭을 보세요")
+        if result.released {
+            return result.ok
+                ? ActionOutcome(kind: .success, message: "\(how)껐어요")
+                : ActionOutcome(kind: .warning, message: "\(how)껐어요. 마무리는 확인되지 않았어요")
         }
-        return ActionOutcome(kind: .success, message: "\(how)어요")
+        if result.reason == "request_in_flight" {
+            return ActionOutcome(
+                kind: .warning,
+                message: "\(how)껐어요. 도구 호출이 끝나지 않아 점유는 못 놓았어요 — 플러그인이 끝날 때 한 번 더 놓고, 남으면 브라우저 점유 탭에 보여요")
+        }
+        return ActionOutcome(kind: .warning, message: "\(how)껐지만 점유를 놓았는지는 확인되지 않았어요 — 브라우저 점유 탭을 보세요")
     }
 
+    /// Reads `ok` and every item (`stopped`, `released`, `reason`), says how many failed and why,
+    /// and lists the connections the engine skipped for not knowing their owner on their own.
     static func stopGroup(_ result: GroupStopResult, group: StopGroup, force: Bool) -> ActionOutcome {
         let label = group == .all ? "연결" : "\(group == .claude ? "Claude" : "Codex") 연결"
-        let how = force ? "강제로 껐" : "껐"
-        switch (result.stopped, result.failed) {
-        case (0, 0): return ActionOutcome(kind: .info, message: "끌 연결이 없어요")
-        case (let stopped, 0): return ActionOutcome(kind: .success, message: "\(label) \(stopped)개를 \(how)어요")
-        case (0, let failed): return ActionOutcome(kind: .failure, message: "\(label) \(failed)개를 모두 끄지 못했어요")
-        case (let stopped, let failed): return ActionOutcome(kind: .warning, message: "\(label) \(stopped)개를 \(how)고 \(failed)개는 못 껐어요")
+        return stopSummary(
+            label: label, force: force,
+            items: result.results.map { StopItem(stopped: $0.stopped, released: $0.released, reason: $0.reason) },
+            fallback: (stopped: result.stopped, failed: result.failed), ok: result.ok, topReason: result.reason)
+    }
+
+    /// 끝난 연결 끄기: the answers of one `stop --connection` per ended connection.
+    static func stopEnded(_ results: [StopResult]) -> ActionOutcome {
+        stopSummary(
+            label: "끝난 연결", force: false,
+            items: results.map { StopItem(stopped: $0.stopped, released: $0.released, reason: $0.reason) },
+            fallback: (stopped: 0, failed: 0), ok: results.allSatisfy(\.ok), topReason: results.first { !$0.ok }?.reason)
+    }
+
+    private static func stopSummary(
+        label: String, force: Bool, items: [StopItem], fallback: (stopped: Int, failed: Int), ok: Bool, topReason: String?
+    ) -> ActionOutcome {
+        let stopped: Int
+        let failedReasons: [String?]
+        let unattributed: Int
+        let notReleased: Int
+        if items.isEmpty {
+            // An engine that only sends counts: use them, with no reasons to give.
+            stopped = fallback.stopped
+            failedReasons = Array(repeating: nil, count: fallback.failed)
+            unattributed = 0
+            notReleased = 0
+        } else {
+            stopped = items.filter(\.stopped).count
+            unattributed = items.filter { !$0.stopped && $0.reason == "unattributed" }.count
+            failedReasons = items.filter { !$0.stopped && $0.reason != "unattributed" }.map(\.reason)
+            notReleased = items.filter { $0.stopped && !$0.released }.count
+        }
+        let failed = failedReasons.count
+        if stopped == 0, failed == 0, unattributed == 0 {
+            return ok
+                ? ActionOutcome(kind: .info, message: "끌 연결이 없어요")
+                : ActionOutcome(kind: .failure, message: "끄지 못했어요 — \(reason(topReason))")
+        }
+        let how = force ? "강제로 " : ""
+        var parts: [String] = []
+        if stopped > 0 { parts.append("\(label) \(stopped)개를 \(how)껐어요") }
+        if failed > 0 {
+            let why = why(failedReasons)
+            parts.append(stopped > 0 ? "\(failed)개는 못 껐어요 — \(why)" : "\(label) \(failed)개를 끄지 못했어요 — \(why)")
+        }
+        if unattributed > 0 {
+            parts.append("주인을 몰라 끄지 않음 \(unattributed)개 — 하나씩 끄거나 전체로 끌 수 있어요")
+        }
+        if notReleased > 0 {
+            parts.append("점유를 놓았는지 확인되지 않은 연결 \(notReleased)개 — 브라우저 점유 탭을 보세요")
+        }
+        let clean = failed == 0 && unattributed == 0 && notReleased == 0
+        if clean && !ok { parts.append("마무리는 확인되지 않았어요") }
+        let kind: ActionOutcome.Kind = stopped == 0 && failed > 0 ? .failure : (clean && ok ? .success : .warning)
+        return ActionOutcome(kind: kind, message: parts.joined(separator: " · "))
+    }
+
+    // MARK: Restart
+
+    /// `quit_cancelled` ends there (nothing else happens); `relaunch_failed` offers the one click
+    /// that opens Codex (R1: only on the person's click).
+    static func restartCodex(_ result: RestartResult) -> ActionOutcome {
+        if result.ok { return ActionOutcome(kind: .success, message: "Codex를 다시 켰어요") }
+        switch result.reason {
+        case "quit_cancelled":
+            return ActionOutcome(kind: .info, message: reason(result.reason))
+        case "relaunch_failed":
+            // The quit worked; only opening it again did not.
+            return ActionOutcome(
+                kind: .failure, message: "Codex를 껐지만 다시 열지 못했어요",
+                followUp: .init(title: "Codex 열기", action: .openCodex))
+        default:
+            return ActionOutcome(kind: .failure, message: "Codex를 다시 켜지 못했어요 — \(reason(result.reason))")
         }
     }
 
-    /// The status card's 놓아주기 for leftover leases: one `release-session` per recorded session it
-    /// could aim at. The numbers count those sessions, never leases: with an unreadable lease list
-    /// the app does not know how many leases there are (R14).
-    static func releaseLeftovers(attempted: Int, released: Int, tabs: Int = 0, firstReason: String?) -> ActionOutcome {
-        let tabText = tabs > 0 ? " (탭 \(tabs)개)" : ""
-        if released == attempted { return ActionOutcome(kind: .success, message: "남은 세션 \(attempted)개의 점유를 풀었어요\(tabText)") }
-        let why = reason(firstReason)
-        if released == 0 { return ActionOutcome(kind: .failure, message: "남은 세션 \(attempted)개의 점유를 풀지 못했어요 — \(why)") }
-        return ActionOutcome(kind: .warning, message: "남은 세션 \(attempted)개 중 \(released)개의 점유를 풀었어요\(tabText) — \(why)")
-    }
+    // MARK: The command itself
 
-    static func restartCodex(_ result: RestartResult) -> ActionOutcome {
-        if result.ok { return ActionOutcome(kind: .success, message: "Codex를 다시 켰어요") }
-        return ActionOutcome(kind: .failure, message: "Codex를 다시 켜지 못했어요 — \(reason(result.reason))")
-    }
-
-    /// The engine could not be asked at all.
+    /// The engine could not be asked at all: the lead-in and one fixed line, never what it printed.
     static func failure(of what: String, error: EngineError) -> ActionOutcome {
         ActionOutcome(kind: .failure, message: "\(what) — \(error.message)")
     }

@@ -133,6 +133,8 @@ struct ButtonWiringTests {
                 engine: engine, appVersion: "0.7.0", pasteboard: RecordingPasteboard(),
                 clock: { Fixtures.now }, calendar: Fixtures.utc, sleep: ManualSleeper().sleep)
             await model.refresh()
+            // This fixture has an ended connection the app releases by itself (F5); let that finish first.
+            await model.waitForBackgroundWork()
             let before = engine.calls.count
             await model.perform(spec.action)
             let calls = Array(engine.calls.dropFirst(before))
@@ -148,6 +150,8 @@ struct ButtonWiringTests {
             engine: engine, appVersion: "0.7.0", pasteboard: RecordingPasteboard(),
             clock: { Fixtures.now }, calendar: Fixtures.utc, sleep: ManualSleeper().sleep)
         await model.refresh()
+        await model.waitForBackgroundWork()
+        let baseline = engine.calls.count
         let content = try #require(model.content)
         let claudeEnded = try #require(content.connections.groups.first?.rows.first)
         #expect(claudeEnded.id == "claude-4001-1792300000")
@@ -157,7 +161,7 @@ struct ButtonWiringTests {
         await model.perform(try #require(content.leases.rows[0].releaseButton).action)
         await model.perform(content.activity.copyButton.action)
         await model.perform(try #require(model.summary.fix))
-        let actionCalls = engine.calls.filter { $0 != .status }
+        let actionCalls = engine.calls.dropFirst(baseline).filter { $0 != .status }
         #expect(actionCalls == [
             .releaseConnection("claude-4001-1792300000"),
             .stopConnection("claude-4001-1792300000", force: false),

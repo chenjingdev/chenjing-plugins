@@ -49,6 +49,16 @@ enum Theme {
         }
     }
 
+    /// Text of an action's result on its own row.
+    static func text(for kind: ActionOutcome.Kind) -> Color {
+        switch kind {
+        case .success: greenText
+        case .info: .secondary
+        case .warning: orangeText
+        case .failure: redText
+        }
+    }
+
     static func tint(for kind: ActionOutcome.Kind) -> Color {
         switch kind {
         case .success: .green
@@ -69,6 +79,8 @@ enum Theme {
 
     /// Fill of the fix button: a darker orange so white text on it stays readable (about 4.5:1).
     static let fixFill = Color(red: 0.76, green: 0.34, blue: 0.0)
+    /// Fill of a confirm button that cuts work off (force stop): a deep red, white text stays readable.
+    static let destructiveFill = Color(red: 0.70, green: 0.14, blue: 0.14)
 
     static let rowFill = Color.primary.opacity(0.055)
     static let rowStroke = Color.primary.opacity(0.06)

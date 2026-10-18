@@ -28,6 +28,8 @@ struct EndedRelease: Equatable, Sendable {
 struct ReleaseEndedResult: Equatable, Sendable {
     var ok = false
     var results: [EndedRelease] = []
+    /// Not in the contract's shape, but an engine that fails before it starts may say why.
+    var reason: String?
 }
 
 struct StopResult: Equatable, Sendable {
@@ -49,6 +51,8 @@ struct GroupStopResult: Equatable, Sendable {
     var stopped = 0
     var failed = 0
     var results: [GroupStopEntry] = []
+    /// Not in the contract's shape, but an engine that fails before it starts may say why.
+    var reason: String?
 }
 
 struct RestartResult: Equatable, Sendable {
@@ -89,11 +93,12 @@ extension EndedRelease: Decodable {
 }
 
 extension ReleaseEndedResult: Decodable {
-    private enum CodingKeys: String, CodingKey { case ok, results }
+    private enum CodingKeys: String, CodingKey { case ok, results, reason }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ok = c.lenientBool(.ok) ?? false
         results = c.lenientArray(EndedRelease.self, forKey: .results)
+        reason = c.lenientString(.reason)
     }
 }
 
@@ -120,13 +125,14 @@ extension GroupStopEntry: Decodable {
 }
 
 extension GroupStopResult: Decodable {
-    private enum CodingKeys: String, CodingKey { case ok, stopped, failed, results }
+    private enum CodingKeys: String, CodingKey { case ok, stopped, failed, results, reason }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ok = c.lenientBool(.ok) ?? false
         stopped = c.lenientInt(.stopped) ?? 0
         failed = c.lenientInt(.failed) ?? 0
         results = c.lenientArray(GroupStopEntry.self, forKey: .results)
+        reason = c.lenientString(.reason)
     }
 }
 

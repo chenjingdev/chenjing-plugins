@@ -82,7 +82,7 @@ enum StatusEvaluator {
         switch error {
         case .pluginMissing:
             return summary(for: Problem(
-                kind: .pluginMissing, title: "CUA 플러그인이 없어요", nextStep: "Claude 플러그인을 설치해 주세요",
+                kind: .pluginMissing, title: "Claude 플러그인이 없어요", nextStep: "Claude 플러그인을 설치해 주세요",
                 warning: nil, fix: .installPlugin, fixLabel: "설치"))
         case .setupNeeded:
             return summary(for: Problem(
@@ -94,7 +94,7 @@ enum StatusEvaluator {
                 warning: nil, fix: .matchPluginVersion, fixLabel: "맞는 판 받기"))
         case .timeout, .commandFailed, .launchFailed, .invalidOutput:
             return summary(for: Problem(
-                kind: .engineUnreadable, title: "CUA 상태를 읽지 못했어요", nextStep: "잠시 뒤 다시 읽어 보세요",
+                kind: .engineUnreadable, title: "상태를 읽지 못했어요", nextStep: "잠시 뒤 다시 읽어 보세요",
                 warning: error.message, fix: .refresh, fixLabel: "다시 읽기"))
         }
     }
@@ -135,21 +135,39 @@ enum StatusEvaluator {
                 kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요", nextStep: "다시 켜면 Claude가 붙어요",
                 warning: "하던 Codex 작업이 끊길 수 있어요", fix: .restartCodex, fixLabel: "다시 켜기")
         }
-        let ended = status.connections.filter { $0.state == .ended }.count
-        if ended > 0 {
+        let ended = status.connections.filter { $0.state == .ended }
+        if !ended.isEmpty {
+            let title = "끝난 연결이 \(ended.count)개 남아 있어요"
+            // A connection without a control endpoint cannot be released (0.5.0 bridges); if none of
+            // them can, the way to clean up is to stop them (the plugin releases once more on exit).
+            let stoppable = ended.filter(\.canStop).count
+            if ended.allSatisfy({ !$0.canRelease }), stoppable > 0 {
+                return Problem(
+                    kind: .endedConnections, title: title, nextStep: "놓아줄 길이 없는 연결이라 꺼서 정리해요",
+                    warning: nil, fix: .stopEnded, fixLabel: "끝난 연결 끄기 \(stoppable)")
+            }
             return Problem(
-                kind: .endedConnections, title: "끝난 연결이 \(ended)개 남아 있어요", nextStep: "놓아주면 다음 AI가 막히지 않아요",
+                kind: .endedConnections, title: title, nextStep: "놓아주면 다음 AI가 막히지 않아요",
                 warning: nil, fix: .releaseEnded, fixLabel: "놓아주기")
         }
         if !status.leases.maybeLeft.isEmpty {
             // No count: when the lease list cannot be read, the number would be a guess (R14).
-            let releasable = status.leases.maybeLeft.contains { $0.releasable && $0.sessionID != nil }
+            let title = "점유가 남았을 수 있어요"
+            let aimable = status.leases.maybeLeft.filter { $0.releasable && $0.sessionID != nil }
+            if aimable.contains(where: { $0.agent == .claude }) {
+                return Problem(
+                    kind: .leasesMaybeLeft, title: title, nextStep: "놓아주기를 눌러 풀어 주세요",
+                    warning: nil, fix: .releaseLeftover, fixLabel: "놓아주기")
+            }
+            // Only Codex chats' sessions can be aimed at, and those are released by a click on their own row.
+            if !aimable.isEmpty {
+                return Problem(
+                    kind: .leasesMaybeLeft, title: title, nextStep: "Codex 대화의 점유는 점유 탭에서 줄마다 직접 풀어 주세요",
+                    warning: nil, fix: .showLeaseGuidance, fixLabel: "점유 보기")
+            }
             return Problem(
-                kind: .leasesMaybeLeft, title: "점유가 남았을 수 있어요",
-                nextStep: releasable
-                    ? "놓아주기를 눌러 풀어 주세요"
-                    : "하나씩 풀 방법이 없어요 — 브라우저 점유 탭의 안내를 따라 주세요",
-                warning: nil, fix: releasable ? .releaseLeftover : nil, fixLabel: releasable ? "놓아주기" : nil)
+                kind: .leasesMaybeLeft, title: title, nextStep: "하나씩 풀 방법이 없어요 — 안내를 따라 주세요",
+                warning: nil, fix: .showLeaseGuidance, fixLabel: "안내 보기")
         }
         return nil
     }

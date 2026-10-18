@@ -17,7 +17,8 @@ struct PopoverContentTests {
         let empty = content(of: EngineStatus())
         #expect(empty.connections.emptyText == "연결 없음")
         #expect(empty.connections.groups.isEmpty)
-        #expect(empty.leases.emptyText == "점유 없음")
+        // The lease list cannot be read here, so "no leases" would be a claim.
+        #expect(empty.leases.emptyText == "기록상 남은 점유 없음")
         #expect(empty.leases.rows.isEmpty)
         #expect(empty.otherTools.emptyText == "다른 도구 없음")
         #expect(empty.otherTools.tools.isEmpty)
@@ -126,6 +127,83 @@ struct PopoverContentTests {
         #expect(none == GroupStopCounts(all: 0, claude: 0, codex: 0))
     }
 
+    @Test func codexOnlyCountsConnectionsWithASessionBecauseTheEngineSkipsTheRest() throws {
+        var status = try Fixtures.status("status-problem")
+        // The Codex connection loses its session: an unrecorded runtime that may serve a Claude conversation.
+        status.connections[2].sessionID = nil
+        let counts = content(of: status).connections.stopCounts
+        #expect(counts == GroupStopCounts(all: 3, claude: 2, codex: 0, unattributedCodex: 1))
+        #expect(counts.count(for: .all) == 3, "--group all still stops it")
+        #expect(counts.count(for: .codex) == 0, "--group codex skips it as unattributed")
+        let connections = content(of: status).connections
+        #expect(connections.stopButtons.map(\.title) == ["전체 끄기 3", "Claude만 2", "Codex만 0"])
+        #expect(connections.stopButtons[2].isEnabled == false)
+        #expect(connections.stopButtons[2].help.contains("주인을 모르는 1개는 빠져요"))
+    }
+
+    @Test func aCodexConnectionThatCannotBeStoppedIsNotCountedEvenWithASession() throws {
+        var status = try Fixtures.status("status-problem")
+        status.connections[2].canStop = false
+        #expect(content(of: status).connections.stopCounts == GroupStopCounts(all: 2, claude: 2, codex: 0))
+    }
+
+    @Test func groupRowsAreHiddenWhenThereAreNoConnections() throws {
+        #expect(content(of: EngineStatus()).connections.showsGroupButtons == false)
+        #expect(try content("status-ready").connections.showsGroupButtons)
+        #expect(try content("status-problem").connections.showsGroupButtons)
+    }
+
+    @Test func endedConnectionsTheEngineMayStopAreCounted() throws {
+        let connections = try content("status-problem").connections
+        #expect(connections.endedCount == 1)
+        #expect(connections.endedStoppableCount == 1)
+        var status = try Fixtures.status("status-problem")
+        status.connections[0].canStop = false
+        #expect(content(of: status).connections.endedStoppableCount == 0)
+    }
+
+    @Test func aRowKeepsTheContractStateNotOnlyHowItReads() throws {
+        var status = try Fixtures.status("status-ready")
+        // Active, but no call was ever recorded: it reads 알 수 없음 yet the contract says active.
+        status.connections[0].idleSeconds = nil
+        status.connections[0].lastCallAt = nil
+        let rows = content(of: status).connections.groups.flatMap(\.rows)
+        let row = try #require(rows.first { $0.id == status.connections[0].id })
+        #expect(row.state == StateDisplay(kind: .unknown, text: "알 수 없음"))
+        #expect(row.contractState == .active)
+        #expect(row.sessionID == status.connections[0].sessionID)
+        let ended = try content("status-problem").connections.groups.flatMap(\.rows).first { $0.contractState == .ended }
+        #expect(ended?.id == "claude-4001-1792300000")
+        let resting = try content("status-problem").connections.groups.flatMap(\.rows).first { $0.contractState == .idle }
+        #expect(resting?.state.kind == .resting)
+    }
+
+    @Test func aRowAfterARefusedReleaseOffersRetryStopAndForceStop() throws {
+        let rows = try content("status-problem").connections.groups.flatMap(\.rows)
+        let row = try #require(rows.first { $0.id == "claude-12345-1792320000" })
+        #expect(ConnectionRow.refusedNote == "작업이 끝나지 않아 못 놓음")
+        #expect(row.refusedButtons.map(\.title) == ["다시 하기", "끄기", "강제 종료"])
+        #expect(row.refusedButtons.map(\.action) == [
+            .retryRelease("claude-12345-1792320000"),
+            .stopConnection("claude-12345-1792320000", force: false),
+            .stopConnection("claude-12345-1792320000", force: true),
+        ])
+        // A normal stop is not blocked by a refused release.
+        #expect(row.refusedButtons[1].isEnabled)
+    }
+
+    @Test func theActivityTabKeepsItsDiagnosisButtonWithoutAStatus() {
+        for isLoading in [true, false] {
+            let placeholder = ActivityContent.placeholder(isLoading: isLoading)
+            #expect(placeholder.rows.isEmpty)
+            #expect(placeholder.copyButton.action == .copyDiagnosis)
+            #expect(placeholder.copyButton.isEnabled)
+            #expect(placeholder.copyButton.title == "진단 복사")
+        }
+        #expect(ActivityContent.placeholder(isLoading: true).emptyText == "불러오는 중…")
+        #expect(ActivityContent.placeholder(isLoading: false).emptyText == "상태를 읽지 못해서 기록을 보일 수 없어요")
+    }
+
     @Test func groupStopCountsOnlyWhatTheEngineMayStopAndOnlyClaudeAndCodex() throws {
         var status = try Fixtures.status("status-problem")
         status.connections[2].canStop = false // the Codex one
@@ -183,7 +261,7 @@ struct PopoverContentTests {
         var status = try Fixtures.status("status-ready")
         status.leases.readable = false
         let leases = content(of: status).leases
-        #expect(leases.emptyText == "점유 없음")
+        #expect(leases.emptyText == "기록상 남은 점유 없음")
         #expect(leases.notice == "점유 목록을 읽지 못해요. 끝난 연결 기록으로만 알 수 있어요")
     }
 
@@ -223,7 +301,8 @@ struct PopoverContentTests {
     @Test func whoUsesTheScreenNowComesFromTheActiveConnection() throws {
         let screen = try content("status-working").otherTools.screen
         #expect(screen.isActive)
-        #expect(screen.text == "Claude · dev/x가 화면을 쓰는 중")
+        // The same words as the tooltip.
+        #expect(screen.text == "Claude(dev/x)가 화면을 쓰는 중")
         #expect(screen.detail == "방금 호출")
     }
 

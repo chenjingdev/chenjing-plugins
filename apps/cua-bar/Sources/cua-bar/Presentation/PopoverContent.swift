@@ -66,12 +66,23 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
     var startedText: String
     var memoryText: String
     var state: StateDisplay
+    /// The contract's `state` (active / idle / ended). `state` above is only how it reads: an
+    /// active connection whose idle time is unknown reads 알 수 없음, so a decision (such as asking
+    /// before releasing a connection that may be working) is made on this one.
+    var contractState: ConnectionState
+    var sessionID: String?
     /// A tool call is in flight right now.
     var isBusy: Bool
     var canRelease: Bool
     var canStop: Bool
     /// 놓아주기 · 끄기 · 강제 종료
     var buttons: [ButtonSpec]
+    /// After the engine refused a release twice (R15): 다시 하기 · 끄기 · 강제 종료. A normal
+    /// stop is not blocked by a refused release, so 끄기 stays.
+    var refusedButtons: [ButtonSpec]
+
+    /// The line a row shows after a refused release.
+    static let refusedNote = "작업이 끝나지 않아 못 놓음"
 
     init(_ connection: Connection, now: Date, calendar: Calendar) {
         id = connection.id
@@ -81,23 +92,32 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         startedText = Format.startTime(connection.startedAt, now: now, calendar: calendar)
         memoryText = Format.memory(connection.memoryBytes)
         state = StateDisplay.make(state: connection.state, idleSeconds: connection.idleSeconds)
+        contractState = connection.state
+        sessionID = connection.sessionID
         isBusy = connection.busy
         canRelease = connection.canRelease
         canStop = connection.canStop
         // A button that is off says why when the pointer rests on it.
         let releaseOffHelp = "놓아줄 길이 확인되지 않은 연결이에요. 중계기가 없거나 기록이 없을 때 그래요"
         let stopOffHelp = "신원을 확인하지 못한 프로세스라 앱이 끌 수 없어요"
+        let stop = ButtonSpec(
+            title: "끄기", action: .stopConnection(connection.id, force: false), isEnabled: connection.canStop,
+            help: connection.canStop ? "탭을 놓아준 뒤 정상 종료해요" : stopOffHelp)
+        let forceStop = ButtonSpec(
+            title: "강제 종료", action: .stopConnection(connection.id, force: true), isDestructive: true,
+            isEnabled: connection.canStop,
+            help: connection.canStop ? "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요. 하던 작업이 끊겨요" : stopOffHelp)
         buttons = [
             ButtonSpec(
                 title: "놓아주기", action: .releaseConnection(connection.id), isEnabled: connection.canRelease,
                 help: connection.canRelease ? "이 연결이 잡고 있는 브라우저 탭만 놓아줘요. 연결은 그대로예요" : releaseOffHelp),
+            stop, forceStop,
+        ]
+        refusedButtons = [
             ButtonSpec(
-                title: "끄기", action: .stopConnection(connection.id, force: false), isEnabled: connection.canStop,
-                help: connection.canStop ? "탭을 놓아준 뒤 정상 종료해요" : stopOffHelp),
-            ButtonSpec(
-                title: "강제 종료", action: .stopConnection(connection.id, force: true), isDestructive: true,
-                isEnabled: connection.canStop,
-                help: connection.canStop ? "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요. 하던 작업이 끊겨요" : stopOffHelp),
+                title: "다시 하기", action: .retryRelease(connection.id), isEnabled: connection.canRelease,
+                help: "한 번 더 놓아 봐요. AI가 하던 조작이 끝나야 놓을 수 있어요"),
+            stop, forceStop,
         ]
     }
 }
@@ -111,11 +131,15 @@ struct ConnectionGroup: Equatable, Identifiable, Sendable {
 }
 
 /// How many connections each group button would stop. Only what the engine says it may signal
-/// (`can_stop`) counts, and "all" is Claude plus Codex: cmux-cua is never in a group (R17).
+/// (`can_stop`) counts, and cmux-cua is never in a group (R17). `stop --group codex` skips a Codex
+/// connection that has no session (`unattributed`: it may serve a Claude conversation), so the
+/// Codex count leaves those out; `--group all` still stops them, so "all" has them.
 struct GroupStopCounts: Equatable, Sendable {
     var all: Int
     var claude: Int
     var codex: Int
+    /// Codex connections `--group codex` skips.
+    var unattributedCodex = 0
 
     func count(for group: StopGroup) -> Int {
         switch group {
@@ -126,11 +150,26 @@ struct GroupStopCounts: Equatable, Sendable {
     }
 }
 
+extension GroupStopCounts {
+    init(connections: [Connection]) {
+        let stoppable = connections.filter(\.canStop)
+        let claude = stoppable.filter { $0.agent == .claude }.count
+        let codex = stoppable.filter { $0.agent == .codex }
+        self.init(
+            all: claude + codex.count, claude: claude, codex: codex.filter { $0.sessionID != nil }.count,
+            unattributedCodex: codex.filter { $0.sessionID == nil }.count)
+    }
+}
+
 struct ConnectionsContent: Equatable, Sendable {
     var groups: [ConnectionGroup]
     var stopCounts: GroupStopCounts
     var endedCount: Int
+    /// Ended connections the engine may stop: what 끝난 연결 끄기 would stop.
+    var endedStoppableCount: Int
     var emptyText: String?
+    /// The group rows (묶음 끄기, 끝난 연결 놓아주기) only make sense when there are connections.
+    var showsGroupButtons: Bool { !groups.isEmpty }
     /// 전체 끄기 · Claude만 · Codex만, each with how many it would stop.
     var stopButtons: [ButtonSpec]
     /// 끝난 연결 놓아주기, with how many ended connections there are.
@@ -156,11 +195,9 @@ struct ConnectionsContent: Equatable, Sendable {
             let rows = ordered.filter { $0.agent == agent }.map { ConnectionRow($0, now: now, calendar: calendar) }
             return ConnectionGroup(agent: agent, title: "\(agent.label) · \(rows.count)", rows: rows)
         }
-        let stoppable = status.connections.filter(\.canStop)
-        let claude = stoppable.filter { $0.agent == .claude }.count
-        let codex = stoppable.filter { $0.agent == .codex }.count
-        stopCounts = GroupStopCounts(all: claude + codex, claude: claude, codex: codex)
+        stopCounts = GroupStopCounts(connections: status.connections)
         endedCount = status.connections.filter { $0.state == .ended }.count
+        endedStoppableCount = status.connections.filter { $0.state == .ended && $0.canStop }.count
         emptyText = status.connections.isEmpty ? PopoverTab.connections.emptyText : nil
 
         let counts = stopCounts
@@ -168,10 +205,13 @@ struct ConnectionsContent: Equatable, Sendable {
             ButtonSpec(title: "\(title) \(counts.count(for: group))", action: .stopGroup(group, force: false),
                        isEnabled: counts.count(for: group) > 0, help: help)
         }
+        let codexHelp = counts.unattributedCodex > 0
+            ? "세션을 아는 Codex 연결만 정상 종료해요. 주인을 모르는 \(counts.unattributedCodex)개는 빠져요 — 하나씩 끄거나 전체로 끌 수 있어요"
+            : "Codex 연결만 정상 종료해요"
         stopButtons = [
             stop("전체 끄기", .all, "Claude와 Codex 연결을 모두 정상 종료해요"),
             stop("Claude만", .claude, "Claude 연결만 정상 종료해요"),
-            stop("Codex만", .codex, "Codex 연결만 정상 종료해요"),
+            stop("Codex만", .codex, codexHelp),
         ]
         releaseEndedButton = ButtonSpec(
             title: "끝난 연결 놓아주기 \(endedCount)", action: .releaseEnded, isEnabled: endedCount > 0,
@@ -244,7 +284,9 @@ struct LeasesContent: Equatable, Sendable {
                 sessionID: item.sessionID, canReleaseSession: releasable, hint: releasable ? nil : "콕 집어 풀 방법이 없어요"))
         }
         self.rows = rows
-        emptyText = rows.isEmpty ? PopoverTab.leases.emptyText : nil
+        // With no readable list "no leases" would be a claim: all the app knows is that the
+        // recorded sessions left nothing behind.
+        emptyText = rows.isEmpty ? (leases.readable ? PopoverTab.leases.emptyText : "기록상 남은 점유 없음") : nil
         // R14: with no readable list the app says what it knows and never invents a count.
         if leases.readable {
             notice = nil
@@ -300,9 +342,8 @@ struct OtherToolsContent: Equatable, Sendable {
     init(status: EngineStatus, now: Date) {
         if let use = StatusEvaluator.screenUse(in: status) {
             let lastCall = status.screen.lastCallAt ?? use.connection?.lastCallAt
-            let who = use.folder.map { "\(use.agentLabel) · \($0)" } ?? use.agentLabel
             screen = ScreenLine(
-                isActive: true, text: "\(who)가 화면을 쓰는 중",
+                isActive: true, text: "\(use.subject)가 화면을 쓰는 중",
                 detail: lastCall.map { "\(Format.ago($0, now: now)) 호출" })
         } else {
             screen = ScreenLine(
@@ -337,7 +378,24 @@ struct ActivityContent: Equatable, Sendable {
     var rows: [ActivityRow]
     var emptyText: String?
     /// 진단 복사: runs `diagnose` and puts its text on the pasteboard.
-    var copyButton = ButtonSpec(title: "진단 복사", action: .copyDiagnosis, help: "진단 내용을 복사해요. 화면과 요청 내용은 들어 있지 않아요")
+    var copyButton = ActivityContent.diagnosisButton
+
+    static let diagnosisButton = ButtonSpec(
+        title: "진단 복사", action: .copyDiagnosis, help: "진단 내용을 복사해요. 화면과 요청 내용은 들어 있지 않아요")
+
+    /// What the tab shows while there is no status to read: no rows, but 진단 복사 stays, because
+    /// that is exactly when someone needs it (F6).
+    static func placeholder(isLoading: Bool) -> ActivityContent {
+        ActivityContent(
+            rows: [], emptyText: isLoading ? "불러오는 중…" : "상태를 읽지 못해서 기록을 보일 수 없어요",
+            copyButton: diagnosisButton)
+    }
+
+    init(rows: [ActivityRow], emptyText: String?, copyButton: ButtonSpec) {
+        self.rows = rows
+        self.emptyText = emptyText
+        self.copyButton = copyButton
+    }
 
     init(status: EngineStatus, calendar: Calendar) {
         var seen: [String: Int] = [:]

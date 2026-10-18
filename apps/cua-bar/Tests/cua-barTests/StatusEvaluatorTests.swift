@@ -226,12 +226,12 @@ struct StatusEvaluatorTests {
         let summary = StatusEvaluator.summary(for: .pluginMissing)
         let problem = summary.problem
         #expect(problem?.kind == .pluginMissing)
-        #expect(problem?.title == "CUA 플러그인이 없어요")
+        #expect(problem?.title == "Claude 플러그인이 없어요")
         #expect(problem?.nextStep == "Claude 플러그인을 설치해 주세요")
         #expect(problem?.fix == .installPlugin)
         #expect(problem?.fixLabel == "설치")
         #expect(summary.icon == .problem)
-        #expect(summary.tooltip == "CUA 문제 · CUA 플러그인이 없어요")
+        #expect(summary.tooltip == "CUA 문제 · Claude 플러그인이 없어요")
     }
 
     @Test func codexMissingIsNotMaskedByTheMissingPluginRule() throws {
@@ -368,14 +368,78 @@ struct StatusEvaluatorTests {
         #expect(problem.fix == .releaseLeftover)
     }
 
-    @Test func leftoverLeasesNobodyCanReleaseOneByOnePointToTheExtensionReset() throws {
+    @Test func leftoverLeasesNobodyCanReleaseOneByOneStillHaveAFixButtonThatShowsTheGuidance() throws {
         var status = try healthy()
         status.leases.maybeLeft = [LeftoverLease(sessionID: nil, agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: false)]
         let problem = try #require(evaluate(status).problem)
         #expect(problem.kind == .leasesMaybeLeft)
-        #expect(problem.fix == nil)
-        #expect(problem.fixLabel == nil)
-        #expect(problem.nextStep == "하나씩 풀 방법이 없어요 — 브라우저 점유 탭의 안내를 따라 주세요")
+        #expect(problem.fix == .showLeaseGuidance)
+        #expect(problem.fixLabel == "안내 보기")
+        #expect(problem.nextStep == "하나씩 풀 방법이 없어요 — 안내를 따라 주세요")
+    }
+
+    @Test func onlyCodexSessionsToAimAtSendThePersonToTheirRows() throws {
+        var status = try healthy()
+        status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
+        let problem = try #require(evaluate(status).problem)
+        // The card's 놓아주기 never releases a Codex chat; its own row's 콕 집어 풀기 does.
+        #expect(problem.fix == .showLeaseGuidance)
+        #expect(problem.fixLabel == "점유 보기")
+        #expect(problem.nextStep == "Codex 대화의 점유는 점유 탭에서 줄마다 직접 풀어 주세요")
+        // With a Claude session to aim at the card's own release is back.
+        status.leases.maybeLeft.append(LeftoverLease(sessionID: "019a-claude", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true))
+        #expect(evaluate(status).problem?.fix == .releaseLeftover)
+    }
+
+    @Test func endedConnectionsThatCannotBeReleasedAreStoppedInstead() throws {
+        var status = try healthy()
+        status.connections[0].state = .ended
+        status.connections[0].canRelease = false // a 0.5.0 bridge has no control socket
+        let problem = try #require(evaluate(status).problem)
+        #expect(problem.kind == .endedConnections)
+        #expect(problem.fix == .stopEnded)
+        #expect(problem.fixLabel == "끝난 연결 끄기 1")
+        #expect(problem.nextStep == "놓아줄 길이 없는 연결이라 꺼서 정리해요")
+        // One that can be released keeps the plain release for all of them.
+        status.connections[1].state = .ended
+        status.connections[1].canRelease = true
+        let mixed = try #require(evaluate(status).problem)
+        #expect(mixed.fix == .releaseEnded)
+        #expect(mixed.fixLabel == "놓아주기")
+        // Nothing to release and nothing the engine may stop: the engine is left to say so.
+        status.connections[1].canRelease = false
+        status.connections[0].canStop = false
+        status.connections[1].canStop = false
+        #expect(evaluate(status).problem?.fix == .releaseEnded)
+    }
+
+    @Test func theCountOnTheStopButtonIsOnlyWhatTheEngineMayStop() throws {
+        var status = try healthy()
+        status.connections[0].state = .ended
+        status.connections[0].canRelease = false
+        status.connections[1].state = .ended
+        status.connections[1].canRelease = false
+        status.connections[1].canStop = false
+        let problem = try #require(evaluate(status).problem)
+        #expect(problem.title == "끝난 연결이 2개 남아 있어요")
+        #expect(problem.fixLabel == "끝난 연결 끄기 1")
+    }
+
+    @Test func noTooltipSaysCUATwice() throws {
+        var summaries: [StatusSummary] = [StatusEvaluator.loading]
+        for kind in ProblemKind.allCases where kind != .pluginMissing && kind != .engineUnreadable {
+            summaries.append(evaluate(try status(causing: kind)))
+        }
+        for error in [EngineError.pluginMissing, .timeout, .setupNeeded(installPath: "/x"), .unsupportedSchema(2),
+                      .commandFailed(exitCode: 1, message: "x"), .launchFailed("x"), .invalidOutput("x")] {
+            summaries.append(StatusEvaluator.summary(for: error))
+        }
+        summaries.append(evaluate(try Fixtures.status("status-working")))
+        summaries.append(evaluate(try healthy()))
+        for summary in summaries {
+            #expect(summary.tooltip.components(separatedBy: "CUA").count - 1 == 1, "\(summary.tooltip)")
+            #expect(summary.accessibilityLabel.components(separatedBy: "CUA").count - 1 <= 1, "\(summary.accessibilityLabel)")
+        }
     }
 
     // MARK: Unreadable engine and placeholder
@@ -384,10 +448,10 @@ struct StatusEvaluatorTests {
         let summary = StatusEvaluator.summary(for: .timeout)
         #expect(summary.icon == .problem)
         #expect(summary.problem?.kind == .engineUnreadable)
-        #expect(summary.problem?.title == "CUA 상태를 읽지 못했어요")
+        #expect(summary.problem?.title == "상태를 읽지 못했어요")
         #expect(summary.problem?.fix == .refresh)
         #expect(summary.problem?.fixLabel == "다시 읽기")
-        #expect(summary.tooltip == "CUA 문제 · CUA 상태를 읽지 못했어요")
+        #expect(summary.tooltip == "CUA 문제 · 상태를 읽지 못했어요")
     }
 
     @Test func beforeTheFirstAnswerTheSummaryIsAPlaceholder() {

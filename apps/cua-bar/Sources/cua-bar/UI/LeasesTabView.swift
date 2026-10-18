@@ -22,6 +22,7 @@ struct LeasesTabView: View {
                 } else {
                     ForEach(content.rows) { row in
                         LeaseRowView(row: row, failed: row.sessionID.map(failedSessionIDs.contains) ?? false,
+                                     result: row.sessionID.flatMap { model.sessionResults[$0] },
                                      waiting: row.releaseButton.map { model.inFlight.contains($0.action) } ?? false) {
                             model.send($0)
                         }
@@ -40,7 +41,10 @@ struct LeasesTabView: View {
 
 struct LeaseRowView: View {
     var row: LeaseRow
+    /// The release failed in a way the extension reset may fix: the guidance below is open for it.
     var failed: Bool
+    /// What the last release of this session said (shown unless it succeeded).
+    var result: ActionOutcome?
     var waiting: Bool
     var send: (CUAAction) -> Void
 
@@ -64,11 +68,16 @@ struct LeaseRowView: View {
                         .font(Theme.captionFont)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    if failed {
-                        Text("콕 집어 풀기가 안 됐어요. 아래 안내를 보세요")
+                    if let result, result.kind != .success {
+                        Text(result.message)
                             .font(Theme.captionFont)
-                            .foregroundStyle(Theme.redText)
+                            .foregroundStyle(Theme.text(for: result.kind))
                             .fixedSize(horizontal: false, vertical: true)
+                        if failed {
+                            Text("아래 안내를 보세요")
+                                .font(Theme.captionFont)
+                                .foregroundStyle(Theme.redText)
+                        }
                     } else if let hint = row.hint {
                         Text(hint).font(Theme.captionFont).foregroundStyle(.secondary)
                     }

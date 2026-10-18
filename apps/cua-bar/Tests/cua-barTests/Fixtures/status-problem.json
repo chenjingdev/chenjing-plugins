@@ -21,7 +21,7 @@
     {
       "id": "codex-15888-1792319000", "agent": "codex", "state": "idle", "pid": 15888, "owner_pid": 15400, "owner_alive": true,
       "cwd": "/Users/chenjing/dev/new-chat", "started_at": "2026-10-18T04:35:00Z", "memory_bytes": 188743680,
-      "last_call_at": "2026-10-18T11:18:00Z", "idle_seconds": 2520, "session_id": null, "busy": false,
+      "last_call_at": "2026-10-18T11:18:00Z", "idle_seconds": 2520, "session_id": "019a1b2c-0002", "busy": false,
       "can_release": false, "can_stop": true
     }
   ],

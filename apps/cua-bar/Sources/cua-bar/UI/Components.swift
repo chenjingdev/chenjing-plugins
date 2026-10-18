@@ -46,13 +46,33 @@ struct SpecButton: View {
             send(spec.action)
         } label: {
             Text(spec.title)
-                .font(.system(size: 11))
-                .foregroundStyle(spec.isDestructive ? Theme.redText : Color.primary)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(RowButtonStyle(isDestructive: spec.isDestructive))
         .disabled(!spec.isEnabled || waiting)
         .help(spec.help)
+    }
+}
+
+/// The look of a small button, decided here and not by the system style: a label color set by hand
+/// overrides the system's dimming, which once made a button that cannot be pressed look pressable.
+/// Red only while it can be pressed; at 40% opacity when it cannot.
+struct RowButtonStyle: ButtonStyle {
+    var isDestructive = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11))
+            .foregroundStyle(isDestructive && isEnabled ? Theme.redText : Color.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.20 : 0.09)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+            .opacity(isEnabled ? 1 : 0.4)
     }
 }
 
@@ -136,6 +156,7 @@ struct TabPlaceholder: View {
 /// The status card's one fix button. Filled with the problem's color whatever the window state
 /// (the system prominent style turns gray when the popover is not the key window).
 struct FixButtonStyle: ButtonStyle {
+    var fill: Color = Theme.fixFill
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -143,6 +164,6 @@ struct FixButtonStyle: ButtonStyle {
             .foregroundStyle(Color.white)
             .padding(.horizontal, 13)
             .padding(.vertical, 5)
-            .background(Capsule().fill(Theme.fixFill.opacity(isEnabled ? (configuration.isPressed ? 0.78 : 1) : 0.45)))
+            .background(Capsule().fill(fill.opacity(isEnabled ? (configuration.isPressed ? 0.78 : 1) : 0.45)))
     }
 }

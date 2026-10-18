@@ -14,8 +14,13 @@ struct PopoverView: View {
                 if let fix = model.summary.fix { model.send(fix) }
             }
 
+            if let prompt = model.confirmationPrompt {
+                ConfirmationView(prompt: prompt, confirm: { model.confirm() }, cancel: { model.cancelPending() })
+                    .transition(.opacity)
+            }
+
             if let banner = model.banner {
-                BannerView(banner: banner) { model.dismissBanner() }
+                BannerView(banner: banner, dismiss: { model.dismissBanner() }, followUp: { model.send($0) })
                     .transition(.opacity)
             }
 
@@ -42,10 +47,16 @@ struct PopoverView: View {
         .padding(Theme.padding)
         .frame(width: Theme.popoverWidth)
         .animation(.easeOut(duration: 0.15), value: model.banner)
+        .animation(.easeOut(duration: 0.15), value: model.pending)
     }
 
     @ViewBuilder private var tabContent: some View {
-        if let content = model.content {
+        if model.selectedTab == .activity {
+            // Also without a status: 진단 복사 is most needed exactly then.
+            ActivityTabView(content: model.activityContent, copying: model.inFlight.contains(.copyDiagnosis)) {
+                model.send(.copyDiagnosis)
+            }
+        } else if let content = model.content {
             switch model.selectedTab {
             case .connections:
                 ConnectionsTabView(content: content.connections, model: model)
@@ -54,9 +65,7 @@ struct PopoverView: View {
             case .otherTools:
                 OtherToolsTabView(content: content.otherTools)
             case .activity:
-                ActivityTabView(content: content.activity, copying: model.inFlight.contains(.copyDiagnosis)) {
-                    model.send(.copyDiagnosis)
-                }
+                EmptyView()
             }
         } else {
             // One view only: a modifier applied to two views in a builder would apply to each.

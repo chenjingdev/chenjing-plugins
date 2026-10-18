@@ -71,6 +71,8 @@ struct StatusCardView: View {
 struct BannerView: View {
     var banner: ActionBanner
     var dismiss: () -> Void
+    /// The message's own button, if it has one (Codex 열기).
+    var followUp: (CUAAction) -> Void = { _ in }
 
     private var symbol: String {
         switch banner.outcome.kind {
@@ -88,6 +90,9 @@ struct BannerView: View {
                 .font(.system(size: 12))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
+            if let button = banner.outcome.followUp {
+                SpecButton(spec: ButtonSpec(title: button.title, action: button.action, help: button.title), send: followUp)
+            }
             Button(action: dismiss) {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
             }

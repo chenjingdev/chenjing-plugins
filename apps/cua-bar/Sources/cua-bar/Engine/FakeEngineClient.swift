@@ -46,9 +46,14 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
     struct Script: Sendable {
         var status: Result<EngineStatus, EngineError> = .success(EngineStatus())
         var releaseConnection = ReleaseResult(ok: true, released: true, reason: nil, scopeCount: 1)
+        /// Answers to successive `releaseConnection` calls, first one first; when it runs dry the
+        /// plain `releaseConnection` answers.
+        var releaseConnectionQueue: [ReleaseResult] = []
         var releaseEnded = ReleaseEndedResult(ok: true, results: [])
         var releaseSession = SessionReleaseResult(ok: true, released: true, reason: nil, tabCount: 1)
         var stopConnection = StopResult(ok: true, stopped: true, released: true, reason: nil)
+        /// Per-connection answers for `stopConnection`, before falling back to `stopConnection`.
+        var stopConnectionByID: [String: StopResult] = [:]
         var stopGroup = GroupStopResult(ok: true, stopped: 0, failed: 0, results: [])
         var restartCodex = RestartResult(ok: true, reason: nil)
         var diagnosis = "CUA diagnosis (fake)\n"
@@ -91,7 +96,9 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
 
     func releaseConnection(id: String) async throws -> ReleaseResult {
         let script = try await begin(.releaseConnection(id), isAction: true)
-        return script.releaseConnection
+        return lock.withLock {
+            self.script.releaseConnectionQueue.isEmpty ? script.releaseConnection : self.script.releaseConnectionQueue.removeFirst()
+        }
     }
 
     func releaseEnded() async throws -> ReleaseEndedResult {
@@ -104,7 +111,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
     }
 
     func stopConnection(id: String, force: Bool) async throws -> StopResult {
-        try await begin(.stopConnection(id, force: force), isAction: true).stopConnection
+        let script = try await begin(.stopConnection(id, force: force), isAction: true)
+        return script.stopConnectionByID[id] ?? script.stopConnection
     }
 
     func stopGroup(_ group: StopGroup, force: Bool) async throws -> GroupStopResult {

@@ -16,14 +16,19 @@ struct ConnectionsTabView: View {
                         ForEach(content.groups) { group in
                             SectionHeader(text: group.title)
                             ForEach(group.rows) { row in
-                                ConnectionRowView(row: row, waiting: model.isWaiting(onConnection: row.id)) { model.send($0) }
+                                ConnectionRowView(
+                                    row: row, waiting: model.isWaiting(onConnection: row.id),
+                                    refused: model.refusedReleaseIDs.contains(row.id)) { model.send($0) }
                             }
                         }
                     }
                     .padding(.vertical, 2)
                 }
             }
-            GroupButtonsView(content: content, busy: model.inFlight.contains { $0.isWide }) { model.send($0) }
+            // The group buttons act on connections: with none, there is nothing for them to say.
+            if content.showsGroupButtons {
+                GroupButtonsView(content: content, busy: model.inFlight.contains { $0.isWide }) { model.send($0) }
+            }
         }
     }
 }
@@ -31,6 +36,8 @@ struct ConnectionsTabView: View {
 struct ConnectionRowView: View {
     var row: ConnectionRow
     var waiting: Bool
+    /// The engine refused to release it twice (R15): the row says so and offers 다시 하기.
+    var refused = false
     var send: (CUAAction) -> Void
 
     var body: some View {
@@ -49,6 +56,12 @@ struct ConnectionRowView: View {
                         .font(Theme.captionFont)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    if refused {
+                        Label(ConnectionRow.refusedNote, systemImage: "hourglass")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.orangeText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 6) {
@@ -58,7 +71,7 @@ struct ConnectionRowView: View {
                     }
                     HStack(spacing: 4) {
                         if waiting { ProgressView().controlSize(.small) }
-                        ForEach(row.buttons) { SpecButton(spec: $0, waiting: waiting, send: send) }
+                        ForEach(refused ? row.refusedButtons : row.buttons) { SpecButton(spec: $0, waiting: waiting, send: send) }
                     }
                 }
             }
