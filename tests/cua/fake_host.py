@@ -7,8 +7,8 @@ timeout and resets the kernel, and a repeated `turn_ended` for the pair is ignor
 therefore shows up in `reused` (and as an error result), and a repeated release in `repeated`.
 
 Everything the bridge sent is kept in `received` and, for tool calls, in `calls`. Tests set `turn_ended` to
-'ok', 'refuse' (isError), 'rpc_error' or 'silent' (no answer), `hold(tool)` to keep an answer back and `results`
-to change what a tool returns.
+'ok', 'refuse' (isError), 'rpc_error' or 'silent' (no answer), `hold(tool)` to keep an answer back, `results`
+to change what a tool returns and `unsubscribe` to 'silent' to leave thread/unsubscribe unanswered.
 """
 import asyncio
 import copy
@@ -44,6 +44,7 @@ class FakeHost:
         self.ended = set()
         self.holds = {}
         self.results = {}
+        self.unsubscribe = 'ok'
         self.was_closed = False
         self.tasks = set()
 
@@ -119,6 +120,8 @@ class FakeHost:
                 return
         elif method == 'thread/unsubscribe':
             self.note({'method': method})
+            if self.unsubscribe == 'silent':
+                await asyncio.Event().wait()
             result = {'status': 'unsubscribed'}
         else:
             raise AssertionError('Unexpected method in the fake host: '+str(method))

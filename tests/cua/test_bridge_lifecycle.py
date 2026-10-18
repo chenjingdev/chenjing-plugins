@@ -18,6 +18,7 @@ import bridge_control
 import bridge_records
 import host_autostart
 import host_mcp
+import mcp_stdio
 from bridge_case import BridgeCase, ISO
 from fake_host import TOOLS, write_registry
 from test_runtime_paths import fake_app
@@ -274,13 +275,13 @@ class ControlTests(BridgeCase):
         self.assertEqual(sorted(reply['reason'] or '' for reply in replies), ['', 'no_trusted_scope'])
         self.assertEqual(len(host.turn_ended_calls()), 1)
 
-    async def test_a_catalogue_without_turn_ended_cannot_release_and_says_so(self):
+    async def test_a_catalogue_without_turn_ended_cannot_release_and_is_not_confirmed(self):
         host = self.add_host(thread_id='thread-A', tools={name: tool for name, tool in TOOLS.items() if name != 'turn_ended'})
         adapter = self.plain_adapter()
         control = await self.start_control(adapter)
         await self.initialize(adapter)
         await adapter.handle(self.call())
-        self.assertEqual(await self.ask(control, 'release'), {'released': False, 'reason': 'cleanup_tool_unavailable', 'scope_count': 0})
+        self.assertEqual(await self.ask(control, 'release'), {'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0})
         self.assertEqual(self.record(control)['cleanup'], 'not_confirmed')
         self.assertEqual((await self.run_call(adapter, 'turn_ended'))['error']['code'], -32601)
         self.assertEqual(host.turn_ended_calls(), [])
@@ -403,6 +404,26 @@ class TurnTests(BridgeCase):
         self.assertNotIn(adapter.turn_id, (first, second))
         self.assertEqual(host.reused, [])
 
+    async def test_a_turn_ended_the_runtime_never_answers_gives_up_and_does_not_hold_back_later_calls(self):
+        host, adapter, control = await self.connected()
+        adapter.cleanup_timeout = 0.3
+        first = adapter.turn_id
+        await adapter.handle(self.call())
+        host.turn_ended = 'silent'
+        started = time.monotonic()
+        reply = await self.run_call(adapter, 'turn_ended')
+        self.assertLess(time.monotonic()-started, 5)
+        self.assertEqual(reply['error']['code'], -32001)
+        self.assertIn('did not answer', reply['error']['message'])
+        # The runtime may still end the pair: the turn moves on and the scope stays open for a later try.
+        self.assertNotEqual(adapter.turn_id, first)
+        record = self.record(control)
+        self.assertEqual((record['cleanup'], [scope['turn_id'] for scope in record['scopes']]), ('not_confirmed', [first]))
+        # The calls behind it are not held back, and they run under the new turn.
+        self.assertEqual((await self.run_call(adapter))['result']['content'][0]['text'], 'PRIVATE_RESULT')
+        self.assertEqual(host.calls[-1]['scope']['turn_id'], adapter.turn_id)
+        self.assertEqual(host.reused, [])
+
     async def test_tools_cannot_name_a_session_or_turn(self):
         host, adapter, control = await self.connected()
         await adapter.handle(self.call(_meta={'x-codex-turn-metadata': {'session_id': 'other', 'turn_id': 'other'}}))
@@ -505,6 +526,25 @@ class ExitReleaseTests(BridgeCase):
         self.assertEqual(host_mcp.EXIT_RELEASE_SECONDS, 3.0)
         await control.finalize()
         self.assertEqual(self.record(control)['cleanup'], 'not_confirmed')
+
+    async def test_the_unsubscribe_at_exit_gets_only_what_is_left_of_the_three_seconds(self):
+        host = self.add_host(thread_id='thread-A', turn_ended='silent')
+        host.unsubscribe = 'silent'
+        adapter = self.plain_adapter()
+        adapter.cleanup_timeout = 30
+        control = await self.start_control(adapter)
+        await self.initialize(adapter)
+        await adapter.handle(self.call())
+        await control.stop()
+        started = time.monotonic()
+        report = await adapter.close()
+        elapsed = time.monotonic()-started
+        # The release used the three seconds, so nothing is left to wait for the unsubscribe.
+        self.assertGreaterEqual(elapsed, 2.9)
+        self.assertLess(elapsed, 4.5)
+        self.assertEqual((report['owned_thread_unsubscribe'], report['connection_close']), ('unconfirmed', 'confirmed'))
+        self.assertEqual(len(host.methods('thread/unsubscribe')), 1)
+        await control.finalize()
 
     async def test_a_connection_without_any_open_scope_leaves_nothing_behind(self):
         host = self.add_host(thread_id='thread-A')
@@ -744,6 +784,32 @@ class ReconnectTests(RegisteredCase):
         self.assertEqual(self.record(control)['session_id'], 'thread-C')
         self.assertEqual(len(fixed.calls), 1)
 
+    async def test_turn_ended_after_a_host_loss_never_reopens_codex_and_keeps_the_scopes(self):
+        host1, adapter, control, _ = await self.registered(thread_id='thread-A')
+        await adapter.handle(self.call())
+        await self.lose_host(host1)
+        (self.host_state/'host.json').unlink()
+        host2 = self.add_host(thread_id='thread-B')
+        second_socket = self.socket()
+        self.reopen = lambda: write_registry(self.host_state, second_socket)
+        with patch.object(mcp_stdio, 'ensure_host', side_effect=AssertionError('turn_ended must not look for a host')) as ensure:
+            reply = await self.run_call(adapter, 'turn_ended')
+        # A fixed answer; the registry was not read, nothing was opened, nothing was connected.
+        self.assertEqual(reply['error'], {'code': -32001, 'message': host_mcp.TURN_ENDED_WITHOUT_HOST})
+        ensure.assert_not_called()
+        self.assertEqual((self.commands, len(self.connects)), ([], 1))
+        self.assertEqual(len(adapter.scopes), 1)
+        record = self.record(control)
+        self.assertEqual((record['cleanup'], len(record['scopes']), record['host'], record['session_id']),
+                         ('not_confirmed', 1, None, 'thread-A'))
+        self.assertEqual([line['tool'] for line in self.activity()], ['js'])
+        # The next real call still finds the host again, as before.
+        self.assertEqual((await self.run_call(adapter))['result']['content'][0]['text'], 'PRIVATE_RESULT')
+        self.assertEqual(len(self.opened()), 1)
+        self.assertEqual(self.connects[-1]['path'], str(second_socket))
+        self.assertEqual(len(host2.calls), 1)
+        self.assertEqual(self.record(control)['session_id'], 'thread-B')
+
     async def test_a_call_that_finds_the_host_gone_when_it_is_about_to_leave_does_not_run_and_leaves_no_scope(self):
         host1, adapter, control, _ = await self.registered(thread_id='thread-A')
         await self.lose_host(host1)
@@ -752,7 +818,7 @@ class ReconnectTests(RegisteredCase):
         self.assertEqual(str(raised.exception), host_mcp.LOST_BEFORE_SEND)
         with self.assertRaises(host_mcp.BridgeFailure) as raised:
             await adapter.end_turn_tool()
-        self.assertEqual(str(raised.exception), host_mcp.LOST_BEFORE_SEND)
+        self.assertEqual(str(raised.exception), host_mcp.TURN_ENDED_WITHOUT_HOST)
         self.assertEqual((host1.calls, adapter.scopes, adapter.active_tool_calls), ([], {}, 0))
         self.assertEqual(self.activity(), [])
 

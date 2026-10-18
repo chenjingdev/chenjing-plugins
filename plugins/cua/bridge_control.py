@@ -7,8 +7,9 @@ through the socket, asks the bridge to release. The socket takes one JSON line a
     {"action": "status",  "pid": <pid>, "started_at": <epoch>}  ->  {"ok", "busy", "open_scopes"}
     {"action": "release", "pid": <pid>, "started_at": <epoch>}  ->  {"released", "reason", "scope_count"}
 
-A request with another pid or start time, other keys, bad JSON, more than 1 KB, or no newline within 2 s is closed
-without an answer. There is no way to name a session, a turn or a tool: a release ends only what this bridge opened.
+A request with another pid or start time, another action, bad JSON, more than 1 KB, or no newline within 2 s is
+closed without an answer. Further keys in a request are ignored. There is no way to name a session, a turn or a tool:
+a release ends only what this bridge opened.
 Every failure to set any of this up leaves the bridge running without records (see host_mcp.serve).
 """
 import asyncio

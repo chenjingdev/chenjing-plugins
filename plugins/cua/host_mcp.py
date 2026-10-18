@@ -30,6 +30,9 @@ LOST_BEFORE_SEND = ('The Codex host connection was lost before this call was sen
                     'The next call connects to Codex again.')
 LOST_DURING_CALL = ('The Codex host connection was lost while this call ran, so its outcome is unknown. '
                     'The call was not sent again. The next call connects to Codex again.')
+# turn_ended never starts or reopens Codex: a new host could not end the turn of the old one anyway.
+TURN_ENDED_WITHOUT_HOST = ('The Codex host connection was lost, so the CUA turn of this connection could not be ended. '
+                           'turn_ended never connects to Codex again; the next CUA tool call does.')
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
 
@@ -510,8 +513,10 @@ class HostMcp:
                     self.reply(ident, error={'code': -32602,
                         'message': 'This host adapter accepts only empty turn_ended arguments; caller session or turn scope is not accepted.'})
                     return
-                # A host that went away is found again the way the conversation start finds it (R12).
-                await self.ensure_connected()
+                if name != 'turn_ended':
+                    # A host that went away is found again the way the conversation start finds it (R12). turn_ended
+                    # is left out on purpose: ending a turn must never start or reopen Codex.
+                    await self.ensure_connected()
                 if name not in self.tool_names:
                     # The catalogue of the new host does not have this tool any more.
                     self.reply(ident, error={'code': -32601, 'message': 'The tool is not advertised by the owned host CUA server.'})
@@ -650,20 +655,28 @@ class HostMcp:
         return confirmed, result
 
     async def end_turn_tool(self):
-        """The AI's turn_ended: end the current scope. Calls made meanwhile wait and run under the next turn."""
+        """The AI's turn_ended: end the current scope. Calls made meanwhile wait and run under the next turn.
+
+        Without a host there is nothing to ask: the answer is fixed, the scopes stay as they are and, if any are
+        open, the record says they could not be confirmed. The request is bounded by cleanup_timeout, so a runtime
+        that never answers cannot hold up the calls behind it; the turn then rotates like in any unanswered release.
+        """
         await self.turn_lock.acquire()
         try:
             if self.stopping:
                 raise BridgeFailure('This owned CUA connection is stopping.')
             if not self.connected:
-                raise BridgeFailure(LOST_BEFORE_SEND)
+                if self.scopes:
+                    self.cleanup_unconfirmed = True
+                    self.changed()
+                raise BridgeFailure(TURN_ENDED_WITHOUT_HOST)
             rpc, scope = self.rpc, self.current_scope()
             relay = bool(self.host and self.host.get('relay'))
             started = time.monotonic()
             self.begin_call()
             ok = False
             try:
-                ok, result = await self.end_scope(scope)
+                ok, result = await self.end_scope(scope, self.cleanup_timeout)
                 return result
             except BridgeFailure:
                 if rpc.closed:
@@ -709,7 +722,7 @@ class HostMcp:
             if not self.connected or 'turn_ended' not in self.tool_names:
                 self.cleanup_unconfirmed = True
                 self.changed()
-                return self.release_result(False, 'cleanup_not_confirmed' if not self.connected else 'cleanup_tool_unavailable', 0)
+                return self.release_result(False, 'cleanup_not_confirmed', 0)
             # Only this host's thread can end its scopes; those of an earlier host stay open in the records.
             targets = [key for key in self.scopes if key[0] == self.thread_id]
             confirmed, failed = 0, not targets
@@ -741,6 +754,7 @@ class HostMcp:
             if self.cleanup_report is not None:
                 return self.cleanup_report
             self.stopping = True
+            begun = time.monotonic()
             report = {'owned_thread_unsubscribe': 'not_created', 'connection_close': 'unconfirmed'}
             if self.initialized and self.connected:
                 try:
@@ -749,7 +763,10 @@ class HostMcp:
                     pass  # whatever failed, the thread is still detached and the connection closed below
             if self.thread_id is not None and not self.rpc.closed:
                 try:
-                    result = await self.rpc.request('thread/unsubscribe', {'threadId': self.thread_id}, self.cleanup_timeout)
+                    # The release and this request share the exit budget; whatever the release left is all there is.
+                    left = max(0.0, EXIT_RELEASE_SECONDS-(time.monotonic()-begun))
+                    result = await self.rpc.request('thread/unsubscribe', {'threadId': self.thread_id},
+                                                    min(self.cleanup_timeout, left))
                     status = result.get('status') if isinstance(result, dict) else None
                     if status not in ('unsubscribed', 'notLoaded'):
                         raise BridgeFailure('The host did not confirm owned-thread detachment.')
