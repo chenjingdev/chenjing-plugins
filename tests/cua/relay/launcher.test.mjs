@@ -92,7 +92,7 @@ test('without a usable original runtime the launcher says so in one fixed line a
           assert.equal(result.code, 127);
           assert.equal(client.stderr, UNAVAILABLE);
         }
-      } finally {fixture.cleanup();}
+      } finally {await fixture.cleanup();}
     });
   }
 });
@@ -142,7 +142,7 @@ test('relay.mjs without an original runtime fails with one fixed line and writes
       assert.equal(result.code, 127);
       assert.equal(client.stderr, UNAVAILABLE);
       assert.deepEqual(relayDirs(fixture), []);
-    } finally {fixture.cleanup();}
+    } finally {await fixture.cleanup();}
   }
 });
 

@@ -17,6 +17,7 @@ function fakeHome(t) {
   put('.local/share/codex-cua/command.py');
   put('.local/bin/codex-cua', '#!/bin/sh\n');
   put('Library/LaunchAgents/other.plist', '<plist/>');
+  put('Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist', '<plist/>');
   fs.mkdirSync(path.join(home, 'Library/Caches/codex-host-cua'), {recursive: true});
   return {home, put, before: fingerprint(home)};
 }
@@ -46,12 +47,25 @@ test('new, removed and changed entries in every watched place show', t => {
   const {home, put, before} = fakeHome(t);
   fs.mkdirSync(path.join(home, 'Library/Caches/codex-cua'));
   put('Library/Caches/codex-host-cua/host.json', '{}');
-  fs.rmSync(path.join(home, 'Library/LaunchAgents/other.plist'));
+  fs.rmSync(path.join(home, 'Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist'));
   fs.chmodSync(path.join(home, '.local/bin/codex-cua'), 0o755);
   fs.rmSync(path.join(home, '.local/share/codex-cua/command.py'));
   const moved = changes(before, fingerprint(home));
-  for (const name of ['Library/Caches/codex-cua', 'Library/Caches/codex-host-cua/host.json', 'Library/LaunchAgents/other.plist',
-    'Library/LaunchAgents', '.local/share/codex-cua/command.py', '.local/share/codex-cua']) assert.ok(moved.includes(name), name);
+  for (const name of ['Library/Caches/codex-cua', 'Library/Caches/codex-host-cua/host.json',
+    'Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist', '.local/share/codex-cua/command.py',
+    '.local/share/codex-cua']) assert.ok(moved.includes(name), name);
+});
+
+test('a login agent of ours is watched and the agents of other tools are not', t => {
+  const {home, put, before} = fakeHome(t);
+  put('Library/LaunchAgents/other.plist', '<plist>changed</plist>');
+  put('Library/LaunchAgents/org.example.new.plist');
+  fs.rmSync(path.join(home, 'Library/LaunchAgents/other.plist'));
+  assert.deepEqual(changes(before, fingerprint(home)), [], 'what other tools do in the shared folder is not our business');
+  put('Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist', '<plist>rewritten</plist>');
+  assert.ok(changes(before, fingerprint(home)).includes('Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist'));
+  put('Library/LaunchAgents/com.chenjingdev.codex-cua.other.plist');
+  assert.ok(changes(before, fingerprint(home)).includes('Library/LaunchAgents/com.chenjingdev.codex-cua.other.plist'));
 });
 
 test('a link is described, not followed', t => {

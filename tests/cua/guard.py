@@ -9,7 +9,10 @@ from pathlib import Path
 import stat
 
 WATCHED = ('.local/share/codex-cua', '.local/bin/codex-cua', 'Library/Caches/codex-cua',
-           'Library/Caches/codex-host-cua', 'Library/LaunchAgents')
+           'Library/Caches/codex-host-cua')
+# Shared folders, of which only the entries with our own prefix count: other tools change their own entries all the
+# time (the login agents of this plugin are com.chenjingdev.codex-cua.*).
+PREFIXED = (('Library/LaunchAgents', 'com.chenjingdev.'),)
 
 
 def real_home():
@@ -18,11 +21,18 @@ def real_home():
     return Path(pwd.getpwuid(os.getuid()).pw_dir)
 
 
-def fingerprint(home, watched=WATCHED):
+def fingerprint(home, watched=WATCHED, prefixed=PREFIXED):
     seen = {}
     home = Path(home)
-    for name in watched:
-        pending = [home/name]
+    starts = [home/name for name in watched]
+    for name, prefix in prefixed:
+        try:
+            with os.scandir(home/name) as entries:
+                starts += [home/name/entry.name for entry in entries if entry.name.startswith(prefix)]
+        except OSError:
+            pass
+    for start in starts:
+        pending = [start]
         while pending:
             path = pending.pop()
             key = str(path.relative_to(home))

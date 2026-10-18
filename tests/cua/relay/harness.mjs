@@ -16,10 +16,13 @@ process.env.HOME = DEFAULT_HOME;
 // and readdir) when the tests start and again when they end, and any difference fails the run. tests/cua/guard.py
 // does the same for the Python tests.
 export const WATCHED = ['.local/share/codex-cua', '.local/bin/codex-cua', 'Library/Caches/codex-cua',
-  'Library/Caches/codex-host-cua', 'Library/LaunchAgents'];
+  'Library/Caches/codex-host-cua'];
+// Shared folders, of which only the entries with our own prefix count: other tools change their own entries all
+// the time (the login agents of this plugin are com.chenjingdev.codex-cua.*).
+export const PREFIXED = [['Library/LaunchAgents', 'com.chenjingdev.']];
 export const REAL_HOME = os.userInfo().homedir;       // from the account database, not from HOME
 
-export function fingerprint(home, watched = WATCHED) {
+export function fingerprint(home, watched = WATCHED, prefixed = PREFIXED) {
   const seen = new Map();
   const kind = BigInt(fs.constants.S_IFMT);
   const directory = BigInt(fs.constants.S_IFDIR);
@@ -34,6 +37,11 @@ export function fingerprint(home, watched = WATCHED) {
     }
   };
   for (const name of watched) visit(path.join(home, name), name);
+  for (const [name, prefix] of prefixed) {
+    let names = [];
+    try {names = fs.readdirSync(path.join(home, name));} catch {/* absent */}
+    for (const entry of names) if (entry.startsWith(prefix)) visit(path.join(home, name, entry), name + '/' + entry);
+  }
   return seen;
 }
 
@@ -52,7 +60,8 @@ process.on('exit', () => {
     process.exitCode = 1;
   }
   if (moved.length > 0) {
-    process.stderr.write('The real support folders changed while the tests ran:\n  ' + moved.slice(0, 30).join('\n  ') + '\n');
+    process.stderr.write('The real support folders changed while the tests ran (the tests only read them; if you installed or '
+      + 'started Codex yourself in the meantime, run them again):\n  ' + moved.slice(0, 30).join('\n  ') + '\n');
     process.exitCode = 1;
   }
 });
@@ -176,9 +185,16 @@ export function makeFixture() {
       try {text = fs.readFileSync(fixture.log, 'utf8');} catch {return [];}
       return text.split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(event => !kind || event.kind === kind);
     },
-    cleanup() {
+    // Stop what the test started and wait until nothing is left that could still write into the folder (the relay
+    // and the fake runtime behind it leave a moment after the kill), then remove the folder.
+    async cleanup() {
       for (const client of fixture.clients) client.kill();
-      fs.rmSync(dir, {recursive: true, force: true});
+      const pids = fixture.events('start').map(event => event.pid);
+      await Promise.race([Promise.all(fixture.clients.map(client => client.exit)), sleep(3000)]);
+      const gone = pid => {try {process.kill(pid, 0); return false;} catch (error) {return error.code === 'ESRCH';}};
+      const deadline = Date.now() + 3000;
+      while (pids.some(pid => !gone(pid)) && Date.now() < deadline) await sleep(20);
+      fs.rmSync(dir, {recursive: true, force: true, maxRetries: 10, retryDelay: 50});
     },
   };
   return fixture;

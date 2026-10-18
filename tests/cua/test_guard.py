@@ -22,6 +22,7 @@ class GuardTests(unittest.TestCase):
         (self.home/'.local/bin/codex-cua').write_text('#!/bin/sh\n')
         (self.home/'Library/LaunchAgents').mkdir(parents=True)
         (self.home/'Library/LaunchAgents/other.plist').write_text('<plist/>')
+        (self.home/'Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist').write_text('<plist/>')
         (self.home/'Library/Caches/codex-host-cua').mkdir(parents=True)
         self.before = guard.fingerprint(self.home)
 
@@ -48,13 +49,26 @@ class GuardTests(unittest.TestCase):
     def test_new_removed_and_changed_entries_in_every_watched_place_are_seen(self):
         (self.home/'Library/Caches/codex-cua').mkdir()
         (self.home/'Library/Caches/codex-host-cua/host.json').write_text('{}')
-        (self.home/'Library/LaunchAgents/other.plist').unlink()
+        (self.home/'Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist').unlink()
         (self.home/'.local/bin/codex-cua').chmod(0o755)
         (self.home/'.local/share/codex-cua/command.py').unlink()
         moved = self.moved()
-        for name in ('Library/Caches/codex-cua', 'Library/Caches/codex-host-cua/host.json', 'Library/LaunchAgents/other.plist',
-                     'Library/LaunchAgents', '.local/share/codex-cua/command.py', '.local/share/codex-cua'):
+        for name in ('Library/Caches/codex-cua', 'Library/Caches/codex-host-cua/host.json',
+                     'Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist',
+                     '.local/share/codex-cua/command.py', '.local/share/codex-cua'):
             self.assertIn(name, moved)
+
+    def test_a_login_agent_of_ours_is_watched_and_other_tools_agents_are_not(self):
+        agents = self.home/'Library/LaunchAgents'
+        (agents/'other.plist').write_text('<plist>changed</plist>')
+        (agents/'org.example.new.plist').write_text('<plist/>')
+        (agents/'other.plist').unlink()
+        self.assertEqual(self.moved(), [], 'what other tools do in the shared folder is not our business')
+        (agents/'com.chenjingdev.codex-cua.env.plist').write_text('<plist>rewritten</plist>')
+        self.assertIn('Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist', self.moved())
+        (agents/'com.chenjingdev.codex-cua.env.plist').unlink()
+        (agents/'com.chenjingdev.codex-cua.other.plist').write_text('<plist/>')
+        self.assertIn('Library/LaunchAgents/com.chenjingdev.codex-cua.other.plist', self.moved())
 
     def test_looking_changes_nothing(self):
         guard.fingerprint(self.home)

@@ -36,7 +36,8 @@ def main():
         problems.append('Tests wrote into the default home instead of an injected one:\n  ' + '\n  '.join(strays))
     moved = guard.changes(before, guard.fingerprint(real_home))
     if moved:
-        problems.append('The real support folders changed while the tests ran:\n  ' + '\n  '.join(moved[:30]))
+        problems.append('The real support folders changed while the tests ran (the tests only read them; if you installed or '
+                        'started Codex yourself in the meantime, run them again):\n  ' + '\n  '.join(moved[:30]))
     for problem in problems:
         print(problem, file=sys.stderr)
     return 0 if result.wasSuccessful() and not problems else 1
