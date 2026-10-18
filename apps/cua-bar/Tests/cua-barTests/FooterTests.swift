@@ -69,6 +69,19 @@ struct FooterTests {
         #expect(kit.releases.newRelease == nil)
     }
 
+    @Test func theFooterDrawsTheButtonOnlyWhenThereIsANewerRelease() async {
+        let newer = kit(latest: "0.8.0")
+        let same = kit(latest: "0.7.0")
+        defer { newer.suite.remove(); same.suite.remove() }
+        await newer.releases.checkIfDue()
+        await same.releases.checkIfDue()
+        func width(_ kit: Kit) -> CGFloat {
+            fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {})).width
+        }
+        // Its natural width grows by the button and its spacing, nothing else.
+        #expect(width(newer) > width(same) + 60, "newer \(width(newer)) vs same \(width(same))")
+    }
+
     // MARK: Layout
 
     @Test func theFooterFitsTheRowInEveryStateAndTheRemoveQuestionAddsOnlyItsOwnCard() async throws {
