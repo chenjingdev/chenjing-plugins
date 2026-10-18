@@ -26,7 +26,7 @@ Claude가 설치와 연결을 점검합니다. 이후 **“cua 써서 이 앱을
 
 설정이 끝나면 Codex를 따로 준비하지 않아도 됩니다.
 
-- **앱을 평소처럼 켜도 됩니다.** 설정 때 로그인 항목(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`)이 등록돼, Dock이나 Spotlight로 연 Codex도 연결 가능한 방식으로 켜집니다.
+- **앱을 평소처럼 켜도 됩니다.** 설정 때 로그인 항목(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`)이 등록돼, Dock이나 Spotlight로 연 Codex도 연결 가능한 방식으로 켜집니다. 시스템 설정의 로그인 항목에는 이 항목이 실행하는 스크립트 이름 `codex-cua-login-env`로 보입니다.
 - **앱이 꺼져 있어도 됩니다.** Claude가 CUA에 연결할 때 Codex를 뒤에서 열고, 앞에 있던 앱으로 포커스를 돌려줍니다. Codex를 켜는 것은 새 Claude 대화가 CUA에 연결할 때와, 연결이 끊긴 뒤의 다음 CUA 호출뿐입니다. 대화 끝 정리(`turn_ended`)는 켜지 않습니다.
 - **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** CUA Bar는 이런 Codex를 끄지 않고 알림으로 다시 켤지 묻고, **다시 켜기**를 누르면 정상 종료한 뒤 다시 켭니다. 앱 없이 하려면 진행 중인 작업을 마치고 Codex를 정상 종료(⌘Q)한 뒤 다시 엽니다. 어느 쪽도 강제로 종료하지 않지만, 다시 켜면 하던 Codex 작업은 끊깁니다. 다시 켠 뒤에도 Claude Code에서 cua가 연결되지 않은 것으로 보이면 `/mcp`로 다시 연결합니다.
 - **Codex가 꺼졌다 켜져도(앱 갱신 포함) 열려 있던 Claude 대화는 이어집니다.** 다음 CUA 호출 때 새 호스트에 다시 붙습니다. 연결이 끊길 때 하던 조작은 다시 보내지 않으므로 그 조작이 실제로 됐는지는 알 수 없습니다. 화면을 확인한 뒤에 이어 갑니다.

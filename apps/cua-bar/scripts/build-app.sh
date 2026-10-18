@@ -74,6 +74,8 @@ rm -rf "$bundle_path"
 mkdir -p "$bundle_path/Contents/MacOS"
 mkdir -p "$bundle_path/Contents/Resources"
 cp "$binary_path" "$bundle_path/Contents/MacOS/$executable_name"
+# Drawn by code at every build. Without it the notification question showed a blank icon.
+swift "$script_dir/make-icon.swift" "$bundle_path/Contents/Resources/AppIcon.icns"
 
 cat > "$bundle_path/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -86,6 +88,8 @@ cat > "$bundle_path/Contents/Info.plist" <<PLIST
   <string>CUA Bar</string>
   <key>CFBundleExecutable</key>
   <string>$executable_name</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
   <string>$bundle_identifier</string>
   <key>CFBundleInfoDictionaryVersion</key>

@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import stat
 import tempfile
 import threading
 import types
@@ -182,9 +183,15 @@ class LoginEnvironmentTests(unittest.TestCase):
         agent = plistlib.loads(setup.login_agent_path(self.home).read_bytes())
         self.assertEqual(agent['Label'], setup.LOGIN_LABEL)
         self.assertTrue(agent['RunAtLoad'])
-        self.assertIn('/bin/launchctl setenv CODEX_CLI_PATH '+launcher, agent['ProgramArguments'][2])
+        # A script of its own, so Login Items names it instead of saying `sh`.
+        script = self.home/'.local/share/codex-cua/codex-cua-login-env'
+        self.assertEqual(agent['ProgramArguments'], [str(script)])
+        self.assertEqual(stat.S_IMODE(script.stat().st_mode), 0o700)
+        text = script.read_text()
+        self.assertTrue(text.startswith('#!/bin/sh\n'+setup.MARKER+'\n'))
+        self.assertIn('/bin/launchctl setenv CODEX_CLI_PATH '+launcher+'\n', text)
         # Updated apps keep working: the native CLI is discovered at launch.
-        self.assertNotIn('CODEX_HOST_CUA_NATIVE_CLI', agent['ProgramArguments'][2])
+        self.assertNotIn('CODEX_HOST_CUA_NATIVE_CLI', text)
 
     def test_foreign_launchd_value_is_preserved(self):
         self.launchd['CODEX_CLI_PATH'] = '/somebody/else'
@@ -199,6 +206,7 @@ class LoginEnvironmentTests(unittest.TestCase):
             self.launchd['CODEX_HOST_CUA_STATE_DIR'] = '/changed/by/user'
             setup.remove_login_environment(self.home, self.environment)
         self.assertFalse(setup.login_agent_path(self.home).exists())
+        self.assertFalse(setup.login_script_path(self.home).exists())
         self.assertEqual(self.launchd, {'CODEX_HOST_CUA_STATE_DIR': '/changed/by/user'})
 
     def test_unrelated_agent_with_same_path_is_preserved(self):

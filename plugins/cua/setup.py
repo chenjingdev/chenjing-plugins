@@ -21,6 +21,9 @@ PLUGIN_ID = 'cua@chenjing-plugins'
 MARKER = '# codex-cua authored command v1'
 DEPENDENCY = 'websockets==12.0'
 LOGIN_LABEL = 'com.chenjingdev.codex-cua.env'
+# What the login agent runs. macOS lists the agent under Login Items by this name; with `/bin/sh -c`
+# it said only `sh`.
+LOGIN_SCRIPT = 'codex-cua-login-env'
 FALLBACK_ENV = 'CODEX_CUA_FALLBACK_NATIVE'
 ROOT_RESOLVED_FLAG = '--root-resolved'
 # Commands of the menu bar app's engine (engine_cli.py): one JSON object on stdout.
@@ -249,6 +252,10 @@ def login_agent_path(home=None):
     return (Path.home() if home is None else Path(home))/'Library/LaunchAgents'/(LOGIN_LABEL+'.plist')
 
 
+def login_script_path(home=None):
+    return support_root(home)/LOGIN_SCRIPT
+
+
 def launchd_value(key):
     result = subprocess.run(['/bin/launchctl', 'getenv', key], stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, text=True, timeout=5)
@@ -277,8 +284,12 @@ def install_login_environment(home=None, environment=None):
             return 'conflict'
     path = login_agent_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    script = '; '.join('/bin/launchctl setenv '+shlex.quote(key)+' '+shlex.quote(value) for key, value in values.items())
-    write_private(path, plistlib.dumps({'Label': LOGIN_LABEL, 'ProgramArguments': ['/bin/sh', '-c', script],
+    script = login_script_path(home)
+    script.parent.mkdir(parents=True, exist_ok=True)
+    write_private(script, '#!/bin/sh\n'+MARKER+'\n'+''.join(
+        '/bin/launchctl setenv '+shlex.quote(key)+' '+shlex.quote(value)+'\n' for key, value in values.items()))
+    script.chmod(0o700)
+    write_private(path, plistlib.dumps({'Label': LOGIN_LABEL, 'ProgramArguments': [str(script)],
                                         'RunAtLoad': True}).decode())
     for key, value in values.items():
         subprocess.run(['/bin/launchctl', 'setenv', key, value], check=True,
@@ -292,6 +303,12 @@ def remove_login_environment(home=None, environment=None):
         if plistlib.loads(path.read_bytes()).get('Label') != LOGIN_LABEL:
             raise RuntimeError('An unrelated login agent was preserved.')
         path.unlink()
+    script = login_script_path(home)
+    try:
+        if MARKER in script.read_text().splitlines()[:3]:
+            script.unlink()
+    except (OSError, UnicodeError):
+        pass
     for key, value in login_values(home, environment).items():
         if launchd_value(key) == value:
             subprocess.run(['/bin/launchctl', 'unsetenv', key], check=True,
