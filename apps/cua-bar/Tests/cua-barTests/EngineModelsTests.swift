@@ -140,6 +140,16 @@ struct EngineModelsTests {
         #expect(try host("null").startedBeforeSetup == false)
     }
 
+    @Test func aHostThatIsStartingOrStoppingIsReadAsSuch() throws {
+        func state(_ raw: String) throws -> HostState {
+            let json = #"{"host": {"state": "\#(raw)", "since": null}}"#
+            return try JSONDecoder().decode(EngineStatus.self, from: Data(json.utf8)).host.state
+        }
+        #expect(try state("starting") == .starting)
+        #expect(try state("stopping") == .stopping)
+        #expect(try state("later") == .unknown("later"))
+    }
+
     @Test func nullsMeanUnknownEverywhere() throws {
         let status = try Fixtures.status("status-nulls")
         #expect(status.generatedAt == nil)

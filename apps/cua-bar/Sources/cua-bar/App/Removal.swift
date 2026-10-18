@@ -122,7 +122,8 @@ final class RemovalFlow: ObservableObject {
 
     static func hostMayBeRunning(in status: EngineStatus) -> Bool {
         switch status.host.state {
-        case .ready, .starting: true
+        // A stopping host is gone, but its Codex is still quitting.
+        case .ready, .starting, .stopping: true
         case .unknown: status.codex.running
         case .closed, .missing: false
         }

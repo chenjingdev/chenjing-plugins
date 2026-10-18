@@ -132,6 +132,23 @@ class HostStartTests(StatusCase):
         self.assertEqual(self.status()['host']['state'], 'ready')
 
 
+class HostStopTests(StatusCase):
+    def test_a_codex_whose_host_closed_moments_ago_is_still_quitting(self):
+        self.machine.add(1000, 1, self.commands.app_main, start=NOW-7200)
+        self.write_host(status='closed', age=5)
+        self.assertEqual(self.status()['host']['state'], 'stopping')
+        self.write_host(status='closed', age=31)
+        self.assertEqual(self.status()['host']['state'], 'closed')
+
+    def test_a_gone_codex_or_a_host_that_never_was_is_not_quitting(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.write_host(status='closed', age=5)
+        self.assertEqual(self.status()['host']['state'], 'closed')
+        (self.host_dir/'host.json').unlink()
+        self.machine.add(1000, 1, self.commands.app_main, start=NOW-7200)
+        self.assertEqual(self.status()['host']['state'], 'missing')
+
+
 class StartedBeforeSetupTests(StatusCase):
     def test_a_host_from_an_older_launcher_says_a_restart_applies_the_setup(self):
         self.machine.add(5, 1, '/bin/x')

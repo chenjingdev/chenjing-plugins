@@ -19,6 +19,8 @@ from engine_records import (WRITER, control_socket, forget_released, load_record
 PRUNE_MIN_AGE = 60
 # A Codex that has just opened starts its host a few seconds later; until then it is not one without a host (S9).
 HOST_START_GRACE = 30
+# A quitting Codex closes its host a few seconds before it ends; until then it is not one without a host (S2).
+HOST_STOP_GRACE = 30
 
 
 def _later(*values):
@@ -454,12 +456,16 @@ class View:
     # --- the status ----------------------------------------------------------------------------------
 
     def host_state(self):
-        """The host's state, where a Codex that opened moments ago without a host yet is still starting it."""
+        """The host's state, where a Codex that opened moments ago without a host yet is still starting it,
+        and one whose host closed moments ago is still quitting (`stopping`)."""
         inv = self.inv
         if inv.host.state in ('closed', 'missing', 'unknown') and inv.app_pids:
             opened = min(inv.procs[pid].start for pid in inv.app_pids)
             if self.now-opened <= HOST_START_GRACE:
                 return 'starting'
+            # The wrapper writes `closed` as it ends; a Codex opened after that is caught above.
+            if inv.host.state == 'closed' and inv.host.since is not None and self.now-inv.host.since <= HOST_STOP_GRACE:
+                return 'stopping'
         return inv.host.state
 
     def started_before_setup(self):

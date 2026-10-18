@@ -25,7 +25,7 @@ This plugin connects to an existing Codex desktop host on the same Mac. Read
      step 5 opens it in the background when its CUA connection starts; recheck the
      host after that.
    - If Codex is running without the host (`status --json` shows `codex.running`
-     while `host.state` is neither `ready` nor `starting`, usually because Codex
+     while `host.state` is not `ready`, `starting` or `stopping`, usually because Codex
      was already open before setup), the user restarts it once: with CUA Bar's
      다시 켜기, or by finishing the Codex work, quitting normally (⌘Q) and opening
      it again. Explain that this interrupts Codex work in progress. Never

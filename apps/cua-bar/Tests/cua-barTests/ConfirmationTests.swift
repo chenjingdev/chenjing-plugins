@@ -296,6 +296,33 @@ struct ConfirmationTests {
         #expect(rig.actionCalls.filter { $0 == .restartCodex }.count == 1)
     }
 
+    @Test func whileTheQuitIsUnderWayTheCardSaysSoAndRestartWaits() async throws {
+        // S10: the banner is gone in seconds, and Codex may be asking whether to quit.
+        let rig = try await quitPending()
+        #expect(rig.model.summary.fix == .restartCodex)
+        #expect(rig.model.summary.nextStep == "Codex가 꺼지기를 기다려요 — 종료를 물으면 '종료'를 눌러 주세요. 꺼지면 다시 켤게요")
+        #expect(rig.model.fixIsBusy)
+        #expect(rig.model.fixHelp == "Codex가 꺼지기를 기다리는 중이에요")
+        try await read(rig, codex: [15400])
+        #expect(rig.model.summary.nextStep == CUABarViewModel.quitWaitStep, "the same Codex is still quitting")
+        try await read(rig, codex: [])
+        rig.clock.advance(CUABarViewModel.relaunchAfterGone)
+        try await read(rig, codex: [])
+        #expect(rig.opener.openedPaths.count == 1)
+        #expect(rig.model.summary.nextStep != CUABarViewModel.quitWaitStep)
+        #expect(!rig.model.fixIsBusy)
+    }
+
+    @Test func aQuitThatOutlastsTheWaitSaysTheRestartIsOver() async throws {
+        let rig = try await quitPending()
+        rig.clock.advance(CUABarViewModel.relaunchWait)
+        try await read(rig, codex: [15400])
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "Codex가 10분 안에 꺼지지 않아 다시 켜기를 그만뒀어요"))
+        #expect(rig.model.summary.nextStep != CUABarViewModel.quitWaitStep)
+        #expect(!rig.model.fixIsBusy)
+        #expect(rig.model.fixHelp == nil)
+    }
+
     @Test func aCodexOpenedMeanwhileOrOneThatOutlastsTheWaitIsLeftAlone() async throws {
         let rig = try await quitPending()
         try await read(rig, codex: [])

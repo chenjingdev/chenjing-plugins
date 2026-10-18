@@ -61,6 +61,18 @@ struct StatusEvaluatorTests {
         #expect(evaluate(status).warning == nil)
     }
 
+    @Test func theRestartHintStaysWhileAnAIUsesTheScreen() throws {
+        // S8: the card flipped between the hint and "없음" each time an AI used the screen.
+        var status = try Fixtures.status("status-working")
+        status.host.startedBeforeSetup = true
+        let summary = evaluate(status)
+        #expect(summary.icon == .working)
+        #expect(summary.nextStep == "Codex를 다시 켜면 새 설정이 적용돼요")
+        #expect(summary.warning == "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 놓아줄 수 없을 수 있어요")
+        status.host.startedBeforeSetup = false
+        #expect(evaluate(status).nextStep == "없음")
+    }
+
     @Test func endedConnectionsAreNotCountedAsConnected() throws {
         let status = try Fixtures.status("status-problem")
         // 1 Claude alive, 1 Codex idle; the ended Claude one is a problem, not a connection.
@@ -345,7 +357,7 @@ struct StatusEvaluatorTests {
     // MARK: Codex without host
 
     @Test(arguments: [
-        (HostState.ready, false), (.starting, false),
+        (HostState.ready, false), (.starting, false), (.stopping, false),
         (.closed, true), (.missing, true), (.unknown("unknown"), true),
     ])
     func hostStatesThatLeaveARunningCodexWithoutAConnection(state: HostState, isProblem: Bool) throws {

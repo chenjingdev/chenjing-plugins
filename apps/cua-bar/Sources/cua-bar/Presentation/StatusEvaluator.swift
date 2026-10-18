@@ -61,17 +61,20 @@ enum StatusEvaluator {
     /// `releaseTried`: the ended connections this app run has already tried to release (see `problem`).
     static func evaluate(_ status: EngineStatus, appVersion: String?, releaseTried: Set<String> = []) -> StatusSummary {
         if let problem = problem(in: status, appVersion: appVersion, releaseTried: releaseTried) { return summary(for: problem) }
+        // Not a problem (nothing is broken and the icon stays ready), but nothing else would say why
+        // the connections of a Codex from before the update cannot be released. Said while working
+        // too, or the card would drop it each time an AI uses the screen.
+        let restartApplies = status.codex.running && status.host.startedBeforeSetup
         if let use = screenUse(in: status) {
             let sentence = "\(use.subject)가 화면을 쓰는 중"
             return StatusSummary(
-                icon: .working, stateLabel: "작업 중", headline: sentence, nextStep: "없음", warning: nil, problem: nil,
+                icon: .working, stateLabel: "작업 중", headline: sentence,
+                nextStep: restartApplies ? restartAppliesStep : "없음",
+                warning: restartApplies ? restartAppliesWarning : nil, problem: nil,
                 tooltip: "CUA 작업 중 · \(sentence)", accessibilityLabel: IconState.working.accessibilityDescription)
         }
         let counts = connectionCounts(in: status)
         let codexIsOffButStartable = status.codex.installed == true && !status.codex.running
-        // Not a problem (nothing is broken and the icon stays ready), but nothing else would say why
-        // the connections of a Codex from before the update cannot be released.
-        let restartApplies = status.codex.running && status.host.startedBeforeSetup
         return StatusSummary(
             icon: .ready, stateLabel: "준비됨",
             headline: counts.isEmpty ? "연결 없음" : "연결 " + counts,
@@ -164,7 +167,7 @@ enum StatusEvaluator {
                 kind: .setupIncomplete, title: title, nextStep: "고치기를 누르면 설정을 다시 맞춰요",
                 warning: nil, fix: .runSetup, fixLabel: "고치기")
         }
-        if status.codex.running, status.host.state != .ready, status.host.state != .starting {
+        if status.codex.running, status.host.state != .ready, status.host.state != .starting, status.host.state != .stopping {
             return Problem(
                 kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요", nextStep: "다시 켜면 Claude가 붙어요",
                 warning: "하던 Codex 작업이 끊길 수 있어요", fix: .restartCodex, fixLabel: "다시 켜기")

@@ -71,13 +71,16 @@ enum ConnectionState: Equatable, Sendable {
 }
 
 enum HostState: Equatable, Sendable {
-    case ready, starting, closed, missing
+    /// `starting`: Codex opened moments ago and has no host yet. `stopping`: Codex closed its host
+    /// moments ago and is still quitting (S2).
+    case ready, starting, stopping, closed, missing
     case unknown(String)
 
     init(raw: String?) {
         switch raw {
         case "ready": self = .ready
         case "starting": self = .starting
+        case "stopping": self = .stopping
         case "closed": self = .closed
         case "missing": self = .missing
         default: self = .unknown(raw ?? "")

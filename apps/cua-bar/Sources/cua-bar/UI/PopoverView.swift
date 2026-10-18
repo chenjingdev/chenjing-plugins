@@ -12,7 +12,7 @@ struct PopoverView: View {
             StatusCardView(
                 summary: model.summary,
                 fixIsRunning: model.fixIsBusy,
-                fixHelp: model.summary.fix.flatMap { model.cleanupHelp(for: $0) }
+                fixHelp: model.fixHelp
             ) {
                 if let fix = model.summary.fix { model.send(fix) }
             }

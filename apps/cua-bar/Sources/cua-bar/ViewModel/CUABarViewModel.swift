@@ -47,6 +47,11 @@ final class CUABarViewModel: ObservableObject {
     static let cleanupBusyOutcome = ActionOutcome(kind: .info, message: "자동 정리 중이에요. 끝나면 다시 눌러 주세요")
     /// The notification's 다시 켜기 while the status cannot be read.
     static let restartNeedsStatus = "상태를 읽지 못해 다시 켜지 않았어요. 잠시 뒤 다시 눌러 주세요"
+    /// While a restart waits for the Codex it asked to quit (S10): the card's next step, 다시 켜기 on
+    /// hover, and what is said when the same Codex outlasts the wait.
+    static let quitWaitStep = "Codex가 꺼지기를 기다려요 — 종료를 물으면 '종료'를 눌러 주세요. 꺼지면 다시 켤게요"
+    static let quitWaitHelp = "Codex가 꺼지기를 기다리는 중이에요"
+    static let quitWaitEnded = "Codex가 10분 안에 꺼지지 않아 다시 켜기를 그만뒀어요"
 
     @Published private(set) var summary: StatusSummary = StatusEvaluator.loading
     /// nil until the first answer, and again while the engine cannot be read.
@@ -133,7 +138,10 @@ final class CUABarViewModel: ObservableObject {
         /// The first read without that Codex; it is opened on a later one, when its host has closed too.
         var goneSince: Date?
     }
-    private var pendingRelaunch: PendingRelaunch?
+    private var pendingRelaunch: PendingRelaunch? {
+        // The card says it waits for exactly as long as it does.
+        didSet { if (oldValue == nil) != (pendingRelaunch == nil) { publishSummary() } }
+    }
     static let relaunchWait: TimeInterval = 10 * 60
     static let relaunchAfterGone: TimeInterval = 3
 
@@ -199,10 +207,13 @@ final class CUABarViewModel: ObservableObject {
     }
 
     /// `summary` is the evaluator's card with setup's state over it: while a setup runs, or an
-    /// install or update that ends in one, the card says so instead of showing a problem.
+    /// install or update that ends in one, the card says so instead of showing a problem. While a
+    /// restart waits for Codex to finish quitting, the next step says so: the banner is gone in
+    /// seconds, and Codex may be asking whether to quit (S10).
     private func publishSummary() {
-        let next = SetupOverlay.apply(
+        var next = SetupOverlay.apply(
             to: evaluatedSummary, setup: setupActivity.phase, flowRunning: inFlight.contains(where: SetupOverlay.runsSetup))
+        if pendingRelaunch != nil { next.nextStep = Self.quitWaitStep }
         if next != summary { summary = next }
     }
 
@@ -301,6 +312,10 @@ final class CUABarViewModel: ObservableObject {
         guard var relaunch = pendingRelaunch else { return }
         if now >= relaunch.until || (status.codex.running && Set(status.codex.pids) != relaunch.pids) {
             pendingRelaunch = nil
+            // Without a word the card would just stop waiting.
+            if status.codex.running, Set(status.codex.pids) == relaunch.pids {
+                show(ActionOutcome(kind: .info, message: Self.quitWaitEnded))
+            }
             return
         }
         guard !status.codex.running else { return }
@@ -775,11 +790,20 @@ final class CUABarViewModel: ObservableObject {
         }
     }
 
-    /// The status card's fix waits: for its own run, or for the automatic cleanup.
+    /// The status card's fix waits: for its own run, for the automatic cleanup, or (다시 켜기) for
+    /// the Codex the last restart asked to quit.
     var fixIsBusy: Bool {
         guard let fix = summary.fix else { return false }
-        return inFlight.contains(fix) || waitsForAutomaticCleanup(fix)
+        return inFlight.contains(fix) || waitsForAutomaticCleanup(fix) || waitsForQuit(fix)
     }
+
+    /// What the status card's fix says on hover while it waits; nil otherwise.
+    var fixHelp: String? {
+        guard let fix = summary.fix else { return nil }
+        return waitsForQuit(fix) ? Self.quitWaitHelp : cleanupHelp(for: fix)
+    }
+
+    private func waitsForQuit(_ action: CUAAction) -> Bool { action == .restartCodex && pendingRelaunch != nil }
 
     /// What a button says on hover while it waits for the automatic cleanup; nil otherwise.
     func cleanupHelp(for action: CUAAction) -> String? {

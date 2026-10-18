@@ -303,8 +303,8 @@ struct RemovalTests {
         #expect(rig.flow.phase == .confirming)
     }
 
-    @Test(arguments: [HostState.ready, .starting])
-    func aHostThatIsReadyOrStartingRefusesWhateverCodexReportsAsRunning(host: HostState) async {
+    @Test(arguments: [HostState.ready, .starting, .stopping])
+    func aHostThatIsReadyStartingOrStoppingRefusesWhateverCodexReportsAsRunning(host: HostState) async {
         var status = EngineStatus()
         status.host.state = host
         status.codex.running = false
