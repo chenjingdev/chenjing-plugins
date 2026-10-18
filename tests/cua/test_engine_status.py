@@ -383,6 +383,77 @@ class AttributionTests(StatusCase):
                          ('claude', 'ended', 500, False))
 
 
+class OwnerNameTests(StatusCase):
+    """A relay that a bridge started carries the bridge's name (`owner`); that decides whose runtime it is."""
+
+    def named_runtime(self, owner, start=NOW-600, cwd='/work/other', scopes=()):
+        self.add_runtime(2000, start)
+        return self.state.relay('r1', 2001, start, root_pid=2000, runtime_pid=2002, cwd=cwd, owner=owner,
+                                scopes=list(scopes))
+
+    def test_a_runtime_that_names_its_bridge_belongs_to_it_without_a_shared_session_folder_or_start(self):
+        self.start_world()
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        self.state.bridge('a1', 4242, NOW-900, owner_pid=500, cwd='/work/x', session_id=SESSION_A)
+        self.named_runtime('bridge-4242-%d' % (NOW-900))
+        [connection] = self.status()['connections']
+        self.assertEqual((connection['id'], connection['agent'], connection['state']),
+                         ('claude-4242-%d' % (NOW-900), 'claude', 'active'))
+        self.assertEqual(connection['memory_bytes'], (30_000+1000+400+2000)*1024)
+
+    def test_a_runtime_that_names_a_bridge_that_is_gone_is_an_ended_claude_connection(self):
+        self.start_world()
+        directory = self.named_runtime('bridge-7001-%d' % (NOW-5000))
+        self.serve(directory, 2001, NOW-600, lambda request: {'released': True})
+        [connection] = self.status()['connections']
+        self.assertEqual((connection['id'], connection['agent'], connection['state'], connection['owner_alive'],
+                          connection['owner_pid'], connection['can_release']),
+                         ('claude-2001-%d' % (NOW-600), 'claude', 'ended', False, 1100, True))
+        self.state.bridge('d1', 7001, NOW-5000, owner_pid=501)       # its record, when there still is one, names the owner
+        [connection] = self.status()['connections']
+        self.assertEqual((connection['state'], connection['owner_pid']), ('ended', 501))
+
+    def test_a_runtime_that_names_a_gone_bridge_is_not_given_to_a_live_bridge_that_shares_its_session(self):
+        self.start_world()
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        self.state.bridge('a1', 4242, NOW-900, owner_pid=500, cwd='/work/x', session_id=SESSION_A,
+                          scopes=[State.scope(SESSION_A)])
+        self.named_runtime('bridge-7001-%d' % (NOW-5000), scopes=[State.scope(SESSION_A)])
+        found = sorted((item['agent'], item['state'], item['pid']) for item in self.status()['connections'])
+        self.assertEqual(found, [('claude', 'active', 4242), ('claude', 'ended', 2001)])
+
+    def test_a_runtime_that_names_a_bridge_running_without_a_record_is_part_of_that_bridges_connection(self):
+        self.start_world()
+        self.add_claude(501)
+        self.add_bridge(4300, 501, NOW-700)
+        self.named_runtime('bridge-4300-%d' % (NOW-700))
+        [connection] = self.status()['connections']
+        self.assertEqual((connection['id'], connection['state'], connection['memory_bytes']),
+                         ('claude-4300-%d' % (NOW-700), 'active', (30_000+1000+400+2000)*1024))
+
+    def test_a_runtime_whose_bridge_still_runs_is_never_ended_even_when_nothing_else_knows_the_bridge(self):
+        self.start_world()
+        self.add_claude(501)
+        self.machine.add(4300, 501, '/usr/bin/python3 /somewhere/else/server.py', start=NOW-700)
+        self.named_runtime('bridge-4300-%d' % (NOW-700))
+        [connection] = self.status()['connections']
+        self.assertEqual((connection['agent'], connection['state'], connection['owner_pid'], connection['owner_alive']),
+                         ('claude', 'active', 501, True))
+
+    def test_a_name_that_is_not_a_bridges_or_whose_start_does_not_match_counts_as_no_name_or_a_gone_bridge(self):
+        self.start_world()
+        self.named_runtime('relay-4242-%d' % (NOW-900), scopes=[State.scope(SESSION_B)])
+        [connection] = self.status()['connections']
+        self.assertEqual((connection['agent'], connection['state']), ('codex', 'active'))
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        self.update(self.state.root/'relays/relay-r1', 'relay', owner='bridge-4242-%d' % (NOW-1900))
+        [connection] = [item for item in self.status()['connections'] if item['pid'] == 2001]
+        self.assertEqual((connection['agent'], connection['state']), ('claude', 'ended'))     # a reused pid
+
+
 class OldHostScopeTests(StatusCase):
     """A live bridge that went to a new host keeps open scopes of the old one, which it cannot end any more."""
     ID = 'claude-4242-%d' % (NOW-900)

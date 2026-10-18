@@ -2,8 +2,9 @@
 
 A connection is one AI conversation that uses CUA (R8):
   claude  a live bridge record (or an unrecorded bridge process), together with the runtime that serves its
-          thread. The runtime is found through the sessions that relay records and the activity log share with
-          the bridge. A runtime that still serves a dead bridge's thread is a claude connection that has ended.
+          thread. A relay names the bridge that started its runtime (`owner`); a relay without that name is matched
+          through the sessions that relay records and the activity log share with the bridge. A runtime that still
+          serves a dead bridge's thread is a claude connection that has ended; stopping it ends the runtime too.
   codex   a live relay record that serves no bridge, or a runtime without any record.
 cmux-cua is none of these; it is listed under other_tools. Each of its `cmux-cua mcp` processes (one per AI
 conversation) is a CmuxConnection that can be stopped on its own.
@@ -12,7 +13,8 @@ import re
 
 from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, IDLE_SECONDS, SCHEMA_VERSION, connection_id, iso)
 from engine_inventory import (collect, is_app_server, is_cua_repl, mark_live, working_folders)
-from engine_records import (control_socket, forget_released, load_records, prune, read_activity, read_released)
+from engine_records import (WRITER, control_socket, forget_released, load_records, prune, read_activity,
+                            read_released)
 
 PRUNE_MIN_AGE = 60
 
@@ -32,6 +34,7 @@ class Connection:
         self.cwd = None
         self.memory_pids = {pid}
         self.memory_bytes = None
+        self.runtimes = set()          # (pid, start) of the cua-repl roots that end with a stopped Claude connection
         self.last_call = None
         self.session_id = None
         self.busy = False
@@ -100,13 +103,26 @@ def _bridge_expects_relay(bridge):
     return isinstance(host, dict) and host.get('relay') is True
 
 
+def relay_owner(relay):
+    """The name (`bridge-<pid>-<started_at>`) of the bridge that started the relay's runtime, or None."""
+    value = relay.text('owner')
+    match = WRITER.match(value) if value else None
+    return value if match is not None and match.group(1) == 'bridge' else None
+
+
 def attribute_runtimes(bridges, relays, relay_sessions):
     """relay writer -> the live bridge whose thread that relay's runtime serves.
 
-    First by shared sessions (open scopes, and the sessions the activity log shows the relay serving). A relay
+    A relay that names its bridge belongs to that bridge, and to no other one when that bridge is gone. The others
+    go first by shared sessions (open scopes, and the sessions the activity log shows the relay serving). A relay
     that has not served any call yet has no session; it is paired with the bridge that connected right after the
     relay started, in the same folder and on the same host, but only when that pairing is unique both ways."""
     owner = {}
+    by_name = {bridge.writer: bridge for bridge in bridges}
+    for relay in relays:
+        if relay_owner(relay) in by_name:
+            owner[relay.writer] = by_name[relay_owner(relay)]
+    relays = [relay for relay in relays if relay_owner(relay) is None]
     for relay in relays:
         seen, best = relay_sessions(relay), None
         for bridge in bridges:
@@ -117,7 +133,7 @@ def attribute_runtimes(bridges, relays, relay_sessions):
                     best = (key, bridge)
         if best is not None:
             owner[relay.writer] = best[1]
-    taken = {bridge.writer for bridge in owner.values()}
+    taken = {bridge.writer for bridge in owner.values()}      # also every bridge that has the runtime it named
     free_relays = [relay for relay in relays if relay.writer not in owner and not relay_sessions(relay)]
     options = {}
     for bridge in bridges:
@@ -164,6 +180,7 @@ class View:
         self.roots = {relay.writer: self._root_of(relay) for relay in self.live_relays}
         self.attributed = attribute_runtimes(self.live_bridges, self.live_relays, self.relay_sessions)
         self.by_writer = {}            # writer of a live record -> the connection it belongs to
+        self.unrecorded = {}           # pid of a bridge process without a live record -> its connection
         self._claude_connections()
         self._relay_connections()
         self._runtime_connections()
@@ -208,7 +225,14 @@ class View:
                 conn = Connection('claude', pid, proc.start)
                 conn.owner_pid = proc.ppid if proc.ppid > 1 else None
                 conn.owner_alive = _owner_alive(inv, conn.owner_pid, proc.start)
+                self.unrecorded[pid] = conn
                 self.connections.append(conn)
+
+    def _running(self, name):
+        """The process of the bridge called `name` while it still runs, else None."""
+        match = WRITER.match(name) if name else None
+        proc = self.inv.mine.get(int(match.group(2))) if match is not None else None
+        return proc if proc is not None and abs(proc.start-int(match.group(3))) <= 1 else None
 
     def _relay_connections(self):
         """Each live relay either adds its runtime to the bridge it serves or is a connection of its own."""
@@ -216,17 +240,27 @@ class View:
         for relay in self.live_relays:
             proc, root = inv.procs[relay.pid], self.roots[relay.writer]
             tree = set(inv.subtree(root if root is not None else relay.pid)) | set(inv.subtree(relay.pid))
+            runtime = {(root, inv.procs[root].start)} if root is not None else set()
+            named = relay_owner(relay)
+            running = self._running(named)
             bridge = self.attributed.get(relay.writer)
-            if bridge is not None:
-                conn = self.by_writer[bridge.writer]
+            conn = self.by_writer[bridge.writer] if bridge is not None else self.unrecorded.get(
+                running.pid if running is not None else None)
+            if conn is not None:
                 conn.memory_pids |= tree
+                if named is not None:          # only a runtime that names its bridge is stopped with it
+                    conn.runtimes |= runtime
                 conn.last_call = _later(conn.last_call, relay.time('last_call_at'))
                 conn.busy = conn.busy or relay.data.get('busy') is True
                 self.by_writer[relay.writer] = conn
                 continue
             sessions = self.relay_sessions(relay)
-            former = next((record for record in self.dead_bridges if sessions & record.sessions()), None)
-            conn = Connection('claude' if former is not None else 'codex', relay.pid, relay.started_at)
+            if named is not None:
+                former = next((record for record in self.dead_bridges if record.writer == named), None)
+            else:
+                former = next((record for record in self.dead_bridges if sessions & record.sessions()), None)
+            claude = named is not None or former is not None
+            conn = Connection('claude' if claude else 'codex', relay.pid, relay.started_at)
             conn.record = relay
             conn.memory_pids = tree
             repl = inv.procs[root] if root is not None else proc
@@ -236,10 +270,15 @@ class View:
                 conn.owner_pid = repl.ppid if repl.ppid > 1 else None
             else:
                 conn.owner_pid = relay.number('app_server_pid')
-            if former is not None:
-                # The conversation that owned this runtime is gone.
-                conn.owner_pid = former.number('owner_pid') or conn.owner_pid
+            if running is not None:
+                # The bridge that started this runtime still runs, without a record the engine could read.
+                conn.owner_pid = running.ppid if running.ppid > 1 else None
+                conn.owner_alive = _owner_alive(inv, conn.owner_pid, running.start)
+            elif claude:
+                # The conversation that owned this runtime is gone, and nothing uses its thread again.
+                conn.owner_pid = (former.number('owner_pid') if former is not None else None) or conn.owner_pid
                 conn.owner_alive = False
+                conn.runtimes = runtime
             else:
                 conn.owner_alive = _owner_alive(inv, conn.owner_pid, repl.start)
             conn.cwd = relay.path('cwd')

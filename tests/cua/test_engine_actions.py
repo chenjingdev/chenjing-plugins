@@ -417,6 +417,85 @@ class StopTests(ActionCase):
         self.assertEqual(self.machine.signals, [])
 
 
+class RuntimeEndTests(ActionCase):
+    """A stopped Claude connection also ends the runtime of its thread, which Codex would keep until it quits."""
+
+    def named(self):
+        directory, relay_directory = self.bridge_with_runtime()
+        self.update(relay_directory, 'relay', owner='bridge-4242-%d' % (NOW-900))
+        self.writer(directory, 4242, NOW-900, DONE)
+        self.watch(4242, 500, 1000, 1100, 2000, 2001, 2002)
+
+    def stop(self, wanted=BRIDGE_ID, force=False):
+        return engine_actions.stop_connection(self.ctx(), wanted, force=force)
+
+    def test_the_runtime_that_names_the_bridge_is_ended_after_the_bridge(self):
+        self.named()
+        self.assertEqual(self.stop(), {'ok': True, 'stopped': True, 'released': True, 'reason': None})
+        self.assertEqual(self.events, [('release', 4242), ('signal', 4242, signal.SIGTERM),
+                                       ('signal', 2000, signal.SIGTERM)])
+        self.assertNotIn(2000, self.machine.procs)
+
+    def test_nothing_is_sent_to_a_runtime_that_the_bridge_ended_on_its_way_out(self):
+        self.named()
+        self.machine.on_signal[4242] = lambda number: self.machine.remove(2000)
+        self.assertTrue(self.stop()['stopped'])
+        self.assertEqual(self.machine.signals, [(4242, signal.SIGTERM)])
+
+    def test_the_runtime_of_a_conversation_that_is_gone_is_ended_after_its_relay(self):
+        self.add_runtime(2000, NOW-890)
+        directory = self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, cwd='/work/x',
+                                     owner='bridge-7001-%d' % (NOW-5000), scopes=[State.scope(SESSION_A)])
+        self.writer(directory, 2001, NOW-890, DONE)
+        result = self.stop('claude-2001-%d' % (NOW-890))
+        self.assertEqual(result, {'ok': True, 'stopped': True, 'released': True, 'reason': None})
+        self.assertEqual(self.machine.signals, [(2001, signal.SIGTERM), (2000, signal.SIGTERM)])
+
+    def test_a_runtime_that_ignores_sigterm_is_left_without_force_and_killed_with_it(self):
+        self.named()
+        self.machine.ignore_term.add(2000)
+        self.assertTrue(self.stop()['stopped'])
+        self.assertEqual(self.machine.signals, [(4242, signal.SIGTERM), (2000, signal.SIGTERM)])
+        self.assertIn(2000, self.machine.procs)
+
+    def test_force_kills_a_runtime_that_ignores_sigterm_after_a_short_wait(self):
+        self.named()
+        self.machine.ignore_term.add(2000)
+        killed_at = []
+        self.machine.on_signal[2000] = lambda number: killed_at.append((number, self.machine.now))
+        self.assertTrue(self.stop(force=True)['stopped'])
+        self.assertEqual([item[0] for item in killed_at], [signal.SIGTERM, signal.SIGKILL])
+        self.assertGreaterEqual(killed_at[1][1]-killed_at[0][1], engine_actions.KILL_WAIT)
+        self.assertNotIn(2000, self.machine.procs)
+
+    def test_a_pid_that_runs_another_program_by_then_is_not_signalled(self):
+        self.named()
+        self.machine.on_signal[4242] = lambda number: self.machine.procs[2000].update(command='/usr/bin/vim notes')
+        self.assertTrue(self.stop(force=True)['stopped'])
+        self.assertEqual(self.machine.signals, [(4242, signal.SIGTERM)])
+
+    def test_a_bridge_that_does_not_stop_keeps_its_runtime(self):
+        self.named()
+        self.machine.ignore_term.add(4242)
+        self.assertFalse(self.stop()['stopped'])
+        self.assertEqual(self.machine.signals, [(4242, signal.SIGTERM)])
+
+    def test_a_runtime_found_only_through_sessions_or_a_codex_runtime_is_not_ended(self):
+        directory, _ = self.bridge_with_runtime()
+        self.writer(directory, 4242, NOW-900, DONE)
+        self.codex_relay()
+        result = engine_actions.stop_group(self.ctx(), 'all')
+        self.assertEqual(result['stopped'], 2)
+        self.assertEqual(sorted(self.machine.signals), [(3001, signal.SIGTERM), (4242, signal.SIGTERM)])
+
+    def test_claude_only_ends_the_runtimes_of_the_connections_it_stopped(self):
+        self.named()
+        self.codex_relay()
+        result = engine_actions.stop_group(self.ctx(), 'claude')
+        self.assertEqual(result['stopped'], 1)
+        self.assertEqual(self.machine.signals, [(4242, signal.SIGTERM), (2000, signal.SIGTERM)])
+
+
 class CmuxConnectionTests(ActionCase):
     """One `cmux-cua mcp` process (a conversation's connection to cmux-cua) is stopped on its own, with nothing to release.
     The daemon and the AI client next to it are never signalled."""

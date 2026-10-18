@@ -23,7 +23,8 @@ async function runtimeStartedDirectly(t, fixture, client) {
   const [start] = fixture.events('start');
   assert.deepEqual(start.argv, ARGS);
   // The runtime started directly has the environment it would have had without the relay.
-  assert.deepEqual({...start.env, marker: null}, {native: null, relayNode: null, state: null, runtimePath: fixture.native, marker: null});
+  assert.deepEqual({...start.env, marker: null}, {native: null, relayNode: null, state: null, runtimePath: fixture.native, marker: null,
+    owner: null});
   assert.deepEqual(relayDirs(fixture), [], 'no relay was involved');
   const call = await client.call('plain', turn('s-1', 't-1'));
   assert.equal(call.result.content[0].text, 'echo:plain');
@@ -69,7 +70,8 @@ for (const [label, apply] of Object.entries(damage)) {
     const fixture = makeFixture();
     t.after(() => fixture.cleanup());
     const copy = copyRelay(fixture);
-    const env = {FAKE_EXIT_CODE: '7'};
+    // A bridge's name is for the relay record only: the runtime started directly never sees it.
+    const env = {FAKE_EXIT_CODE: '7', CODEX_CUA_OWNER: 'bridge-4242-1792345678'};
     apply(copy, env);
     const client = startRelay(fixture, {via: 'launcher', launcher: copy.launcher, args: ARGS, env});
     await runtimeStartedDirectly(t, fixture, client);
@@ -118,7 +120,8 @@ for (const via of ['node', 'launcher']) {
     const client = startRelay(fixture, {via, args: ARGS, env: {CODEX_CUA_RELAY_TEST_FAIL: 'before-spawn', FAKE_EXIT_CODE: '7', FAKE_MARKER: 'm'}});
     await runtimeStartedDirectly(t, fixture, client);
     const [start] = fixture.events('start');
-    assert.deepEqual(start.env, {native: null, relayNode: null, state: null, runtimePath: fixture.native, marker: 'm'});
+    assert.deepEqual(start.env, {native: null, relayNode: null, state: null, runtimePath: fixture.native, marker: 'm',
+      owner: null});
     assert.equal(client.stderr, 'codex-cua relay: relay setup failed; starting the original runtime directly\n');
   });
 }

@@ -874,5 +874,63 @@ class AcceptRelayTests(MachineCase):
         self.assertFalse(self.accept({'config': {'mcp_servers': {'cua_repl': relay_entry(self.machine)}}}, other)[0])
 
 
+
+class RelayThreadServerTests(MachineCase):
+    """What a Claude bridge gives its own thread: the launcher's verified table from the host record, with its name."""
+
+    def setUp(self):
+        super().setUp()
+        plan, reason = self.machine.plan()
+        self.assertIsNone(reason)
+        self.table = plan.table
+        self.owner = 'bridge-4242-1792345678'
+
+    def registry(self, **changes):
+        record = {'schema_version': 1, 'status': 'ready', 'relay': True, 'relay_launcher': str(self.machine.launcher),
+                  'relay_config': copy.deepcopy(self.table)}
+        record.update(changes)
+        return record
+
+    def server(self, registry=Ellipsis, owner=None, cua_root=Ellipsis):
+        return relay_install.relay_thread_server(self.registry() if registry is Ellipsis else registry,
+                                                 self.machine.cua if cua_root is Ellipsis else cua_root,
+                                                 owner, home=self.machine.home)
+
+    def test_the_table_is_the_override_of_the_launcher(self):
+        _, value = parse_override(self.machine.plan()[0].override)
+        self.assertEqual(self.table, value)
+
+    def test_the_bridge_gets_the_table_with_its_name_in_the_relay_environment_only(self):
+        server = self.server(owner=self.owner)
+        expected = copy.deepcopy(self.table)
+        expected['env']['CODEX_CUA_OWNER'] = self.owner
+        self.assertEqual(server, expected)
+        registry = self.registry()
+        self.server(registry, owner=self.owner)['env']['CHANGED'] = 'x'
+        self.assertEqual(registry['relay_config'], self.table, 'the record is never changed')
+
+    def test_a_name_that_is_not_a_bridge_name_is_left_out(self):
+        for owner in (None, '', 'relay-1-2', 'bridge-1-2 extra', 42):
+            self.assertEqual(self.server(owner=owner), self.table, owner)
+
+    def test_anything_short_of_the_verified_relay_of_this_home_means_no_relay(self):
+        other = self.machine.data/'relay/other'
+        changed = copy.deepcopy(self.table)
+        changed['env']['CUA_REPL_NODE_REPL_PATH'] = str(other)
+        native = copy.deepcopy(self.table)
+        native['command'] = '/usr/bin/node'
+        for registry in (self.registry(relay=False), self.registry(relay='yes'), self.registry(relay_launcher=str(other)),
+                         self.registry(relay_launcher=None), self.registry(relay_config=None),
+                         self.registry(relay_config=[1, 2]), self.registry(relay_config=changed),
+                         self.registry(relay_config=native), {}, None, 'host'):
+            self.assertIsNone(self.server(registry, owner=self.owner), registry)
+        self.assertIsNone(self.server(owner=self.owner, cua_root=None))
+        self.assertIsNone(self.server(owner=self.owner, cua_root=self.machine.root/'other/cua_node'))
+
+    def test_a_launcher_others_can_write_is_not_used(self):
+        self.machine.launcher.chmod(0o777)
+        self.assertIsNone(self.server(owner=self.owner))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -221,7 +221,10 @@ def _launch(native, arguments, environment, state_dir, progress):
               "native_cli": str(native), "mechanism": "original_app_server_unix_websocket",
               "operational_readiness": "not_checked",
               "relay": relay is not None, "relay_launcher": str(relay.launcher) if relay else None,
-              "relay_reason": relay_reason}
+              "relay_reason": relay_reason,
+              # The verified relay table: the desktop app drops the -c override from the host's configuration, so a
+              # Claude bridge gives this table to its own thread (relay_install.relay_thread_server).
+              "relay_config": relay.table if relay else None}
     try:
         # Still before anything is started: a state directory that cannot be written
         # must not cost Codex its backend.
@@ -261,7 +264,7 @@ def _launch(native, arguments, environment, state_dir, progress):
             except OSError:
                 pass
             relay, relay_reason = None, "backend_rejected"
-            record.update(relay=False, relay_launcher=None, relay_reason=relay_reason)
+            record.update(relay=False, relay_launcher=None, relay_reason=relay_reason, relay_config=None)
             backend = _spawn_backend(native, list(arguments), endpoint, environment)
             record["backend_pid"] = backend.pid
             _write_metadata(metadata_path, record)

@@ -7,7 +7,8 @@
 //   - remembers every (session_id, turn_id) scope that tool calls carry in params._meta["x-codex-turn-metadata"],
 //   - can end those scopes through the runtime's own turn_ended tool, on request (control socket) and
 //     automatically when the runtime is stopped without that clean-up,
-//   - keeps a relay record, a control socket and activity lines in the codex-cua state directory.
+//   - keeps a relay record, a control socket and activity lines in the codex-cua state directory. A Claude bridge
+//     that starts its thread with this relay names itself in CODEX_CUA_OWNER, and the record carries that name.
 // The format of those files is documented in the engine records description of the plugin.
 //
 // Nothing the user did is written down: no tool arguments or results, no code, titles, URLs, page text or
@@ -28,6 +29,8 @@ const ENV_NATIVE = 'CODEX_CUA_NATIVE_RUNTIME';
 const ENV_NODE = 'CODEX_CUA_RELAY_NODE';
 const ENV_STATE = 'CODEX_CUA_STATE_DIR';
 const ENV_RUNTIME_PATH = 'CUA_REPL_NODE_REPL_PATH';
+const ENV_OWNER = 'CODEX_CUA_OWNER';
+const OWNER = /^bridge-[0-9]{1,10}-[0-9]{1,12}$/;
 
 const IN_FLIGHT_WAIT_MS = 2500;      // how long a release waits for running tool calls
 const OWNED_TIMEOUT_MS = 4000;       // one turn_ended of our own
@@ -44,6 +47,7 @@ const O_EXLOCK = 0x20;               // Darwin: open(2) takes flock(2)'s exclusi
 
 const args = process.argv.slice(2);
 const native = process.env[ENV_NATIVE];
+const owner = OWNER.test(process.env[ENV_OWNER] ?? '') ? process.env[ENV_OWNER] : null;
 
 function say(message) {
   try {fs.writeSync(2, 'codex-cua relay: ' + message + '\n');} catch {/* nowhere to say it */}
@@ -74,7 +78,7 @@ function checkNative() {
 // The runtime gets the environment it would have had without the relay.
 function runtimeEnvironment() {
   const env = {...process.env};
-  for (const name of [ENV_NATIVE, ENV_NODE, ENV_STATE]) delete env[name];
+  for (const name of [ENV_NATIVE, ENV_NODE, ENV_STATE, ENV_OWNER]) delete env[name];
   env[ENV_RUNTIME_PATH] = native;
   return env;
 }
@@ -202,7 +206,7 @@ function relay(child) {
     try {cwd = process.cwd();} catch {/* removed directory */}
     return {
       schema_version: 1, kind: 'relay', pid: me, started_at: records.startedAt,
-      runtime_pid: child.pid ?? null, root_pid: rootPid, app_server_pid: records.appServerPid, cwd,
+      runtime_pid: child.pid ?? null, root_pid: rootPid, app_server_pid: records.appServerPid, cwd, owner,
       control_path: records.controlPath, last_call_at: lastCallAt, busy: callsInFlight > 0,
       scopes: [...scopes.values()].map(s => ({session_id: s.session_id, turn_id: s.turn_id, first_at: s.first_at,
         last_at: s.last_at, subagent: s.subagent})),
@@ -359,10 +363,14 @@ function relay(child) {
       // Only context supplied by the host counts. Tool code is never accepted as scope.
       const scope = isEnd ? null : scopeOf(message);
       const pair = isEnd ? pairOf(message.params?.arguments) : null;
-      lastCallAt = iso();
+      // The Codex app ends every turn of its chats with turn_ended, CUA or not. Only the end of a pair that a call
+      // opened here is the AI's own: the others are neither a call nor a line in the activity log.
+      const routine = isEnd && !(pair && scopes.has(pairKey(pair.session_id, pair.turn_id)));
+      if (!routine) lastCallAt = iso();
       if (key !== null) {
         callsInFlight += 1;
-        pending.set(key, {kind: 'call', tool: name, sessionId: scope?.session_id ?? pair?.session_id ?? null, pair, started: Date.now()});
+        pending.set(key, {kind: 'call', tool: name, sessionId: scope?.session_id ?? pair?.session_id ?? null, pair, routine,
+          started: Date.now()});
       }
       if (scope) openScope(scope); else schedulePersist();
     } else if (message.method === 'tools/list') {
@@ -405,9 +413,11 @@ function relay(child) {
     pending.delete(key);
     if (entry.kind === 'call') {
       callsInFlight -= 1;
-      lastCallAt = iso();
       const ok = confirmed(message);
-      activity({sessionId: entry.sessionId, tool: entry.tool, ok, ms: Date.now() - entry.started});
+      if (!entry.routine) {
+        lastCallAt = iso();
+        activity({sessionId: entry.sessionId, tool: entry.tool, ok, ms: Date.now() - entry.started});
+      }
       if (ok && entry.pair) closeScope(entry.pair);
       schedulePersist();
     } else if (entry.kind === 'list' && Array.isArray(message.result?.tools)) {

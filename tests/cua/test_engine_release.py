@@ -2,6 +2,8 @@
 import json
 import os
 from pathlib import Path
+import signal
+import stat
 import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
@@ -30,9 +32,11 @@ class ReleaseCase(EngineCase):
         self.script = self.chrome_plugin()
         self.hosts = []
         self.tools = {'js': counts_three, 'turn_ended': ends_quietly}
+        self.host_hooks = {}
 
         async def connect(**kwargs):
             host = FakeHost(self.tools)
+            host.hooks.update(self.host_hooks)
             self.hosts.append(host)
             return host
         patcher = patch.object(host_mcp, 'unix_connect', AsyncMock(side_effect=connect))
@@ -72,12 +76,63 @@ class SuccessTests(ReleaseCase):
         # Whatever the short-lived thread does for itself when it leaves concerns its own session only.
         self.assertTrue(all(call['arguments']['session_id'] == OWN_THREAD for call in own))
         methods = [message.get('method') for message in host.received]
-        self.assertEqual(methods[:4], ['initialize', 'initialized', 'thread/start', 'mcpServerStatus/list'])
+        self.assertEqual(methods[:6], ['initialize', 'initialized', 'plugin/installed', 'config/read', 'thread/start',
+                                       'mcpServerStatus/list'])
         self.assertEqual(methods[-1], 'thread/unsubscribe')
-        self.assertEqual([message['params'] for message in host.received if message.get('method') == 'thread/start'],
-                         [{'ephemeral': True, 'cwd': os.getcwd()}])
+        [started] = [message['params'] for message in host.received if message.get('method') == 'thread/start']
+        self.assertEqual(started, {'ephemeral': True, 'cwd': host.thread_params['cwd']})   # nothing else runs there
+        self.assertNotEqual(started['cwd'], os.getcwd())
         self.assertTrue(host.closed)
         self.assertFalse(directory.exists())          # the record held nothing else
+
+    def test_the_thread_works_in_a_new_private_folder_and_only_the_runtime_working_there_is_ended(self):
+        self.dead()
+        self.add_runtime(3000, NOW-4000, relay=False)           # an older runtime of another thread
+        self.machine.cwds[3000] = '/work/codex'
+        seen = {}
+
+        def spawn():
+            # Codex starts the thread's runtime under its app-server, in the thread's folder (lsof prints real paths).
+            folder = self.hosts[-1].thread_params['cwd']
+            seen['folder'], seen['mode'] = folder, stat.S_IMODE(os.lstat(folder).st_mode)
+            self.add_runtime(3100, int(self.machine.now), relay=False)
+            self.machine.cwds[3100] = os.path.realpath(folder)
+            self.add_runtime(3200, int(self.machine.now), relay=False)     # another thread that started meanwhile
+            self.machine.cwds[3200] = '/work/codex'
+        self.host_hooks['mcpServerStatus/list'] = spawn
+        result = self.release([SESSION_C])[SESSION_C]
+        self.assertEqual(result, {'released': True, 'reason': None, 'tab_count': 3})
+        self.assertTrue(Path(seen['folder']).name.startswith('codex-cua-release-'))
+        self.assertEqual(seen['mode'], 0o700)
+        self.assertEqual(self.machine.signals, [(3100, signal.SIGTERM)])
+        self.assertIn(3000, self.machine.procs)
+        self.assertIn(3200, self.machine.procs)
+        self.assertFalse(os.path.exists(seen['folder']))
+
+    def test_a_runtime_in_the_threads_folder_that_is_not_under_the_hosts_app_server_is_left_alone(self):
+        self.dead()
+
+        def spawn():
+            folder = os.path.realpath(self.hosts[-1].thread_params['cwd'])
+            self.add_runtime(3100, int(self.machine.now), relay=False, parent=1)
+            self.machine.cwds[3100] = folder
+        self.host_hooks['mcpServerStatus/list'] = spawn
+        self.assertTrue(self.release([SESSION_C])[SESSION_C]['released'])
+        self.assertEqual(self.machine.signals, [])
+
+    def test_a_failed_release_still_ends_the_threads_runtime(self):
+        self.dead()
+
+        async def fails(params):
+            return {'isError': True, 'content': [{'type': 'text', 'text': 'no browser'}]}
+        self.tools['js'] = fails
+
+        def spawn():
+            self.add_runtime(3100, int(self.machine.now), relay=False)
+            self.machine.cwds[3100] = os.path.realpath(self.hosts[-1].thread_params['cwd'])
+        self.host_hooks['mcpServerStatus/list'] = spawn
+        self.assertEqual(self.release([SESSION_C])[SESSION_C]['reason'], 'unsupported')
+        self.assertEqual(self.machine.signals, [(3100, signal.SIGTERM)])
 
     def test_only_the_count_leaves_the_engine(self):
         self.dead()

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import signal
 import stat
 import sys
@@ -24,6 +25,8 @@ except ImportError:
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
 VERSION = '0.7.0'
+# A plugin or server name that can stand in a dotted configuration key as itself.
+CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
 # Fixed texts: a call that lost its host is never sent again, and the AI is told so (R12).
 LOST_BEFORE_SEND = ('The Codex host connection was lost before this call was sent, so it did not run. '
@@ -72,6 +75,32 @@ async def frames(stream):
 
 def encode(message):
     return (json.dumps(message, ensure_ascii=True, separators=(',', ':')) + '\n').encode()
+
+
+def quiet_config(installed, config, server='cua_repl', keep_plugin=NATIVE_PLUGIN_ID):
+    """Thread configuration that turns off every MCP server of the user's set-up except the CUA one.
+
+    An owned thread never runs a model turn, so the other servers would only start processes there, and the host keeps
+    them, like the thread, until Codex quits (it does not unload a thread when its last client leaves). Built from the
+    answers of plugin/installed and config/read; a name that cannot stand in a dotted key is left as it is.
+    """
+    out = {}
+    markets = installed.get('marketplaces') if isinstance(installed, dict) else None
+    for market in markets if isinstance(markets, list) else []:
+        plugins = market.get('plugins') if isinstance(market, dict) else None
+        for plugin in plugins if isinstance(plugins, list) else []:
+            if not isinstance(plugin, dict) or plugin.get('enabled') is not True:
+                continue
+            ident = plugin.get('id')
+            if isinstance(ident, str) and ident != keep_plugin and CONFIG_NAME.match(ident):
+                out['plugins.' + ident + '.enabled'] = False
+    settings = config.get('config') if isinstance(config, dict) else None
+    servers = settings.get('mcp_servers') if isinstance(settings, dict) else None
+    for name, entry in servers.items() if isinstance(servers, dict) else ():
+        if (isinstance(name, str) and name != server and CONFIG_NAME.match(name)
+                and not (isinstance(entry, dict) and entry.get('enabled') is False)):
+            out['mcp_servers.' + name + '.enabled'] = False
+    return out
 
 
 def ident_key(value):
@@ -215,6 +244,12 @@ class HostMcp:
         self.rpc_arguments = (cli_path, socket_path)
         self.rpc = self.new_rpc()
         self.thread_id = None
+        # The owned thread works in this folder: the bridge's own (the Claude conversation's).
+        self.thread_cwd = os.getcwd()
+        # The bridge's name for the relay record (bridge-<pid>-<started_at>), set by whoever keeps its record.
+        self.owner = None
+        # Whether this plugin's relay runs in front of the owned thread's runtime: then the relay logs the calls.
+        self.thread_relay = False
         # A connection owns one ephemeral host thread and one tool lifecycle.
         # Context is authored here, never copied from the calling agent.
         self.turn_id = str(uuid.uuid4())
@@ -285,11 +320,24 @@ class HostMcp:
         """Which host this connection is attached to; the registered-host entry point knows more."""
         return {'pid': None, 'relay': False}
 
+    async def thread_config(self, request):
+        """The configuration of the owned thread: only the CUA server starts there. An answer the host does not
+        give is left out; the thread then starts with the host's own configuration, as before."""
+        answers = []
+        for method, params in (('plugin/installed', {}), ('config/read', {'includeLayers': False})):
+            try:
+                answers.append(await request(method, params))
+            except RpcFailure:
+                answers.append(None)
+        return quiet_config(answers[0], answers[1], self.server)
+
     def mark_connected(self):
         # A new connection has a new owned thread and never inherits the turn id of an older one.
         self.rotate_turn()
         self.session_id = self.thread_id
-        self.host = self.host_info()
+        # The record says relay only when the relay really runs in front of this thread's runtime; the calls of a
+        # connection are logged by the relay then, else by the bridge.
+        self.host = {**self.host_info(), 'relay': self.thread_relay}
         self.connected_at = utc_now()
         self.ready = True
         self.changed()
@@ -366,8 +414,18 @@ class HostMcp:
                 or not Path(initialized['codexHome']).is_absolute()):
             raise BridgeFailure('The existing Codex host returned an invalid initialization response.')
         await self.rpc.send({'method': 'initialized', 'params': {}})
+        config = await self.thread_config(request)
+        self.thread_relay = False
         self.thread_creation_requested = True
-        started = await request('thread/start', {'ephemeral': True, 'cwd': os.getcwd()})
+        plain = {'ephemeral': True, 'cwd': self.thread_cwd}
+        try:
+            started = await request('thread/start', {**plain, 'config': config} if config else plain)
+        except RpcFailure:
+            if not config:
+                raise
+            # A host that does not take one of these keys starts the thread with its own configuration, as before.
+            self.log('owned_thread_config_refused')
+            started = await request('thread/start', plain)
         thread = started.get('thread') if isinstance(started, dict) else None
         if isinstance(thread, dict) and isinstance(thread.get('id'), str) and thread['id']:
             self.thread_id = thread['id']
@@ -385,6 +443,7 @@ class HostMcp:
                 from relay_install import accept_relay  # only this plugin's relay in front of the bundled runtime
                 if not await accept_relay(self, request, selected):
                     raise BridgeFailure('The selected host server is not identified as the original bundled CUA plugin.')
+                self.thread_relay = True
             state = selected.get('runtimeStatus')
             tools = selected.get('tools')
             if state in ('notStarted', 'starting', None) or (state == 'connected' and tools == {} and selected.get('toolsError') is None):

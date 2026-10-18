@@ -45,6 +45,7 @@ class FakeHost:
         self.holds = {}
         self.results = {}
         self.unsubscribe = 'ok'
+        self.thread_config = None       # the configuration the last thread/start brought
         self.was_closed = False
         self.tasks = set()
 
@@ -110,9 +111,12 @@ class FakeHost:
         if method == 'initialize':
             result = {'userAgent': 'fixture', 'codexHome': '/fixture/codex-home', 'platformFamily': 'unix', 'platformOs': 'macos'}
         elif method == 'thread/start':
+            self.thread_config = params.get('config')
             result = {'thread': {'id': self.thread_id, 'ephemeral': True}}
         elif method == 'mcpServerStatus/list':
-            result = {'data': [{'name': 'cua_repl', 'pluginId': NATIVE_PLUGIN_ID, 'runtimeStatus': 'connected',
+            # Like the real host: a cua_repl the thread brought itself is a server of no plugin.
+            own = isinstance(self.thread_config, dict) and 'mcp_servers.cua_repl' in self.thread_config
+            result = {'data': [{'name': 'cua_repl', 'pluginId': None if own else NATIVE_PLUGIN_ID, 'runtimeStatus': 'connected',
                                 'tools': self.tools, 'toolsError': None}], 'nextCursor': None}
         elif method == 'mcpServer/tool/call':
             result = await self.tool_call(ident, params)
@@ -123,6 +127,10 @@ class FakeHost:
             if self.unsubscribe == 'silent':
                 await asyncio.Event().wait()
             result = {'status': 'unsubscribed'}
+        elif method == 'plugin/installed':
+            result = {'marketplaces': []}           # nothing to turn off in the owned thread
+        elif method == 'config/read':
+            result = {'config': {}, 'origins': {}}
         else:
             raise AssertionError('Unexpected method in the fake host: '+str(method))
         self.emit({'id': ident, 'result': result})

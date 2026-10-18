@@ -31,11 +31,15 @@ class RelayHost(FakeProxy):
         self.config = config
         self.config_error = config_error
         self.config_reads = []
+        self.setup_reads = []
 
     async def answer(self, message):
         if message.get('method') != 'config/read':
             return await super().answer(message)
-        self.config_reads.append(message['params'])
+        # Before thread/start the bridge reads the configuration to set up its thread; only later reads ask who the
+        # server is.
+        started = any(item.get('method') == 'thread/start' for item in self.received)
+        (self.config_reads if started else self.setup_reads).append(message['params'])
         if self.config_error:
             self.emit({'id': message['id'], 'error': {'code': -32601, 'message': 'config/read is not supported'}})
         else:

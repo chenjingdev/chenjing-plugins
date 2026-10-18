@@ -11,11 +11,16 @@ A request with another pid or start time, another action, bad JSON, more than 1 
 closed without an answer. Further keys in a request are ignored. There is no way to name a session, a turn or a tool:
 a release ends only what this bridge opened.
 Every failure to set any of this up leaves the bridge running without records (see host_mcp.serve).
+
+The bridge gives its name (`bridge-<pid>-<started_at>`) to the relay of its own thread, and on the way out ends the
+runtimes whose relay record carries that name: the host keeps an owned thread and its runtime until Codex quits.
 """
 import asyncio
 import json
 import os
 from pathlib import Path
+import signal
+import subprocess
 import tempfile
 
 import bridge_records as records
@@ -60,6 +65,7 @@ class BridgeControl:
             raise
         self.adapter.on_change = self.refresh
         self.adapter.on_call = self.record_call
+        self.adapter.owner = self.writer_id
 
     def record(self, **changes):
         view = self.adapter.snapshot()
@@ -145,12 +151,58 @@ class BridgeControl:
         except FileNotFoundError:
             pass
 
+    def stop_runtimes(self, run=subprocess.run, kill=os.kill):
+        """End the runtimes the host started for this bridge's threads; returns how many were signalled (R8).
+
+        Each runs the relay, whose record names this bridge. Only the cua-repl process that is the parent of such a
+        relay and still a child of the host the relay started under is signalled. The relay then ends the runtime
+        behind it when its input closes, and releases on the way whatever is still open.
+        """
+        if self.writer_id is None:
+            return 0
+        stopped = 0
+        for path in sorted((self.state/'relays').glob('relay-*/relay.json')):
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict) or data.get('owner') != self.writer_id:
+                continue
+            relay, root, host = data.get('pid'), data.get('root_pid'), data.get('app_server_pid')
+            if not all(type(value) is int and value > 1 for value in (relay, root, host)):
+                continue
+            try:
+                listed = run(['/bin/ps', '-o', 'pid=,ppid=,command=', '-p', '%d,%d' % (relay, root)],
+                             capture_output=True, text=True, timeout=2, env={'LC_ALL': 'C'}).stdout
+            except (OSError, subprocess.SubprocessError):
+                continue
+            procs = {}
+            for line in listed.splitlines():
+                fields = line.split(None, 2)
+                if len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit():
+                    procs[int(fields[0])] = (int(fields[1]), fields[2])
+            if (procs.get(relay, (None,))[0] != root or procs.get(root, (None,))[0] != host
+                    or '/@oai/cua-repl/' not in procs[root][1]):
+                continue
+            try:
+                kill(root, signal.SIGTERM)
+                stopped += 1
+            except OSError:
+                pass
+        return stopped
+
     async def finalize(self):
-        """The record's last write: removed when nothing is open, else left as not confirmed without its socket."""
+        """The record's last write: removed when nothing is open, else left as not confirmed without its socket.
+
+        The runtimes of this bridge's threads are ended first: nothing will use them again."""
         self.finished = True
         self.adapter.on_change = self.adapter.on_call = None
         if self.directory is None:
             return
+        try:
+            self.stop_runtimes()
+        except Exception:
+            pass
         try:
             await self.stop()
             if self.adapter.snapshot()['cleanup'] == 'none':

@@ -12,13 +12,14 @@ import subprocess
 from types import SimpleNamespace
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import bridge_control
 import bridge_records
 import host_autostart
 import host_mcp
 import mcp_stdio
+import relay_install
 from bridge_case import BridgeCase, ISO
 from fake_host import TOOLS, write_registry
 from test_runtime_paths import fake_app
@@ -600,6 +601,15 @@ class RegisteredCase(BridgeCase):
         path = self.state/'activity.jsonl'
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    def relay_threads(self):
+        """From now on a registry that says relay gives the bridge's thread a relay (its checks are relay_install's)."""
+        def server(registry, cua_root, owner=None, home=None):
+            return {'command': 'relay', 'env': {'CODEX_CUA_OWNER': owner}} if registry.get('relay') is True else None
+        for name, value in (('relay_thread_server', server), ('accept_relay', AsyncMock(return_value=True))):
+            patcher = patch.object(relay_install, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
 
 class ActivityTests(RegisteredCase):
     async def lines_for(self, relay):
@@ -634,8 +644,18 @@ class ActivityTests(RegisteredCase):
         self.assertEqual(self.record(control)['host'], {'pid': os.getpid(), 'relay': False})
         await self.check_lines(control, lines)
 
-    async def test_a_host_with_a_relay_gets_no_lines_from_the_bridge(self):
+    async def test_a_registry_that_says_relay_does_not_silence_the_bridge_when_its_thread_has_none(self):
+        # The desktop app takes the launcher's override away, so a relay host can still give this thread the bundled
+        # runtime: nobody else would write these lines.
         host, control, lines = await self.lines_for(True)
+        self.assertEqual(self.record(control)['host'], {'pid': os.getpid(), 'relay': False})
+        await self.check_lines(control, lines)
+
+    async def test_a_thread_that_runs_the_relay_gets_no_lines_from_the_bridge(self):
+        self.relay_threads()
+        host, control, lines = await self.lines_for(True)
+        self.assertEqual(host.thread_config['mcp_servers.cua_repl']['env']['CODEX_CUA_OWNER'],
+                         'bridge-%d-%d' % (control.pid, control.started_at))
         self.assertEqual(self.record(control)['host'], {'pid': os.getpid(), 'relay': True})
         self.assertEqual(len(host.calls), 3)
         self.assertEqual(lines, [])
@@ -848,6 +868,7 @@ class ReconnectTests(RegisteredCase):
         self.assertEqual(self.record(control)['session_id'], 'thread-B')
 
     async def test_the_relay_flag_is_read_again_for_every_host_the_bridge_attaches_to(self):
+        self.relay_threads()
         host1, adapter, control, _ = await self.registered(relay=False, thread_id='thread-A')
         host2, host3 = self.add_host(thread_id='thread-B'), self.add_host(thread_id='thread-C')
         await adapter.handle(self.call())

@@ -9,7 +9,11 @@ node_repl. Three things in this module make that happen and keep it safe:
   from the native CLI, and only when it is exactly the bundled one, start the backend with one extra
   `-c mcp_servers.cua_repl=<table>` that differs from that definition in the environment alone;
 * the identity check of the Claude bridge, which accepts a `cua_repl` server that is not the bundled plugin only
-  when it is this relay.
+  when it is this relay;
+* the relay definition a Claude bridge hands to its own thread. The desktop app writes `mcp_servers.cua_repl = null`
+  into the host's configuration when it starts, which also takes away the launcher's `-c`, so a thread without
+  configuration of its own would get the bundled runtime. The launcher keeps its verified table in the host record
+  for that.
 
 Everything here refuses rather than guesses: a refusal means Codex starts exactly as it would without the relay.
 Reasons are fixed code words. No definition, environment value or path is ever put into a message.
@@ -38,7 +42,9 @@ ENV_RUNTIME_PATH = 'CUA_REPL_NODE_REPL_PATH'
 ENV_NATIVE = 'CODEX_CUA_NATIVE_RUNTIME'
 ENV_NODE = 'CODEX_CUA_RELAY_NODE'
 ENV_STATE = 'CODEX_CUA_STATE_DIR'
+ENV_OWNER = 'CODEX_CUA_OWNER'
 RELAY_ENV = (ENV_NATIVE, ENV_NODE, ENV_STATE)
+OWNER_NAME = re.compile(r'^bridge-[0-9]{1,10}-[0-9]{1,12}$')
 SECRET_NAME = re.compile('TOKEN|SECRET|PASSWORD|KEY|AUTH', re.IGNORECASE)
 
 READ_TIMEOUT = 3.0
@@ -423,7 +429,8 @@ def _hidden_fields(definition, entry):
 def build_override(definition, hidden, launcher, state_dir=None):
     """The `-c` value: every field of the definition, the environment changed to start the relay.
 
-    Returns (override, environment): the argument `mcp_servers.cua_repl=<inline table>` and the new environment.
+    Returns (override, environment, table): the argument `mcp_servers.cua_repl=<inline table>`, the new environment
+    and the table itself.
     """
     transport = definition['transport']
     env = dict(transport['env'])
@@ -452,15 +459,16 @@ def build_override(definition, hidden, launcher, state_dir=None):
         raise RelayRefused('unrepresentable') from None
     if len(text.encode('ascii')) > MAX_OVERRIDE_BYTES:
         raise RelayRefused('unrepresentable')
-    return text, env
+    return text, env, table
 
 
 class RelayPlan:
     """What the launcher does for this start: the arguments of the backend and the proxy, and what was verified."""
 
-    def __init__(self, arguments, override, launcher, native_runtime, node, script, state_dir):
+    def __init__(self, arguments, override, launcher, native_runtime, node, script, state_dir, table=None):
         self.arguments = arguments
         self.override = override
+        self.table = table              # the override as data: what a Claude bridge gives its own thread
         self.launcher = launcher
         self.native_runtime = native_runtime
         self.node = node
@@ -499,7 +507,7 @@ def _plan(native, arguments, environment, plugin_root, home, run):
     hidden = _hidden_fields(definition, _bundled_plugin_entry(installation, definition, environment, home))
     state = environment.get(ENV_STATE)
     state = state if isinstance(state, str) and os.path.isabs(state) else None
-    override, env = build_override(definition, hidden, launcher, state)
+    override, env, table = build_override(definition, hidden, launcher, state)
     # Ask the native CLI's own parser whether it reads the override back as intended, before the backend gets it.
     expected = json.loads(json.dumps(definition))
     expected['transport']['env'] = env
@@ -507,7 +515,7 @@ def _plan(native, arguments, environment, plugin_root, home, run):
         raise RelayRefused('override_rejected')
     return RelayPlan(list(arguments[:index]) + ['-c', override] + list(arguments[index:]), override, launcher,
                      definition['transport']['env'][ENV_RUNTIME_PATH], definition['transport']['command'],
-                     definition['transport']['args'][0], state)
+                     definition['transport']['args'][0], state, table)
 
 
 def plan_relay(native, arguments, environment, plugin_root, home=None, run=subprocess.run):
@@ -569,6 +577,32 @@ def transport_is_relay(entry, cua_root, launcher):
 
 
 _decided = weakref.WeakKeyDictionary()      # one decision per boot: `request` is a new function in every boot
+
+
+def relay_thread_server(registry, cua_root, owner=None, home=None):
+    """The `cua_repl` definition a Claude bridge gives its own thread so the relay runs in front of its runtime.
+
+    Only the table the launcher verified and kept in a ready host record whose relay is the trusted launcher of this
+    home, and only when it is exactly the relay in front of the bundled runtime. The bridge's name goes into the
+    relay's environment and from there into its record; the runtime never sees it. None means the thread is started
+    without it, as before.
+    """
+    try:
+        if not isinstance(registry, dict) or registry.get('relay') is not True or cua_root is None:
+            return None
+        from runtime_paths import runtime_home
+        launcher = stable_launcher(runtime_home(home))
+        if registry.get('relay_launcher') != str(launcher) or not trusted_launcher(launcher):
+            return None
+        table = registry.get('relay_config')
+        if not isinstance(table, dict) or not _plain(table) or not transport_is_relay(table, cua_root, launcher):
+            return None
+        server = json.loads(json.dumps(table))
+        if isinstance(owner, str) and OWNER_NAME.match(owner):
+            server['env'][ENV_OWNER] = owner
+        return server
+    except Exception:
+        return None
 
 
 async def accept_relay(adapter, request, selected, home=None):

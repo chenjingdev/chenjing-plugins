@@ -6,10 +6,12 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import signal
 import stat
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import bridge_control
 
@@ -156,3 +158,88 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+CUA_REPL = '/App/cua_node/bin/node /App/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
+RELAY = '/App/cua_node/bin/node /home/.local/share/codex-cua/relay/relay.mjs'
+MINE = 'bridge-4242-1792345678'
+
+
+class RuntimeTests(unittest.IsolatedAsyncioTestCase):     # the control makes an asyncio lock
+    """On its way out a bridge ends the runtimes whose relay record names it, and nothing else."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir='/tmp', prefix='bc')
+        self.addCleanup(self.temp.cleanup)
+        self.state = Path(self.temp.name).resolve()
+        self.control = bridge_control.BridgeControl(Adapter(), state=self.state)
+        self.control.writer_id = MINE
+        self.table = {}          # pid -> (ppid, command), what ps prints
+        self.kills = []
+
+    def relay(self, name, owner=MINE, relay=2001, root=2000, host=1100, raw=None):
+        directory = self.state/'relays'/('relay-'+name)
+        directory.mkdir(parents=True)
+        (directory/'relay.json').write_text(raw if raw is not None else json.dumps(
+            {'pid': relay, 'root_pid': root, 'app_server_pid': host, 'owner': owner}))
+
+    def ps(self, argv, **options):
+        self.assertEqual((argv[:3], options['env']), (['/bin/ps', '-o', 'pid=,ppid=,command='], {'LC_ALL': 'C'}))
+        wanted = [int(item) for item in argv[argv.index('-p')+1].split(',')]
+        return SimpleNamespace(returncode=0, stdout=''.join(
+            '%5d %5d %s\n' % (pid, *self.table[pid]) for pid in wanted if pid in self.table))
+
+    def stop(self):
+        return self.control.stop_runtimes(run=self.ps, kill=lambda pid, number: self.kills.append((pid, number)))
+
+    def test_only_the_cua_repl_whose_relay_names_this_bridge_is_signalled(self):
+        self.table = {2000: (1100, CUA_REPL), 2001: (2000, RELAY), 3000: (1100, CUA_REPL), 3001: (3000, RELAY)}
+        self.relay('mine')
+        self.relay('other', owner='bridge-4243-1792345678', relay=3001, root=3000)
+        self.relay('codex', owner=None, relay=3001, root=3000)
+        self.assertEqual(self.stop(), 1)
+        self.assertEqual(self.kills, [(2000, signal.SIGTERM)])
+
+    def test_a_runtime_that_is_not_where_the_record_says_is_left_alone(self):
+        self.relay('mine')
+        for table in ({2000: (1100, CUA_REPL)},                                  # the relay is gone
+                      {2000: (1, CUA_REPL), 2001: (2000, RELAY)},                 # cua-repl left the host
+                      {2000: (1100, '/usr/bin/vim notes'), 2001: (2000, RELAY)},  # the pid runs another program
+                      {2000: (1100, CUA_REPL), 2001: (1, RELAY)},                 # the relay is not under it
+                      {}):
+            self.table = table
+            self.assertEqual(self.stop(), 0)
+        self.assertEqual(self.kills, [])
+
+    def test_records_that_cannot_be_read_or_name_no_usable_process_are_skipped(self):
+        self.table = {2000: (1100, CUA_REPL), 2001: (2000, RELAY)}
+        self.relay('broken', raw='{not json')
+        self.relay('list', raw='[]')
+        self.relay('bool', relay=True)
+        self.relay('one', root=1)
+        self.relay('text', host='1100')
+        self.assertEqual(self.stop(), 0)
+        self.control.writer_id = None          # a bridge that never got its name ends nothing
+        self.relay('mine')
+        self.assertEqual(self.stop(), 0)
+        self.assertEqual(self.kills, [])
+
+    def test_a_process_list_or_a_signal_that_fails_ends_nothing_and_raises_nothing(self):
+        self.relay('mine')
+        self.table = {2000: (1100, CUA_REPL), 2001: (2000, RELAY)}
+
+        def refuses(pid, number):
+            raise PermissionError(pid)
+        self.assertEqual(self.control.stop_runtimes(run=self.ps, kill=refuses), 0)
+        self.assertEqual(self.control.stop_runtimes(run=Mock(side_effect=OSError('no ps')), kill=refuses), 0)
+
+
+class FinalizeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_the_runtimes_are_ended_before_the_last_write_and_a_failure_there_changes_nothing(self):
+        with tempfile.TemporaryDirectory(dir='/tmp', prefix='bc') as temp:
+            control = bridge_control.BridgeControl(Adapter(), state=Path(temp).resolve()/'state')
+            await control.start()
+            control.stop_runtimes = Mock(side_effect=RuntimeError('boom'))
+            await control.finalize()
+            control.stop_runtimes.assert_called_once_with()
+            self.assertFalse(control.directory.exists())

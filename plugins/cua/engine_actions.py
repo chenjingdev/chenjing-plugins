@@ -3,7 +3,8 @@
 Safety rules that hold everywhere in this module:
 - A process is signalled only after its identity (pid and start time) was verified again a moment before.
 - Only connection processes are ever signalled: a bridge, a relay, a runtime's cua-repl, or the one `cmux-cua mcp`
-  process that was asked for by its id. The Codex app, its servers, the AI client that owns a connection, Chrome
+  process that was asked for by its id. A stopped Claude connection also ends the cua-repl of its own thread, which
+  Codex would keep until it quits. The Codex app, its servers, the AI client that owns a connection, Chrome
   and the cmux-cua daemon are on a protected list that is checked before every signal. For every other kind of stop
   that list holds all of cmux-cua, and a group stop never reaches it.
 - Codex is quit through Apple Events, never killed; restart-codex runs only because a person clicked it.
@@ -14,7 +15,8 @@ import signal
 import subprocess
 
 from engine_core import CONNECTION_ID, REASON
-from engine_inventory import app_pids, cmux_mode, find_installation, lookup, read_host, same_process, snapshot
+from engine_inventory import (app_pids, cmux_mode, find_installation, is_cua_repl, lookup, read_host, same_process,
+                              snapshot)
 from engine_records import ControlError, control_request, release_timeout
 from engine_release import release_sessions
 from engine_status import CmuxConnection, build_view
@@ -30,6 +32,7 @@ POLL = 0.2
 REASON_MAP = {'cleanup_tool_unavailable': 'cleanup_not_confirmed'}
 
 Release = namedtuple('Release', 'released reason count nothing')
+Runtime = namedtuple('Runtime', 'pid started')       # the cua-repl of a stopped Claude connection's thread
 NO_RELEASE = Release(False, None, 0, False)      # a connection without a release step: nothing was asked, nothing failed
 
 
@@ -116,10 +119,13 @@ def release_ended(ctx):
 
 def _same(ctx, conn, proc):
     """Whether proc is still the process this connection is: the same pid, user and start time (within a second).
-    A cmux-cua connection must also still be a `cmux-cua mcp`: a process can start another program under its pid."""
+    A cmux-cua connection must also still be a `cmux-cua mcp`, and a runtime a cua-repl: a process can start another
+    program under its pid."""
     if not same_process(proc, ctx.uid, conn.pid, conn.started):
         return False
-    return not isinstance(conn, CmuxConnection) or cmux_mode(proc.command) == 'mcp'
+    if isinstance(conn, CmuxConnection):
+        return cmux_mode(proc.command) == 'mcp'
+    return not isinstance(conn, Runtime) or is_cua_repl(proc.command)
 
 
 def _signal(ctx, conn, number):
@@ -190,6 +196,9 @@ def stop_connections(ctx, conns, force, protected):
         remaining = _wait_gone(ctx, killed, KILL_WAIT)
         for conn in killed:
             outcome[conn.id] = 'waiting' if conn in remaining else 'stopped'
+    _end_runtimes(ctx, [Runtime(pid, started) for conn in conns if outcome[conn.id] == 'stopped'
+                        for pid, started in sorted(getattr(conn, 'runtimes', ()))
+                        if pid > 1 and pid != ctx.pid and pid not in protected], force)
     results = []
     for conn in conns:
         released, reason = release[conn.id].released, release[conn.id].reason
@@ -201,6 +210,16 @@ def stop_connections(ctx, conns, force, protected):
         results.append({'connection_id': conn.id, 'stopped': stopped, 'released': released,
                         'reason': None if released and stopped else reason})
     return results
+
+
+def _end_runtimes(ctx, runtimes, force):
+    """End the runtimes of Claude connections that stopped (R8). A bridge ends its own when it exits normally; this is
+    for one that was killed, or whose conversation is already gone. Nothing of it changes a connection's result."""
+    sent = [runtime for runtime in runtimes if _signal(ctx, runtime, signal.SIGTERM) == 'sent']
+    left = _wait_gone(ctx, sent, KILL_WAIT)
+    if force:
+        for runtime in left:
+            _signal(ctx, runtime, signal.SIGKILL)
 
 
 def stop_connection(ctx, wanted, force=False):

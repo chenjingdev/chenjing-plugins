@@ -349,7 +349,12 @@ class FakeHost:
         if method == 'initialize':
             result = {'userAgent': 'fixture', 'codexHome': '/fixture/codex-home', 'platformFamily': 'unix',
                       'platformOs': 'macos'}
+        elif method == 'plugin/installed':
+            result = {'marketplaces': []}
+        elif method == 'config/read':
+            result = {'config': {}, 'origins': {}}
         elif method == 'thread/start':
+            self.thread_params = message['params']
             result = {'thread': {'id': self.thread_id, 'ephemeral': True}}
         elif method == 'mcpServerStatus/list':
             result = {'data': [{'name': 'cua_repl', 'pluginId': self.plugin_id, 'runtimeStatus': 'connected',

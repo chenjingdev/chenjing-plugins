@@ -7,22 +7,30 @@ session holds. The call below only counts the session's tabs; titles, URLs and p
 
 This path exists only as an engine command. It is not an MCP tool, an AI cannot choose the session, and the status
 command never runs it. It connects to the host the way the bridge does (HostMcp.boot, with its checks) and never
-starts Codex.
+starts Codex. Codex keeps the runtime of a thread until it quits, so the short-lived thread works in a new folder of
+its own, and afterwards the runtime that works there is ended.
 """
 import asyncio
 import json
 import os
 from pathlib import Path
 import re
+import shutil
+import signal
 import stat
+import subprocess
+import tempfile
 import uuid
 
 from engine_core import SESSION_ID, iso
+from engine_inventory import is_cua_repl, lookup, same_process, snapshot, working_folders
 from engine_records import remember_released, remove_sessions
 from engine_status import build_view
 
 TITLE = 'Release an ended CUA session'
 DEFAULT_OPTIONS = {'boot': 15.0, 'call': 45.0, 'end': 10.0, 'cleanup': 5.0}
+RUNTIME_WAIT = 3.0
+POLL = 0.2
 # The whole call is one async function, so its names never clash with those of earlier calls in the same runtime.
 SNIPPET = '''await (async () => {
   const { setupBrowserRuntime } = await import(%s);
@@ -141,13 +149,15 @@ async def _release_one(adapter, session, code, options):
     return {'released': True, 'reason': None, 'tab_count': count}
 
 
-async def _release_batch(ctx, view, sessions, script, options, user):
-    """Release several sessions through one short-lived thread; returns session -> result."""
+async def _release_batch(ctx, view, sessions, script, options, user, folder=None):
+    """Release several sessions through one short-lived thread (working in `folder`); returns session -> result."""
     from host_mcp import HostMcp
     registry = view.inv.host.registry
     adapter = HostMcp(None, Path(registry['socket_path']), native_cua_root=native_cua_root(registry),
                       emit=_ignore, log=_ignore, startup_timeout=options['boot'],
                       cleanup_timeout=options['cleanup'])
+    if folder is not None:
+        adapter.thread_cwd = folder
     code = release_code(script)
     results = {}
     try:
@@ -175,6 +185,40 @@ async def _release_batch(ctx, view, sessions, script, options, user):
     return results
 
 
+def end_thread_runtimes(ctx, folder, host_pid, since):
+    """End the runtime that Codex started for the short-lived thread: a cua-repl of this user right under the host's
+    app-server, started since the thread was asked for, that works in the thread's own folder. Returns how many."""
+    try:
+        found = [proc for proc in snapshot(ctx).values()
+                 if proc.uid == ctx.uid and proc.ppid == host_pid and proc.start >= since-1 and is_cua_repl(proc.command)]
+    except Exception:
+        return 0
+    folders = working_folders(ctx, [proc.pid for proc in found])
+    wanted = {folder, os.path.realpath(folder)}
+    ended = []
+    for proc in found:
+        if folders.get(proc.pid) not in wanted:
+            continue
+        try:
+            current = lookup(ctx, proc.pid)
+            if (same_process(current, ctx.uid, proc.pid, proc.start) and current.ppid == host_pid
+                    and is_cua_repl(current.command)):
+                ctx.kill(proc.pid, signal.SIGTERM)
+                ended.append(proc)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    deadline = ctx.clock()+RUNTIME_WAIT
+    left = list(ended)
+    while left and ctx.clock() < deadline:          # its folder is removed once it is gone
+        ctx.sleep(POLL)
+        try:
+            procs = snapshot(ctx)
+        except Exception:
+            break
+        left = [proc for proc in left if same_process(procs.get(proc.pid), ctx.uid, proc.pid, proc.start)]
+    return len(ended)
+
+
 def release_sessions(ctx, sessions, user=False, view=None, options=None):
     """session id -> {'released', 'reason', 'tab_count'} for each session asked about."""
     options = dict(DEFAULT_OPTIONS, **(options or {}))
@@ -196,9 +240,18 @@ def release_sessions(ctx, sessions, user=False, view=None, options=None):
         results.update({session: _failure('unsupported') for session in allowed})
         return results
     try:
-        outcome = asyncio.run(_release_batch(ctx, view, allowed, script, options, user))
+        folder = tempfile.mkdtemp(prefix='codex-cua-release-')
+    except OSError:
+        folder = None      # the thread works where the engine does, and its runtime stays until Codex quits
+    since = ctx.clock()
+    try:
+        outcome = asyncio.run(_release_batch(ctx, view, allowed, script, options, user, folder))
     except Exception:
         outcome = {}       # nothing could be confirmed; every session says so below
+    finally:
+        if folder is not None:
+            end_thread_runtimes(ctx, folder, view.inv.host.registry.get('backend_pid'), since)
+            shutil.rmtree(folder, ignore_errors=True)
     for session in allowed:
         result = outcome.get(session) or _failure('cleanup_not_confirmed')
         results[session] = result

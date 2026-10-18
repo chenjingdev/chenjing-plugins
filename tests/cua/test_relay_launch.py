@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from test_desktop_cli_wrapper import FAKE, FAKE_STDIO, PRIMARY
 from test_relay_install import Machine
+from toml_subset import parse_override
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'plugins/cua'
 TESTS = Path(__file__).resolve().parent
@@ -123,6 +124,7 @@ class RelayLaunchTests(unittest.TestCase):
         self.assertEqual(proxy['argv'], ['--socket', record['socket_path']])
         self.assertIs(record['relay'], False)
         self.assertIsNone(record['relay_launcher'])
+        self.assertIsNone(record['relay_config'])
         if reason is not None:
             self.assertEqual(record['relay_reason'], reason)
         return record
@@ -140,6 +142,8 @@ class RelayLaunchTests(unittest.TestCase):
         override = [item for item in backend if item.startswith(OVERRIDE_PREFIX)]
         self.assertEqual(len(override), 1)
         self.assertEqual(backend[index-2:index], ['-c', override[0]], 'right before the subcommand, as a root-level option')
+        # The record keeps the same table as data, for the Claude bridge's own threads.
+        self.assertEqual(parse_override(override[0]), ('mcp_servers.cua_repl', record['relay_config']))
         rest = list(backend)
         position = rest.index(override[0])
         del rest[position-1:position+1]

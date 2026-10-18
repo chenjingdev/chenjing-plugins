@@ -71,8 +71,23 @@ test('the runtime gets its arguments and the environment it would have had witho
   const {fixture, client} = await boot(t, {args: ['one two', '', '--flag'], env: {FAKE_MARKER: 'kept'}});
   const [start] = fixture.events('start');
   assert.deepEqual(start.argv, ['one two', '', '--flag']);
-  assert.deepEqual(start.env, {native: null, relayNode: null, state: null, runtimePath: fixture.native, marker: 'kept'});
+  assert.deepEqual(start.env, {native: null, relayNode: null, state: null, runtimePath: fixture.native, marker: 'kept',
+    owner: null});
   assert.equal(client.stderr, '');
+});
+
+test('a bridge that names itself is the owner in the record, and the runtime never sees the name', async t => {
+  const {fixture} = await boot(t, {env: {CODEX_CUA_OWNER: 'bridge-4242-1792345678'}});
+  const record = await readRecord(fixture);
+  assert.equal(record.owner, 'bridge-4242-1792345678');
+  assert.equal(fixture.events('start')[0].env.owner, null);
+});
+
+test('an owner that is not a bridge name is not written down', async t => {
+  for (const value of ['', 'relay-1-2', 'bridge-1-2; rm', 'bridge-' + '9'.repeat(11) + '-1']) {
+    const {fixture} = await boot(t, {env: {CODEX_CUA_OWNER: value}});
+    assert.equal((await readRecord(fixture)).owner, null, value);
+  }
 });
 
 test('scopes come from the host-supplied context and from nowhere else', async t => {
@@ -145,6 +160,7 @@ test('the record describes the relay, its runtime and its place in the process t
   assert.equal(record.root_pid, process.pid);
   assert.equal(record.app_server_pid, parentOf(process.pid));
   assert.equal(record.cwd, process.cwd());
+  assert.equal(record.owner, null);
   assert.equal(record.control_path, path.join(record.dir, 'control.sock'));
   assert.equal(record.busy, false);
   assert.equal(record.cleanup, 'none');
@@ -170,6 +186,16 @@ test('busy and last_call_at follow the calls that are running', async t => {
   await until(() => client.messages.find(m => m.id === 90), 4000, 'answer');
   record = await readRecord(fixture, r => r.busy === false);
   assert.deepEqual(await control(record.control_path, {action: 'status', ...identity(record)}), {ok: true, busy: false, open_scopes: 1});
+});
+
+test('the end of a turn that no call opened here leaves last_call_at alone', async t => {
+  const {fixture, client} = await boot(t);
+  await client.request('tools/call', {name: 'turn_ended', arguments: {hook_event_name: 'Stop', session_id: 's-chat', turn_id: 't1'}});
+  await sleep(300);
+  assert.equal((await readRecord(fixture)).last_call_at, null);
+  await client.call('a', turn('s-chat', 't2'));
+  const opened = (await readRecord(fixture, r => r.last_call_at !== null)).last_call_at;
+  assert.match(opened, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
 });
 
 test('a cancelled call no longer counts as running', async t => {
@@ -201,13 +227,15 @@ test('activity lines hold the tool name, success and duration, and nothing of wh
   await client.call('no scope here');
   await client.request('tools/call', {name: 'js_reset', arguments: {}});
   await client.request('tools/call', {name: 'turn_ended', arguments: {hook_event_name: 'Stop', session_id: 's-act', turn_id: 't1'}});
+  // The Codex app's turn_ended at the end of a turn without CUA: no line, and no call either.
+  await client.request('tools/call', {name: 'turn_ended', arguments: {hook_event_name: 'Stop', session_id: 's-chat', turn_id: 't9'}});
   await client.request('tools/call', {name: 'weird name with spaces!', arguments: {}});
   await client.request('tools/list', {});
   const file = path.join(fixture.state, 'activity.jsonl');
   const [dir] = relayDirs(fixture);
   const record = JSON.parse(fs.readFileSync(path.join(dir, 'relay.json'), 'utf8'));
   const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
-  assert.equal(lines.length, 7, 'one line per tools/call, none for tools/list');
+  assert.equal(lines.length, 7, 'one line per tools/call, none for tools/list or the end of a turn nobody opened');
   const writer = 'relay-' + record.pid + '-' + record.started_at;
   for (const line of lines) {
     assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms']);

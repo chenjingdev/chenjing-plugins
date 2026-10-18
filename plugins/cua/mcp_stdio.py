@@ -62,6 +62,7 @@ def build_adapter(state, **options):
                 except InstallationError:
                     raise BridgeFailure('Install Codex Desktop, or set CODEX_CUA_APP_PATH to its original app bundle.') from None
                 self.rpc.socket_path = Path(registry['socket_path'])
+                self.registry = registry
                 self.native_cua_root = None
                 if isinstance(registry.get('native_cli'), str):
                     try:
@@ -75,6 +76,19 @@ def build_adapter(state, **options):
             except (OSError, ValueError):
                 raise BridgeFailure('Start Codex with the prepared host launcher before using this MCP plugin. No runtime was started.') from None
             await super().boot()
+
+        async def thread_config(self, request):
+            # The desktop app takes the launcher's relay override out of the host's configuration, so the relay
+            # definition the launcher verified is given to this thread directly, with this bridge's name.
+            config = await super().thread_config(request)
+            try:
+                from relay_install import SERVER_KEY, relay_thread_server
+            except Exception:
+                return config
+            server = relay_thread_server(getattr(self, 'registry', None), self.native_cua_root, self.owner)
+            if server is not None:
+                config[SERVER_KEY] = server
+            return config
 
         def host_info(self):
             # The registry the host wrote, but only when it still names the endpoint this connection is on.

@@ -141,7 +141,7 @@ const text = value => ({content: [{type: 'text', text: value}]});
 append('start', {pid: process.pid, argv: process.argv.slice(2), env: {
   native: process.env.CODEX_CUA_NATIVE_RUNTIME ?? null, relayNode: process.env.CODEX_CUA_RELAY_NODE ?? null,
   state: process.env.CODEX_CUA_STATE_DIR ?? null, runtimePath: process.env.CUA_REPL_NODE_REPL_PATH ?? null,
-  marker: process.env.FAKE_MARKER ?? null}});
+  marker: process.env.FAKE_MARKER ?? null, owner: process.env.CODEX_CUA_OWNER ?? null}});
 const ended = new Set();
 let buffer = Buffer.alloc(0);
 function handle(line) {
