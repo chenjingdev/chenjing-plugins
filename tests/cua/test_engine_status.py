@@ -262,13 +262,26 @@ class AttributionTests(StatusCase):
             {'id': 'cmux-3002-%d' % (NOW-3600), 'pid': 77, 'mcp_pid': 3002, 'agent': None, 'cwd': None,
              'started_at': iso(NOW-3600), 'can_stop': True}]}])
 
-    def test_an_mcp_process_whose_ai_client_is_gone_is_still_listed_and_can_be_stopped(self):
+    def test_an_mcp_process_whose_ai_client_is_gone_is_still_listed_without_a_client_and_can_be_stopped(self):
         self.machine.add(3002, 1, self.commands.cmux_mcp, start=NOW-500)          # its parent is launchd now
         self.machine.add(3003, 4444, self.commands.cmux_mcp, start=NOW-400)       # its parent vanished from the list
+        self.machine.cwds[4444] = '/work/whoever-has-that-pid-now'                # nothing of that is taken for its client
         clients = self.status()['other_tools'][0]['clients']
         self.assertEqual([(item['mcp_pid'], item['pid'], item['agent'], item['cwd'], item['can_stop']) for item in clients],
-                         [(3002, 1, None, None, True), (3003, 4444, None, None, True)])
+                         [(3002, None, None, None, True), (3003, None, None, None, True)])
         self.assertEqual(self.status()['other_tools'][0]['running'], True)
+
+    def test_connections_are_ordered_by_client_with_the_ones_without_a_client_last(self):
+        self.add_claude(500)
+        self.machine.add(3001, 1, self.commands.cmux_mcp, start=NOW-900)          # no client
+        self.machine.add(3002, 500, self.commands.cmux_mcp, start=NOW-800)
+        self.machine.add(3003, 1100, self.commands.cmux_mcp, start=NOW-700)
+        self.machine.add(3004, 4444, self.commands.cmux_mcp, start=NOW-600)       # no client
+        self.machine.add(3005, 500, self.commands.cmux_mcp, start=NOW-100)
+        self.machine.add(1100, 1, self.commands.app_server)
+        clients = self.status()['other_tools'][0]['clients']
+        self.assertEqual([(item['mcp_pid'], item['pid']) for item in clients],
+                         [(3002, 500), (3005, 500), (3003, 1100), (3001, None), (3004, None)])
 
     def test_can_stop_is_false_where_stop_would_refuse(self):
         self.add_claude(500)

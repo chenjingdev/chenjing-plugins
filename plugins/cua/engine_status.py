@@ -68,12 +68,14 @@ class CmuxConnection:
     """One `cmux-cua mcp` process: what an AI conversation holds open to cmux-cua.
 
     It is not one of the connections above. It is stopped one at a time, never in a group, and it has nothing to
-    release. `pid` is the process that is signalled; `client_pid` is the AI client that started it, which never is."""
+    release. `pid` is the process that is signalled; `client_pid` is the AI client that started it, which never is.
+    When that client is gone (the parent is launchd, or no longer in the process list) there is none: `client_pid`
+    and `agent` are None, which is how the contract writes an unknown value."""
 
     def __init__(self, proc, client):
         self.pid = proc.pid
         self.started = proc.start
-        self.client_pid = proc.ppid
+        self.client_pid = client.pid if client is not None else None
         self.agent = client_agent(client.command) if client is not None else None
         self.cwd = None
         self.can_stop = False
@@ -264,12 +266,14 @@ class View:
                 self.connections.append(conn)
 
     def _cmux_connections(self):
-        """Every `cmux-cua mcp` process of this user, also one whose AI client is gone (its parent is then launchd)."""
+        """Every `cmux-cua mcp` process of this user, also one whose AI client is gone: it is listed without a client.
+
+        Ordered by AI client, each client's connections by start; the ones without a client come last."""
         inv = self.inv
         for pid in inv.cmux_mcp:
             proc = inv.mine[pid]
             self.cmux.append(CmuxConnection(proc, inv.procs.get(proc.ppid) if proc.ppid > 1 else None))
-        self.cmux.sort(key=lambda conn: (conn.client_pid, conn.started, conn.pid))
+        self.cmux.sort(key=lambda conn: (conn.client_pid is None, conn.client_pid or 0, conn.started, conn.pid))
 
     def _map_activity(self, activity):
         """Which connection each line of the activity log belongs to, and each connection's newest call."""
@@ -311,7 +315,7 @@ class View:
             for conn in self.connections:
                 conn.cwd = conn.cwd or self.folders.get(conn.pid)
             for conn in self.cmux:
-                conn.cwd = self.folders.get(conn.client_pid)
+                conn.cwd = self.folders.get(conn.client_pid)       # None without a client: nothing is looked up for it
 
     @staticmethod
     def _newest_session(relay):
