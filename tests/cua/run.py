@@ -7,11 +7,12 @@ run fails if anything shows up there: a forgotten injection is loud, not silent.
 environment without HOME would find the real home through the account database, so the real support folders are
 also fingerprinted before and after the run (read only, see guard.py) and the run fails on any difference.
 
-Exit code: 0 when everything passed. 1 when a test failed or a test wrote into the throw-away home. 2 when the real
-support folders changed while the run was going; the changed paths are listed with their new modification time in
-local time. Using CUA, starting Codex or installing the plugin during the run does that, and then the run proves
-nothing, so 2 wins over 1 (the test results are printed above it all the same). Run the tests again while CUA is
-not in use; if 2 repeats with everything idle, a test writes there.
+Exit code: 0 when everything passed. 1 when a test failed, a test wrote into the throw-away home or the arguments
+were wrong (argparse would end a usage error with 2, which is taken here). 2 when the real support folders changed
+while the run was going; the changed paths are listed with their new modification time in local time. Using CUA,
+starting Codex or installing the plugin during the run does that, and then the run proves nothing, so 2 wins over 1
+(the test results are printed above it all the same). Run the tests again while CUA is not in use; if 2 repeats with
+everything idle, a test writes there.
 
 --tests and --real-home point the runner at a stand-in suite and a stand-in home. They exist for the runner's own
 tests (test_guard.py) and are not needed otherwise.
@@ -32,10 +33,17 @@ MOVED = ('The real support folders changed while the tests ran. The tests only r
          'modification time, local time:')
 
 
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        # argparse ends a usage error with 2, but 2 means here that the guard saw a change.
+        self.print_usage(sys.stderr)
+        self.exit(EXIT_FAILED, '%s: error: %s\n' % (self.prog, message))
+
+
 def main(argv=None):
     sys.dont_write_bytecode = True
     here = Path(__file__).resolve().parent
-    parser = argparse.ArgumentParser(description='Run the development regressions of the cua plugin.')
+    parser = Parser(description='Run the development regressions of the cua plugin.')
     parser.add_argument('--tests', type=Path, default=here, help='folder to discover test_*.py in (default: this one)')
     parser.add_argument('--real-home', type=Path,
                         help='home whose support folders the guard watches (default: the home of this account)')

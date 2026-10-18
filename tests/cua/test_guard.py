@@ -213,6 +213,16 @@ class RunnerTests(unittest.TestCase):
         self.assertIn('Tests wrote into the default home instead of an injected one:\n  stray.txt', done.stderr)
         self.assertNotIn('changed while the tests ran', done.stderr)
 
+    def test_a_usage_error_exits_1_because_2_belongs_to_the_guard(self):
+        for arguments, said in ((['--no-such-option'], 'unrecognized arguments: --no-such-option'),
+                                (['--tests'], 'expected one argument')):
+            with self.subTest(arguments=arguments):
+                done = subprocess.run([sys.executable, '-B', str(HERE/'run.py'), *arguments], stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True, timeout=60)
+                self.assertEqual(done.returncode, 1, done.stderr)
+                self.assertIn('usage:', done.stderr)
+                self.assertIn(said, done.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()
