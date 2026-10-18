@@ -119,12 +119,16 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     // MARK: Install (plugin_missing)
 
     /// Adds the marketplace when Claude Code does not know it yet, installs the plugin for the
-    /// user, then sets it up.
+    /// user, then sets it up. A record whose folder is gone is taken away first, keeping the
+    /// plugin's data: Claude Code installs nothing over a plugin it already lists.
     func installPlugin() async -> ActionOutcome {
         guard enter() else { return ActionOutcome(kind: .info, message: PluginMessages.busy) }
         defer { leave() }
         guard let claudeCLI = claude.locate() else { return failure(PluginMessages.claudeMissing) }
 
+        if locator.pluginPresence() == .broken {
+            guard await runClaude(claudeCLI, Self.uninstall) else { return failure(PluginMessages.installFailed) }
+        }
         if !locator.knowsMarketplace() {
             guard await runClaude(claudeCLI, Self.marketplaceAdd) else { return failure(PluginMessages.marketplaceAddFailed) }
         }
@@ -181,6 +185,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
 
     static let marketplaceAdd = ["plugin", "marketplace", "add", ReleaseSource.repository, "--json"]
     static let install = ["plugin", "install", CommandLocator.pluginID, "--scope", "user", "--json"]
+    static let uninstall = ["plugin", "uninstall", CommandLocator.pluginID, "--scope", "user", "--keep-data", "--json"]
     static let marketplaceUpdate = ["plugin", "marketplace", "update", CommandLocator.marketplaceName, "--json"]
     static let update = ["plugin", "update", CommandLocator.pluginID, "--scope", "user", "--json"]
 

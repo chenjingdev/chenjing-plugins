@@ -155,6 +155,31 @@ struct LiveSystemActionsTests {
         #expect(outcome.kind == .success)
     }
 
+    @Test func aRecordWhoseFolderIsGoneIsTakenAwayKeepingItsDataBeforeTheInstall() async throws {
+        let rig = try rig(marketplace: true)
+        defer { rig.home.remove() }
+        try rig.home.installPlugin(createFolder: false)
+        let outcome = await rig.actions.installPlugin()
+        let step: Duration = .seconds(300)
+        #expect(rig.runner.calls == [
+            .init(executable: rig.claude, arguments: ["plugin", "uninstall", "cua@chenjing-plugins", "--scope", "user", "--keep-data", "--json"], timeout: step),
+            .init(executable: rig.claude, arguments: ["plugin", "install", "cua@chenjing-plugins", "--scope", "user", "--json"], timeout: step),
+            setupCall(rig.pluginAt070),
+        ])
+        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+    }
+
+    @Test func aFailedRemovalOfTheBrokenRecordStopsTheInstall() async throws {
+        let rig = try rig(marketplace: true, responses: { call in
+            call.verb == "plugin uninstall" ? StepRunner.failed() : StepRunner.ok()
+        })
+        defer { rig.home.remove() }
+        try rig.home.installPlugin(createFolder: false)
+        let outcome = await rig.actions.installPlugin()
+        #expect(outcome == ActionOutcome(kind: .failure, message: "플러그인을 설치하지 못했어요"))
+        #expect(rig.runner.calls.map(\.verb) == ["plugin uninstall"])
+    }
+
     @Test func installNeedsClaudeCodeAndSaysNothingElse() async throws {
         let rig = try rig(claudeInstalled: false)
         defer { rig.home.remove() }

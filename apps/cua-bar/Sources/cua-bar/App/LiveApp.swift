@@ -38,7 +38,8 @@ final class LiveApp {
         let notifier = SystemNotifier.makeDefault()
         let model = CUABarViewModel(
             engine: engine, appVersion: appVersion, systemActions: actions, pasteboard: pasteboard,
-            notifier: notifier, setupActivity: setup, registeredPluginVersion: { locator.installedPlugin()?.version })
+            notifier: notifier, setupActivity: setup, registeredPluginVersion: { locator.installedPlugin()?.version },
+            pluginPresence: { locator.pluginPresence() })
         releases.onNewVersion = { version in
             Task { _ = await notifier.post(.newVersion(version)) }
         }

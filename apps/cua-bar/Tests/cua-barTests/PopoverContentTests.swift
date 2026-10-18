@@ -349,7 +349,7 @@ struct PopoverContentTests {
         #expect(first.timeText == "11:59:30")
         #expect(first.agent == .claude)
         #expect(first.folder == "dev/computer-use")
-        #expect(first.tool == "js")
+        #expect(first.tool == "화면 조작")
         #expect(first.ok == true)
         #expect(first.durationText == "1.2초")
         let failed = rows[1]
@@ -368,6 +368,14 @@ struct PopoverContentTests {
         let rows = content(of: status).activity.rows
         #expect(Set(rows.map(\.id)).count == 3)
         #expect(content(of: try Fixtures.status("status-problem")).activity.rows.map(\.timeText) == ["11:59:30", "11:58:12", "09:02:00"])
+    }
+
+    @Test func toolNamesAreShownInWordsAndUnknownOnesAsTheEngineWroteThem() {
+        #expect(Format.tool("js") == "화면 조작")
+        #expect(Format.tool("turn_ended") == "차례 끝 · 점유 놓기")
+        #expect(Format.tool("js_reset") == "런타임 초기화")
+        #expect(Format.tool("list_tabs") == "list_tabs")
+        #expect(Format.tool(nil) == "—")
     }
 
     @Test func missingActivityValuesAreShownAsDashes() throws {

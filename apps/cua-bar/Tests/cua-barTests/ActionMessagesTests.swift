@@ -13,6 +13,7 @@ struct ActionMessagesTests {
         ("relay_unavailable", "중계기를 쓸 수 없어요"),
         ("unsupported", "하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"),
         ("quit_cancelled", "Codex가 종료를 취소했어요"),
+        ("quit_pending", "Codex가 아직 꺼지는 중이에요"),
         ("not_running", "Codex가 켜져 있지 않아요"),
         ("relaunch_failed", "Codex를 다시 열지 못했어요"),
         ("timeout", "시간이 너무 오래 걸렸어요"),
@@ -29,9 +30,9 @@ struct ActionMessagesTests {
         #expect(ActionMessages.reason(reason) == text)
     }
 
-    @Test func allSixteenReasonsAreDistinctAndNoneIsTheUnknownLine() {
-        #expect(Self.reasons.count == 16)
-        #expect(Set(Self.reasons.map(\.1)).count == 16)
+    @Test func allSeventeenReasonsAreDistinctAndNoneIsTheUnknownLine() {
+        #expect(Self.reasons.count == 17)
+        #expect(Set(Self.reasons.map(\.1)).count == 17)
         #expect(!Self.reasons.map { ActionMessages.reason($0.0) }.contains(ActionMessages.unknownReason))
     }
 
@@ -322,6 +323,12 @@ struct ActionMessagesTests {
     @Test func aCancelledQuitEndsThereWithNothingMoreToDo() {
         let outcome = ActionMessages.restartCodex(RestartResult(ok: false, reason: "quit_cancelled"))
         #expect(outcome == ActionOutcome(kind: .info, message: "Codex가 종료를 취소했어요"))
+        #expect(outcome.followUp == nil)
+    }
+
+    @Test func aQuitStillUnderWaySaysTheAppWillOpenCodexOnceItIsOff() {
+        let outcome = ActionMessages.restartCodex(RestartResult(ok: false, reason: "quit_pending"))
+        #expect(outcome == ActionOutcome(kind: .info, message: "Codex가 아직 꺼지는 중이에요 — 꺼지면 다시 켤게요"))
         #expect(outcome.followUp == nil)
     }
 

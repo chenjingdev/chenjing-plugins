@@ -8,6 +8,17 @@ enum CommandLocation: Equatable, Sendable {
     case pluginMissing
 }
 
+/// What Claude Code's registry says about the plugin, for a command that cannot answer.
+enum PluginPresence: Equatable, Sendable {
+    /// Not looked at, or the registry could not be read.
+    case unknown
+    /// No record of the plugin.
+    case absent
+    /// A record whose folder (its `setup.sh`) is gone.
+    case broken
+    case present
+}
+
 /// The plugin as Claude Code registered it: the `scope: user` record of `cua@chenjing-plugins`
 /// in `installed_plugins.json`.
 struct RegisteredPlugin: Equatable, Sendable {
@@ -59,6 +70,20 @@ struct CommandLocator: Sendable {
     func installedPlugin() -> RegisteredPlugin? {
         guard let plugin = registeredPlugin(), FileManager.default.fileExists(atPath: plugin.setupScript.path) else { return nil }
         return plugin
+    }
+
+    /// Whether the plugin is registered and its folder is there. A registry that does not exist means
+    /// Claude Code has installed no plugin at all.
+    func pluginPresence() -> PluginPresence {
+        if let plugin = registeredPlugin() {
+            return FileManager.default.fileExists(atPath: plugin.setupScript.path) ? .present : .broken
+        }
+        guard let data = try? Data(contentsOf: registryURL) else {
+            return FileManager.default.fileExists(atPath: registryURL.path) ? .unknown : .absent
+        }
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let plugins = root["plugins"] as? [String: Any] else { return .unknown }
+        return plugins[Self.pluginID] == nil || plugins[Self.pluginID] is [Any] ? .absent : .unknown
     }
 
     /// The registered plugin and its version, or nil when there is no usable record.

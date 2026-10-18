@@ -44,6 +44,7 @@ enum ActionMessages {
         case "relay_unavailable": "중계기를 쓸 수 없어요"
         case "unsupported": "하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"
         case "quit_cancelled": "Codex가 종료를 취소했어요"
+        case "quit_pending": "Codex가 아직 꺼지는 중이에요"
         case "not_running": "Codex가 켜져 있지 않아요"
         case "relaunch_failed": "Codex를 다시 열지 못했어요"
         case "timeout": "시간이 너무 오래 걸렸어요"
@@ -297,22 +298,28 @@ enum ActionMessages {
 
     // MARK: Restart
 
-    /// `quit_cancelled` ends there (nothing else happens); `relaunch_failed` offers the one click
+    /// `quit_cancelled` ends there (nothing else happens); `quit_pending` is a quit Codex took and is
+    /// still finishing: the app opens it again once it is gone. `relaunch_failed` offers the one click
     /// that opens Codex (R1: only on the person's click).
     static func restartCodex(_ result: RestartResult) -> ActionOutcome {
-        if result.ok { return ActionOutcome(kind: .success, message: "Codex를 다시 켰어요") }
+        if result.ok { return ActionOutcome(kind: .success, message: restarted) }
         switch result.reason {
         case "quit_cancelled":
             return ActionOutcome(kind: .info, message: reason(result.reason))
+        case "quit_pending":
+            return ActionOutcome(kind: .info, message: "Codex가 아직 꺼지는 중이에요 — 꺼지면 다시 켤게요")
         case "relaunch_failed":
             // The quit worked; only opening it again did not.
-            return ActionOutcome(
-                kind: .failure, message: "Codex를 껐지만 다시 열지 못했어요",
-                followUp: .init(title: "Codex 열기", action: .openCodex))
+            return relaunchFailed
         default:
             return ActionOutcome(kind: .failure, message: "Codex를 다시 켜지 못했어요 — \(reason(result.reason))")
         }
     }
+
+    static let restarted = "Codex를 다시 켰어요"
+
+    static let relaunchFailed = ActionOutcome(
+        kind: .failure, message: "Codex를 껐지만 다시 열지 못했어요", followUp: .init(title: "Codex 열기", action: .openCodex))
 
     // MARK: The command itself
 

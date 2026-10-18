@@ -3,6 +3,21 @@ import Testing
 @testable import cua_bar
 
 struct CommandLocatorTests {
+    @Test func thePresenceOfThePluginIsReadFromTheRegistryAndItsFolder() throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let locator = CommandLocator(home: home.url)
+        #expect(locator.pluginPresence() == .absent)                     // Claude Code has installed nothing
+        try home.write(#"{"version": 2, "plugins": {"other@market": [{"scope": "user", "installPath": "/x"}]}}"#, to: locator.registryURL)
+        #expect(locator.pluginPresence() == .absent)
+        try home.installPlugin(createFolder: false)
+        #expect(locator.pluginPresence() == .broken)
+        try home.installPlugin()
+        #expect(locator.pluginPresence() == .present)
+        try home.write("{not json", to: locator.registryURL)
+        #expect(locator.pluginPresence() == .unknown)
+    }
+
     @Test func theAuthoredCommandWinsWhenItsMarkerIsInTheFirstThreeLines() throws {
         let home = try TempHome()
         defer { home.remove() }

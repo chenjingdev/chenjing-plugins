@@ -51,12 +51,21 @@ final class FakeNotifier: Notifier, @unchecked Sendable {
 final class FakeAppOpener: AppOpening, @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [String?] = []
+    private var backgrounds: [Bool] = []
+    var succeeds = true
 
     var openedPaths: [String?] { lock.withLock { recorded } }
+    /// Whether each open was asked for in the background.
+    var openedInBackground: [Bool] { lock.withLock { backgrounds } }
 
-    func openCodex(appPath: String?) async -> ActionOutcome {
-        lock.withLock { recorded.append(appPath) }
-        return ActionOutcome(kind: .success, message: "Codex를 열었어요")
+    func openCodex(appPath: String?, inBackground: Bool) async -> ActionOutcome {
+        lock.withLock {
+            recorded.append(appPath)
+            backgrounds.append(inBackground)
+        }
+        return succeeds
+            ? ActionOutcome(kind: .success, message: "Codex를 열었어요")
+            : ActionOutcome(kind: .failure, message: "Codex를 열지 못했어요")
     }
 }
 

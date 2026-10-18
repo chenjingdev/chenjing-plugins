@@ -97,6 +97,7 @@ final class CUABarViewModel: ObservableObject {
     private let sleep: @Sendable (Duration) async throws -> Void
     private let setupActivity: SetupActivity
     private let registeredPluginVersion: @Sendable () -> String?
+    private let pluginPresence: @Sendable () -> PluginPresence
 
     /// What the evaluator said about the last answer, before setup's own state is put over it.
     private var evaluatedSummary: StatusSummary = StatusEvaluator.loading
@@ -118,6 +119,19 @@ final class CUABarViewModel: ObservableObject {
     private var backgroundTasks: [UUID: Task<Void, Never>] = [:]
     private var didRequestAuthorization = false
 
+    /// A restart whose quit Codex took but had not finished when the engine stopped waiting
+    /// (`quit_pending`): which Codex it was, and until when the app waits for it to end.
+    private struct PendingRelaunch {
+        var pids: Set<Int>
+        var appPath: String?
+        var until: Date
+        /// The first read without that Codex; it is opened on a later one, when its host has closed too.
+        var goneSince: Date?
+    }
+    private var pendingRelaunch: PendingRelaunch?
+    static let relaunchWait: TimeInterval = 10 * 60
+    static let relaunchAfterGone: TimeInterval = 3
+
     init(
         engine: any EngineClient,
         appVersion: String?,
@@ -135,7 +149,10 @@ final class CUABarViewModel: ObservableObject {
         setupActivity: SetupActivity = SetupActivity(),
         // The plugin version Claude Code registered (nil when unknown): an old plugin that cannot
         // answer `status` is told from a broken one by comparing it with `appVersion`.
-        registeredPluginVersion: @escaping @Sendable () -> String? = { nil }
+        registeredPluginVersion: @escaping @Sendable () -> String? = { nil },
+        // Whether Claude Code lists the plugin and its folder is there: a command that fails without
+        // it is that problem, not a read problem.
+        pluginPresence: @escaping @Sendable () -> PluginPresence = { .unknown }
     ) {
         self.engine = engine
         self.appVersion = appVersion
@@ -150,6 +167,7 @@ final class CUABarViewModel: ObservableObject {
         self.sleep = sleep
         self.setupActivity = setupActivity
         self.registeredPluginVersion = registeredPluginVersion
+        self.pluginPresence = pluginPresence
         setupActivity.onChange = { [weak self] in self?.publishSummary() }
         notifier.setResponseHandler { [weak self] response in self?.handle(response) }
     }
@@ -267,6 +285,34 @@ final class CUABarViewModel: ObservableObject {
         // Cleanup first: the notifications look at what it has tried.
         startAutomaticCleanupIfNeeded()
         postDueNotifications(now: now)
+        relaunchIfQuit(status, now: now)
+    }
+
+    /// Opens Codex again, in the background, once the Codex a restart asked to quit is gone (S10).
+    /// It is the end of the person's restart, so R1 holds. A Codex someone opened meanwhile, or the
+    /// same one still there after the wait, ends it without opening anything.
+    private func relaunchIfQuit(_ status: EngineStatus, now: Date) {
+        guard var relaunch = pendingRelaunch else { return }
+        if now >= relaunch.until || (status.codex.running && Set(status.codex.pids) != relaunch.pids) {
+            pendingRelaunch = nil
+            return
+        }
+        guard !status.codex.running else { return }
+        guard let gone = relaunch.goneSince else {
+            relaunch.goneSince = now
+            pendingRelaunch = relaunch
+            return
+        }
+        guard now.timeIntervalSince(gone) >= Self.relaunchAfterGone, status.host.state != .ready else { return }
+        pendingRelaunch = nil
+        let appPath = relaunch.appPath ?? status.codex.appPath
+        runInBackground { [weak self] in
+            guard let self else { return }
+            let opened = await self.appOpener.openCodex(appPath: appPath, inBackground: true)
+            self.show(opened.kind == .success
+                ? ActionOutcome(kind: .success, message: ActionMessages.restarted) : ActionMessages.relaunchFailed)
+            await self.refreshAfterInFlight()
+        }
     }
 
     private func reject(_ error: EngineError) {
@@ -279,7 +325,8 @@ final class CUABarViewModel: ObservableObject {
             if lastStatus != nil, consecutiveFailures < Self.failuresBeforeProblem { return }
         }
         lastStatus = nil
-        publish(StatusEvaluator.summary(for: error, appVersion: appVersion, registeredPluginVersion: registeredPluginVersion()))
+        publish(StatusEvaluator.summary(
+            for: error, appVersion: appVersion, registeredPluginVersion: registeredPluginVersion(), plugin: pluginPresence()))
         content = nil
         updatedAt = clock()
         failedSessionIDs = []
@@ -545,7 +592,12 @@ final class CUABarViewModel: ObservableObject {
             case .stopEnded:
                 return try await stopEndedConnections()
             case .restartCodex:
+                let codex = lastStatus?.codex
                 let result = try await engine.restartCodex()
+                if result.reason == "quit_pending", let codex {
+                    pendingRelaunch = PendingRelaunch(
+                        pids: Set(codex.pids), appPath: codex.appPath, until: clock().addingTimeInterval(Self.relaunchWait))
+                }
                 return ActionResult(outcome: ActionMessages.restartCodex(result), reason: result.reason)
             case .copyDiagnosis:
                 pasteboard.copy(try await engine.diagnose())

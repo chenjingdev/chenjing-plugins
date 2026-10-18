@@ -309,6 +309,33 @@ struct OldPluginTests {
         }
     }
 
+    @Test(arguments: [
+        EngineError.commandFailed(exitCode: 1, message: "SECRET-STDERR"), .invalidOutput("EngineStatus"),
+    ])
+    func aFailingCommandWithoutAUsablePluginIsThePluginProblem(error: EngineError) {
+        let missing = StatusEvaluator.summary(for: error, appVersion: "0.7.0", registeredPluginVersion: nil, plugin: .absent)
+        #expect(missing.problem?.kind == .pluginMissing)
+        #expect(missing.problem?.fix == .installPlugin)
+        #expect(missing.problem?.fixLabel == "설치")
+        #expect(missing == StatusEvaluator.summary(for: .pluginMissing))
+        let broken = StatusEvaluator.summary(for: error, appVersion: "0.7.0", registeredPluginVersion: "0.7.0", plugin: .broken)
+        #expect(broken.problem?.kind == .pluginMissing)
+        #expect(broken.problem?.title == "Claude 플러그인 폴더가 없어요")
+        #expect(broken.problem?.fix == .installPlugin)
+        #expect(broken.problem?.fixLabel == "다시 설치")
+        #expect(broken.tooltip == "CUA 문제 · Claude 플러그인 폴더가 없어요")
+        for plugin in [PluginPresence.unknown, .present] {
+            #expect(StatusEvaluator.summary(for: error, appVersion: "0.7.0", registeredPluginVersion: nil, plugin: plugin).problem?.kind
+                == .engineUnreadable)
+        }
+    }
+
+    @Test func aTimeoutOrACommandThatCannotStartSaysNothingAboutThePlugin() {
+        for error in [EngineError.timeout, .launchFailed("nope")] {
+            #expect(StatusEvaluator.summary(for: error, plugin: .broken) == StatusEvaluator.summary(for: error))
+        }
+    }
+
     @Test(arguments: [(nil, "0.5.0"), (nil, nil), ("0.7.0", nil), ("", "0.5.0"), ("0.7.0", " ")] as [(String?, String?)])
     func withoutBothVersionsItIsAReadProblem(app: String?, registered: String?) {
         let summary = StatusEvaluator.summary(for: .commandFailed(exitCode: 2, message: "usage"), appVersion: app, registeredPluginVersion: registered)

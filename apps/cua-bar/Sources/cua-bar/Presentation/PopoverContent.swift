@@ -457,7 +457,7 @@ struct ActivityContent: Equatable, Sendable {
             let agent = entry.agent == .other("") ? (connection?.agent ?? entry.agent) : entry.agent
             return ActivityRow(
                 id: "\(base)|\(occurrence)", timeText: Format.clock(entry.at, calendar: calendar), agent: agent,
-                folder: Format.folder(connection?.cwd), tool: entry.tool ?? Format.unknown, ok: entry.ok,
+                folder: Format.folder(connection?.cwd), tool: Format.tool(entry.tool), ok: entry.ok,
                 durationText: Format.milliseconds(entry.ms))
         }
         emptyText = rows.isEmpty ? PopoverTab.activity.emptyText : nil

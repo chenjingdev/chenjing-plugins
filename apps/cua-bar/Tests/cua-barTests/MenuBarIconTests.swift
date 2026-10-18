@@ -25,8 +25,27 @@ struct MenuBarIconTests {
         }
     }
 
-    @Test func theImagesAreTemplatesSoTheMenuBarTintsThemForLightAndDark() {
-        for state in IconState.allCases { #expect(MenuBarIcon.image(for: state).isTemplate) }
+    @Test func readyAndWorkingAreTemplatesSoTheMenuBarTintsThemForLightAndDark() {
+        #expect(MenuBarIcon.image(for: .ready).isTemplate)
+        #expect(MenuBarIcon.image(for: .working).isTemplate)
+    }
+
+    @Test func theProblemIconIsOrangeItselfBecauseTheMenuBarIgnoresATint() {
+        let image = MenuBarIcon.image(for: .problem)
+        #expect(!image.isTemplate)
+        let side = 44
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+        NSGraphicsContext.restoreGraphicsState()
+        let data = bitmap.bitmapData!
+        let solid = (0..<(side * side)).map { $0 * bitmap.samplesPerPixel }.filter { data[$0 + 3] > 240 }
+        let orange = solid.filter { data[$0] > 200 && data[$0 + 1] > 90 && data[$0 + 1] < 200 && data[$0 + 2] < 90 }
+        #expect(solid.count > 30)
+        #expect(Double(orange.count) / Double(max(solid.count, 1)) > 0.9)
     }
 
     @Test func imagesCarryTheAccessibilityDescription() {

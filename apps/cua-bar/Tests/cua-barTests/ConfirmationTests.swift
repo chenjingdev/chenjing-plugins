@@ -256,6 +256,77 @@ struct ConfirmationTests {
         #expect(rig.model.pending == nil)
     }
 
+    // MARK: A quit Codex took but had not finished (S10)
+
+    /// The restart came back `quit_pending` for the Codex of the problem fixture (pid 15400).
+    private func quitPending() async throws -> Rig {
+        let rig = try await problem()
+        rig.engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "quit_pending") }
+        rig.model.send(.restartCodex)
+        await rig.model.confirmPending()
+        return rig
+    }
+
+    /// One status read with Codex at `pids` (none: Codex is gone), and what it started.
+    private func read(_ rig: Rig, codex pids: [Int]) async throws {
+        var status = try Fixtures.status("status-problem")
+        status.codex.running = !pids.isEmpty
+        status.codex.pids = pids
+        rig.engine.setStatus(status)
+        await rig.model.refresh()
+        await rig.model.waitForBackgroundWork()
+    }
+
+    @Test func aQuitStillUnderWaySaysSoAndOpensCodexInTheBackgroundOnceItIsGone() async throws {
+        let rig = try await quitPending()
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "Codex가 아직 꺼지는 중이에요 — 꺼지면 다시 켤게요"))
+        rig.clock.advance(5)
+        try await read(rig, codex: [15400])
+        #expect(rig.opener.openedPaths.isEmpty, "the same Codex is still quitting")
+        try await read(rig, codex: [])
+        #expect(rig.opener.openedPaths.isEmpty, "gone on one read is not gone yet")
+        rig.clock.advance(CUABarViewModel.relaunchAfterGone)
+        try await read(rig, codex: [])
+        #expect(rig.opener.openedPaths == ["/Applications/ChatGPT.app"])
+        #expect(rig.opener.openedInBackground == [true])
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .success, message: "Codex를 다시 켰어요"))
+        rig.clock.advance(60)
+        try await read(rig, codex: [])
+        #expect(rig.opener.openedPaths.count == 1, "opened once")
+        #expect(rig.actionCalls.filter { $0 == .restartCodex }.count == 1)
+    }
+
+    @Test func aCodexOpenedMeanwhileOrOneThatOutlastsTheWaitIsLeftAlone() async throws {
+        let rig = try await quitPending()
+        try await read(rig, codex: [])
+        try await read(rig, codex: [15500])
+        rig.clock.advance(60)
+        try await read(rig, codex: [])
+        rig.clock.advance(60)
+        try await read(rig, codex: [])
+        #expect(rig.opener.openedPaths.isEmpty, "someone opened Codex meanwhile")
+
+        let late = try await quitPending()
+        late.clock.advance(CUABarViewModel.relaunchWait)
+        try await read(late, codex: [15400])
+        try await read(late, codex: [])
+        late.clock.advance(60)
+        try await read(late, codex: [])
+        #expect(late.opener.openedPaths.isEmpty, "past the wait the restart is over")
+    }
+
+    @Test func aRelaunchThatFailsOffersTheOpenButton() async throws {
+        let rig = try await quitPending()
+        rig.opener.succeeds = false
+        try await read(rig, codex: [])
+        rig.clock.advance(CUABarViewModel.relaunchAfterGone)
+        try await read(rig, codex: [])
+        let banner = try #require(rig.model.banner)
+        #expect(banner.outcome.message == "Codex를 껐지만 다시 열지 못했어요")
+        #expect(banner.outcome.followUp == ActionOutcome.FollowUp(title: "Codex 열기", action: .openCodex))
+        #expect(rig.opener.openedPaths.count == 1)
+    }
+
     // MARK: Ending the ended ones (R17)
 
     private func endedWithoutAControlEndpoint() throws -> EngineStatus {

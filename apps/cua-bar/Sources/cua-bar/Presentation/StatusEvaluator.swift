@@ -84,7 +84,14 @@ enum StatusEvaluator {
     /// Claude Code is a different version from the app is most likely an old plugin that does not
     /// know `status` yet (0.5.0 exits 2), so it is the version problem, not a read problem. When the
     /// registered version is the app's, the command itself is old or broken: setup replaces it.
-    static func summary(for error: EngineError, appVersion: String? = nil, registeredPluginVersion: String? = nil) -> StatusSummary {
+    /// Before either: a command that fails while Claude Code has no plugin, or one whose folder is
+    /// gone, is that plugin problem; the command only hands over to it.
+    static func summary(
+        for error: EngineError, appVersion: String? = nil, registeredPluginVersion: String? = nil, plugin: PluginPresence = .unknown
+    ) -> StatusSummary {
+        if error.mayComeFromAnOldCommand, plugin == .absent || plugin == .broken {
+            return summary(for: plugin == .absent ? missingPluginProblem : brokenPluginProblem)
+        }
         if error.mayComeFromAnOldCommand, let pluginVersion = nonEmpty(registeredPluginVersion), let appVersion = nonEmpty(appVersion) {
             return summary(for: pluginVersion == appVersion
                 ? staleCommandProblem
@@ -92,9 +99,7 @@ enum StatusEvaluator {
         }
         switch error {
         case .pluginMissing:
-            return summary(for: Problem(
-                kind: .pluginMissing, title: "Claude 플러그인이 없어요", nextStep: "Claude 플러그인을 설치해 주세요",
-                warning: nil, fix: .installPlugin, fixLabel: "설치"))
+            return summary(for: missingPluginProblem)
         case .setupNeeded:
             return summary(for: Problem(
                 kind: .setupIncomplete, title: "연결 설정이 아직 안 됐어요", nextStep: "고치기를 누르면 연결을 설정해요",
@@ -109,6 +114,16 @@ enum StatusEvaluator {
                 warning: error.message, fix: .refresh, fixLabel: "다시 읽기"))
         }
     }
+
+    static let missingPluginProblem = Problem(
+        kind: .pluginMissing, title: "Claude 플러그인이 없어요", nextStep: "Claude 플러그인을 설치해 주세요",
+        warning: nil, fix: .installPlugin, fixLabel: "설치")
+
+    /// Claude Code lists the plugin, but its folder is gone: installing again over the record does
+    /// nothing, so the fix takes the record away first (`installPlugin`).
+    static let brokenPluginProblem = Problem(
+        kind: .pluginMissing, title: "Claude 플러그인 폴더가 없어요", nextStep: "다시 설치를 누르면 플러그인을 다시 받아요",
+        warning: nil, fix: .installPlugin, fixLabel: "다시 설치")
 
     static let loading = StatusSummary(
         icon: .ready, stateLabel: "확인 중", headline: "상태를 확인하는 중이에요", nextStep: "없음", warning: nil, problem: nil,

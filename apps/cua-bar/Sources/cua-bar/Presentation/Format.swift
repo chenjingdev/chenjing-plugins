@@ -100,6 +100,17 @@ enum Format {
         return "\(minutes)분"
     }
 
+    /// What a CUA tool call did, in words. Names the app does not know stay as the engine wrote them.
+    static func tool(_ name: String?) -> String {
+        switch name {
+        case nil: unknown
+        case "js"?: "화면 조작"
+        case "turn_ended"?: "차례 끝 · 점유 놓기"
+        case "js_reset"?: "런타임 초기화"
+        case let name?: name
+        }
+    }
+
     /// `87ms`, `1.2초`, `12초`, `1분 5초`.
     static func milliseconds(_ ms: Int?) -> String {
         guard let ms else { return unknown }

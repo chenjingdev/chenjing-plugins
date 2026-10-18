@@ -55,9 +55,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         button.setAccessibilityLabel(summary.accessibilityLabel)
         button.setAccessibilityHelp(summary.tooltip)
         // Dimmed until the first answer, so "ready" is never claimed before it is known. A
-        // problem is also orange: color is an extra cue, the shape is what tells the states apart.
+        // problem is also orange (the image carries it): color is an extra cue, the shape is what
+        // tells the states apart.
         button.appearsDisabled = summary.isPlaceholder
-        button.contentTintColor = summary.icon == .problem ? .systemOrange : nil
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {
