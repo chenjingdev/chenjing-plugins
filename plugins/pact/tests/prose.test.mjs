@@ -211,7 +211,7 @@ test('probe spreads a wide feature map first, then goes down branch by branch, t
   assert.ok(probe.includes('`- <갈래>: <아이디어> · <아이디어> · <아이디어>`'));
   assert.match(probe, /갈래는 5~8개/);
   assert.match(probe, /기능 전체를 펼쳐 보이기 전에는 한 기능으로 깊이 들어가지 않는다/);
-  assert.match(probe, /방향 2~3개/);
+  assert.match(probe, /거른 것만 내놓고/);
   assert.match(probe, /"group"/);
   for (const gone of ['예시 답 목록을 붙이지 않는다', '실제 장면을 묻는 열린 질문']) assert.ok(!probe.includes(gone), gone);
   assert.match(probe, /추천 뒤에 "괜찮을까요\?"를 붙이지 않는다/);
@@ -226,7 +226,13 @@ test('the spec stays short: later-round branches on one line, decision log left 
 test('no single-default confirm questions: offer real directions with a recommendation instead', () => {
   const skill = read('skills/pact/SKILL.md');
   assert.ok(!skill.includes('틀린 거나 빠진 게 있어요?'));
-  assert.match(skill, /방향 2~3개/);
+  assert.match(skill, /선택지는 내놓기 전에 거른다/);
+  assert.match(skill, /대비책으로 이미 품은 안/);
+  assert.match(skill, /거르고 남은 안이 하나면 묻지 않는다/);
+  assert.match(skill, /선택지 수를 맞추려고 안을 지어내지 않는다/);
+  assert.match(skill, /들러리 안을 붙여 고르는 질문처럼 꾸민 것도 같다/);
+  assert.match(read('skills/pact/probe.md'), /들러리 안을 붙여 고르는 질문처럼 꾸미지도 않는다/);
+  for (const file of PROSE) assert.ok(!readFileSync(file, 'utf8').includes('방향 2~3개'), `${rel(file)} still asks for a fixed number of directions`);
   assert.match(skill, /기본안 하나를 내밀고 맞는지 묻는 것도 확인 질문/);
   assert.match(read('skills/pact/probe.md'), /"맞음"밖에 할 말이 없는 질문/);
 });

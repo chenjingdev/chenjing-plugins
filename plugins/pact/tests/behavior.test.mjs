@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { judge, explain, replyOf, countQuestions, hitLimit, wrappedUp, mapBranches } from './behavior/judge.mjs';
+import { judge, explain, replyOf, countQuestions, hitLimit, wrappedUp, mapBranches, parseReading } from './behavior/judge.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'pact-judge-'));
@@ -296,4 +296,72 @@ test('explain: spec checks give numbers or the first lint error, with no match',
   assert.equal(lint.pass, false);
   assert.equal(lint.reason, 'F1: 태그가 없습니다 ([사용자] 또는 [AI 가정])');
   assert.deepEqual(lint.match, []);
+});
+
+// readerJudge용 가짜 claude. 받은 물음(-p 뒤)을 보고 답을 찍고, 불린 횟수를 calls 파일에 쌓는다.
+function fakeReader(dir, body) {
+  const bin = path.join(dir, 'reader.mjs');
+  writeFileSync(
+    bin,
+    `#!/usr/bin/env node\nimport { appendFileSync } from 'node:fs';\nappendFileSync(${JSON.stringify(path.join(dir, 'calls'))}, 'x');\nconst prompt = process.argv[process.argv.indexOf('-p') + 1];\n${body}\n`,
+  );
+  chmodSync(bin, 0o755);
+  return bin;
+}
+
+function withReader(body, fn) {
+  const dir = tmp();
+  process.env.PACT_TEST_OUT = dir;
+  process.env.PACT_TEST_READER = fakeReader(dir, body);
+  try {
+    return fn(dir);
+  } finally {
+    delete process.env.PACT_TEST_OUT;
+    delete process.env.PACT_TEST_READER;
+  }
+}
+
+test('parseReading takes PASS or FAIL from the first line and the reason from the second', () => {
+  assert.deepEqual(parseReading('FAIL\n추천 안이 B를 이미 품었다\n'), { pass: false, reason: '추천 안이 B를 이미 품었다' });
+  assert.deepEqual(parseReading('**PASS**\n둘 다 고를 만하다'), { pass: true, reason: '둘 다 고를 만하다' });
+  assert.equal(parseReading('PASS').reason, 'PASS');
+  assert.equal(parseReading('글쎄요').pass, null);
+  assert.equal(parseReading('').pass, null);
+});
+
+test('readerJudge hands the question and the reply to a reader, keeps its reason, and reads the same reply once', () => {
+  const filler = '1. **A (추천)** 해 보고 안 되면 B\n2. **B만**\n어느 쪽이 맞아요?';
+  withReader(
+    `console.log(prompt.includes('들러리 안이 있나?') && prompt.includes('B만**') ? 'FAIL\\n추천 안이 B를 이미 품었다' : 'PASS\\n고를 거리가 없다');`,
+    (dir) => {
+      const check = { kind: 'readerJudge', question: '들러리 안이 있나?' };
+      const bad = explain(check, T([say('지도')], [say(filler)]), tmp(), tmp());
+      assert.deepEqual(bad, { pass: false, reason: '2번째 답: 추천 안이 B를 이미 품었다', match: [] });
+      assert.equal(explain(check, T([say('A로 정했어요.')]), tmp(), tmp()).pass, true);
+      explain(check, T([say('지도')], [say(filler)]), tmp(), tmp());
+      assert.equal(readFileSync(path.join(dir, 'calls'), 'utf8').length, 2, 'a cached verdict is not read again');
+      assert.ok(existsSync(path.join(dir, 'reader-cache.json')));
+    },
+  );
+});
+
+test('readerJudge: an unreadable or failed reading is undecidable and not cached, and so is a missing reply', () => {
+  const check = { kind: 'readerJudge', question: '들러리 안이 있나?' };
+  withReader(`console.log('잘 모르겠어요');`, (dir) => {
+    const r = explain(check, T([say('1. A\n2. B\n어느 쪽?')]), tmp(), tmp());
+    assert.equal(r.pass, null);
+    assert.match(r.reason, /판정 불가/);
+    assert.ok(!existsSync(path.join(dir, 'reader-cache.json')));
+  });
+  withReader(`console.error('limit'); process.exit(1);`, () => {
+    const r = explain(check, T([say('1. A\n2. B\n어느 쪽?')]), tmp(), tmp());
+    assert.equal(r.pass, null);
+    assert.match(r.reason, /판정 불가\(읽기 실패: limit\)/);
+  });
+  withReader(`console.log('PASS');`, (dir) => {
+    const r = explain(check, T([say('지도')], [{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: {} }] } }]), tmp(), tmp());
+    assert.deepEqual(r, { pass: null, reason: '2번째 답: 판정 불가(답이 없음)', match: [] });
+    assert.equal(explain({ ...check, turn: 1 }, T([say('지도')]), tmp(), tmp()).reason, '2번째 답: 판정 불가(답이 없음)', 'a turn the run never reached');
+    assert.ok(!existsSync(path.join(dir, 'calls')), 'an empty reply is not sent to the reader');
+  });
 });

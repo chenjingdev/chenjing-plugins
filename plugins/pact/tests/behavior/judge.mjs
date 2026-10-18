@@ -1,6 +1,10 @@
 // 행동 시험의 판정 함수. transcript는 턴 배열이고, 턴은 claude -p stream-json 이벤트 배열이다.
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { lintSpec } from '../../scripts/spec.mjs';
 
 const contentOf = (ev) => (ev?.type === 'assistant' ? ev.message?.content ?? [] : []);
@@ -122,6 +126,64 @@ function matchedLines(reply, pattern) {
   return whole ? [whole[0]] : [];
 }
 
+// 정규식으로 가를 수 없는 검사(예: 들러리 선택지)는 Claude가 답을 읽고 PASS나 FAIL을 낸다.
+// 깨끗한 프로필에서 도구 없이 한 턴만 돌린다. 같은 물음·같은 답의 판정은 out/reader-cache.json에서 꺼낸다.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const READER_MODEL = 'sonnet';
+const readerCachePath = () => path.join(process.env.PACT_TEST_OUT || path.join(HERE, 'out'), 'reader-cache.json');
+const readJson = (file) => {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return {};
+  }
+};
+
+// 첫 줄이 PASS나 FAIL, 둘째 줄이 까닭. 알아볼 수 없으면 판정 불가(null)다.
+export function parseReading(text) {
+  const lines = String(text ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const m = /^\**(PASS|FAIL)\b/i.exec(lines[0] ?? '');
+  if (!m) return { pass: null, reason: '판정 불가(읽은 결과를 알아보지 못함)' };
+  const word = m[1].toUpperCase();
+  return { pass: word === 'PASS', reason: (lines[1] ?? word).slice(0, 300) };
+}
+
+function readReply(question, reply) {
+  const key = createHash('sha256').update(`${READER_MODEL}\n${question}\n${reply}`).digest('hex').slice(0, 16);
+  const file = readerCachePath();
+  const hit = readJson(file)[key];
+  if (hit) return hit;
+  const prompt = [
+    '아래는 AI가 사용자에게 보낸 답 하나다. 이 답을 물음에 비추어 판정하라.',
+    '',
+    `물음: ${question}`,
+    '',
+    '첫 줄에는 PASS나 FAIL만 쓴다. 둘째 줄에는 그렇게 본 까닭을 한국어 한 문장으로 쓴다.',
+    '',
+    '--- 답 ---',
+    reply,
+    '--- 끝 ---',
+  ].join('\n');
+  const env = {
+    ...process.env,
+    CLAUDE_CONFIG_DIR: process.env.PACT_TEST_PROFILE || path.join(homedir(), '.bench', '_claude'),
+    PATH: (process.env.PATH ?? '').split(':').filter((p) => !p.includes('cmux-cli-shims')).join(':'),
+  };
+  const cmd = process.env.PACT_TEST_READER || process.env.PACT_TEST_CLAUDE || 'claude';
+  const args = ['-p', prompt, '--model', READER_MODEL, '--output-format', 'text', '--max-turns', '1', '--tools', ''];
+  const run = spawnSync(cmd, args, { cwd: tmpdir(), env, encoding: 'utf8', timeout: 180000 });
+  if (run.status !== 0) return { pass: null, reason: `판정 불가(읽기 실패: ${String(run.stderr || run.stdout || run.error?.message || run.status).trim().slice(0, 120)})` };
+  const reading = parseReading(run.stdout);
+  if (reading.pass !== null) {
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ ...readJson(file), [key]: reading }, null, 1));
+  }
+  return reading;
+}
+
 const specLabel = '명세 파일 없음';
 
 // 판정과 이유. reason은 사람이 읽는 한 줄(통과해도 채운다).
@@ -161,6 +223,14 @@ export function explain(check, transcript, workdir, fixtureDir) {
       const turn = norm(transcript, check.turn);
       const lines = matchedLines(replyOf(transcript, check.turn), check.pattern);
       return lines.length ? verdict(true, `${turn + 1}번째 답에서 패턴을 찾음`, inTurn(turn, lines)) : verdict(false, `${turn + 1}번째 답에서 패턴을 찾지 못함`);
+    }
+    case 'readerJudge': {
+      const turn = norm(transcript, check.turn);
+      const reply = replyOf(transcript, check.turn);
+      // 답 글이 없으면 그 턴이 끝나지 않았거나(시간·턴 한도) 그 턴까지 가지 못한 것이다. 읽을 것이 없으니 판정 불가다.
+      if (!reply.trim()) return verdict(null, `${turn + 1}번째 답: 판정 불가(답이 없음)`);
+      const { pass, reason } = readReply(check.question, reply);
+      return verdict(pass, `${turn + 1}번째 답: ${reason}`);
     }
     case 'skillInvoked': {
       const pass = transcript.flat().flatMap(contentOf).some((c) => c.type === 'tool_use' && c.name === 'Skill' && c.input?.skill === check.name);
