@@ -17,9 +17,9 @@ struct ActionBanner: Equatable, Identifiable, Sendable {
 /// Owns everything the menu bar item and the popover show: it reads the engine on a timer,
 /// turns the answer into `summary` and `content`, and runs the buttons' actions.
 ///
-/// The engine is only ever awaited, so the main actor stays free while a command runs. The
-/// confirmations, notifications and automatic cleanup of the next task wrap `perform(_:)` and
-/// observe `summary` / `content`; nothing here needs to change for them.
+/// The engine is only ever awaited, so the main actor stays free while a command runs. Every
+/// button ends in `perform(_:)`, the one place the next task's confirmations, notifications and
+/// automatic cleanup are meant to hook in; they can read `summary` and `content` for what to show.
 @MainActor
 final class CUABarViewModel: ObservableObject {
     /// This many failed reads in a row replace the last good answer with a problem; a single

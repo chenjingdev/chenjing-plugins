@@ -313,7 +313,7 @@ struct ViewModelTests {
         await settle()
         #expect(engine.statusCallCount == 1, "the read after the action does not start beside read #1")
         gate.open()
-        await acting.value
+        _ = await acting.value
         await early.value
         #expect(engine.statusCallCount == 2, "it read once more, after the action")
         #expect(engine.calls.last == .status)
@@ -333,7 +333,7 @@ struct ViewModelTests {
         let second = await model.perform(.releaseConnection("claude-1-1"))
         #expect(second == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
         gate.open()
-        await first.value
+        _ = await first.value
         #expect(engine.calls.filter { $0 == .releaseConnection("claude-1-1") }.count == 1)
         #expect(model.inFlight.isEmpty)
     }
@@ -348,7 +348,7 @@ struct ViewModelTests {
         #expect(await waitUntil { engine.calls.contains(.stopGroup(.all, force: false)) })
         #expect(model.isWaiting(onConnection: "anything"))
         gate.open()
-        await running.value
+        _ = await running.value
         #expect(model.isWaiting(onConnection: "anything") == false)
     }
 

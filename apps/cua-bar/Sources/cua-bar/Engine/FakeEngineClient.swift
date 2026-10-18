@@ -56,8 +56,6 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var actionError: EngineError?
         /// Per-session answers for `releaseSession`, before falling back to `releaseSession`.
         var releaseSessionByID: [String: SessionReleaseResult] = [:]
-        /// How long each call takes, to exercise slow engines.
-        var delay: Duration = .zero
         /// While shut, `status` calls wait here after being recorded.
         var statusGate: AsyncGate?
         /// While shut, action calls wait here after being recorded.
@@ -125,13 +123,12 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         _ = try await begin(.runSetup, isAction: true)
     }
 
-    /// Records the call, waits the scripted delay, and hands back the script as it is now.
+    /// Records the call, waits at the gate if one is shut, and hands back the script as it is now.
     private func begin(_ call: Call, isAction: Bool = false) async throws -> Script {
         let script = lock.withLock { () -> Script in
             recorded.append(call)
             return self.script
         }
-        if script.delay > .zero { try await Task.sleep(for: script.delay) }
         await (isAction ? script.actionGate : script.statusGate)?.wait()
         if isAction, let error = script.actionError { throw error }
         return script
