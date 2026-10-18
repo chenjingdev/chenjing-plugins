@@ -1,6 +1,7 @@
 """Installer/control tests use private fixtures, fake dependencies and fake hosts."""
 import asyncio
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -114,6 +115,21 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         self.assertIn('websockets==12.0', run.call_args.args[0])
         self.assertIs(run.call_args.kwargs['stdout'], setup.sys.stderr)
+
+    def test_readiness_check_without_repair_never_waits_creates_or_installs(self):
+        # Another process is repairing the environment right now, so the setup lock is held.
+        lock = open(self.root/'.setup.lock', 'a+')
+        self.addCleanup(lock.close)
+        os.chmod(self.root/'.setup.lock', 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        with patch.object(setup, 'venv_ready', return_value=False), \
+             patch.object(setup.subprocess, 'run', side_effect=AssertionError('No installation')), \
+             patch.object(setup.time, 'sleep', side_effect=AssertionError('No waiting')):
+            with self.assertRaises(RuntimeError):
+                setup.ensure_dependencies(self.home, repair=False)
+        self.assertFalse((self.root/'venv').exists())
+        with patch.object(setup, 'venv_ready', return_value=True):
+            self.assertEqual(setup.ensure_dependencies(self.home, repair=False), self.root/'venv/bin/python3')
 
     def test_concurrent_dependency_bootstraps_are_serialized(self):
         ready = [False]

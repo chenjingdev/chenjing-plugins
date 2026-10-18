@@ -112,13 +112,16 @@ def venv_ready(root):
         return False
 
 
-def ensure_dependencies(home=None):
+def ensure_dependencies(home=None, repair=True):
+    """The private interpreter, prepared if needed. With repair=False it only reports readiness."""
     if sys.version_info < (3, 9):
         raise RuntimeError('Python 3.9 or newer is required; no package manager was installed.')
     root = support_root(home)
     private_directory(root)
     if venv_ready(root):
         return root/'venv/bin/python3'
+    if not repair:
+        raise RuntimeError('The private Python runtime is not ready; run codex-cua setup.')
     flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0)
     descriptor = os.open(root/'.setup.lock', flags, 0o600)
     lock_info = os.fstat(descriptor)
@@ -526,7 +529,9 @@ def main(arguments=None):
         plugin_root = registered or Path(__file__).resolve().parent
         sys.path.insert(0, str(plugin_root))
         if args.command == 'ensure':
-            python = ensure_dependencies()
+            # Codex's own start never waits for a repair, takes the setup lock or runs pip:
+            # not ready means the original CLI starts now. Setup and the MCP entry point repair.
+            python = ensure_dependencies(repair=not launching_codex)
             if args.exec_mcp or args.exec_wrapper:
                 script = plugin_root/('mcp_stdio.py' if args.exec_mcp else 'desktop_cli_wrapper.py')
                 if launching_codex:

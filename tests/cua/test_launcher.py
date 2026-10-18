@@ -1,4 +1,5 @@
 """The Desktop launch path, script and plugin side, against fake programs; never Codex or a GUI."""
+import fcntl
 import importlib.util
 import json
 import os
@@ -116,6 +117,10 @@ class LauncherTests(unittest.TestCase):
         self.assertNotEqual(report['returncode'], 0)
 
 
+class ForbiddenCall(BaseException):
+    """Not an Exception, so a fallback in the code under test cannot absorb a call that must not happen."""
+
+
 class LaunchPathGuardTests(unittest.TestCase):
     """setup.py ensure --exec-wrapper checks the files Codex starts through before it execs them."""
 
@@ -139,11 +144,12 @@ class LaunchPathGuardTests(unittest.TestCase):
 
     def run_main(self, *arguments):
         with patch.dict(os.environ, {setup.FALLBACK_ENV: str(self.native)}), \
-             patch.object(self.module, 'ensure_dependencies', return_value=Path('/fixture/python')), \
+             patch.object(self.module, 'ensure_dependencies', return_value=Path('/fixture/python')) as ensure, \
              patch.object(self.module.os, 'execve', side_effect=SystemExit(0)) as execute:
             with self.assertRaises(SystemExit):
                 self.module.main(list(arguments))
         self.assertEqual(execute.call_count, 1)
+        self.ensure = ensure
         return execute.call_args.args[:2]
 
     def test_intact_files_start_the_wrapper(self):
@@ -167,6 +173,34 @@ class LaunchPathGuardTests(unittest.TestCase):
                          str(self.plugin/'desktop_cli_wrapper.py'), 'app-server', '-c', 'x=1']))
         (self.plugin/'desktop_cli_wrapper.py').unlink()
         self.assertEqual(self.run_main(*arguments), (str(self.native), [str(self.native), 'app-server', '-c', 'x=1']))
+
+    def test_codex_launch_never_waits_for_the_setup_lock_or_installs_anything(self):
+        home = self.root/'home'
+        support = home/'.local/share/codex-cua'
+        support.mkdir(parents=True, mode=0o700)
+        lock = open(support/'.setup.lock', 'a+')  # another process is repairing the environment right now
+        self.addCleanup(lock.close)
+        os.chmod(support/'.setup.lock', 0o600)  # as the real lock: anything else is refused, not waited for
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        with patch.dict(os.environ, {'HOME': str(home), setup.FALLBACK_ENV: str(self.native)}), \
+             patch.object(self.module, 'venv_ready', return_value=False), \
+             patch.object(self.module.subprocess, 'run', side_effect=ForbiddenCall('installation')), \
+             patch.object(self.module.time, 'sleep', side_effect=ForbiddenCall('waiting')), \
+             patch.object(self.module.os, 'execve', side_effect=SystemExit(0)) as execute:
+            with self.assertRaises(SystemExit):
+                self.module.main(['ensure', '--exec-wrapper', '--', 'app-server', '-c', 'x=1'])
+        # The original CLI starts right away with the original arguments; nothing was prepared.
+        self.assertEqual(execute.call_args.args[:2], (str(self.native), [str(self.native), 'app-server', '-c', 'x=1']))
+        self.assertFalse((support/'venv').exists())
+
+    def test_only_the_codex_launch_gives_up_where_setup_and_the_mcp_entry_point_repair(self):
+        self.run_main('ensure', '--exec-wrapper', '--', 'app-server')
+        self.assertEqual(self.ensure.call_args.kwargs, {'repair': False})
+        self.run_main('ensure', '--exec-mcp', '--')
+        self.assertEqual(self.ensure.call_args.kwargs, {'repair': True})
+        with patch.object(self.module, 'ensure_dependencies', return_value=Path('/fixture/python')) as ensure:
+            self.assertEqual(self.module.main(['ensure']), 0)
+        self.assertEqual(ensure.call_args.kwargs, {'repair': True})
 
     def test_the_mcp_entry_point_does_not_depend_on_the_launch_path_files(self):
         (self.plugin/'desktop_cli_wrapper.py').write_text('def run(:\n')
