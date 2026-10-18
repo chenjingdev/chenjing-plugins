@@ -129,9 +129,11 @@ class View:
         self.live_relays = [record for record in self.live if record.kind == 'relay']
         self.dead_bridges = [record for record in self.dead if record.kind == 'bridge']
         self.served = {}               # relay writer -> sessions that the activity log shows it serving
-        for line in activity:
+        self.served_last = {}          # relay writer -> the session of its newest activity line that names one
+        for line in activity:          # oldest first, so the last line seen wins
             if line['session_id']:
                 self.served.setdefault(line['writer'], set()).add(line['session_id'])
+                self.served_last[line['writer']] = line['session_id']
         self.roots = {relay.writer: self._root_of(relay) for relay in self.live_relays}
         self.attributed = attribute_runtimes(self.live_bridges, self.live_relays, self.relay_sessions)
         self.by_writer = {}            # writer of a live record -> the connection it belongs to
@@ -213,7 +215,9 @@ class View:
             else:
                 conn.owner_alive = _owner_alive(inv, conn.owner_pid, repl.start)
             conn.cwd = relay.path('cwd')
-            conn.session_id = self._newest_session(relay)
+            # A Codex turn that ended normally closes its scope, but the runtime still serves that chat: the activity
+            # log names it.
+            conn.session_id = self._newest_session(relay) or self.served_last.get(relay.writer)
             conn.last_call = relay.time('last_call_at')
             conn.busy = relay.data.get('busy') is True
             conn.can_release = control_socket(relay, self.ctx.uid) is not None

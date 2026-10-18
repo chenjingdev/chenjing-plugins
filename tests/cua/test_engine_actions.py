@@ -473,7 +473,7 @@ class GroupStopTests(ActionCase):
         self.assertIn(4000, self.machine.procs)
 
     def unattributed_relay(self):
-        """A live relay with no open scope, so no session: it may well serve a Claude conversation that just released."""
+        """A live relay with no open scope and no activity line, so its session is unknown."""
         self.add_runtime(3000, NOW-2000)
         directory = self.state.relay('r2', 3001, NOW-2000, root_pid=3000, runtime_pid=3002, cwd='/work/codex', scopes=[])
         return self.writer(directory, 3001, NOW-2000, DONE)
@@ -485,6 +485,19 @@ class GroupStopTests(ActionCase):
         self.assertEqual(result, {'ok': True, 'stopped': 0, 'failed': 0, 'results': [
             {'connection_id': RELAY_ID, 'stopped': False, 'released': False, 'reason': 'unattributed'}]})
         self.assertEqual((writer.requests, self.machine.signals, self.events), ([], [], []))
+
+    def test_codex_only_stops_a_relay_whose_turn_ended_but_whose_activity_names_its_chat(self):
+        # A Codex turn that ended normally closes its scope; the activity log still shows the chat it serves.
+        writer = self.unattributed_relay()
+        self.state.activity([State.line('relay-3001-%d' % (NOW-2000), 120, SESSION_C),
+                             State.line('relay-3001-%d' % (NOW-2000), 60, SESSION_D)])
+        conn = next(item for item in engine_status.status(self.ctx())['connections'] if item['id'] == RELAY_ID)
+        self.assertEqual((conn['agent'], conn['session_id']), ('codex', SESSION_D))
+        result = engine_actions.stop_group(self.ctx(), 'codex')
+        self.assertEqual(result, {'ok': True, 'stopped': 1, 'failed': 0, 'results': [
+            {'connection_id': RELAY_ID, 'stopped': True, 'released': True, 'reason': None}]})
+        self.assertEqual(len(writer.requests), 1)
+        self.assertEqual(self.machine.signals, [(3001, signal.SIGTERM)])
 
     def test_all_and_a_single_connection_still_stop_a_connection_without_a_session(self):
         writer = self.unattributed_relay()

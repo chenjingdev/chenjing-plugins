@@ -200,9 +200,10 @@ def stop_connection(ctx, wanted, force=False):
 def stop_group(ctx, group, force=False):
     """Group stop covers claude and codex connections only; cmux-cua and the rest are never connections.
 
-    "Codex only" leaves alone every codex connection that has no session (R8): without a relay a runtime that no
-    record covers may serve a Claude conversation, so it is neither released nor signalled. Each is reported as
-    `unattributed` and counts neither as stopped nor as failed. `all` and a single connection do stop them."""
+    "Codex only" leaves alone every codex connection whose session is unknown (R8): a runtime that no record covers,
+    or a relay with neither an open scope nor an activity line naming a session. Such a runtime may serve a Claude
+    conversation, so it is neither released nor signalled. Each is reported as `unattributed` and counts neither as
+    stopped nor as failed. `all` and a single connection do stop them."""
     view = build_view(ctx, with_folders=False, with_checks=False)
     conns = [conn for conn in view.connections if group == 'all' or conn.agent == group]
     skipped = [conn for conn in conns if group == 'codex' and conn.session_id is None]
