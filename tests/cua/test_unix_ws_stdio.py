@@ -157,9 +157,19 @@ class RewriteTests(Fixture):
         self.assertEqual(self.rewrite(once), once)
 
     def test_only_lines_with_the_key_are_even_decoded(self):
-        with patch.object(unix_ws_stdio.json, 'loads', side_effect=AssertionError('decoded')):
-            for body in (b'{"id":1}', b'x' * 100000, line(request(method='turn/start', entry={'c': 1})).replace(b'mcp_servers.cua_repl', b'other')):
+        decoded = []
+        real = unix_ws_stdio.json.loads
+
+        def spy(*args, **kwargs):
+            decoded.append(args[0])
+            return real(*args, **kwargs)
+        with patch.object(unix_ws_stdio.json, 'loads', side_effect=spy):
+            for body in (b'{"id":1}', b'x' * 100000, b'',
+                         line(request(method='turn/start', entry={'c': 1})).replace(b'mcp_servers.cua_repl', b'other')):
                 self.assertEqual(self.rewrite(body), body)
+            self.assertEqual(decoded, [], 'nothing without the key was decoded')
+            self.rewrite(line(request()))
+            self.assertEqual(len(decoded), 1, 'a line with the key is')
 
 
 STUB_WEBSOCKETS = '''
@@ -214,8 +224,11 @@ class ProcessTests(Fixture):
         child = subprocess.Popen([sys.executable, str(PLUGIN_ROOT/'unix_ws_stdio.py'), '--socket', str(self.socket_path), *extra],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
         self.addCleanup(lambda: child.kill() if child.poll() is None else None)
-        child.stdin.write(stdin)
-        child.stdin.flush()
+        try:
+            child.stdin.write(stdin)
+            child.stdin.flush()
+        except BrokenPipeError:                                  # a transport that failed at once never reads
+            pass
         output = b''
         if received:
             wanted = len(received.encode('utf-8'))
@@ -227,7 +240,10 @@ class ProcessTests(Fixture):
                     if not chunk:
                         break
                     output += chunk
-        child.stdin.close()
+        try:
+            child.stdin.close()
+        except BrokenPipeError:
+            pass
         rest, stderr = child.stdout.read(), child.stderr.read()
         child.wait(timeout=20)
         return child.returncode, output+rest, stderr, (self.sent.read_bytes() if self.sent.exists() else b'')
