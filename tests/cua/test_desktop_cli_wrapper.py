@@ -382,6 +382,29 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.state.stat().st_mode),0o700)
         self.assertEqual(list(self.state.glob('run-*')),[])
 
+    def test_metadata_that_cannot_be_written_before_the_backend_starts_runs_the_original_cli(self):
+        environment=dict(self.environment)
+        with patch.object(wrapper.subprocess,'Popen',side_effect=AssertionError('No backend may start')), \
+             patch.object(wrapper,'_write_metadata',side_effect=OSError('PRIVATE_DISK_ERROR')) as write:
+            execute=self.run_main(environment)
+        self.assertEqual(write.call_count,1)
+        self.assertEqual(write.call_args.args[1]['backend_pid'],None)
+        self.assertEqual(execute.call_args.args,(str(self.native),[str(self.native),*PRIMARY],environment))
+        self.assertEqual(list(self.state.glob('run-*')),[])
+
+    def test_metadata_failure_after_the_backend_started_keeps_failing_and_reaps_it(self):
+        real=wrapper._write_metadata;calls=[]
+        def second_write_fails(path,data):
+            calls.append(dict(data))
+            if len(calls)==2:raise OSError('PRIVATE_DISK_ERROR')
+            return real(path,data)
+        with patch.object(wrapper,'_write_metadata',side_effect=second_write_fails), \
+             patch.object(wrapper.os,'execve',side_effect=AssertionError('The backend had started')):
+            with self.assertRaises(OSError):
+                wrapper.main(list(PRIMARY),dict(self.environment))
+        self.assertIsNone(calls[0]['backend_pid']);self.assertIsInstance(calls[1]['backend_pid'],int)
+        self.assert_reaped(calls[1]['backend_pid'])
+
     def test_unverifiable_cli_uses_the_one_recorded_by_the_launcher_script(self):
         environment=dict(self.environment,CODEX_HOST_CUA_NATIVE_CLI=str(self.root/'missing'),
                          CODEX_CUA_FALLBACK_NATIVE=str(self.native))

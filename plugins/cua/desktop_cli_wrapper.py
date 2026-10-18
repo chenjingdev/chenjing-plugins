@@ -199,6 +199,14 @@ def _launch(native, arguments, environment, state_dir, progress):
               "backend_pid": None, "desktop_proxy_pid": None, "socket_path": str(endpoint),
               "native_cli": str(native), "mechanism": "original_app_server_unix_websocket",
               "operational_readiness": "not_checked"}
+    try:
+        # Still before anything is started: a state directory that cannot be written
+        # must not cost Codex its backend.
+        _write_metadata(metadata_path, record)
+    except OSError:
+        instance_dir.rmdir()
+        lock.close()
+        raise
     stop = threading.Event()
     caught_signal = [None]
     previous = {}
