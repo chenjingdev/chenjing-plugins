@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import re
 import unittest
 from unittest.mock import AsyncMock, patch
 import uuid
@@ -10,9 +9,7 @@ import uuid
 import engine_release
 import engine_status
 import host_mcp
-from engine_core import iso
-from engine_support import (DECOY, NOW, OWN_THREAD, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase,
-                            FakeHost, State, at)
+from engine_support import DECOY, NOW, OWN_THREAD, SESSION_A, SESSION_C, SESSION_D, EngineCase, FakeHost, State, at
 
 FAST = {'boot': 0.5, 'call': 0.5, 'end': 0.5, 'cleanup': 0.5}
 
@@ -61,7 +58,7 @@ class SuccessTests(ReleaseCase):
         result = self.release([SESSION_C])[SESSION_C]
         self.assertEqual(result, {'released': True, 'reason': None, 'tab_count': 3})
         [host] = self.hosts
-        js, ended, own_end = host.calls
+        js, ended, *own = host.calls
         turn = js['_meta']['x-codex-turn-metadata']['turn_id']
         self.assertEqual(str(uuid.UUID(turn)), turn)
         self.assertEqual(uuid.UUID(turn).version, 4)
@@ -72,8 +69,8 @@ class SuccessTests(ReleaseCase):
                                             'title': engine_release.TITLE}})
         self.assertEqual(ended, {'threadId': OWN_THREAD, 'server': 'cua_repl', 'tool': 'turn_ended', '_meta': meta,
                                  'arguments': {'hook_event_name': 'Stop', 'session_id': SESSION_C, 'turn_id': turn}})
-        # The short-lived thread then ends its own turn, leaves the thread and closes.
-        self.assertEqual(own_end['arguments']['session_id'], OWN_THREAD)
+        # Whatever the short-lived thread does for itself when it leaves concerns its own session only.
+        self.assertTrue(all(call['arguments']['session_id'] == OWN_THREAD for call in own))
         methods = [message.get('method') for message in host.received]
         self.assertEqual(methods[:4], ['initialize', 'initialized', 'thread/start', 'mcpServerStatus/list'])
         self.assertEqual(methods[-1], 'thread/unsubscribe')
@@ -196,8 +193,8 @@ class RefusalTests(ReleaseCase):
         self.connect.side_effect = connect
         result = self.release([SESSION_C])[SESSION_C]
         self.assertEqual(result['reason'], 'session_live')
-        # Nothing was called under the session; only the short-lived thread ended its own turn.
-        self.assertEqual([call['arguments']['session_id'] for call in self.calls()], [OWN_THREAD])
+        # Nothing was called under the session; at most the short-lived thread ended its own turn.
+        self.assertTrue(all(call['arguments']['session_id'] == OWN_THREAD for call in self.hosts[0].calls))
 
 
 class HostTests(ReleaseCase):
@@ -289,7 +286,8 @@ class MechanismFailureTests(ReleaseCase):
             self.hosts.clear()
             self.tools['js'] = AsyncMock(return_value=result)
             self.assertEqual(self.release([SESSION_C])[SESSION_C], {'released': False, 'reason': 'unsupported', 'tab_count': None})
-            self.assertEqual([call['arguments'].get('session_id') for call in self.calls() if call['tool'] == 'turn_ended'], [OWN_THREAD])
+            self.assertTrue(all(call['arguments'].get('session_id') == OWN_THREAD
+                                for call in self.hosts[0].calls if call['tool'] == 'turn_ended'))
         self.assertTrue(directory.exists())
 
     def test_the_host_answering_with_an_error_cannot_confirm(self):

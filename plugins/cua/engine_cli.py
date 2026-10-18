@@ -10,7 +10,6 @@ import sys
 from engine_core import Context
 
 COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'diagnose')
-GROUPS = ('all', 'claude', 'codex')
 # Which of the option flags each command accepts.
 OPTIONS = {'status': (), 'release': ('connection', 'ended'), 'release-session': ('session', 'user'),
            'stop': ('connection', 'group', 'force'), 'restart-codex': (), 'diagnose': ()}

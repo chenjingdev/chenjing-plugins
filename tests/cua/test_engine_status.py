@@ -1,12 +1,11 @@
 """The status the menu bar app reads: every contract field, attribution of runtimes, states, leases and activity."""
 import json
-import os
 import re
 import unittest
 
 import engine_status
 from engine_core import iso
-from engine_support import (APP_VERSION, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase, State, at)
+from engine_support import APP_VERSION, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, EngineCase, State, at
 
 TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'codex', 'host', 'setup', 'connections', 'leases',
             'other_tools', 'screen', 'activity']
@@ -161,6 +160,15 @@ class AttributionTests(StatusCase):
             'owner_alive': True, 'cwd': '/work/unrecorded', 'started_at': iso(NOW-5000),
             'memory_bytes': (1000+2000)*1024, 'last_call_at': None, 'idle_seconds': None, 'session_id': None,
             'busy': False, 'can_release': False, 'can_stop': True})
+
+    def test_what_the_engine_must_never_signal_is_not_offered_for_stopping(self):
+        from engine_support import ENGINE_PID
+        self.start_world()
+        self.add_runtime(4000, NOW-5000, relay=False)
+        self.add_runtime(4100, NOW-5000, relay=False)
+        self.machine.add(ENGINE_PID, 4100, '/usr/bin/python3 setup.py status')     # the engine runs below this runtime
+        connections = {item['pid']: item['can_stop'] for item in self.status()['connections']}
+        self.assertEqual(connections, {4000: True, 4100: False})
 
     def test_a_bridge_without_a_record_is_listed_too(self):
         self.start_world()
@@ -389,6 +397,14 @@ class LeaseTests(StatusCase):
         self.assertEqual([item['session_id'] for item in self.left()], [SESSION_D])
         self.assertFalse(old.exists())
         self.assertTrue(newer.exists())
+
+    def test_a_session_that_ended_exactly_when_chrome_started_may_still_hold_leases(self):
+        self.start_world()
+        self.dead_bridge(last=100)
+        self.machine.add(5000, 1, self.commands.chrome, start=NOW-100)
+        self.assertEqual(len(self.left()), 1)           # only a session that ended *before* the restart is dropped
+        self.machine.procs[5000]['start'] = NOW-99
+        self.assertEqual(self.left(), [])
 
     def test_a_record_that_lists_a_gone_and_a_remaining_session_stays_untouched(self):
         self.start_world()

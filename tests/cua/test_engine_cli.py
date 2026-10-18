@@ -192,6 +192,11 @@ class DiagnoseTests(CliCase):
                           'SECRET_SENTINEL_TOKEN', '://', 'TITLE_SENTINEL', os.path.expanduser('~')):
             self.assertNotIn(forbidden, text)
         self.assertNotRegex(text, r'/Users/|/home/|/private/var')
+        # Not even the work folders of the connections, which only the app's own list shows.
+        folders = {item['cwd'] for item in json.loads(self.run_cli('status')[1])['connections'] if item['cwd']}
+        self.assertTrue(folders)
+        for folder in folders:
+            self.assertNotIn(folder, text)
         self.assertIn('~/Applications/Codex.app', text)     # the app that lives in the home folder is written with ~
 
     def test_the_home_folder_is_written_as_a_tilde_in_every_spelling(self):

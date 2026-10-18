@@ -1,16 +1,13 @@
 """The inventory: process list parsing, what each process is, the host registry, the app and the setup state."""
-import json
-import os
 from pathlib import Path
 import plistlib
-import stat
 import types
 import unittest
 from unittest.mock import patch
 
 import engine_inventory as inventory
 import setup
-from engine_support import (APP_VERSION, ENGINE_PID, NOW, UID, Commands, EngineCase, Machine, at, lstart)
+from engine_support import APP_VERSION, ENGINE_PID, NOW, UID, EngineCase, lstart
 
 
 class ParsingTests(EngineCase):

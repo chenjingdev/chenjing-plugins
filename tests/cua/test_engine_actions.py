@@ -3,13 +3,11 @@ import json
 import signal
 import subprocess
 import time
-import types
 import unittest
 from unittest.mock import patch
 
 import engine_actions
-from engine_core import iso
-from engine_support import ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase, State, at
+from engine_support import ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, EngineCase, State, at
 
 BRIDGE_ID = 'claude-4242-%d' % (NOW-900)
 RELAY_ID = 'codex-3001-%d' % (NOW-2000)
@@ -82,6 +80,10 @@ class ReleaseTests(ActionCase):
     def test_nothing_to_release_is_no_failure_when_a_verified_writer_says_so(self):
         self.codex_relay({'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
         self.assertEqual(self.release(RELAY_ID), {'ok': True, 'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
+
+    def test_a_contradicting_answer_is_not_taken_for_nothing_to_release(self):
+        self.codex_relay({'released': False, 'reason': 'no_trusted_scope', 'scope_count': 2})
+        self.assertEqual(self.release(RELAY_ID), {'ok': False, 'released': False, 'reason': 'no_trusted_scope', 'scope_count': 2})
 
     def test_a_connection_without_a_verified_control_endpoint_has_no_trusted_scope(self):
         self.unrecorded_runtime()
@@ -287,6 +289,18 @@ class StopTests(ActionCase):
         self.assertEqual(self.stop(UNRECORDED_ID, force=True),
                          {'ok': False, 'stopped': False, 'released': False, 'reason': 'permission_denied'})
         self.assertEqual(self.machine.signals, [(4000, signal.SIGTERM)])
+
+    def test_a_process_whose_identity_cannot_be_checked_is_not_signalled(self):
+        self.unrecorded_runtime()
+        original = self.machine.run
+
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/bin/ps' and '-p' in argv:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return original(argv, timeout=timeout, environment=environment)
+        result = engine_actions.stop_connection(self.context(run=run), UNRECORDED_ID, force=True)
+        self.assertEqual(result, {'ok': False, 'stopped': False, 'released': False, 'reason': 'unverified'})
+        self.assertEqual(self.machine.signals, [])
 
     def test_unknown_connections_are_not_found_and_nothing_is_signalled(self):
         self.unrecorded_runtime()

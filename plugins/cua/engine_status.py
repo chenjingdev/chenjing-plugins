@@ -121,41 +121,44 @@ class View:
         self.maybe_left = []
         self.prunable = []
         self.activity = []
-        self._analyze(activity, with_folders)
+        self.folders = {}
+        mark_live(records, inv.mine, ctx.uid)
+        self.live = [record for record in records if record.live]
+        self.dead = [record for record in records if not record.live]
+        self.live_bridges = [record for record in self.live if record.kind == 'bridge']
+        self.live_relays = [record for record in self.live if record.kind == 'relay']
+        self.dead_bridges = [record for record in self.dead if record.kind == 'bridge']
+        self.served = {}               # relay writer -> sessions that the activity log shows it serving
+        for line in activity:
+            if line['session_id']:
+                self.served.setdefault(line['writer'], set()).add(line['session_id'])
+        self.roots = {relay.writer: self._root_of(relay) for relay in self.live_relays}
+        self.attributed = attribute_runtimes(self.live_bridges, self.live_relays, self.relay_sessions)
+        self.by_writer = {}            # writer of a live record -> the connection it belongs to
+        self._claude_connections()
+        self._relay_connections()
+        self._runtime_connections()
+        self._map_activity(activity)
+        self._finish(with_folders)
+        self._leases()
 
     # --- connections ---------------------------------------------------------------------------------
 
-    def _analyze(self, activity, with_folders):
-        ctx, inv = self.ctx, self.inv
-        mark_live(self.records, inv.mine, ctx.uid)
-        live = [record for record in self.records if record.live]
-        dead = [record for record in self.records if not record.live]
-        live_bridges = [record for record in live if record.kind == 'bridge']
-        live_relays = [record for record in live if record.kind == 'relay']
-        dead_bridges = [record for record in dead if record.kind == 'bridge']
+    def relay_sessions(self, relay):
+        return set(relay.open_sessions) | self.served.get(relay.writer, set())
 
-        served = {}
-        for line in activity:
-            if line['session_id']:
-                served.setdefault(line['writer'], set()).add(line['session_id'])
+    def _root_of(self, relay):
+        """The cua-repl process the relay runs under, if it can be found."""
+        for candidate in (self.inv.procs[relay.pid].ppid, relay.number('root_pid')):
+            proc = self.inv.mine.get(candidate)
+            if proc is not None and is_cua_repl(proc.command):
+                return candidate
+        return None
 
-        def relay_sessions(relay):
-            return set(relay.open_sessions) | served.get(relay.writer, set())
-
-        def root_of(relay):
-            """The cua-repl process the relay runs under, if it can be found."""
-            for candidate in (inv.procs[relay.pid].ppid, relay.number('root_pid')):
-                proc = inv.mine.get(candidate)
-                if proc is not None and is_cua_repl(proc.command):
-                    return candidate
-            return None
-
-        roots = {relay.writer: root_of(relay) for relay in live_relays}
-        attributed = attribute_runtimes(live_bridges, live_relays, relay_sessions)
-        by_writer, connections = {}, []
-
+    def _claude_connections(self):
+        inv = self.inv
         recorded = set()
-        for bridge in live_bridges:
+        for bridge in self.live_bridges:
             proc = inv.procs[bridge.pid]
             recorded.add(bridge.pid)
             conn = Connection('claude', bridge.pid, bridge.started_at)
@@ -166,30 +169,33 @@ class View:
             conn.session_id = bridge.current_session
             conn.last_call = bridge.time('last_call_at')
             conn.busy = bridge.data.get('busy') is True
-            conn.can_release = control_socket(bridge, ctx.uid) is not None
-            by_writer[bridge.writer] = conn
-            connections.append(conn)
+            conn.can_release = control_socket(bridge, self.ctx.uid) is not None
+            self.by_writer[bridge.writer] = conn
+            self.connections.append(conn)
         for pid in inv.bridges:
-            if pid in recorded:
-                continue
-            proc = inv.mine[pid]
-            conn = Connection('claude', pid, proc.start)
-            conn.owner_pid = proc.ppid if proc.ppid > 1 else None
-            conn.owner_alive = _owner_alive(inv, conn.owner_pid, proc.start)
-            connections.append(conn)
+            if pid not in recorded:
+                proc = inv.mine[pid]
+                conn = Connection('claude', pid, proc.start)
+                conn.owner_pid = proc.ppid if proc.ppid > 1 else None
+                conn.owner_alive = _owner_alive(inv, conn.owner_pid, proc.start)
+                self.connections.append(conn)
 
-        for relay in live_relays:
-            proc, root = inv.procs[relay.pid], roots[relay.writer]
+    def _relay_connections(self):
+        """Each live relay either adds its runtime to the bridge it serves or is a connection of its own."""
+        inv = self.inv
+        for relay in self.live_relays:
+            proc, root = inv.procs[relay.pid], self.roots[relay.writer]
             tree = set(inv.subtree(root if root is not None else relay.pid)) | set(inv.subtree(relay.pid))
-            bridge = attributed.get(relay.writer)
+            bridge = self.attributed.get(relay.writer)
             if bridge is not None:
-                conn = by_writer[bridge.writer]
+                conn = self.by_writer[bridge.writer]
                 conn.memory_pids |= tree
                 conn.last_call = _later(conn.last_call, relay.time('last_call_at'))
                 conn.busy = conn.busy or relay.data.get('busy') is True
-                by_writer[relay.writer] = conn
+                self.by_writer[relay.writer] = conn
                 continue
-            former = next((record for record in dead_bridges if relay_sessions(relay) & record.sessions()), None)
+            sessions = self.relay_sessions(relay)
+            former = next((record for record in self.dead_bridges if sessions & record.sessions()), None)
             conn = Connection('claude' if former is not None else 'codex', relay.pid, relay.started_at)
             conn.record = relay
             conn.memory_pids = tree
@@ -210,29 +216,32 @@ class View:
             conn.session_id = self._newest_session(relay)
             conn.last_call = relay.time('last_call_at')
             conn.busy = relay.data.get('busy') is True
-            conn.can_release = control_socket(relay, ctx.uid) is not None
-            by_writer[relay.writer] = conn
-            connections.append(conn)
+            conn.can_release = control_socket(relay, self.ctx.uid) is not None
+            self.by_writer[relay.writer] = conn
+            self.connections.append(conn)
 
-        covered = {root for root in roots.values() if root is not None}
+    def _runtime_connections(self):
+        """Runtimes that no relay record covers: all that is known is the process."""
+        inv = self.inv
+        covered = {root for root in self.roots.values() if root is not None}
         for pid in inv.cua_repl:
-            if pid in covered:
-                continue
-            proc = inv.mine[pid]
-            conn = Connection('codex', pid, proc.start)
-            conn.memory_pids = set(inv.subtree(pid))
-            conn.owner_pid = proc.ppid if proc.ppid > 1 else None
-            conn.owner_alive = _owner_alive(inv, conn.owner_pid, proc.start)
-            connections.append(conn)
+            if pid not in covered:
+                proc = inv.mine[pid]
+                conn = Connection('codex', pid, proc.start)
+                conn.memory_pids = set(inv.subtree(pid))
+                conn.owner_pid = proc.ppid if proc.ppid > 1 else None
+                conn.owner_alive = _owner_alive(inv, conn.owner_pid, proc.start)
+                self.connections.append(conn)
 
-        # What the activity log says about each connection, and who each line belongs to.
+    def _map_activity(self, activity):
+        """Which connection each line of the activity log belongs to, and each connection's newest call."""
         session_bridge = {}
-        for record in live_bridges + dead_bridges:
+        for record in self.live_bridges + self.dead_bridges:
             for session in record.sessions():
                 session_bridge.setdefault(session, record.connection_id)
-        newest, located = {}, []
+        self.newest = {}
         for line in activity:
-            conn = by_writer.get(line['writer'])
+            conn = self.by_writer.get(line['writer'])
             if conn is not None:
                 target, agent = conn.id, conn.agent
             elif line['writer'].startswith('bridge-'):
@@ -241,25 +250,25 @@ class View:
                 target, agent = session_bridge[line['session_id']], 'claude'
             else:
                 target, agent = 'codex-'+line['writer'][len('relay-'):], 'codex'
-            newest[target] = _later(newest.get(target), line['at'])
-            located.append((line, target, agent))
-        self.activity = located
+            self.newest[target] = _later(self.newest.get(target), line['at'])
+            self.activity.append((line, target, agent))
 
-        for conn in connections:
+    def _finish(self, with_folders):
+        inv = self.inv
+        for conn in self.connections:
             conn.memory_bytes = inv.rss_bytes(conn.memory_pids)
-            conn.last_call = _later(conn.last_call, newest.get(conn.id))
+            conn.last_call = _later(conn.last_call, self.newest.get(conn.id))
             conn.finish(self.now)
-        connections.sort(key=lambda conn: (conn.agent != 'claude', conn.started, conn.pid))
-        self.connections = connections
-
-        self.folders = {}
+        self.connections.sort(key=lambda conn: (conn.agent != 'claude', conn.started, conn.pid))
+        protected = self.protected_pids()
+        for conn in self.connections:
+            conn.can_stop = conn.pid > 1 and conn.pid not in protected     # what stop would refuse is not offered
         if with_folders:
-            wanted = [conn.pid for conn in connections if conn.cwd is None]
+            wanted = [conn.pid for conn in self.connections if conn.cwd is None]
             wanted += [pid for pid in inv.cmux_clients if pid > 1]
-            self.folders = working_folders(ctx, wanted)
-            for conn in connections:
+            self.folders = working_folders(self.ctx, wanted)
+            for conn in self.connections:
                 conn.cwd = conn.cwd or self.folders.get(conn.pid)
-        self._leases(live, dead)
 
     @staticmethod
     def _newest_session(relay):
@@ -275,10 +284,10 @@ class View:
 
     # --- leases that may have been left behind --------------------------------------------------------
 
-    def _leases(self, live, dead):
-        inv = self.inv
+    def _leases(self):
+        inv, dead = self.inv, self.dead
         listed = set()
-        for record in live:
+        for record in self.live:
             listed |= record.sessions()
         found = {}
         for record in dead:

@@ -10,7 +10,6 @@ from contextlib import contextmanager
 import fcntl
 import json
 import os
-from pathlib import Path
 import re
 import socket
 import stat
@@ -287,9 +286,10 @@ def delete_record_directory(record, uid):
         names = os.listdir(directory)
     except OSError:
         return False
-    # The record, its socket and the temporary files of an interrupted atomic write (name.pid.tmp, .engine-*).
+    # The record, its socket and the temporary files of an interrupted atomic write (relay.json.<pid>.tmp, .tmp-*).
     for name in names:
-        if name in (FILENAME[record.kind], 'control.sock') or name.endswith('.tmp') or name.startswith('.engine-'):
+        if (name in (FILENAME[record.kind], 'control.sock') or name.endswith('.tmp')
+                or name.startswith(('.tmp-', '.engine-'))):
             try:
                 if not stat.S_ISDIR(os.lstat(directory/name).st_mode):
                     os.unlink(directory/name)
@@ -370,11 +370,9 @@ def read_activity(state_dir, uid):
         return []
     finally:
         os.close(descriptor)
-    lines = raw.decode('utf-8', 'replace').split('\n')
-    if offset:
-        lines = lines[1:]
     found = []
-    for line in lines:
+    # The first line of a tail may be cut in half; a half line is not JSON and is skipped like any other bad line.
+    for line in raw.decode('utf-8', 'replace').split('\n'):
         try:
             item = json.loads(line)
         except ValueError:

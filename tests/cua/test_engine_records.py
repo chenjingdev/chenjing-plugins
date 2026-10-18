@@ -1,7 +1,6 @@
 """Reading and cleaning bridge and relay records, the activity log and the control sockets."""
 import json
 import os
-from pathlib import Path
 import time
 import unittest
 
@@ -178,6 +177,7 @@ class CleanupTests(EngineCase):
         directory = self.state.relay('b2', 5151, NOW-800, scopes=[State.scope(SESSION_A)])
         (directory/'control.sock').write_text('left over')
         (directory/'relay.json.5151.tmp').write_text('{}')
+        (directory/'.tmp-ab12cd').write_text('{}')
         [record] = self.load('relay')
         self.assertTrue(records.remove_sessions(self.state.root, UID, record, {SESSION_A}))
         self.assertFalse(directory.exists())
@@ -233,7 +233,7 @@ class ActivityTests(EngineCase):
                           ('bridge', 'js', True, 1234, SESSION_A)])
         self.assertEqual(lines[0]['at'], at(30))
 
-    def test_only_the_tail_of_a_big_file_is_read_and_a_cut_first_line_is_dropped(self):
+    def test_only_the_tail_of_a_big_file_is_read_and_a_cut_first_line_is_skipped(self):
         old = records.ACTIVITY_TAIL_BYTES
         records.ACTIVITY_TAIL_BYTES = 600
         self.addCleanup(setattr, records, 'ACTIVITY_TAIL_BYTES', old)

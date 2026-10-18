@@ -60,8 +60,17 @@ def release_one(ctx, conn, timeout=None):
     return Release(False, reason, count, reason == 'no_trusted_scope' and count == 0)
 
 
+def find_connection(ctx, wanted):
+    """(view, connection) for a connection id, or (None, None) when there is no such live connection."""
+    if not CONNECTION_ID.match(wanted):
+        return None, None
+    view = build_view(ctx, with_folders=False, with_checks=False)
+    conn = view.find(wanted)
+    return (view, conn) if conn is not None else (None, None)
+
+
 def release_connection(ctx, wanted):
-    conn = build_view(ctx, with_folders=False, with_checks=False).find(wanted) if CONNECTION_ID.match(wanted) else None
+    _, conn = find_connection(ctx, wanted)
     if conn is None:
         return {'ok': False, 'released': False, 'reason': 'not_found', 'scope_count': 0}
     result = release_one(ctx, conn)
@@ -102,11 +111,11 @@ def release_ended(ctx):
 # --- stop -------------------------------------------------------------------------------------------------
 
 def _signal(ctx, conn, number):
-    """'sent', 'gone' (nothing of that identity is left) or 'denied'. The identity is checked first."""
+    """'sent', 'gone' (nothing of that identity is left), 'denied' or 'unverified'. The identity is checked first."""
     try:
         proc = lookup(ctx, conn.pid)
     except (OSError, subprocess.TimeoutExpired):
-        return 'denied'
+        return 'unverified'
     if not same_process(proc, ctx.uid, conn.pid, conn.started):
         return 'gone'
     try:
@@ -149,7 +158,7 @@ def stop_connections(ctx, conns, force, protected):
             outcome[conn.id] = 'protected'
             continue
         sent = _signal(ctx, conn, signal.SIGTERM)
-        outcome[conn.id] = {'sent': 'waiting', 'gone': 'stopped', 'denied': 'denied'}[sent]
+        outcome[conn.id] = {'sent': 'waiting', 'gone': 'stopped', 'denied': 'denied', 'unverified': 'unverified'}[sent]
         if sent == 'sent':
             waiting.append(conn)
     left = _wait_gone(ctx, waiting, STOP_GRACE)
@@ -158,8 +167,9 @@ def stop_connections(ctx, conns, force, protected):
     if force and left:
         killed = []
         for conn in left:
-            if _signal(ctx, conn, signal.SIGKILL) == 'denied':
-                outcome[conn.id] = 'denied'
+            sent = _signal(ctx, conn, signal.SIGKILL)
+            if sent in ('denied', 'unverified'):
+                outcome[conn.id] = sent
             else:
                 killed.append(conn)
         remaining = _wait_gone(ctx, killed, KILL_WAIT)
@@ -171,15 +181,15 @@ def stop_connections(ctx, conns, force, protected):
         state = outcome[conn.id]
         stopped = state == 'stopped'
         if not stopped:
-            reason = {'waiting': 'timeout', 'denied': 'permission_denied', 'protected': 'protected'}[state]
+            reason = {'waiting': 'timeout', 'denied': 'permission_denied', 'protected': 'protected',
+                      'unverified': 'unverified'}[state]
         results.append({'connection_id': conn.id, 'stopped': stopped, 'released': released,
                         'reason': None if released and stopped else reason})
     return results
 
 
 def stop_connection(ctx, wanted, force=False):
-    view = build_view(ctx, with_folders=False, with_checks=False) if CONNECTION_ID.match(wanted) else None
-    conn = view.find(wanted) if view is not None else None
+    view, conn = find_connection(ctx, wanted)
     if conn is None:
         return {'ok': False, 'stopped': False, 'released': False, 'reason': 'not_found'}
     result = stop_connections(ctx, [conn], force, view.protected_pids())[0]
@@ -210,8 +220,8 @@ def restart_codex(ctx, quit_timeout=QUIT_TIMEOUT, host_timeout=HOST_CLOSE_TIMEOU
     if not app_pids(procs, installation, ctx.uid):
         return {'ok': False, 'reason': 'not_running'}
     host = read_host(ctx, procs)
-    previous_host = [host.registry.get(key) for key in ('owner_pid', 'backend_pid', 'desktop_proxy_pid')
-                     if host.state in ('ready', 'starting') and host.registry] if host.registry else []
+    running_host = host.registry if host.state in ('ready', 'starting') else None
+    previous_host = [running_host.get(key) for key in ('owner_pid', 'backend_pid', 'desktop_proxy_pid')] if running_host else []
     try:
         ctx.run(['/usr/bin/osascript', '-e', 'tell application id "%s" to quit' % installation.bundle_id], timeout=10)
     except subprocess.TimeoutExpired:

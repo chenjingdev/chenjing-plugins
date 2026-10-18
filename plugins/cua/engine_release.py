@@ -195,7 +195,10 @@ def release_sessions(ctx, sessions, user=False, view=None, options=None):
     if script is None:
         results.update({session: _failure('unsupported') for session in allowed})
         return results
-    outcome = asyncio.run(_release_batch(ctx, view, allowed, script, options, user))
+    try:
+        outcome = asyncio.run(_release_batch(ctx, view, allowed, script, options, user))
+    except Exception:
+        outcome = {}       # nothing could be confirmed; every session says so below
     for session in allowed:
         result = outcome.get(session) or _failure('cleanup_not_confirmed')
         results[session] = result
