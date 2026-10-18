@@ -73,7 +73,7 @@ claude plugin uninstall cua@chenjing-plugins --scope user
 - Codex의 원본 CUA를 호출합니다. Codex 앱 파일과 모델 설정은 수정하지 않으며, Claude 연결마다 별도의 임시 대화를 사용합니다.
 - 원본 CUA의 접근 권한·브라우저 정책·파일 제한이 적용됩니다. 표준 form 승인만 전달하며, 지원하지 않는 승인 흐름은 실패를 알립니다.
 - 내부 Codex 인터페이스를 사용하므로 앱 업데이트 후 플러그인 업데이트나 재연결이 필요할 수 있습니다. Claude 매 턴 자동 종료와 MCP cancellation 중계는 지원하지 않습니다.
-- Codex가 `cua_repl` 서버를 번들 CUA 플러그인으로 식별하지 못하면(설정으로 바꾼 중계기 등) 연결하지 않고 오류를 알립니다.
+- Codex가 `cua_repl` 서버를 번들 CUA 플러그인으로도, 이 플러그인의 중계기로도 식별하지 못하면(설정으로 바꾼 다른 중계기 등) 연결하지 않고 오류를 알립니다.
 - 앱이 기본 위치에 없다면 `CODEX_CUA_APP_PATH`에 원본 `.app`의 절대 경로를 지정합니다. 상태 폴더를 `CODEX_HOST_CUA_STATE_DIR`로 바꾸는 경우 호스트와 MCP에 같은 값을 지정하고, 현재 사용자 소유의 비공개 폴더를 사용합니다.
 
 연결기 코드는 [MIT](LICENSE)로 제공됩니다. 원본 Codex·CUA는 포함하지 않으며 해당 소프트웨어와 서비스에는 각 제공자의 이용 조건이 적용됩니다. OpenAI 또는 Anthropic의 공식 제품이 아닙니다.

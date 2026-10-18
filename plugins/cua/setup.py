@@ -213,7 +213,29 @@ def install_command(plugin_root, home=None, environment=None):
     launcher = desktop_launcher(python, root/'command.py', original_cli_path(home, environment))
     write_private(root/'start-desktop-cli.sh', launcher)
     (root/'start-desktop-cli.sh').chmod(0o700)
+    install_relay(plugin_root, home)
     return target
+
+
+def install_relay(plugin_root, home=None):
+    """Copy the relay files to the support directory (the Codex launcher refreshes them at every start).
+
+    The CUA connection works without the relay, so a failure here only shows up as `relay` in doctor.
+    """
+    try:
+        from relay_install import refresh_relay_files
+        refresh_relay_files(plugin_root, support_root(home))
+        return True
+    except Exception:
+        return False
+
+
+def relay_status(home=None):
+    try:
+        from relay_install import relay_files_status
+        return relay_files_status(support_root(home))
+    except Exception:
+        return 'invalid'
 
 
 def app_processes(executable):
@@ -373,7 +395,7 @@ def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None):
     environment = os.environ if environment is None else environment
     report = {'schema_version': 1, 'plugin_id': PLUGIN_ID, 'status': 'unavailable',
               'installation': 'not_checked', 'dependencies': 'missing', 'host': 'unavailable',
-              'login_environment': 'not_checked',
+              'login_environment': 'not_checked', 'relay': 'missing',
               'cua': 'not_checked', 'browser': 'not_checked', 'computer': 'not_checked',
               'operational_readiness': 'not_checked'}
     try:
@@ -389,6 +411,7 @@ def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None):
         report['login_environment'] = login_environment_status(home, environment)
     except Exception:
         report['login_environment'] = 'unknown'
+    report['relay'] = relay_status(home)
     if venv_ready(support_root(home)):
         report['dependencies'] = 'ready'
         report['websockets_version'] = '12.0'
@@ -447,6 +470,11 @@ def uninstall(home=None, environment=None):
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or MARKER not in target.read_text().splitlines()[:3]:
             raise RuntimeError('An unrelated command was preserved.')
         target.unlink()
+    try:
+        from relay_install import remove_relay_files
+        remove_relay_files(root)
+    except Exception:
+        pass
     shutil.rmtree(root)
     # App, original assets, live host state and Claude managed caches are untouched.
     return 0
@@ -554,6 +582,7 @@ def main(arguments=None):
         except Exception:
             status = 'failed'
         print('Ordinary app launch as host: '+status)
+        print('Relay files: '+relay_status())
         return 0
     if remainder:
         parser.error('unrecognized arguments')
