@@ -22,7 +22,7 @@ struct LeasesTabView: View {
                 } else {
                     ForEach(content.rows) { row in
                         LeaseRowView(row: row, failed: row.sessionID.map(failedSessionIDs.contains) ?? false,
-                                     waiting: row.sessionID.map { model.inFlight.contains(.releaseSession($0)) } ?? false) {
+                                     waiting: row.releaseButton.map { model.inFlight.contains($0.action) } ?? false) {
                             model.send($0)
                         }
                     }
@@ -57,12 +57,15 @@ struct LeaseRowView: View {
                         AgentBadge(agent: row.agent)
                         Text(row.folder).font(Theme.titleFont).lineLimit(1).truncationMode(.middle)
                     }
-                    Text(row.statusText).font(Theme.bodyFont)
-                    if let detail = row.detail {
-                        Text(detail).font(Theme.captionFont).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                    // What it is, then when and which session, on one line.
+                    (Text(row.statusText)
+                        .foregroundStyle(row.kind == .maybeLeft ? Theme.orangeText : Color.primary)
+                        + Text(row.detail.map { " · " + $0 } ?? "").foregroundStyle(.secondary))
+                        .font(Theme.captionFont)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                     if failed {
-                        Text("콕 집어 풀기가 안 됐어요. 아래 확장 초기화를 보세요")
+                        Text("콕 집어 풀기가 안 됐어요. 아래 안내를 보세요")
                             .font(Theme.captionFont)
                             .foregroundStyle(Theme.redText)
                             .fixedSize(horizontal: false, vertical: true)
@@ -71,10 +74,10 @@ struct LeaseRowView: View {
                     }
                 }
                 Spacer(minLength: 4)
-                if row.canReleaseSession, let session = row.sessionID {
+                if let button = row.releaseButton {
                     HStack(spacing: 4) {
                         if waiting { ProgressView().controlSize(.small) }
-                        RowButton(title: "콕 집어 풀기", isEnabled: !waiting) { send(.releaseSession(session)) }
+                        SpecButton(spec: button, waiting: waiting, send: send)
                     }
                 }
             }

@@ -191,13 +191,14 @@ struct PopoverContentTests {
 
     @Test func guidanceListsTheLiveConnectionsAResetWouldCut() throws {
         let guidance = try content("status-problem").leases.guidance
-        #expect(guidance.title == "그래도 안 풀리면 — Chrome 확장 초기화")
+        #expect(guidance.title == "그래도 안 풀리면 — 막힌 탭 닫기 · 확장 초기화")
+        // Smallest remedy first (spec ruling): close the blocked tab, and only then reset the extension.
         #expect(guidance.steps == [
-            "Chrome에서 chrome://extensions 페이지를 열어요.",
-            "ChatGPT 확장을 껐다가 다시 켜요.",
+            "막힌 탭이 있으면 그 탭을 닫아요. 그 탭의 점유만 풀려서 다른 대화는 끊기지 않아요.",
+            "그래도 안 풀리면 Chrome에서 chrome://extensions 페이지를 열어 ChatGPT 확장을 껐다가 다시 켜요.",
         ])
-        #expect(guidance.warning == "이 Chrome을 쓰는 모든 CUA 연결의 점유가 한꺼번에 풀려요. 다른 작업 중에는 하지 마세요.")
-        #expect(guidance.liveConnectionsTitle == "초기화하면 끊길 살아 있는 연결")
+        #expect(guidance.warning == "확장을 껐다 켜면 이 Chrome을 쓰는 모든 CUA 연결의 점유가 한꺼번에 풀려요. 다른 작업 중에는 하지 마세요.")
+        #expect(guidance.liveConnectionsTitle == "확장을 껐다 켜면 끊길 살아 있는 연결")
         // The ended Claude connection is not alive; the other two are.
         #expect(guidance.liveConnections == ["Claude · dev/computer-use", "Codex · dev/new-chat"])
         #expect(guidance.needsAttention) // one leftover has no per-session release

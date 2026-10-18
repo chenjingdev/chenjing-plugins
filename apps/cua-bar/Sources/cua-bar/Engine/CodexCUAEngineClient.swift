@@ -46,8 +46,9 @@ struct CodexCUAEngineClient: EngineClient {
         try await json(ReleaseEndedResult.self, ["release", "--ended", "--json"], timeout: timeouts.release)
     }
 
-    func releaseSession(id: String) async throws -> ReleaseResult {
-        try await json(ReleaseResult.self, ["release-session", "--session", id, "--json"], timeout: timeouts.release)
+    func releaseSession(id: String, user: Bool) async throws -> SessionReleaseResult {
+        let arguments = ["release-session", "--session", id] + (user ? ["--user"] : []) + ["--json"]
+        return try await json(SessionReleaseResult.self, arguments, timeout: timeouts.release)
     }
 
     func stopConnection(id: String, force: Bool) async throws -> StopResult {

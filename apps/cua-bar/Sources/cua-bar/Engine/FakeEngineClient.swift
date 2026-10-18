@@ -35,7 +35,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         case status
         case releaseConnection(String)
         case releaseEnded
-        case releaseSession(String)
+        case releaseSession(String, user: Bool)
         case stopConnection(String, force: Bool)
         case stopGroup(StopGroup, force: Bool)
         case restartCodex
@@ -47,7 +47,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var status: Result<EngineStatus, EngineError> = .success(EngineStatus())
         var releaseConnection = ReleaseResult(ok: true, released: true, reason: nil, scopeCount: 1)
         var releaseEnded = ReleaseEndedResult(ok: true, results: [])
-        var releaseSession = ReleaseResult(ok: true, released: true, reason: nil, scopeCount: 1)
+        var releaseSession = SessionReleaseResult(ok: true, released: true, reason: nil, tabCount: 1)
         var stopConnection = StopResult(ok: true, stopped: true, released: true, reason: nil)
         var stopGroup = GroupStopResult(ok: true, stopped: 0, failed: 0, results: [])
         var restartCodex = RestartResult(ok: true, reason: nil)
@@ -55,7 +55,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         /// When set, every action (not `status`) throws this instead of answering.
         var actionError: EngineError?
         /// Per-session answers for `releaseSession`, before falling back to `releaseSession`.
-        var releaseSessionByID: [String: ReleaseResult] = [:]
+        var releaseSessionByID: [String: SessionReleaseResult] = [:]
         /// How long each call takes, to exercise slow engines.
         var delay: Duration = .zero
         /// While shut, `status` calls wait here after being recorded.
@@ -100,8 +100,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         try await begin(.releaseEnded, isAction: true).releaseEnded
     }
 
-    func releaseSession(id: String) async throws -> ReleaseResult {
-        let script = try await begin(.releaseSession(id), isAction: true)
+    func releaseSession(id: String, user: Bool) async throws -> SessionReleaseResult {
+        let script = try await begin(.releaseSession(id, user: user), isAction: true)
         return script.releaseSessionByID[id] ?? script.releaseSession
     }
 

@@ -24,7 +24,9 @@ enum ActionMessages {
         case "no_trusted_scope": "놓을 점유가 없어요"
         case "cleanup_not_confirmed": "정리가 확인되지 않았어요"
         case "relay_unavailable": "중계기를 쓸 수 없어요"
-        case "unsupported": "하나만 골라 풀 방법이 없어요. 확장 초기화 안내를 보세요"
+        case "unsupported": "하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"
+        case "needs_user": "Codex 대화의 점유는 직접 눌러야 풀 수 있어요"
+        case "session_live": "살아 있는 연결이 아직 이 세션을 쓰고 있어요"
         case "quit_cancelled": "Codex가 종료되지 않았어요 (종료를 취소했을 수 있어요)"
         case "not_running": "켜져 있지 않아요"
         case "relaunch_failed": "다시 열지 못했어요"
@@ -49,8 +51,12 @@ enum ActionMessages {
         return ActionOutcome(kind: .warning, message: "끝난 연결 \(total)개 중 \(released)개를 놓아줬어요 — \(why)")
     }
 
-    static func releaseSession(_ result: ReleaseResult) -> ActionOutcome {
-        if result.ok, result.released { return ActionOutcome(kind: .success, message: "점유를 풀었어요") }
+    static func releaseSession(_ result: SessionReleaseResult) -> ActionOutcome {
+        if result.ok, result.released {
+            // The engine counts the tabs it just released; that is a result, not a guess at what is left.
+            let tabs = result.tabCount.flatMap { $0 > 0 ? " (탭 \($0)개)" : nil } ?? ""
+            return ActionOutcome(kind: .success, message: "점유를 풀었어요\(tabs)")
+        }
         return ActionOutcome(kind: .failure, message: "풀지 못했어요 — \(reason(result.reason))")
     }
 
@@ -77,12 +83,15 @@ enum ActionMessages {
         }
     }
 
-    /// The status card's 놓아주기 for leftover leases: one `release-session` per lease it could aim at.
-    static func releaseLeftovers(attempted: Int, released: Int, firstReason: String?) -> ActionOutcome {
-        if released == attempted { return ActionOutcome(kind: .success, message: "점유 \(attempted)개를 풀었어요") }
+    /// The status card's 놓아주기 for leftover leases: one `release-session` per recorded session it
+    /// could aim at. The numbers count those sessions, never leases: with an unreadable lease list
+    /// the app does not know how many leases there are (R14).
+    static func releaseLeftovers(attempted: Int, released: Int, tabs: Int = 0, firstReason: String?) -> ActionOutcome {
+        let tabText = tabs > 0 ? " (탭 \(tabs)개)" : ""
+        if released == attempted { return ActionOutcome(kind: .success, message: "남은 세션 \(attempted)개의 점유를 풀었어요\(tabText)") }
         let why = reason(firstReason)
-        if released == 0 { return ActionOutcome(kind: .failure, message: "점유 \(attempted)개를 풀지 못했어요 — \(why)") }
-        return ActionOutcome(kind: .warning, message: "점유 \(attempted)개 중 \(released)개를 풀었어요 — \(why)")
+        if released == 0 { return ActionOutcome(kind: .failure, message: "남은 세션 \(attempted)개의 점유를 풀지 못했어요 — \(why)") }
+        return ActionOutcome(kind: .warning, message: "남은 세션 \(attempted)개 중 \(released)개의 점유를 풀었어요\(tabText) — \(why)")
     }
 
     static func restartCodex(_ result: RestartResult) -> ActionOutcome {

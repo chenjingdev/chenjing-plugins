@@ -34,22 +34,25 @@ struct EmptyLine: View {
     }
 }
 
-/// Small text button used in rows.
-struct RowButton: View {
-    var title: String
-    var role: ButtonRole?
-    var isEnabled = true
-    var action: () -> Void
+/// Small text button used in rows, drawn from a `ButtonSpec`.
+struct SpecButton: View {
+    var spec: ButtonSpec
+    /// Something is already running that this button would collide with.
+    var waiting = false
+    var send: (CUAAction) -> Void
 
     var body: some View {
-        Button(role: role, action: action) {
-            Text(title)
+        Button(role: spec.isDestructive ? .destructive : nil) {
+            send(spec.action)
+        } label: {
+            Text(spec.title)
                 .font(.system(size: 11))
-                .foregroundStyle(role == .destructive ? Theme.redText : Color.primary)
+                .foregroundStyle(spec.isDestructive ? Theme.redText : Color.primary)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .disabled(!isEnabled)
+        .disabled(!spec.isEnabled || waiting)
+        .help(spec.help)
     }
 }
 

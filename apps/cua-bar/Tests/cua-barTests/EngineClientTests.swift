@@ -74,9 +74,18 @@ struct EngineClientTests {
         let runner = ScriptedRunner(stdout: #"{"ok": true, "released": false, "reason": "unsupported"}"#)
         let (client, home) = try client(runner)
         defer { home.remove() }
-        let result = try await client.releaseSession(id: "019a-1")
-        #expect(result == ReleaseResult(ok: true, released: false, reason: "unsupported", scopeCount: nil))
+        let result = try await client.releaseSession(id: "019a-1", user: false)
+        #expect(result == SessionReleaseResult(ok: true, released: false, reason: "unsupported", tabCount: nil))
         #expect(runner.calls.map(\.arguments) == [["release-session", "--session", "019a-1", "--json"]])
+    }
+
+    @Test func aPersonsClickReleasesWithTheUserFlagAndReadsTheTabCount() async throws {
+        let runner = ScriptedRunner(stdout: #"{"ok": true, "released": true, "reason": null, "tab_count": 3}"#)
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        let result = try await client.releaseSession(id: "019a-2", user: true)
+        #expect(result == SessionReleaseResult(ok: true, released: true, reason: nil, tabCount: 3))
+        #expect(runner.calls.map(\.arguments) == [["release-session", "--session", "019a-2", "--user", "--json"]])
     }
 
     @Test func stopOneConnectionNormallyAndByForce() async throws {
@@ -228,6 +237,8 @@ struct EngineClientTests {
     @Test func resultsWithUnknownKeysOrMissingFieldsStillDecode() throws {
         let release = try JSONDecoder().decode(ReleaseResult.self, from: Data(#"{"ok": true, "future": 1}"#.utf8))
         #expect(release == ReleaseResult(ok: true, released: false, reason: nil, scopeCount: nil))
+        let session = try JSONDecoder().decode(SessionReleaseResult.self, from: Data(#"{"ok": true, "tab_count": 2.0, "future": 1}"#.utf8))
+        #expect(session == SessionReleaseResult(ok: true, released: false, reason: nil, tabCount: 2))
         let group = try JSONDecoder().decode(GroupStopResult.self, from: Data(#"{"stopped": 1.0}"#.utf8))
         #expect(group == GroupStopResult(ok: false, stopped: 1, failed: 0, results: []))
     }

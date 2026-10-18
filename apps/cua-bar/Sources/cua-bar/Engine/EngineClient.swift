@@ -12,8 +12,10 @@ protocol EngineClient: Sendable {
     func releaseConnection(id: String) async throws -> ReleaseResult
     /// `release --ended`
     func releaseEnded() async throws -> ReleaseEndedResult
-    /// `release-session --session <id>`
-    func releaseSession(id: String) async throws -> ReleaseResult
+    /// `release-session --session <id> [--user]`. `user` is true when a person pressed a button:
+    /// a Codex thread's session is released only then (`needs_user` otherwise), so automatic
+    /// cleanup passes false.
+    func releaseSession(id: String, user: Bool) async throws -> SessionReleaseResult
     /// `stop --connection <id> [--force]`
     func stopConnection(id: String, force: Bool) async throws -> StopResult
     /// `stop --group all|claude|codex [--force]`

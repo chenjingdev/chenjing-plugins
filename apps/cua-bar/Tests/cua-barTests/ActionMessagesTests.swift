@@ -11,7 +11,9 @@ struct ActionMessagesTests {
         ("no_trusted_scope", "놓을 점유가 없어요"),
         ("cleanup_not_confirmed", "정리가 확인되지 않았어요"),
         ("relay_unavailable", "중계기를 쓸 수 없어요"),
-        ("unsupported", "하나만 골라 풀 방법이 없어요. 확장 초기화 안내를 보세요"),
+        ("unsupported", "하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"),
+        ("needs_user", "Codex 대화의 점유는 직접 눌러야 풀 수 있어요"),
+        ("session_live", "살아 있는 연결이 아직 이 세션을 쓰고 있어요"),
         ("quit_cancelled", "Codex가 종료되지 않았어요 (종료를 취소했을 수 있어요)"),
         ("not_running", "켜져 있지 않아요"),
         ("relaunch_failed", "다시 열지 못했어요"),
@@ -63,9 +65,37 @@ struct ActionMessagesTests {
     }
 
     @Test func sessionRelease() {
-        #expect(ActionMessages.releaseSession(ReleaseResult(ok: true, released: true)) == ActionOutcome(kind: .success, message: "점유를 풀었어요"))
-        let refused = ActionMessages.releaseSession(ReleaseResult(ok: true, released: false, reason: "unsupported"))
-        #expect(refused == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 하나만 골라 풀 방법이 없어요. 확장 초기화 안내를 보세요"))
+        #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: true)) == ActionOutcome(kind: .success, message: "점유를 풀었어요"))
+        let refused = ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: false, reason: "unsupported"))
+        #expect(refused == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"))
+    }
+
+    @Test func sessionReleaseSaysHowManyTabsTheEngineReleased() {
+        #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: true, tabCount: 3))
+                == ActionOutcome(kind: .success, message: "점유를 풀었어요 (탭 3개)"))
+        // Zero or unknown is not worth a number.
+        #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: true, tabCount: 0))
+                == ActionOutcome(kind: .success, message: "점유를 풀었어요"))
+        #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: true, tabCount: nil))
+                == ActionOutcome(kind: .success, message: "점유를 풀었어요"))
+    }
+
+    @Test func sessionReleaseRefusalsExplainThemselves() {
+        #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: false, released: false, reason: "needs_user"))
+                == ActionOutcome(kind: .failure, message: "풀지 못했어요 — Codex 대화의 점유는 직접 눌러야 풀 수 있어요"))
+        #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: false, released: false, reason: "session_live"))
+                == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 살아 있는 연결이 아직 이 세션을 쓰고 있어요"))
+    }
+
+    @Test func leftoverReleaseCountsSessionsNotLeases() {
+        #expect(ActionMessages.releaseLeftovers(attempted: 2, released: 2, firstReason: nil)
+                == ActionOutcome(kind: .success, message: "남은 세션 2개의 점유를 풀었어요"))
+        #expect(ActionMessages.releaseLeftovers(attempted: 2, released: 2, tabs: 3, firstReason: nil)
+                == ActionOutcome(kind: .success, message: "남은 세션 2개의 점유를 풀었어요 (탭 3개)"))
+        #expect(ActionMessages.releaseLeftovers(attempted: 2, released: 1, firstReason: "cleanup_not_confirmed")
+                == ActionOutcome(kind: .warning, message: "남은 세션 2개 중 1개의 점유를 풀었어요 — 정리가 확인되지 않았어요"))
+        #expect(ActionMessages.releaseLeftovers(attempted: 1, released: 0, firstReason: "unsupported")
+                == ActionOutcome(kind: .failure, message: "남은 세션 1개의 점유를 풀지 못했어요 — 하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"))
     }
 
     // MARK: Stop

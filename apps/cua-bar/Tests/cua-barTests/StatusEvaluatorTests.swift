@@ -375,7 +375,7 @@ struct StatusEvaluatorTests {
         #expect(problem.kind == .leasesMaybeLeft)
         #expect(problem.fix == nil)
         #expect(problem.fixLabel == nil)
-        #expect(problem.nextStep == "하나씩 풀 방법이 없어요 — 브라우저 점유 탭의 확장 초기화 안내를 따라 주세요")
+        #expect(problem.nextStep == "하나씩 풀 방법이 없어요 — 브라우저 점유 탭의 안내를 따라 주세요")
     }
 
     // MARK: Unreadable engine and placeholder

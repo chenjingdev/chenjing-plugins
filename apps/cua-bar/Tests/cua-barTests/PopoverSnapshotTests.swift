@@ -183,7 +183,7 @@ struct PopoverSnapshotTests {
         await broken.refresh()
         // Same list area, cards a little different: all within a few lines of each other, and short enough for a laptop.
         for value in [loadingHeight, readyEmptyHeight, height(broken), heights.first ?? 0] {
-            #expect(value > 380 && value < 640, "unexpected popover height \(value)")
+            #expect(value > 380 && value < 700, "unexpected popover height \(value)")
         }
         #expect(abs(loadingHeight - readyEmptyHeight) < 30)
     }

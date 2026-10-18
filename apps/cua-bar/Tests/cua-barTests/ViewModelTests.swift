@@ -280,7 +280,8 @@ struct ViewModelTests {
     @Test(arguments: [
         (CUAAction.releaseConnection("claude-1-1"), FakeEngineClient.Call.releaseConnection("claude-1-1")),
         (.releaseEnded, .releaseEnded),
-        (.releaseSession("019a-1"), .releaseSession("019a-1")),
+        (.releaseSession("019a-1", user: true), .releaseSession("019a-1", user: true)),
+        (.releaseSession("019a-1", user: false), .releaseSession("019a-1", user: false)),
         (.stopConnection("codex-2-2", force: false), .stopConnection("codex-2-2", force: false)),
         (.stopConnection("codex-2-2", force: true), .stopConnection("codex-2-2", force: true)),
         (.stopGroup(.all, force: false), .stopGroup(.all, force: false)),
@@ -425,13 +426,16 @@ struct ViewModelTests {
         var status = try Fixtures.status("status-problem")
         status.leases.maybeLeft.append(LeftoverLease(sessionID: "019a-extra", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true))
         let engine = FakeEngineClient(status: status)
-        engine.configure { $0.releaseSessionByID["019a-extra"] = ReleaseResult(ok: true, released: false, reason: "cleanup_not_confirmed") }
+        engine.configure {
+            $0.releaseSessionByID["019a-extra"] = SessionReleaseResult(ok: true, released: false, reason: "cleanup_not_confirmed")
+            $0.releaseSessionByID["019a1b2c-0009"] = SessionReleaseResult(ok: true, released: true, reason: nil, tabCount: 2)
+        }
         let model = makeModel(engine)
         await model.refresh()
         let outcome = await model.perform(.releaseLeftover)
         // The Codex leftover has no session id and is not releasable: it is not attempted.
-        #expect(engine.calls.filter { if case .releaseSession = $0 { true } else { false } } == [.releaseSession("019a1b2c-0009"), .releaseSession("019a-extra")])
-        #expect(outcome == ActionOutcome(kind: .warning, message: "점유 2개 중 1개를 풀었어요 — 정리가 확인되지 않았어요"))
+        #expect(engine.calls.filter { if case .releaseSession = $0 { true } else { false } } == [.releaseSession("019a1b2c-0009", user: true), .releaseSession("019a-extra", user: true)])
+        #expect(outcome == ActionOutcome(kind: .warning, message: "남은 세션 2개 중 1개의 점유를 풀었어요 (탭 2개) — 정리가 확인되지 않았어요"))
         #expect(model.failedSessionIDs == ["019a-extra"])
     }
 
@@ -446,26 +450,26 @@ struct ViewModelTests {
 
     @Test func aFailedTargetedReleaseOpensTheExtensionGuidanceAndASuccessClosesItAgain() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
-        engine.configure { $0.releaseSession = ReleaseResult(ok: true, released: false, reason: "unsupported") }
+        engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: false, reason: "unsupported") }
         let model = makeModel(engine)
         await model.refresh()
-        await model.perform(.releaseSession("019a1b2c-0009"))
+        await model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(model.failedSessionIDs == ["019a1b2c-0009"])
-        engine.configure { $0.releaseSession = ReleaseResult(ok: true, released: true) }
-        await model.perform(.releaseSession("019a1b2c-0009"))
+        engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: true) }
+        await model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(model.failedSessionIDs.isEmpty)
     }
 
     @Test func aNewFailedReleaseOpensTheGuidanceAgainEvenIfThePersonClosedIt() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
-        engine.configure { $0.releaseSession = ReleaseResult(ok: true, released: false, reason: "unsupported") }
+        engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: false, reason: "unsupported") }
         let model = makeModel(engine)
         await model.refresh()
         model.guidanceOpenByUser = false
-        await model.perform(.releaseSession("019a1b2c-0009"))
+        await model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(model.guidanceOpenByUser == nil, "left to the popover again: open, because a release failed")
         model.guidanceOpenByUser = false
-        await model.perform(.releaseSession("019a1b2c-0009")) // the same session failing again is not news
+        await model.perform(.releaseSession("019a1b2c-0009", user: true)) // the same session failing again is not news
         #expect(model.guidanceOpenByUser == false)
     }
 

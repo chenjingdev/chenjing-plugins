@@ -25,6 +25,20 @@ enum PopoverTab: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// One button as the popover offers it: its label, what it does, whether it can be pressed now.
+/// The views draw exactly these, so a test can check every button without a window.
+struct ButtonSpec: Equatable, Identifiable, Sendable {
+    var title: String
+    var action: CUAAction
+    var isDestructive = false
+    var isEnabled = true
+    /// Shown when the pointer rests on the button.
+    var help: String
+
+    /// Titles are unique within one row or group of buttons.
+    var id: String { title }
+}
+
 /// What the four tabs show, already turned into text. The views only lay this out, so the
 /// decisions (which button is on, what a row says) are testable without a window.
 struct PopoverContent: Equatable, Sendable {
@@ -56,6 +70,8 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
     var isBusy: Bool
     var canRelease: Bool
     var canStop: Bool
+    /// 놓아주기 · 끄기 · 강제 종료
+    var buttons: [ButtonSpec]
 
     init(_ connection: Connection, now: Date, calendar: Calendar) {
         id = connection.id
@@ -68,6 +84,17 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         isBusy = connection.busy
         canRelease = connection.canRelease
         canStop = connection.canStop
+        buttons = [
+            ButtonSpec(
+                title: "놓아주기", action: .releaseConnection(connection.id), isEnabled: connection.canRelease,
+                help: "이 연결이 잡고 있는 브라우저 탭만 놓아줘요. 연결은 그대로예요"),
+            ButtonSpec(
+                title: "끄기", action: .stopConnection(connection.id, force: false), isEnabled: connection.canStop,
+                help: "탭을 놓아준 뒤 정상 종료해요"),
+            ButtonSpec(
+                title: "강제 종료", action: .stopConnection(connection.id, force: true), isDestructive: true,
+                isEnabled: connection.canStop, help: "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요. 하던 작업이 끊겨요"),
+        ]
     }
 }
 
@@ -100,6 +127,10 @@ struct ConnectionsContent: Equatable, Sendable {
     var stopCounts: GroupStopCounts
     var endedCount: Int
     var emptyText: String?
+    /// 전체 끄기 · Claude만 · Codex만, each with how many it would stop.
+    var stopButtons: [ButtonSpec]
+    /// 끝난 연결 놓아주기, with how many ended connections there are.
+    var releaseEndedButton: ButtonSpec
 
     init(status: EngineStatus, now: Date, calendar: Calendar) {
         // Needs attention first (ended), then the newest; a stable order so rows do not jump.
@@ -127,6 +158,20 @@ struct ConnectionsContent: Equatable, Sendable {
         stopCounts = GroupStopCounts(all: claude + codex, claude: claude, codex: codex)
         endedCount = status.connections.filter { $0.state == .ended }.count
         emptyText = status.connections.isEmpty ? PopoverTab.connections.emptyText : nil
+
+        let counts = stopCounts
+        func stop(_ title: String, _ group: StopGroup, _ help: String) -> ButtonSpec {
+            ButtonSpec(title: "\(title) \(counts.count(for: group))", action: .stopGroup(group, force: false),
+                       isEnabled: counts.count(for: group) > 0, help: help)
+        }
+        stopButtons = [
+            stop("전체 끄기", .all, "Claude와 Codex 연결을 모두 정상 종료해요"),
+            stop("Claude만", .claude, "Claude 연결만 정상 종료해요"),
+            stop("Codex만", .codex, "Codex 연결만 정상 종료해요"),
+        ]
+        releaseEndedButton = ButtonSpec(
+            title: "끝난 연결 놓아주기 \(endedCount)", action: .releaseEnded, isEnabled: endedCount > 0,
+            help: "끝난 연결이 잡고 있는 브라우저 탭만 한꺼번에 놓아줘요")
     }
 }
 
@@ -147,6 +192,12 @@ struct LeaseRow: Equatable, Identifiable, Sendable {
     var canReleaseSession: Bool
     /// Shown instead of the button when there is no way to release this one by itself.
     var hint: String?
+    /// 콕 집어 풀기; nil when there is no session to aim at.
+    var releaseButton: ButtonSpec? {
+        guard canReleaseSession, let sessionID else { return nil }
+        // A button press is a person's click, so `--user` goes along (Codex thread sessions need it).
+        return ButtonSpec(title: "콕 집어 풀기", action: .releaseSession(sessionID, user: true), help: "이 세션이 남긴 점유만 세션 ID로 풀어요")
+    }
 }
 
 struct ExtensionResetGuidance: Equatable, Sendable {
@@ -203,10 +254,15 @@ struct LeasesContent: Equatable, Sendable {
             .flatMap(\.rows)
             .filter { $0.state.kind != .ended }
         guidance = ExtensionResetGuidance(
-            title: "그래도 안 풀리면 — Chrome 확장 초기화",
-            steps: ["Chrome에서 chrome://extensions 페이지를 열어요.", "ChatGPT 확장을 껐다가 다시 켜요."],
-            warning: "이 Chrome을 쓰는 모든 CUA 연결의 점유가 한꺼번에 풀려요. 다른 작업 중에는 하지 마세요.",
-            liveConnectionsTitle: "초기화하면 끊길 살아 있는 연결",
+            title: "그래도 안 풀리면 — 막힌 탭 닫기 · 확장 초기화",
+            // Smallest first (spec ruling): closing the blocked tab frees only that tab's lease and
+            // cuts nobody off; the extension reset comes last.
+            steps: [
+                "막힌 탭이 있으면 그 탭을 닫아요. 그 탭의 점유만 풀려서 다른 대화는 끊기지 않아요.",
+                "그래도 안 풀리면 Chrome에서 chrome://extensions 페이지를 열어 ChatGPT 확장을 껐다가 다시 켜요.",
+            ],
+            warning: "확장을 껐다 켜면 이 Chrome을 쓰는 모든 CUA 연결의 점유가 한꺼번에 풀려요. 다른 작업 중에는 하지 마세요.",
+            liveConnectionsTitle: "확장을 껐다 켜면 끊길 살아 있는 연결",
             liveConnections: live.map { row in row.path == nil ? row.agent.label : "\(row.agent.label) · \(row.folder)" },
             liveConnectionsEmptyText: "없음",
             needsAttention: rows.contains { $0.kind == .maybeLeft && !$0.canReleaseSession })
@@ -276,6 +332,8 @@ struct ActivityRow: Equatable, Identifiable, Sendable {
 struct ActivityContent: Equatable, Sendable {
     var rows: [ActivityRow]
     var emptyText: String?
+    /// 진단 복사: runs `diagnose` and puts its text on the pasteboard.
+    var copyButton = ButtonSpec(title: "진단 복사", action: .copyDiagnosis, help: "진단 내용을 복사해요. 화면과 요청 내용은 들어 있지 않아요")
 
     init(status: EngineStatus, calendar: Calendar) {
         var seen: [String: Int] = [:]

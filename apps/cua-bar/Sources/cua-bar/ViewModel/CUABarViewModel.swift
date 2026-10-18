@@ -256,8 +256,8 @@ final class CUABarViewModel: ObservableObject {
                 return ActionMessages.releaseConnection(try await engine.releaseConnection(id: id))
             case .releaseEnded:
                 return ActionMessages.releaseEnded(try await engine.releaseEnded())
-            case .releaseSession(let id):
-                let result = try await engine.releaseSession(id: id)
+            case .releaseSession(let id, let user):
+                let result = try await engine.releaseSession(id: id, user: user)
                 noteSessionRelease(id, result)
                 return ActionMessages.releaseSession(result)
             case .stopConnection(let id, let force):
@@ -297,16 +297,23 @@ final class CUABarViewModel: ObservableObject {
             return ActionOutcome(kind: .info, message: "하나씩 풀 수 있는 점유가 없어요")
         }
         var released = 0
+        var tabs = 0
         var firstReason: String?
         for id in targets {
-            let result = try await engine.releaseSession(id: id)
+            // The card's button is a person's click, so Codex thread sessions may be released too.
+            let result = try await engine.releaseSession(id: id, user: true)
             noteSessionRelease(id, result)
-            if result.ok, result.released { released += 1 } else if firstReason == nil { firstReason = result.reason }
+            if result.ok, result.released {
+                released += 1
+                tabs += result.tabCount ?? 0
+            } else if firstReason == nil {
+                firstReason = result.reason
+            }
         }
-        return ActionMessages.releaseLeftovers(attempted: targets.count, released: released, firstReason: firstReason)
+        return ActionMessages.releaseLeftovers(attempted: targets.count, released: released, tabs: tabs, firstReason: firstReason)
     }
 
-    private func noteSessionRelease(_ id: String, _ result: ReleaseResult) {
+    private func noteSessionRelease(_ id: String, _ result: SessionReleaseResult) {
         if result.ok, result.released {
             failedSessionIDs.remove(id)
         } else if failedSessionIDs.insert(id).inserted {

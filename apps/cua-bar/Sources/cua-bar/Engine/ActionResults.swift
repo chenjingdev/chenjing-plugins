@@ -10,6 +10,15 @@ struct ReleaseResult: Equatable, Sendable {
     var scopeCount: Int?
 }
 
+/// `release-session`: like `ReleaseResult`, but it reports how many tabs the session held.
+struct SessionReleaseResult: Equatable, Sendable {
+    var ok = false
+    var released = false
+    var reason: String?
+    /// Tabs the session held right before the release; nil when unknown.
+    var tabCount: Int?
+}
+
 struct EndedRelease: Equatable, Sendable {
     var connectionID: String?
     var released = false
@@ -55,6 +64,17 @@ extension ReleaseResult: Decodable {
         released = c.lenientBool(.released) ?? false
         reason = c.lenientString(.reason)
         scopeCount = c.lenientInt(.scopeCount)
+    }
+}
+
+extension SessionReleaseResult: Decodable {
+    private enum CodingKeys: String, CodingKey { case ok, released, reason, tabCount = "tab_count" }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ok = c.lenientBool(.ok) ?? false
+        released = c.lenientBool(.released) ?? false
+        reason = c.lenientString(.reason)
+        tabCount = c.lenientInt(.tabCount)
     }
 }
 

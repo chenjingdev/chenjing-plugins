@@ -14,7 +14,7 @@ extension Color {
 /// appearance follow the Mac; no state is told by color alone (each also has its own shape or text).
 enum Theme {
     static let popoverWidth: CGFloat = 420
-    static let listHeight: CGFloat = 340
+    static let listHeight: CGFloat = 360
     static let padding: CGFloat = 14
     static let cardRadius: CGFloat = 10
 

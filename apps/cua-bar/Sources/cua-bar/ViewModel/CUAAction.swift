@@ -11,7 +11,8 @@ enum CUAAction: Hashable, Sendable {
     // Engine actions (contract: "Actions").
     case releaseConnection(String)
     case releaseEnded
-    case releaseSession(String)
+    /// `user` is true for a button press; a Codex thread's session is released only then.
+    case releaseSession(String, user: Bool)
     case stopConnection(String, force: Bool)
     case stopGroup(StopGroup, force: Bool)
     case restartCodex

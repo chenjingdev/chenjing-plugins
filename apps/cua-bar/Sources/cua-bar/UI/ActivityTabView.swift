@@ -14,7 +14,7 @@ struct ActivityTabView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if copying { ProgressView().controlSize(.small) }
-                RowButton(title: "진단 복사", isEnabled: !copying, action: copy)
+                SpecButton(spec: content.copyButton, waiting: copying) { _ in copy() }
             }
             if let empty = content.emptyText {
                 EmptyLine(text: empty)

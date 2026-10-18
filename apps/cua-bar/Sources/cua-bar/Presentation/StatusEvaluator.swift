@@ -148,7 +148,7 @@ enum StatusEvaluator {
                 kind: .leasesMaybeLeft, title: "점유가 남았을 수 있어요",
                 nextStep: releasable
                     ? "놓아주기를 눌러 풀어 주세요"
-                    : "하나씩 풀 방법이 없어요 — 브라우저 점유 탭의 확장 초기화 안내를 따라 주세요",
+                    : "하나씩 풀 방법이 없어요 — 브라우저 점유 탭의 안내를 따라 주세요",
                 warning: nil, fix: releasable ? .releaseLeftover : nil, fixLabel: releasable ? "놓아주기" : nil)
         }
         return nil
