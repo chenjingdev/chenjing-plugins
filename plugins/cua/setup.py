@@ -463,6 +463,11 @@ def split_forwarded(arguments):
     return arguments, []
 
 
+def readable_source(path):
+    """Compile a script before exec'ing it, while a failure can still fall back to the original CLI."""
+    compile(path.read_bytes(), str(path), 'exec', dont_inherit=True)
+
+
 def hand_over_to_registered_plugin(arguments):
     """Make the installed plugin version decide what the stable command does.
 
@@ -477,7 +482,7 @@ def hand_over_to_registered_plugin(arguments):
     if target.resolve() == Path(__file__).resolve():
         return root
     # This file has not run on this machine yet; a damaged update must fail here, not after exec.
-    compile(target.read_bytes(), str(target), 'exec', dont_inherit=True)
+    readable_source(target)
     handed = list(arguments)
     handed.insert(handed.index('--control')+1, ROOT_RESOLVED_FLAG)
     os.execve(sys.executable, [sys.executable, str(target), *handed], dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
@@ -518,6 +523,10 @@ def main(arguments=None):
             python = ensure_dependencies()
             if args.exec_mcp or args.exec_wrapper:
                 script = plugin_root/('mcp_stdio.py' if args.exec_mcp else 'desktop_cli_wrapper.py')
+                if not args.exec_mcp:
+                    # Codex itself starts through these two: a missing or damaged file must not stop it.
+                    for needed in (script, plugin_root/'unix_ws_stdio.py'):
+                        readable_source(needed)
                 environment = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
                 os.execve(str(python), [str(python), str(script), *remainder], environment)
             return 0

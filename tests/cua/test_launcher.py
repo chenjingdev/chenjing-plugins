@@ -1,8 +1,10 @@
-"""The generated Desktop launcher runs in a real /bin/sh against fake programs, never Codex or a GUI."""
+"""The Desktop launch path, script and plugin side, against fake programs; never Codex or a GUI."""
+import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -112,6 +114,57 @@ class LauncherTests(unittest.TestCase):
         report = self.run_launcher(launcher, 'app-server')
         self.assertNotIn('role', report)
         self.assertNotEqual(report['returncode'], 0)
+
+
+class LaunchPathGuardTests(unittest.TestCase):
+    """setup.py ensure --exec-wrapper checks the files Codex starts through before it execs them."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.plugin = self.root/'plugin'
+        self.plugin.mkdir()
+        for name in ('desktop_cli_wrapper.py', 'unix_ws_stdio.py', 'mcp_stdio.py'):
+            (self.plugin/name).write_text('pass\n')
+        (self.plugin/'setup.py').write_text(Path(setup.__file__).read_text())
+        spec = importlib.util.spec_from_file_location('setup_in_temporary_plugin', self.plugin/'setup.py')
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
+        # main() puts the plugin directory on sys.path; do not leave a fake one behind.
+        self.addCleanup(lambda: [sys.path.remove(entry) for entry in list(sys.path) if entry == str(self.plugin)])
+        self.native = self.root/'codex'
+        self.native.write_text('#!/bin/sh\n')
+        self.native.chmod(0o700)
+
+    def run_main(self, *arguments):
+        with patch.dict(os.environ, {setup.FALLBACK_ENV: str(self.native)}), \
+             patch.object(self.module, 'ensure_dependencies', return_value=Path('/fixture/python')), \
+             patch.object(self.module.os, 'execve', side_effect=SystemExit(0)) as execute:
+            with self.assertRaises(SystemExit):
+                self.module.main(list(arguments))
+        self.assertEqual(execute.call_count, 1)
+        return execute.call_args.args[:2]
+
+    def test_intact_files_start_the_wrapper(self):
+        self.assertEqual(self.run_main('ensure', '--exec-wrapper', '--', 'app-server'),
+                         ('/fixture/python', ['/fixture/python', str(self.plugin/'desktop_cli_wrapper.py'), 'app-server']))
+
+    def test_missing_or_damaged_files_start_the_original_cli_instead(self):
+        original = (str(self.native), [str(self.native), 'app-server', '-c', 'x=1'])
+        for name in ('desktop_cli_wrapper.py', 'unix_ws_stdio.py'):
+            for label, damage in (('missing', lambda path: path.unlink()),
+                                  ('truncated', lambda path: path.write_text('def run(:\n'))):
+                with self.subTest(name=name, damage=label):
+                    damage(self.plugin/name)
+                    self.assertEqual(self.run_main('ensure', '--exec-wrapper', '--', 'app-server', '-c', 'x=1'), original)
+                    (self.plugin/name).write_text('pass\n')
+
+    def test_the_mcp_entry_point_does_not_depend_on_the_launch_path_files(self):
+        (self.plugin/'desktop_cli_wrapper.py').write_text('def run(:\n')
+        (self.plugin/'unix_ws_stdio.py').unlink()
+        self.assertEqual(self.run_main('ensure', '--exec-mcp', '--'),
+                         ('/fixture/python', ['/fixture/python', str(self.plugin/'mcp_stdio.py')]))
 
 
 if __name__ == '__main__':
