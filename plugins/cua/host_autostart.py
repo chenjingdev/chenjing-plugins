@@ -8,7 +8,6 @@ import time
 
 from runtime_paths import discover_installation, runtime_home
 
-AUTOSTART_ENV = 'CODEX_HOST_CUA_AUTOSTART'
 TIMEOUT_ENV = 'CODEX_HOST_CUA_AUTOSTART_TIMEOUT'
 
 
@@ -79,8 +78,6 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
         return read_registry(state)
     except Exception:
         pass
-    if environment.get(AUTOSTART_ENV, '1') == '0':
-        raise AutostartFailure('Start Codex with the prepared host launcher before using this MCP plugin. No runtime was started.')
     timeout = _timeout(environment)
     descriptor = _lock(state)
     try:

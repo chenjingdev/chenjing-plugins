@@ -99,12 +99,6 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(len(self.opened()), 1)
         self.assertEqual(self.commands[-1], ['/usr/bin/open', '-b', 'com.openai.codex'])
 
-    def test_opt_out_keeps_previous_manual_behavior(self):
-        self.environment['CODEX_HOST_CUA_AUTOSTART'] = '0'
-        with self.assertRaises(host_autostart.AutostartFailure):
-            self.run_host(lambda state: (_ for _ in ()).throw(FileNotFoundError))
-        self.assertEqual(self.commands, [])
-
     def test_concurrent_sessions_open_the_app_once(self):
         ready = threading.Event()
         opened = []
