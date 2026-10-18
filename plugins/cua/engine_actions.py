@@ -287,7 +287,8 @@ def _wait_and_reopen(ctx, installation, previous_host, quit_event, quit_timeout,
     deadline = ctx.clock()+(QUIT_REFUSED_GRACE if refused else quit_timeout)
     while app_pids(snapshot(ctx), installation, ctx.uid):
         if ctx.clock() >= deadline:
-            return {'ok': False, 'reason': 'quit_cancelled'}
+            # A quit that Codex took may still take minutes while it finishes its work; the app watches for the end.
+            return {'ok': False, 'reason': 'quit_cancelled' if refused else 'quit_pending'}
         ctx.sleep(POLL)
     # The host that ran inside the app closes its files a moment after the app is gone; opening Codex earlier
     # would find its lease taken and start Codex without a host.

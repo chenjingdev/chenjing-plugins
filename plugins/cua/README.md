@@ -132,7 +132,7 @@ CUA Bar가 쓰는 명령을 직접 부를 수도 있습니다. 모두 `~/.local/
 - `release --ended`는 살아 있는 연결이 지금 쓰는 점유를 건드리지 않습니다. `release --connection`을 일하는 중인 연결에 쓰면 하던 브라우저 작업의 탭이 닫히고, Codex 대화는 그 턴의 다음 브라우저 조작이 시간 초과까지 멈춥니다. CUA Bar는 이럴 때 한 번 묻습니다.
 - `stop`은 연결 프로세스(Claude의 브리지, Codex 대화의 런타임, cmux-cua 연결의 `cmux-cua mcp`)만 끕니다. Codex 앱, AI 클라이언트, Chrome, cmux-cua 데몬(`serve`)은 어떤 경우에도 끄지 않습니다. cmux-cua 연결은 `stop --connection cmux-…`로 하나씩만, 놓아주기 없이 끄며 묶음 종료에는 들어가지 않습니다. 끄면 그 AI 대화의 cmux-cua 도구는 다시 붙을 때까지 끊깁니다.
 - `stop --group codex`는 주인을 알 수 없는 연결을 건너뜁니다(`unattributed`). Claude 대화의 런타임일 수 있기 때문이며, 그런 연결은 하나씩 끄거나 `--group all`로 끕니다.
-- `restart-codex`는 정상 종료(⌘Q와 같은 종료 요청)만 하고 강제로 종료하지 않습니다. Codex가 꺼져 있으면 `not_running`이고 아무것도 켜지 않으며, 종료 창에서 사용자가 취소하면 `quit_cancelled`입니다. 하던 Codex 작업이 끊기므로 사용자가 직접 부를 때만 씁니다.
+- `restart-codex`는 정상 종료(⌘Q와 같은 종료 요청)만 하고 강제로 종료하지 않습니다. Codex가 꺼져 있으면 `not_running`이고 아무것도 켜지 않으며, 종료 창에서 사용자가 취소하면 `quit_cancelled`입니다. Codex가 종료 요청을 받고도 30초 안에 꺼지지 않으면 `quit_pending`이고, 메뉴 막대 앱이 Codex가 꺼지기를 기다렸다가 다시 엽니다. 하던 Codex 작업이 끊기므로 사용자가 직접 부를 때만 씁니다.
 
 ## 개인정보
 

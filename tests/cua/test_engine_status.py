@@ -113,6 +113,25 @@ class ShapeTests(StatusCase):
         self.assertEqual(self.status()['host']['state'], 'closed')
 
 
+class HostStartTests(StatusCase):
+    def test_a_codex_that_opened_moments_ago_is_still_starting_its_host(self):
+        self.machine.add(1000, 1, self.commands.app_main, start=NOW-10)
+        self.write_host(status='closed')
+        self.assertEqual(self.status()['host']['state'], 'starting')
+        self.machine.procs[1000]['start'] = NOW-31
+        self.assertEqual(self.status()['host']['state'], 'closed')
+
+    def test_without_a_codex_or_with_a_ready_host_nothing_changes(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.write_host(status='closed')
+        self.assertEqual(self.status()['host']['state'], 'closed')
+        self.machine.add(1000, 1, self.commands.app_main, start=NOW-5)
+        self.machine.add(1100, 1000, self.commands.app_server, start=NOW-4)
+        self.machine.add(1200, 1000, '/usr/bin/python3 unix_ws_stdio.py --socket x', start=NOW-4)
+        self.write_host(status='ready')
+        self.assertEqual(self.status()['host']['state'], 'ready')
+
+
 class RelaySetupTests(StatusCase):
     def relay_state(self, host_ready, relay, files):
         self.machine.add(5, 1, '/bin/x')

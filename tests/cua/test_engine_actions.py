@@ -856,10 +856,10 @@ class RestartTests(ActionCase):
                          {'ok': False, 'reason': 'not_running'})
         self.assertEqual(self.tools(), [])
 
-    def test_a_quit_that_codex_does_not_follow_is_cancelled_and_nothing_is_opened_or_killed(self):
+    def test_a_quit_that_codex_took_but_has_not_finished_is_pending_and_nothing_is_opened_or_killed(self):
         self.machine.quit_delay = None
         began = self.machine.now
-        self.assertEqual(self.restart(quit_timeout=12), {'ok': False, 'reason': 'quit_cancelled'})
+        self.assertEqual(self.restart(quit_timeout=12), {'ok': False, 'reason': 'quit_pending'})
         self.assertGreaterEqual(self.machine.now-began, 12)
         self.assertEqual(self.tools(), ['/usr/bin/osascript'])
         self.assertEqual(self.machine.signals, [])
@@ -877,6 +877,14 @@ class RestartTests(ActionCase):
                 raise subprocess.TimeoutExpired(argv, timeout)
             return self.machine.run(argv, timeout=timeout, environment=environment)
         self.assertEqual(engine_actions.restart_codex(self.context(run=run)), {'ok': True, 'reason': None})
+
+    def test_a_quit_event_that_stays_open_and_a_codex_that_stays_is_pending_too(self):
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/usr/bin/osascript':
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return self.machine.run(argv, timeout=timeout, environment=environment)
+        self.assertEqual(engine_actions.restart_codex(self.context(run=run), quit_timeout=5),
+                         {'ok': False, 'reason': 'quit_pending'})
 
     def test_an_apple_events_tool_that_cannot_run_means_codex_did_not_quit(self):
         def run(argv, timeout=None, environment=None):

@@ -17,6 +17,8 @@ from engine_records import (WRITER, control_socket, forget_released, load_record
                             read_released)
 
 PRUNE_MIN_AGE = 60
+# A Codex that has just opened starts its host a few seconds later; until then it is not one without a host (S9).
+HOST_START_GRACE = 30
 
 
 def _later(*values):
@@ -451,6 +453,15 @@ class View:
 
     # --- the status ----------------------------------------------------------------------------------
 
+    def host_state(self):
+        """The host's state, where a Codex that opened moments ago without a host yet is still starting it."""
+        inv = self.inv
+        if inv.host.state in ('closed', 'missing', 'unknown') and inv.app_pids:
+            opened = min(inv.procs[pid].start for pid in inv.app_pids)
+            if self.now-opened <= HOST_START_GRACE:
+                return 'starting'
+        return inv.host.state
+
     def _codex(self):
         inv = self.inv
         installation = inv.installation
@@ -505,7 +516,7 @@ class View:
         return {'schema_version': SCHEMA_VERSION, 'generated_at': iso(self.now),
                 'plugin': {'version': self.ctx.plugin_version()},
                 'codex': self._codex(),
-                'host': {'state': host.state, 'since': iso(host.since)},
+                'host': {'state': self.host_state(), 'since': iso(host.since)},
                 'setup': self._setup(),
                 'connections': [conn.to_json() for conn in self.connections],
                 'leases': {'readable': False, 'items': [], 'maybe_left': self.maybe_left_json()},
