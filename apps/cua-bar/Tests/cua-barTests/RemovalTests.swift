@@ -149,6 +149,44 @@ struct RemovalTests {
         }
     }
 
+    @Test func withoutItsCommandOnlyTheRemoversNothingInstalledCountsAsNothingToUndo() async throws {
+        // The real client: the plugin is there, `codex-cua` is not, and the plugin's remover exits 1.
+        for leftBehind in [false, true] {
+            let home = try TempHome()
+            defer { home.remove() }
+            let install = try home.installPlugin()
+            if leftBehind { try home.addSupportInstallation() }
+            let runner = ScriptedRunner(stdout: "", exitCode: 1, stderr: "codex-cua could not complete.\n")
+            let log = EventLog()
+            let suite = DefaultsSuite()
+            defer { suite.remove() }
+            let sleeper = ManualSleeper()
+            let flow = RemovalFlow(
+                engine: CodexCUAEngineClient(locator: CommandLocator(home: home.url), runner: runner),
+                loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: log), defaults: suite.defaults),
+                quit: { log.add("quit") }, sleep: sleeper.sleep)
+            flow.ask()
+            let removal = Task { await flow.confirm() }
+            #expect(await waitUntil { flow.phase != .confirming && flow.phase != .working })
+            if case .finished = flow.phase {
+                // Let the result be read and the app quit, whatever the phase should have been.
+                #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
+                sleeper.releaseAll()
+            }
+            await removal.value
+            if leftBehind {
+                #expect(flow.phase == .refused(RemovalMessages.failed), "a remover that had something to undo failed")
+                #expect(log.events.isEmpty, "the login item stays and the app does not quit")
+            } else {
+                #expect(flow.phase == .finished(RemovalMessages.nothingToUndo))
+                #expect(log.events == ["unregister login item", "quit"])
+            }
+            #expect(runner.calls == [.init(
+                executable: "/bin/sh", arguments: [install.appendingPathComponent("setup.sh").path, "uninstall"],
+                timeout: EngineTimeouts().uninstall)])
+        }
+    }
+
     @Test func aLoginItemThatCannotBeRemovedIsSaidSoInTheResult() async {
         let log = EventLog()
         let engine = FakeEngineClient()

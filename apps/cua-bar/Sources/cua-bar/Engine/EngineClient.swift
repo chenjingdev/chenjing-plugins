@@ -28,6 +28,6 @@ protocol EngineClient: Sendable {
     func runSetup() async throws
     /// `uninstall`: the existing remover. It also removes the login environment, and it refuses
     /// while a Codex host is running (the command then exits non-zero and nothing is removed).
-    /// Throws `pluginMissing` or `setupNeeded` when there is no command to run: nothing was set up.
+    /// Throws `pluginMissing` when there is no plugin, and `setupNeeded` when nothing was set up to undo.
     func uninstall() async throws
 }

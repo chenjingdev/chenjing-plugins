@@ -81,11 +81,13 @@ enum StatusEvaluator {
     ///
     /// A command that fails or prints something unreadable while the plugin registered with
     /// Claude Code is a different version from the app is most likely an old plugin that does not
-    /// know `status` yet (0.5.0 exits 2), so it is the version problem, not a read problem.
+    /// know `status` yet (0.5.0 exits 2), so it is the version problem, not a read problem. When the
+    /// registered version is the app's, the command itself is old or broken: setup replaces it.
     static func summary(for error: EngineError, appVersion: String? = nil, registeredPluginVersion: String? = nil) -> StatusSummary {
-        if error.mayComeFromAnOldCommand, let pluginVersion = nonEmpty(registeredPluginVersion),
-           let appVersion = nonEmpty(appVersion), pluginVersion != appVersion {
-            return summary(for: versionMismatchProblem(appVersion: appVersion, pluginVersion: pluginVersion))
+        if error.mayComeFromAnOldCommand, let pluginVersion = nonEmpty(registeredPluginVersion), let appVersion = nonEmpty(appVersion) {
+            return summary(for: pluginVersion == appVersion
+                ? staleCommandProblem
+                : versionMismatchProblem(appVersion: appVersion, pluginVersion: pluginVersion))
         }
         switch error {
         case .pluginMissing:

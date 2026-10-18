@@ -73,29 +73,42 @@ struct CodexCUAEngineClient: EngineClient {
         return String(decoding: output.stdout, as: UTF8.self)
     }
 
-    /// Runs the installer. Before the command exists that is the plugin's own `setup.sh`.
+    /// Runs the installer: the registered plugin's own `setup.sh` whenever its folder is there. Not
+    /// `codex-cua setup`, which may be an old command (0.6.0 or lower) that does not hand over to
+    /// the registered plugin and would keep its old launcher. The command's own `setup` is only for
+    /// when no registered plugin folder is there.
     func runSetup() async throws {
+        if let plugin = locator.installedPlugin() {
+            _ = try await execute(Self.shell, [plugin.setupScript.path, "setup"], timeout: timeouts.setup)
+        } else if case .ready(let command) = locator.locate() {
+            _ = try await execute(command, ["setup"], timeout: timeouts.setup)
+        } else {
+            throw EngineError.pluginMissing
+        }
+    }
+
+    /// Runs the remover. When `codex-cua` is missing or not ours, the plugin's own `setup.sh
+    /// uninstall` still undoes what an earlier setup left (login environment, relay). If no setup
+    /// ever installed anything, that remover fails at once; that is `setupNeeded`, nothing to undo.
+    func uninstall() async throws {
         switch locator.locate() {
         case .ready(let command):
-            _ = try await execute(command, ["setup"], timeout: timeouts.setup)
+            _ = try await execute(command, ["uninstall"], timeout: timeouts.uninstall)
         case .installedNotSetUp(let installPath):
-            // Through sh, so a plugin copy that lost its executable bit still runs.
-            _ = try await execute(
-                URL(fileURLWithPath: "/bin/sh"), [installPath.appendingPathComponent("setup.sh").path, "setup"],
-                timeout: timeouts.setup)
+            // Read before it runs: a remover that failed halfway may already have removed it.
+            let somethingInstalled = locator.hasSupportInstallation()
+            do {
+                _ = try await execute(Self.shell, [installPath.appendingPathComponent("setup.sh").path, "uninstall"], timeout: timeouts.uninstall)
+            } catch EngineError.commandFailed where !somethingInstalled {
+                throw EngineError.setupNeeded(installPath: installPath.path)
+            }
         case .pluginMissing:
             throw EngineError.pluginMissing
         }
     }
 
-    /// Runs the remover. Without the command there is nothing set up to remove.
-    func uninstall() async throws {
-        switch locator.locate() {
-        case .ready(let command): _ = try await execute(command, ["uninstall"], timeout: timeouts.uninstall)
-        case .installedNotSetUp(let installPath): throw EngineError.setupNeeded(installPath: installPath.path)
-        case .pluginMissing: throw EngineError.pluginMissing
-        }
-    }
+    /// The plugin's scripts run through sh, so a plugin copy that lost its executable bit still runs.
+    private static let shell = URL(fileURLWithPath: "/bin/sh")
 
     // MARK: Running
 

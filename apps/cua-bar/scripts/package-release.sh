@@ -67,18 +67,32 @@ echo "  ${output_dir}/${zip_name}"
 echo "  ${output_dir}/${sums_name}"
 echo "  checksum and the signature of the unzipped app verified (ditto and unzip)"
 
-built_from=""
-if git -C "$package_dir" rev-parse --short HEAD >/dev/null 2>&1; then
-  built_from=$(git -C "$package_dir" rev-parse --short HEAD)
+# The full id of the commit this was built from: the tag must point at it, not at whatever the
+# default branch has when the release is made.
+commit=""
+uncommitted=""
+if commit=$(git -C "$package_dir" rev-parse --verify HEAD 2>/dev/null); then
   if [[ -n "$(git -C "$package_dir" status --porcelain -- . 2>/dev/null)" ]]; then
-    built_from="$built_from (with uncommitted changes)"
+    uncommitted=" (with uncommitted changes)"
   fi
-  echo "  built from commit $built_from"
+  echo "  built from commit $commit$uncommitted"
+else
+  commit=""
 fi
 
 echo
 echo "Release tag: $tag"
 echo
+if [[ -z "$commit" ]]; then
+  echo "This was not built from a git checkout, so there is no commit for the tag to point at."
+  echo "Package it from the repository before publishing."
+  exit 0
+fi
+if [[ -n "$uncommitted" ]]; then
+  echo "Warning: the build has uncommitted changes, so commit ${commit[1,12]} is not what was zipped."
+  echo "Commit them and package again before publishing."
+  echo
+fi
 echo "Nothing was tagged, pushed or uploaded. To publish (ask first: R22), push the commit this was"
 echo "built from, then run:"
 echo
@@ -89,5 +103,6 @@ release_notes="CUA Bar $version - ad-hoc signed, not notarized. Apple Silicon, m
 echo "  gh release create ${(qq)tag} \\"
 echo "    ${(qq)zip_path} ${(qq)sums_path} \\"
 echo "    --repo $repository \\"
+echo "    --target $commit \\"
 echo "    --title ${(qq)release_title} \\"
 echo "    --notes ${(qq)release_notes}"

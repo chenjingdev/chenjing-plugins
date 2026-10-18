@@ -44,15 +44,21 @@ struct CommandLocator: Sendable {
 
     var marketplacesURL: URL { home.appendingPathComponent(".claude/plugins/known_marketplaces.json") }
 
+    /// What a setup leaves behind, and the first thing the plugin's remover reads: without it the
+    /// remover fails at once, because nothing was installed.
+    var supportBindingURL: URL { home.appendingPathComponent(".local/share/codex-cua/source.json") }
+
     func locate() -> CommandLocation {
         if hasMarker(at: commandURL) { return .ready(commandURL) }
-        if let plugin = registeredPlugin() {
-            // A registry entry whose folder is gone is not an installed plugin.
-            if FileManager.default.fileExists(atPath: plugin.setupScript.path) {
-                return .installedNotSetUp(installPath: plugin.installPath)
-            }
-        }
+        if let plugin = installedPlugin() { return .installedNotSetUp(installPath: plugin.installPath) }
         return .pluginMissing
+    }
+
+    /// The registered plugin when its folder is really there (its `setup.sh` exists). A registry
+    /// entry whose folder is gone is not an installed plugin.
+    func installedPlugin() -> RegisteredPlugin? {
+        guard let plugin = registeredPlugin(), FileManager.default.fileExists(atPath: plugin.setupScript.path) else { return nil }
+        return plugin
     }
 
     /// The registered plugin and its version, or nil when there is no usable record.
@@ -71,25 +77,23 @@ struct CommandLocator: Sendable {
             version: version?.isEmpty == false ? version : nil)
     }
 
-    /// Whether Claude Code already knows the marketplace, from `known_marketplaces.json`. The name
-    /// is looked for as a key at any depth, so the file's exact layout does not matter.
+    /// Whether Claude Code already knows the marketplace. `known_marketplaces.json` is an object
+    /// keyed by marketplace name (each entry has `source`, `installLocation`, `lastUpdated` and
+    /// `autoUpdate`), so only its top-level keys are names.
     func knowsMarketplace(named name: String = CommandLocator.marketplaceName) -> Bool {
         guard
             let data = try? Data(contentsOf: marketplacesURL),
-            let root = try? JSONSerialization.jsonObject(with: data)
+            let marketplaces = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return false }
-        return Self.contains(key: name, in: root, depth: 0)
+        return marketplaces[name] != nil
     }
 
-    private static func contains(key: String, in value: Any, depth: Int) -> Bool {
-        guard depth < 6 else { return false }
-        if let dictionary = value as? [String: Any] {
-            return dictionary[key] != nil || dictionary.values.contains { contains(key: key, in: $0, depth: depth + 1) }
-        }
-        if let array = value as? [Any] {
-            return array.contains { contains(key: key, in: $0, depth: depth + 1) }
-        }
-        return false
+    /// Whether a setup left its support installation, judged as the remover judges it: only a
+    /// binding that is not there at all (`lstat` says ENOENT) means nothing was installed. A link or
+    /// a file the remover would refuse still counts as something.
+    func hasSupportInstallation() -> Bool {
+        var info = stat()
+        return lstat(supportBindingURL.path, &info) == 0 || errno != ENOENT
     }
 
     private func hasMarker(at url: URL) -> Bool {

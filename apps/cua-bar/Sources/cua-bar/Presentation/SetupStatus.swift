@@ -1,6 +1,14 @@
 import Foundation
 
 extension StatusEvaluator {
+    /// The plugin Claude Code registered is the app's version, but `codex-cua` cannot answer
+    /// `status`: it is still an old command (0.6.0 or lower does not know `status` and does not
+    /// hand over to the registered plugin) or a broken one. The plugin's setup replaces it, so this
+    /// is a setup problem, which also lets the card say so while setup runs and after it fails.
+    static let staleCommandProblem = Problem(
+        kind: .setupIncomplete, title: "연결 명령이 옛 판이거나 깨졌어요", nextStep: "고치기를 누르면 연결을 다시 설정해요",
+        warning: nil, fix: .runSetup, fixLabel: "고치기")
+
     /// The card while a setup process runs: not a problem, just something being done.
     static let settingUp = StatusSummary(
         icon: .working, stateLabel: "설정 중", headline: SetupMessages.running,

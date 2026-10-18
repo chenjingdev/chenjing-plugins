@@ -16,9 +16,10 @@ enum RemovalMessages {
     static let loginItemStays = " 로그인 항목은 시스템 설정 > 일반 > 로그인 항목에서 직접 꺼 주세요."
 }
 
-/// The footer's 제거 (R3): asks once, runs `codex-cua uninstall`, takes the login item away, shows
-/// the result and quits. If the remover refuses because a Codex host is running, it says so and
-/// changes nothing else; it never quits Codex. The Claude plugin and the app file stay.
+/// The footer's 제거 (R3): asks once, runs `codex-cua uninstall` (the plugin's `setup.sh uninstall`
+/// when the command is missing or not ours), takes the login item away, shows the result and
+/// quits. If the remover refuses because a Codex host is running, it says so and changes nothing
+/// else; it never quits Codex. The Claude plugin and the app file stay.
 @MainActor
 final class RemovalFlow: ObservableObject {
     enum Phase: Equatable {
@@ -93,7 +94,7 @@ final class RemovalFlow: ObservableObject {
         } catch let error as EngineError {
             switch error {
             case .pluginMissing, .setupNeeded:
-                // The command was never set up: there is nothing to undo.
+                // No plugin, or the remover found nothing a setup installed: there is nothing to undo.
                 undone = false
             default:
                 phase = .refused(await refusal())

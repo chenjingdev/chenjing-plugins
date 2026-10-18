@@ -33,12 +33,18 @@ struct TempHome {
         return install
     }
 
-    /// `known_marketplaces.json` with a marketplace of that name in it, the way Claude Code writes it.
+    /// `known_marketplaces.json` with a marketplace of that name in it, the way Claude Code writes it:
+    /// an object keyed by marketplace name.
     func addMarketplace(_ name: String = "chenjing-plugins") throws {
         let text = """
-        {"\(name)": {"source": {"source": "github", "repo": "chenjingdev/chenjing-plugins"}, "installLocation": "/x/\(name)", "lastUpdated": "2026-10-18T00:00:00.000Z"}}
+        {"\(name)": {"source": {"source": "github", "repo": "chenjingdev/chenjing-plugins"}, "installLocation": "/x/\(name)", "lastUpdated": "2026-10-18T00:00:00.000Z", "autoUpdate": true}}
         """
         try write(text, to: url.appendingPathComponent(".claude/plugins/known_marketplaces.json"))
+    }
+
+    /// What a setup leaves behind and the plugin's remover reads first: `~/.local/share/codex-cua/source.json`.
+    func addSupportInstallation() throws {
+        try write(#"{"plugin_id": "cua@chenjing-plugins"}"#, to: url.appendingPathComponent(".local/share/codex-cua/source.json"))
     }
 
     func write(_ text: String, to file: URL) throws {

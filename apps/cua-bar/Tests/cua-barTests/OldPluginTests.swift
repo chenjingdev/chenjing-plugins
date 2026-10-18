@@ -63,13 +63,21 @@ struct OldPluginTests {
         #expect(rig.system.calls == ["matchPluginVersion"])
     }
 
-    @Test func theSameVersionMeansTheCommandIsReallyBroken() async throws {
+    @Test func theSameVersionMeansTheCommandIsOldOrBrokenAndSetupFixesIt() async throws {
+        // The registry already says 0.7.0 (an update, or the marketplace updating by itself), but
+        // `~/.local/bin/codex-cua` is still 0.5.0's, which exits 2 on `status`.
         let rig = try rig(registered: "0.7.0")
         defer { rig.home.remove() }
         await rig.model.refresh()
         let problem = try #require(rig.model.summary.problem)
-        #expect(problem.kind == .engineUnreadable)
-        #expect(problem.fixLabel == "다시 읽기")
+        #expect(problem.kind == .setupIncomplete)
+        #expect(problem.title == "연결 명령이 옛 판이거나 깨졌어요")
+        #expect(problem.nextStep == "고치기를 누르면 연결을 다시 설정해요")
+        #expect(problem.fix == .runSetup)
+        #expect(problem.fixLabel == "고치기")
+        #expect(rig.model.summary.warning == nil, "nothing the command printed")
+        #expect(rig.model.summary.icon == .problem)
+        #expect(rig.model.content == nil)
     }
 
     @Test func withoutAKnownRegisteredVersionItStaysAReadProblem() async throws {
@@ -148,6 +156,116 @@ struct OldPluginTests {
         #expect(model.summary.problem?.kind == .engineUnreadable)
     }
 
+    // MARK: Updating away from an old command
+
+    /// Records what the engine client runs and runs it for real: here only stand-ins in a throwaway home.
+    private final class RecordingRunner: ProcessRunning, @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [StepRunner.Call] = []
+        private let base = SystemProcessRunner()
+
+        var calls: [StepRunner.Call] { lock.withLock { recorded } }
+
+        func run(_ executable: URL, arguments: [String], timeout: Duration) async throws -> ProcessOutput {
+            lock.withLock { recorded.append(.init(executable: executable.path, arguments: arguments, timeout: timeout)) }
+            return try await base.run(executable, arguments: arguments, timeout: timeout)
+        }
+    }
+
+    private struct UpdateRig {
+        var home: TempHome
+        var model: CUABarViewModel
+        var engineRunner: RecordingRunner
+
+        /// The folder `claude plugin update` registers 0.7.0 in.
+        var newFolder: URL { home.url.appendingPathComponent(".claude/plugins/cache/chenjing-plugins/cua/0.7.0") }
+    }
+
+    /// 0.5.0 is registered and its command cannot answer `status`. `claude plugin update` (a
+    /// stand-in) registers 0.7.0 in a new folder, and the setup at the end of that flow fails, so
+    /// the old command stays. The new folder's `setup.sh` is a stand-in that puts a command that
+    /// answers `status` in place, as 0.7.0's setup replaces the old command.
+    private func updateRig() throws -> UpdateRig {
+        let home = try TempHome()
+        try home.writeCommand(Self.oldCommand)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: home.command.path)
+        try home.installPlugin(version: "0.5.0")
+        let answer = try #require(Bundle.module.url(forResource: "status-ready", withExtension: "json", subdirectory: "Fixtures")).path
+        let command = home.command.path
+        let newSetup = """
+        #!/bin/sh
+        cat > '\(command)' <<'EOF'
+        #!/bin/sh
+        # codex-cua authored command v1
+        cat '\(answer)'
+        EOF
+        chmod 755 '\(command)'
+        """
+        let systemRunner = StepRunner { call in
+            if call.isClaude, call.verb == "plugin update" {
+                let folder = try home.installPlugin(version: "0.7.0")
+                try home.write(newSetup, to: folder.appendingPathComponent("setup.sh"))
+            }
+            // The flow's own setup fails, as when pip cannot install anything: the old command stays.
+            return call.executable == "/bin/sh" ? StepRunner.failed() : StepRunner.ok()
+        }
+        let claude = home.url.appendingPathComponent(".local/bin/claude").path
+        let setup = SetupActivity()
+        let locator = CommandLocator(home: home.url)
+        let actions = LiveSystemActions(
+            locator: locator, claude: ClaudeCLILocator(home: home.url, isExecutableFile: { $0 == claude }),
+            runner: systemRunner, opener: FakeOpener(), appVersion: "0.7.0", setup: setup)
+        let engineRunner = RecordingRunner()
+        let model = CUABarViewModel(
+            engine: CodexCUAEngineClient(locator: locator, runner: engineRunner), appVersion: "0.7.0", systemActions: actions,
+            pasteboard: RecordingPasteboard(), clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: .seconds(3600),
+            sleep: ManualSleeper().sleep, setupActivity: setup, registeredPluginVersion: { locator.registeredPlugin()?.version })
+        return UpdateRig(home: home, model: model, engineRunner: engineRunner)
+    }
+
+    @Test func anUpdateWhoseSetupFailedStillOffersTryAgainAfterTheNextRead() async throws {
+        let rig = try updateRig()
+        defer { rig.home.remove() }
+        await rig.model.refresh()
+        #expect(rig.model.summary.fix == .matchPluginVersion, "0.5.0 against the app's 0.7.0")
+
+        let outcome = await rig.model.perform(.matchPluginVersion)
+        #expect(outcome == ActionOutcome(kind: .failure, message: PluginMessages.setupFailed))
+        #expect(rig.model.summary.headline == "연결 설정에 실패했어요")
+        #expect(rig.model.summary.fixLabel == "다시 하기")
+
+        // The next read: 0.7.0 is registered now, and the old command still exits 2.
+        await rig.model.refresh()
+        let problem = try #require(rig.model.summary.problem)
+        #expect(problem.kind == .setupIncomplete)
+        #expect(problem.title == "연결 설정에 실패했어요")
+        #expect(problem.fix == .runSetup)
+        #expect(problem.fixLabel == "다시 하기")
+        #expect(rig.model.summary.warning == nil)
+    }
+
+    @Test func tryAgainRunsTheNewFoldersSetupScriptNeverTheOldCommandsSetup() async throws {
+        let rig = try updateRig()
+        defer { rig.home.remove() }
+        await rig.model.refresh()
+        await rig.model.perform(.matchPluginVersion)
+        await rig.model.refresh()
+        let retry = try #require(rig.model.summary.fix)
+        #expect(retry == .runSetup)
+
+        let outcome = await rig.model.perform(retry)
+        let setups = rig.engineRunner.calls.filter { $0.arguments.contains("setup") }
+        #expect(setups == [.init(
+            executable: "/bin/sh", arguments: [rig.newFolder.appendingPathComponent("setup.sh").path, "setup"],
+            timeout: EngineTimeouts().setup)])
+        #expect(
+            rig.engineRunner.calls.allSatisfy { $0.executable != rig.home.command.path || $0.arguments == ["status", "--json"] },
+            "the old command is only ever asked for its status")
+        #expect(outcome == ActionOutcome(kind: .success, message: "연결 설정을 마쳤어요"))
+        #expect(rig.model.summary.problem == nil, "the command the new setup put in place answers")
+        #expect(rig.model.content != nil)
+    }
+
     // MARK: The evaluator's rule
 
     @Test(arguments: [
@@ -170,15 +288,29 @@ struct OldPluginTests {
     }
 
     @Test(arguments: [
-        EngineError.timeout, .launchFailed("nope"), .pluginMissing, .setupNeeded(installPath: "/x"), .unsupportedSchema(2),
+        EngineError.commandFailed(exitCode: 2, message: "usage"), .commandFailed(exitCode: 1, message: "SECRET-STDERR"), .invalidOutput("EngineStatus"),
     ])
-    func otherErrorsAreNotTurnedIntoAVersionProblem(error: EngineError) {
-        let with = StatusEvaluator.summary(for: error, appVersion: "0.7.0", registeredPluginVersion: "0.5.0")
-        #expect(with == StatusEvaluator.summary(for: error))
+    func aFailingCommandWithTheSameRegisteredVersionIsTheSetupProblem(error: EngineError) {
+        let summary = StatusEvaluator.summary(for: error, appVersion: "0.7.0", registeredPluginVersion: "0.7.0")
+        #expect(summary.problem?.kind == .setupIncomplete)
+        #expect(summary.problem?.fix == .runSetup)
+        #expect(summary.problem?.fixLabel == "고치기")
+        #expect(summary.warning == nil)
+        #expect(!summary.headline.contains("SECRET") && !summary.nextStep.contains("SECRET"))
     }
 
-    @Test(arguments: [(nil, "0.5.0"), ("0.7.0", nil), ("0.7.0", "0.7.0"), ("", "0.5.0"), ("0.7.0", " ")] as [(String?, String?)])
-    func withoutTwoDifferentVersionsItIsAReadProblem(app: String?, registered: String?) {
+    @Test(arguments: [
+        EngineError.timeout, .launchFailed("nope"), .pluginMissing, .setupNeeded(installPath: "/x"), .unsupportedSchema(2),
+    ])
+    func otherErrorsAreNotTurnedIntoAVersionOrSetupProblem(error: EngineError) {
+        for registered in ["0.5.0", "0.7.0"] {
+            let with = StatusEvaluator.summary(for: error, appVersion: "0.7.0", registeredPluginVersion: registered)
+            #expect(with == StatusEvaluator.summary(for: error))
+        }
+    }
+
+    @Test(arguments: [(nil, "0.5.0"), (nil, nil), ("0.7.0", nil), ("", "0.5.0"), ("0.7.0", " ")] as [(String?, String?)])
+    func withoutBothVersionsItIsAReadProblem(app: String?, registered: String?) {
         let summary = StatusEvaluator.summary(for: .commandFailed(exitCode: 2, message: "usage"), appVersion: app, registeredPluginVersion: registered)
         #expect(summary.problem?.kind == .engineUnreadable)
         #expect(summary.problem?.fixLabel == "다시 읽기")
@@ -226,17 +358,21 @@ struct OldPluginTests {
 
     // MARK: The marketplace file
 
-    @Test func theMarketplaceIsFoundWhereverTheFileKeepsItsName() throws {
+    @Test func theMarketplaceIsAKeyAtTheTopOfTheFile() throws {
         let home = try TempHome()
         defer { home.remove() }
         let file = home.url.appendingPathComponent(".claude/plugins/known_marketplaces.json")
         #expect(!CommandLocator(home: home.url).knowsMarketplace(), "no file")
         try home.addMarketplace()
         #expect(CommandLocator(home: home.url).knowsMarketplace())
+        try home.write(#"{"claude-plugins-official": {"source": {}}, "chenjing-plugins": {"source": {}}}"#, to: file)
+        #expect(CommandLocator(home: home.url).knowsMarketplace(), "among others")
         try home.write(#"{"version": 2, "marketplaces": {"chenjing-plugins": {"source": {}}}}"#, to: file)
-        #expect(CommandLocator(home: home.url).knowsMarketplace(), "nested")
+        #expect(!CommandLocator(home: home.url).knowsMarketplace(), "a name further down is not a marketplace of this file")
+        try home.write(#"{"other": {"source": {"chenjing-plugins": {}}}}"#, to: file)
+        #expect(!CommandLocator(home: home.url).knowsMarketplace(), "nor is a key inside an entry")
         try home.write(#"[{"name": "x"}, {"chenjing-plugins": {}}]"#, to: file)
-        #expect(CommandLocator(home: home.url).knowsMarketplace(), "in a list")
+        #expect(!CommandLocator(home: home.url).knowsMarketplace(), "a list is not the file's shape")
     }
 
     @Test func otherMarketplacesOrABrokenFileAreNotThisOne() throws {
@@ -251,5 +387,21 @@ struct OldPluginTests {
         #expect(!CommandLocator(home: home.url).knowsMarketplace())
         try home.write("{}", to: file)
         #expect(!CommandLocator(home: home.url).knowsMarketplace())
+    }
+
+    // MARK: What a setup left behind
+
+    @Test func whatASetupLeftIsSeenTheWayThePluginsRemoverSeesIt() throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let locator = CommandLocator(home: home.url)
+        #expect(!locator.hasSupportInstallation(), "no folder")
+        try FileManager.default.createDirectory(at: locator.supportBindingURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        #expect(!locator.hasSupportInstallation(), "a folder without its binding")
+        try home.addSupportInstallation()
+        #expect(locator.hasSupportInstallation())
+        try FileManager.default.removeItem(at: locator.supportBindingURL)
+        try FileManager.default.createSymbolicLink(atPath: locator.supportBindingURL.path, withDestinationPath: "/nonexistent/source.json")
+        #expect(locator.hasSupportInstallation(), "a dangling link makes the remover refuse; it is not nothing")
     }
 }
