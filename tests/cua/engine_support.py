@@ -141,10 +141,10 @@ class Machine:
                 raise PermissionError(pid)
             if pid not in self.procs:
                 raise ProcessLookupError(pid)
-            if number == signal.SIGTERM and pid in self.ignore_term:
-                return
             if pid in self.on_signal:
                 self.on_signal[pid](number)
+            if number == signal.SIGTERM and pid in self.ignore_term:
+                return
             if number in (signal.SIGTERM, signal.SIGKILL):
                 self.procs.pop(pid, None)
 
@@ -462,6 +462,27 @@ class EngineCase(unittest.TestCase):
         else:
             self.machine.add(repl+1, repl, self.commands.node_repl, start=start, rss_kb=rss[2])
         return repl
+
+    def bridge_with_runtime(self, name='a1', pid=4242, owner=500, repl=2000, session=SESSION_A, cwd='/work/x',
+                            start=NOW-900, last_call=20, relay_last_call=25, scopes=True, busy=False, relay_scopes=None):
+        """A Claude bridge and the runtime that serves its thread (cua-repl, relay, runtime)."""
+        self.add_claude(owner)
+        self.add_bridge(pid, owner, start)
+        self.add_runtime(repl, start+10)
+        bridge_directory = self.state.bridge(name, pid, start, owner_pid=owner, cwd=cwd, session_id=session,
+            last_call_at=iso(at(last_call)) if last_call is not None else None, busy=busy,
+            scopes=[State.scope(session)] if scopes else [], cleanup='open' if scopes else 'none')
+        relay_directory = self.state.relay('r'+name, repl+1, start+10, root_pid=repl, runtime_pid=repl+2, cwd=cwd,
+            last_call_at=iso(at(relay_last_call)) if relay_last_call is not None else None,
+            scopes=[State.scope(session)] if relay_scopes is None and scopes else (relay_scopes or []))
+        return bridge_directory, relay_directory
+
+    @staticmethod
+    def update(directory, kind, **fields):
+        path = directory/(kind+'.json')
+        data = json.loads(path.read_text())
+        data.update(fields)
+        path.write_text(json.dumps(data))
 
     def serve(self, directory, pid, started_at, handler):
         server = ControlServer(directory, pid, started_at, handler)

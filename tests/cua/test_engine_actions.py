@@ -1,0 +1,518 @@
+"""Release, stop and restart: results, reasons, order of events and what is never touched."""
+import json
+import signal
+import subprocess
+import time
+import types
+import unittest
+from unittest.mock import patch
+
+import engine_actions
+from engine_core import iso
+from engine_support import ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase, State, at
+
+BRIDGE_ID = 'claude-4242-%d' % (NOW-900)
+RELAY_ID = 'codex-3001-%d' % (NOW-2000)
+UNRECORDED_ID = 'codex-4000-%d' % (NOW-5000)
+DONE = {'released': True, 'reason': None, 'scope_count': 1}
+
+
+class ActionCase(EngineCase):
+    def setUp(self):
+        super().setUp()
+        self.start_world()
+        self.events = []     # in order: ('release', pid) when a writer was asked, ('signal', pid, number) when signalled
+
+    def ctx(self, **settings):
+        return self.context(**settings)
+
+    def writer(self, directory, pid, started_at, reply, delay=0.0):
+        def handler(request):
+            self.events.append(('release', pid))
+            if delay:
+                time.sleep(delay)
+            return reply(request) if callable(reply) else reply
+        return self.serve(directory, pid, started_at, handler)
+
+    def watch(self, *pids):
+        for pid in pids:
+            self.machine.on_signal[pid] = lambda number, pid=pid: self.events.append(('signal', pid, number))
+
+    def codex_relay(self, reply=DONE):
+        self.add_runtime(3000, NOW-2000)
+        directory = self.state.relay('r2', 3001, NOW-2000, root_pid=3000, runtime_pid=3002, cwd='/work/codex',
+                                     scopes=[State.scope(SESSION_B)])
+        return self.writer(directory, 3001, NOW-2000, reply)
+
+    def unrecorded_runtime(self):
+        self.add_runtime(4000, NOW-5000, relay=False)
+
+
+class ReleaseTests(ActionCase):
+    def release(self, wanted):
+        return engine_actions.release_connection(self.ctx(), wanted)
+
+    def test_a_claude_connection_is_released_through_its_own_bridge_only(self):
+        directory, relay_dir = self.bridge_with_runtime()
+        bridge = self.writer(directory, 4242, NOW-900, {'released': True, 'reason': None, 'scope_count': 2})
+        relay = self.writer(relay_dir, 2001, NOW-890, DONE)
+        self.assertEqual(self.release(BRIDGE_ID), {'ok': True, 'released': True, 'reason': None, 'scope_count': 2})
+        self.assertEqual(bridge.requests, [{'action': 'release', 'pid': 4242, 'started_at': NOW-900}])
+        self.assertEqual(relay.requests, [])
+
+    def test_a_codex_connection_is_released_through_its_relay(self):
+        relay = self.codex_relay({'released': True, 'reason': None, 'scope_count': 3})
+        self.assertEqual(self.release(RELAY_ID), {'ok': True, 'released': True, 'reason': None, 'scope_count': 3})
+        self.assertEqual(relay.requests, [{'action': 'release', 'pid': 3001, 'started_at': NOW-2000}])
+
+    def test_a_refused_release_passes_its_reason_and_count_through(self):
+        for reply, expected in (
+                ({'released': False, 'reason': 'request_in_flight', 'scope_count': 0}, ('request_in_flight', 0)),
+                ({'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 1}, ('cleanup_not_confirmed', 1)),
+                ({'released': False, 'reason': 'cleanup_tool_unavailable', 'scope_count': 0}, ('cleanup_not_confirmed', 0)),
+                ({'released': False, 'scopeCount': 2}, ('cleanup_not_confirmed', 2)),
+                ({'released': False, 'reason': 'Some Text! with spaces', 'scope_count': 'x'}, ('cleanup_not_confirmed', 0)),
+                ({'released': 'yes', 'reason': None, 'scope_count': 1}, ('cleanup_not_confirmed', 1))):
+            self.setUp()
+            self.codex_relay(reply)
+            result = self.release(RELAY_ID)
+            self.assertEqual((result['ok'], result['released'], result['reason'], result['scope_count']),
+                             (False, False, expected[0], expected[1]), reply)
+
+    def test_nothing_to_release_is_no_failure_when_a_verified_writer_says_so(self):
+        self.codex_relay({'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
+        self.assertEqual(self.release(RELAY_ID), {'ok': True, 'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
+
+    def test_a_connection_without_a_verified_control_endpoint_has_no_trusted_scope(self):
+        self.unrecorded_runtime()
+        self.assertEqual(self.release(UNRECORDED_ID),
+                         {'ok': False, 'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
+        directory, _ = self.bridge_with_runtime()           # a record whose socket does not exist
+        self.assertEqual(self.release(BRIDGE_ID)['reason'], 'no_trusted_scope')
+
+    def test_unknown_dead_or_reused_connections_are_not_found(self):
+        directory, _ = self.bridge_with_runtime()
+        bridge = self.writer(directory, 4242, NOW-900, DONE)
+        for wanted in ('claude-9999-%d' % (NOW-900), 'claude-4242-%d' % (NOW-899-5), 'codex-4242-%d' % (NOW-900),
+                       'claude-4242', 'garbage', '', 'claude-4242-%d; rm -rf' % (NOW-900)):
+            self.assertEqual(self.release(wanted), {'ok': False, 'released': False, 'reason': 'not_found', 'scope_count': 0}, wanted)
+        self.assertEqual(bridge.requests, [])
+        self.machine.remove(4242)
+        self.assertEqual(self.release(BRIDGE_ID)['reason'], 'not_found')
+
+    def test_a_writer_that_does_not_answer_or_cannot_be_reached(self):
+        directory = self.codex_relay(lambda request: None).path.parent        # closes without an answer
+        self.assertEqual(self.release(RELAY_ID)['reason'], 'relay_unavailable')
+        self.servers[-1].close()
+        self.assertEqual(self.release(RELAY_ID)['reason'], 'relay_unavailable')       # stale socket file
+        bridge_dir, _ = self.bridge_with_runtime()
+        self.writer(bridge_dir, 4242, NOW-901, DONE)                                  # does not know this identity
+        self.assertEqual(self.release(BRIDGE_ID)['reason'], 'cleanup_not_confirmed')
+
+    def test_a_writer_that_is_too_slow_times_out(self):
+        self.codex_relay(DONE)
+        self.servers[-1].handler = lambda request: time.sleep(1.5) or DONE
+        with patch.object(engine_actions, 'RELEASE_TIMEOUT', 0.3):
+            self.assertEqual(self.release(RELAY_ID)['reason'], 'timeout')
+
+    def test_a_relay_has_time_to_finish_a_release(self):
+        # 2.5 s waiting for a running call, then up to 10 s: the reply timeout has to be longer than that.
+        self.assertGreaterEqual(engine_actions.RELEASE_TIMEOUT, 13)
+
+
+class ReleaseEndedTests(ActionCase):
+    def test_only_ended_connections_are_released_never_one_whose_owner_is_alive(self):
+        directory, _ = self.bridge_with_runtime()
+        ended = self.writer(directory, 4242, NOW-900, DONE)
+        live_codex = self.codex_relay()
+        self.machine.remove(500)                                    # the Claude Code process is gone
+        result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result, {'ok': True, 'results': [{'connection_id': BRIDGE_ID, 'released': True, 'reason': None}]})
+        self.assertEqual(len(ended.requests), 1)
+        self.assertEqual(live_codex.requests, [])
+
+    def test_a_runtime_of_a_dead_bridge_and_an_unrecorded_ended_connection_are_both_listed(self):
+        self.add_runtime(2000, NOW-890)
+        relay_dir = self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_A)])
+        orphan = self.writer(relay_dir, 2001, NOW-890, DONE)
+        self.state.bridge('d1', 7001, NOW-5000, owner_pid=501, session_id=SESSION_A, scopes=[State.scope(SESSION_A)])
+        self.add_runtime(4000, NOW-5000, relay=False, parent=1)
+        results = engine_actions.release_ended(self.ctx())
+        self.assertEqual(results['ok'], False)
+        self.assertEqual({item['connection_id']: (item['released'], item['reason']) for item in results['results']
+                          if item['connection_id'].startswith(('claude-2001', 'codex-4000'))},
+                         {'claude-2001-%d' % (NOW-890): (True, None), UNRECORDED_ID: (False, 'no_trusted_scope')})
+        self.assertEqual(len(orphan.requests), 1)
+
+    def test_nothing_to_release_counts_as_fine(self):
+        self.add_runtime(3000, NOW-2000, parent=1)
+        directory = self.state.relay('r2', 3001, NOW-2000, root_pid=3000, runtime_pid=3002)
+        self.writer(directory, 3001, NOW-2000, {'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
+        self.assertEqual(engine_actions.release_ended(self.ctx()), {'ok': True, 'results': [
+            {'connection_id': RELAY_ID, 'released': False, 'reason': 'no_trusted_scope'}]})
+
+    def test_nothing_ended_nothing_done(self):
+        self.codex_relay()
+        self.assertEqual(engine_actions.release_ended(self.ctx()), {'ok': True, 'results': []})
+        self.assertEqual(self.events, [])
+
+
+class SessionReleaseInEndedTests(ActionCase):
+    """release --ended also frees the sessions of dead bridges, through the host."""
+
+    def setUp(self):
+        super().setUp()
+        import host_mcp
+        from unittest.mock import AsyncMock
+        from engine_support import DECOY, FakeHost
+        self.host_socket()
+        self.chrome_plugin()
+        self.hosts = []
+
+        async def js(params):
+            return {'content': [{'type': 'text', 'text': DECOY+'\n@@count 2\n'}]}
+
+        async def connect(**kwargs):
+            host = FakeHost({'js': js})
+            self.hosts.append(host)
+            return host
+        patcher = patch.object(host_mcp, 'unix_connect', AsyncMock(side_effect=connect))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def dead(self, name, pid, session, kind='bridge'):
+        builder = self.state.bridge if kind == 'bridge' else self.state.relay
+        return builder(name, pid, NOW-5000, cwd='/work/dead', scopes=[State.scope(session, last=at(1000))], cleanup='open')
+
+    def test_sessions_of_dead_bridges_are_released_and_those_of_codex_threads_are_left_for_a_click(self):
+        bridge = self.dead('d1', 7001, SESSION_C)
+        relay = self.dead('d2', 7101, SESSION_D, kind='relay')
+        result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result, {'ok': True, 'results': [{'connection_id': 'claude-7001-%d' % (NOW-5000), 'released': True, 'reason': None}]})
+        self.assertFalse(bridge.exists())
+        self.assertTrue(relay.exists())
+        self.assertNotIn(SESSION_D, json.dumps([call for host in self.hosts for call in host.calls]))
+
+    def test_a_dead_bridge_with_two_sessions_is_one_result_that_reports_the_first_failure(self):
+        self.state.bridge('d1', 7001, NOW-5000, scopes=[State.scope(SESSION_C, last=at(1000)), State.scope(SESSION_D, last=at(900))],
+                          cleanup='open')
+        self.add_runtime(2000, NOW-890)
+        self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_D)])
+        result = engine_actions.release_ended(self.ctx())
+        item = [entry for entry in result['results'] if entry['connection_id'].startswith('claude-7001')]
+        self.assertEqual(item, [{'connection_id': 'claude-7001-%d' % (NOW-5000), 'released': False, 'reason': 'session_live'}])
+        self.assertFalse(result['ok'])
+
+    def test_without_a_host_the_result_says_why(self):
+        self.dead('d1', 7001, SESSION_C)
+        self.machine.remove(1200)
+        result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result['results'], [{'connection_id': 'claude-7001-%d' % (NOW-5000), 'released': False, 'reason': 'not_running'}])
+        self.assertEqual(self.hosts, [])
+
+    def test_the_order_is_connections_first_then_dead_bridges(self):
+        self.add_runtime(3000, NOW-2000, parent=1)
+        directory = self.state.relay('r2', 3001, NOW-2000, root_pid=3000, runtime_pid=3002, scopes=[State.scope(SESSION_B)])
+        self.writer(directory, 3001, NOW-2000, DONE)
+        self.dead('d1', 7001, SESSION_C)
+        ids = [item['connection_id'] for item in engine_actions.release_ended(self.ctx())['results']]
+        self.assertEqual(ids, [RELAY_ID, 'claude-7001-%d' % (NOW-5000)])
+
+
+class StopTests(ActionCase):
+    def stop(self, wanted, force=False):
+        return engine_actions.stop_connection(self.ctx(), wanted, force=force)
+
+    def test_release_comes_first_then_the_bridge_is_asked_to_end_and_nothing_else_is_signalled(self):
+        directory, _ = self.bridge_with_runtime()
+        self.writer(directory, 4242, NOW-900, DONE)
+        self.watch(4242, 500, 1000, 1100, 2000, 2001, 2002)
+        result = self.stop(BRIDGE_ID)
+        self.assertEqual(result, {'ok': True, 'stopped': True, 'released': True, 'reason': None})
+        self.assertEqual(self.events, [('release', 4242), ('signal', 4242, signal.SIGTERM)])
+        self.assertEqual(self.machine.signals, [(4242, signal.SIGTERM)])
+        self.assertNotIn(4242, self.machine.procs)
+
+    def test_a_codex_connection_with_a_relay_signals_the_relay(self):
+        self.codex_relay()
+        result = self.stop(RELAY_ID)
+        self.assertEqual(result, {'ok': True, 'stopped': True, 'released': True, 'reason': None})
+        self.assertEqual(self.machine.signals, [(3001, signal.SIGTERM)])
+
+    def test_without_a_relay_the_runtimes_cua_repl_is_signalled(self):
+        self.unrecorded_runtime()
+        result = self.stop(UNRECORDED_ID)
+        self.assertEqual(result, {'ok': True, 'stopped': True, 'released': False, 'reason': 'no_trusted_scope'})
+        self.assertEqual(self.machine.signals, [(4000, signal.SIGTERM)])
+
+    def test_a_refused_release_does_not_keep_the_connection_from_stopping(self):
+        directory, _ = self.bridge_with_runtime()
+        self.writer(directory, 4242, NOW-900, {'released': False, 'reason': 'request_in_flight', 'scope_count': 0})
+        result = self.stop(BRIDGE_ID)
+        self.assertEqual(result, {'ok': True, 'stopped': True, 'released': False, 'reason': 'request_in_flight'})
+        self.assertEqual(self.machine.signals, [(4242, signal.SIGTERM)])
+
+    def test_a_process_that_ignores_sigterm_is_left_running_without_force_after_the_grace_period(self):
+        self.unrecorded_runtime()
+        self.machine.ignore_term.add(4000)
+        began = self.machine.now
+        result = self.stop(UNRECORDED_ID)
+        self.assertEqual(result, {'ok': False, 'stopped': False, 'released': False, 'reason': 'timeout'})
+        self.assertEqual(self.machine.signals, [(4000, signal.SIGTERM)])
+        self.assertGreaterEqual(self.machine.now-began, engine_actions.STOP_GRACE)
+        self.assertIn(4000, self.machine.procs)
+
+    def test_force_waits_out_the_grace_period_before_it_kills(self):
+        self.unrecorded_runtime()
+        self.machine.ignore_term.add(4000)
+        killed_at = []
+        self.machine.on_signal[4000] = lambda number: killed_at.append((number, self.machine.now))
+        began = self.machine.now
+        result = self.stop(UNRECORDED_ID, force=True)
+        self.assertEqual(result['stopped'], True)
+        self.assertEqual([item[0] for item in killed_at], [signal.SIGTERM, signal.SIGKILL])
+        self.assertGreaterEqual(killed_at[1][1]-began, engine_actions.STOP_GRACE)
+        self.assertNotIn(4000, self.machine.procs)
+
+    def test_force_does_not_kill_what_already_ended_on_its_own(self):
+        self.unrecorded_runtime()
+        self.machine.later(2.0, lambda: self.machine.remove(4000))
+        self.machine.ignore_term.add(4000)
+        self.assertTrue(self.stop(UNRECORDED_ID, force=True)['stopped'])
+        self.assertEqual(self.machine.signals, [(4000, signal.SIGTERM)])
+
+    def test_a_signal_that_is_not_permitted_is_a_failure_not_a_crash(self):
+        self.unrecorded_runtime()
+        self.machine.deny.add(4000)
+        self.assertEqual(self.stop(UNRECORDED_ID, force=True),
+                         {'ok': False, 'stopped': False, 'released': False, 'reason': 'permission_denied'})
+        self.assertEqual(self.machine.signals, [(4000, signal.SIGTERM)])
+
+    def test_unknown_connections_are_not_found_and_nothing_is_signalled(self):
+        self.unrecorded_runtime()
+        for wanted in ('codex-4000-%d' % (NOW-5001-5), 'codex-4001-%d' % (NOW-5000), 'codex-1100-%d' % (NOW-7100),
+                       'claude-1000-%d' % (NOW-7200), 'whatever'):
+            self.assertEqual(self.stop(wanted, force=True), {'ok': False, 'stopped': False, 'released': False, 'reason': 'not_found'})
+        self.assertEqual(self.machine.signals, [])
+
+    def test_a_pid_that_was_reused_while_the_release_ran_is_never_signalled(self):
+        directory, _ = self.bridge_with_runtime()
+
+        def release_then_the_process_is_replaced(request):
+            self.machine.procs[4242]['start'] = NOW-3        # another process has this pid now
+            return DONE
+        self.writer(directory, 4242, NOW-900, release_then_the_process_is_replaced)
+        result = self.stop(BRIDGE_ID, force=True)
+        self.assertEqual(result, {'ok': True, 'stopped': True, 'released': True, 'reason': None})
+        self.assertEqual(self.machine.signals, [])
+        self.assertIn(4242, self.machine.procs)
+
+    def test_a_pid_that_is_reused_while_waiting_does_not_get_the_kill(self):
+        self.unrecorded_runtime()
+        self.machine.ignore_term.add(4000)
+
+        def replaced(number):
+            if number == signal.SIGTERM:
+                self.machine.later(1.0, lambda: self.machine.procs[4000].update(start=NOW-1))
+        self.machine.on_signal[4000] = replaced
+        result = self.stop(UNRECORDED_ID, force=True)
+        self.assertTrue(result['stopped'])
+        self.assertEqual(self.machine.signals, [(4000, signal.SIGTERM)])
+
+    def test_a_connection_that_vanishes_before_the_signal_counts_as_stopped(self):
+        directory, _ = self.bridge_with_runtime()
+        self.writer(directory, 4242, NOW-900, lambda request: self.machine.remove(4242) or DONE)
+        result = self.stop(BRIDGE_ID)
+        self.assertEqual((result['stopped'], result['released']), (True, True))
+        self.assertEqual(self.machine.signals, [])
+
+    def test_a_connection_that_is_also_the_engine_or_one_of_its_ancestors_is_protected(self):
+        self.add_runtime(4000, NOW-5000, relay=False)
+        self.machine.add(ENGINE_PID, 4000, '/usr/bin/python3 setup.py stop')    # the engine runs below this runtime
+        result = self.stop(UNRECORDED_ID, force=True)
+        self.assertEqual(result, {'ok': False, 'stopped': False, 'released': False, 'reason': 'protected'})
+        self.assertEqual(self.machine.signals, [])
+
+
+class GroupStopTests(ActionCase):
+    def world(self):
+        """Two bridges (one with a relay runtime), a codex relay and an unrecorded runtime, next to everything
+        that must never be touched."""
+        directory, relay_dir = self.bridge_with_runtime()
+        self.writer(directory, 4242, NOW-900, DONE)
+        self.writer(relay_dir, 2001, NOW-890, DONE)
+        self.add_bridge(4300, 500, NOW-700, command=self.commands.old_bridge)
+        self.codex_relay()
+        self.unrecorded_runtime()
+        self.machine.add(3500, 1, self.commands.cmux_serve)
+        self.machine.add(3501, 500, self.commands.cmux_mcp)
+        self.machine.add(5000, 1, self.commands.chrome)
+        self.machine.add(2100, 1100, self.commands.node_repl)          # the user's own node_repl
+        self.machine.add(6000, 1, '/bin/zsh')
+        self.machine.add(ENGINE_PID, 6000, '/usr/bin/python3 setup.py stop')
+        self.untouchable = {1000, 1100, 1200, 500, 3500, 3501, 5000, 2100, 6000, ENGINE_PID, 2000, 2001, 2002}
+        self.watch(4242, 4300, 3001, 4000)
+
+    def test_all_stops_every_connection_and_only_connections(self):
+        self.world()
+        result = engine_actions.stop_group(self.ctx(), 'all')
+        self.assertEqual((result['ok'], result['stopped'], result['failed']), (True, 4, 0))
+        self.assertEqual(sorted(item['connection_id'] for item in result['results']),
+                         sorted([BRIDGE_ID, 'claude-4300-%d' % (NOW-700), RELAY_ID, UNRECORDED_ID]))
+        signalled = {pid for pid, _ in self.machine.signals}
+        self.assertEqual(signalled, {4242, 4300, 3001, 4000})
+        self.assertFalse(signalled & self.untouchable)
+        self.assertEqual({number for _, number in self.machine.signals}, {signal.SIGTERM})
+
+    def test_every_release_comes_before_the_first_signal(self):
+        self.world()
+        engine_actions.stop_group(self.ctx(), 'all')
+        kinds = [event[0] for event in self.events]
+        self.assertEqual(kinds.count('release'), 2)                     # the two writers that exist and are asked
+        self.assertLess(max(index for index, kind in enumerate(kinds) if kind == 'release'),
+                        min(index for index, kind in enumerate(kinds) if kind == 'signal'))
+
+    def test_claude_only_and_codex_only(self):
+        self.world()
+        result = engine_actions.stop_group(self.ctx(), 'claude')
+        self.assertEqual((result['stopped'], result['failed']), (2, 0))
+        self.assertEqual({pid for pid, _ in self.machine.signals}, {4242, 4300})
+        self.machine.signals.clear()
+        result = engine_actions.stop_group(self.ctx(), 'codex')
+        self.assertEqual({pid for pid, _ in self.machine.signals}, {3001, 4000})
+        self.assertEqual(sorted(item['connection_id'] for item in result['results']), sorted([RELAY_ID, UNRECORDED_ID]))
+
+    def test_a_runtime_that_belongs_to_a_claude_connection_is_not_stopped_by_codex_only(self):
+        directory, relay_dir = self.bridge_with_runtime()
+        self.writer(relay_dir, 2001, NOW-890, DONE)
+        result = engine_actions.stop_group(self.ctx(), 'codex')
+        self.assertEqual(result, {'ok': True, 'stopped': 0, 'failed': 0, 'results': []})
+        self.assertEqual(self.machine.signals, [])
+
+    def test_the_result_has_one_entry_per_connection_and_failures_are_counted(self):
+        self.world()
+        self.machine.ignore_term.add(4000)
+        result = engine_actions.stop_group(self.ctx(), 'all')
+        self.assertEqual((result['ok'], result['stopped'], result['failed']), (False, 3, 1))
+        by_id = {item['connection_id']: item for item in result['results']}
+        self.assertEqual(by_id[UNRECORDED_ID], {'connection_id': UNRECORDED_ID, 'stopped': False, 'released': False, 'reason': 'timeout'})
+        self.assertEqual(by_id[BRIDGE_ID], {'connection_id': BRIDGE_ID, 'stopped': True, 'released': True, 'reason': None})
+
+    def test_force_kills_only_the_stragglers_and_only_after_the_grace_period(self):
+        self.world()
+        self.machine.ignore_term.add(4000)
+        result = engine_actions.stop_group(self.ctx(), 'all', force=True)
+        self.assertEqual((result['stopped'], result['failed']), (4, 0))
+        self.assertEqual([signal for pid, signal in self.machine.signals if pid == 4000], [signal.SIGTERM, signal.SIGKILL])
+        self.assertEqual({pid for pid, number in self.machine.signals if number == signal.SIGKILL}, {4000})
+
+    def test_an_empty_group_is_fine(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.assertEqual(engine_actions.stop_group(self.ctx(), 'all'), {'ok': True, 'stopped': 0, 'failed': 0, 'results': []})
+
+    def test_the_whole_machine_survives_a_group_stop(self):
+        self.world()
+        before = {pid for pid in self.machine.procs}
+        engine_actions.stop_group(self.ctx(), 'all', force=True)
+        self.assertEqual(before-set(self.machine.procs), {4242, 4300, 3001, 4000})
+
+
+class RestartTests(ActionCase):
+    def setUp(self):
+        super().setUp()
+        self.machine.add(1300, 1, '/bin/x')       # something else, so that the process list is never empty
+
+    def restart(self, **options):
+        return engine_actions.restart_codex(self.ctx(), **options)
+
+    def tools(self):
+        return [command[0] for command in self.machine.commands if command[0] != '/bin/ps']
+
+    def test_a_normal_quit_through_apple_events_then_open_in_the_background(self):
+        result = self.restart()
+        self.assertEqual(result, {'ok': True, 'reason': None})
+        quit_command = [command for command in self.machine.commands if command[0] == '/usr/bin/osascript']
+        self.assertEqual(quit_command, [['/usr/bin/osascript', '-e', 'tell application id "com.openai.codex" to quit']])
+        self.assertEqual([command for command in self.machine.commands if command[0] == '/usr/bin/open'],
+                         [['/usr/bin/open', '-g', '-a', str(self.app)]])
+        self.assertEqual(self.tools(), ['/usr/bin/osascript', '/usr/bin/open'])
+        self.assertEqual(self.machine.signals, [])                 # never a kill of any kind
+        self.assertEqual([proc['command'] for proc in self.machine.procs.values()
+                          if proc['command'].endswith('/Contents/MacOS/ChatGPT')], [self.commands.app_main])
+
+    def test_codex_that_is_not_running_is_not_started_by_a_restart(self):
+        self.machine.remove(1000)
+        self.assertEqual(self.restart(), {'ok': False, 'reason': 'not_running'})
+        self.assertEqual(self.tools(), [])
+
+    def test_no_installed_app_is_not_running_either(self):
+        self.assertEqual(engine_actions.restart_codex(self.context(application_roots=[self.home/'Nowhere'])),
+                         {'ok': False, 'reason': 'not_running'})
+        self.assertEqual(self.tools(), [])
+
+    def test_a_quit_that_codex_does_not_follow_is_cancelled_and_nothing_is_opened_or_killed(self):
+        self.machine.quit_delay = None
+        began = self.machine.now
+        self.assertEqual(self.restart(quit_timeout=12), {'ok': False, 'reason': 'quit_cancelled'})
+        self.assertGreaterEqual(self.machine.now-began, 12)
+        self.assertEqual(self.tools(), ['/usr/bin/osascript'])
+        self.assertEqual(self.machine.signals, [])
+        self.assertIn(1000, self.machine.procs)
+
+    def test_a_user_who_takes_a_while_to_confirm_the_quit_dialog_still_gets_the_restart(self):
+        self.machine.quit_delay = 20.0
+        self.assertEqual(self.restart(), {'ok': True, 'reason': None})
+
+    def test_the_quit_call_that_stays_open_behind_a_dialog_does_not_end_the_wait(self):
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/usr/bin/osascript':
+                self.machine.commands.append(list(argv))
+                self.machine.later(3.0, self.machine.close_app)
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return self.machine.run(argv, timeout=timeout, environment=environment)
+        self.assertEqual(engine_actions.restart_codex(self.context(run=run)), {'ok': True, 'reason': None})
+
+    def test_an_apple_events_tool_that_cannot_run_means_codex_did_not_quit(self):
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/usr/bin/osascript':
+                raise OSError('no osascript')
+            return self.machine.run(argv, timeout=timeout, environment=environment)
+        self.assertEqual(engine_actions.restart_codex(self.context(run=run)), {'ok': False, 'reason': 'quit_cancelled'})
+
+    def test_codex_is_opened_only_after_its_old_host_finished_closing(self):
+        self.machine.add(1100, 1000, self.commands.app_server)
+        self.machine.add(1200, 1000, '/bin/proxy')
+        self.write_host()
+        self.machine.quit_delay = 1.0                                  # the app is gone a second after the quit event ...
+        opened_at = []
+        original = self.machine.run
+
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/usr/bin/osascript':
+                self.machine.later(6.0, lambda: [self.machine.remove(pid) for pid in (1100, 1200)])   # ... its host 5 s after that
+            if argv[0] == '/usr/bin/open':
+                opened_at.append((self.machine.now, 1100 in self.machine.procs, 1200 in self.machine.procs))
+            return original(argv, timeout=timeout, environment=environment)
+        self.assertEqual(engine_actions.restart_codex(self.context(run=run)), {'ok': True, 'reason': None})
+        [(when, backend_alive, proxy_alive)] = opened_at
+        self.assertEqual((backend_alive, proxy_alive), (False, False))
+
+    def test_codex_that_cannot_be_opened_or_does_not_come_back_is_a_failed_relaunch(self):
+        self.machine.open_status = 1
+        self.assertEqual(self.restart(), {'ok': False, 'reason': 'relaunch_failed'})
+        self.setUp()
+        self.machine.launch_delay = None
+        began = self.machine.now
+        self.assertEqual(self.restart(launch_timeout=9), {'ok': False, 'reason': 'relaunch_failed'})
+        self.assertGreaterEqual(self.machine.now-began, 9)
+
+    def test_an_open_that_cannot_run_is_a_failed_relaunch(self):
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/usr/bin/open':
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return self.machine.run(argv, timeout=timeout, environment=environment)
+        self.assertEqual(engine_actions.restart_codex(self.context(run=run)), {'ok': False, 'reason': 'relaunch_failed'})
+
+
+if __name__ == '__main__':
+    unittest.main()

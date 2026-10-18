@@ -194,8 +194,12 @@ class View:
             conn.record = relay
             conn.memory_pids = tree
             repl = inv.procs[root] if root is not None else proc
-            app_server = relay.number('app_server_pid')
-            conn.owner_pid = (repl.ppid if root is not None and repl.ppid > 1 else None) or app_server
+            # Who started the runtime is what the process list says now; the record's app_server_pid is only
+            # what it was when the relay started, and is used when cua-repl cannot be found.
+            if root is not None:
+                conn.owner_pid = repl.ppid if repl.ppid > 1 else None
+            else:
+                conn.owner_pid = relay.number('app_server_pid')
             if former is not None:
                 # The conversation that owned this runtime is gone.
                 conn.owner_pid = former.number('owner_pid') or conn.owner_pid
