@@ -3,6 +3,8 @@ import SwiftUI
 /// The popover (structure B): a status card on top, tabs below, buttons on every row.
 struct PopoverView: View {
     @ObservedObject var model: CUABarViewModel
+    /// What the footer and the 기록 tab add: new version, remove, login item. nil leaves them out.
+    var maintenance: Maintenance?
     var quit: () -> Void
 
     var body: some View {
@@ -28,16 +30,7 @@ struct PopoverView: View {
             tabContent
                 .frame(height: Theme.listHeight)
 
-            HStack {
-                Text(model.updatedText)
-                    .font(Theme.captionFont)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("끝내기", action: quit)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
+            FooterView(updatedText: model.updatedText, maintenance: maintenance, quit: quit)
         }
         .padding(Theme.padding)
         .frame(width: Theme.popoverWidth)
@@ -54,7 +47,9 @@ struct PopoverView: View {
             case .otherTools:
                 OtherToolsTabView(content: content.otherTools)
             case .activity:
-                ActivityTabView(content: content.activity, copying: model.inFlight.contains(.copyDiagnosis)) {
+                ActivityTabView(
+                    content: content.activity, copying: model.inFlight.contains(.copyDiagnosis), note: maintenance?.loginItem.line
+                ) {
                     model.send(.copyDiagnosis)
                 }
             }

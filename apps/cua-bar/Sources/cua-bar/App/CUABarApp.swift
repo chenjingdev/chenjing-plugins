@@ -10,19 +10,19 @@ enum AppVersion {
 
 @MainActor
 final class CUABarAppDelegate: NSObject, NSApplicationDelegate {
-    private var model: CUABarViewModel?
+    private var live: LiveApp?
     private var controller: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
-        let model = CUABarViewModel(engine: CodexCUAEngineClient(), appVersion: AppVersion.current)
-        self.model = model
-        controller = StatusItemController(model: model)
-        model.start()
+        let live = LiveApp.make(quit: { NSApplication.shared.terminate(nil) })
+        self.live = live
+        controller = StatusItemController(model: live.model, maintenance: live.maintenance)
+        live.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        model?.stop()
+        live?.stop()
         controller?.remove()
     }
 }
@@ -30,6 +30,8 @@ final class CUABarAppDelegate: NSObject, NSApplicationDelegate {
 @main
 enum CUABarMain {
     @MainActor static func main() {
+        // A second copy leaves before it shows anything and without waking the first (R1).
+        if SingleInstance.anotherCopyIsRunning() { exit(0) }
         let application = NSApplication.shared
         let delegate = CUABarAppDelegate()
         application.delegate = delegate

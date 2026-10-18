@@ -8,15 +8,17 @@ import SwiftUI
 @MainActor
 final class StatusItemController: NSObject, NSPopoverDelegate {
     private let model: CUABarViewModel
+    private let maintenance: Maintenance?
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let host: NSHostingController<PopoverView>
     private var subscription: AnyCancellable?
 
-    init(model: CUABarViewModel) {
+    init(model: CUABarViewModel, maintenance: Maintenance? = nil) {
         self.model = model
+        self.maintenance = maintenance
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        host = NSHostingController(rootView: PopoverView(model: model, quit: { NSApplication.shared.terminate(nil) }))
+        host = NSHostingController(rootView: PopoverView(model: model, maintenance: maintenance, quit: { NSApplication.shared.terminate(nil) }))
         super.init()
 
         statusItem.autosaveName = "dev.chenjing.cua-bar.status-item"
@@ -69,6 +71,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     // MARK: NSPopoverDelegate
 
     func popoverWillShow(_ notification: Notification) {
+        maintenance?.loginItem.refresh()
         model.setPopoverOpen(true)
     }
 

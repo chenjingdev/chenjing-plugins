@@ -4,6 +4,8 @@ import SwiftUI
 struct ActivityTabView: View {
     var content: ActivityContent
     var copying: Bool
+    /// A line about the app itself under the list (the login item).
+    var note: String?
     var copy: () -> Void
 
     var body: some View {
@@ -28,6 +30,13 @@ struct ActivityTabView: View {
                         }
                     }
                 }
+            }
+            if let note {
+                Text(note)
+                    .font(Theme.captionFont)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
