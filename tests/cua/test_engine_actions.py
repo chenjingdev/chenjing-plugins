@@ -9,11 +9,12 @@ from unittest.mock import patch
 
 import engine_actions
 import engine_status
-from engine_support import ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, EngineCase, State, at
+from engine_support import ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase, State, at
 
 BRIDGE_ID = 'claude-4242-%d' % (NOW-900)
 RELAY_ID = 'codex-3001-%d' % (NOW-2000)
 UNRECORDED_ID = 'codex-4000-%d' % (NOW-5000)
+CMUX_ID = 'cmux-3501-%d' % (NOW-600)
 DONE = {'released': True, 'reason': None, 'scope_count': 1}
 
 
@@ -416,6 +417,177 @@ class StopTests(ActionCase):
         self.assertEqual(self.machine.signals, [])
 
 
+class CmuxConnectionTests(ActionCase):
+    """One `cmux-cua mcp` process (a conversation's connection to cmux-cua) is stopped on its own, with nothing to release.
+    The daemon and the AI client next to it are never signalled."""
+
+    def setUp(self):
+        super().setUp()
+        self.add_claude(500)
+        self.machine.add(3500, 1, self.commands.cmux_serve, start=NOW-7000)
+        self.machine.add(3501, 500, self.commands.cmux_mcp, start=NOW-600)
+        self.machine.add(3502, 500, self.commands.cmux_mcp, start=NOW-300)
+        self.watch(500, 3500, 3501, 3502)
+        self.untouched = {500, 3500, 3502, 1000, 1100, 1200}
+
+    def stop(self, wanted=CMUX_ID, force=False):
+        return engine_actions.stop_connection(self.ctx(), wanted, force=force)
+
+    def release(self, wanted=CMUX_ID):
+        return engine_actions.release_connection(self.ctx(), wanted)
+
+    def after_the_view_was_read(self, change):
+        """A context whose first identity check (`ps -p`, right before a signal) sees the machine after `change()`."""
+        original, done = self.machine.run, []
+
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/bin/ps' and '-p' in argv and not done:
+                done.append(True)
+                change()
+            return original(argv, timeout=timeout, environment=environment)
+        return self.context(run=run)
+
+    def test_only_the_mcp_process_is_signalled_and_nothing_is_released(self):
+        directory, _ = self.bridge_with_runtime()
+        bridge = self.writer(directory, 4242, NOW-900, DONE)
+        self.watch(4242)
+        self.assertEqual(self.stop(), {'ok': True, 'stopped': True, 'released': False, 'reason': None})
+        self.assertEqual(self.machine.signals, [(3501, signal.SIGTERM)])
+        self.assertEqual(self.events, [('signal', 3501, signal.SIGTERM)])
+        self.assertEqual(bridge.requests, [])
+        self.assertNotIn(3501, self.machine.procs)
+        self.assertTrue(self.untouched <= set(self.machine.procs))
+
+    def test_force_does_not_add_a_signal_when_the_process_ends_at_once(self):
+        self.assertEqual(self.stop(force=True), {'ok': True, 'stopped': True, 'released': False, 'reason': None})
+        self.assertEqual(self.machine.signals, [(3501, signal.SIGTERM)])
+
+    def test_a_process_that_ignores_sigterm_is_left_running_without_force_after_the_grace_period(self):
+        self.machine.ignore_term.add(3501)
+        began = self.machine.now
+        self.assertEqual(self.stop(), {'ok': False, 'stopped': False, 'released': False, 'reason': 'timeout'})
+        self.assertEqual(self.machine.signals, [(3501, signal.SIGTERM)])
+        self.assertGreaterEqual(self.machine.now-began, engine_actions.STOP_GRACE)
+        self.assertIn(3501, self.machine.procs)
+
+    def test_force_kills_only_that_process_and_only_after_the_grace_period(self):
+        self.machine.ignore_term.add(3501)
+        sent = []
+        self.machine.on_signal[3501] = lambda number: sent.append((number, self.machine.now))
+        began = self.machine.now
+        self.assertEqual(self.stop(force=True), {'ok': True, 'stopped': True, 'released': False, 'reason': None})
+        self.assertEqual([number for number, _ in sent], [signal.SIGTERM, signal.SIGKILL])
+        self.assertGreaterEqual(sent[1][1]-began, engine_actions.STOP_GRACE)
+        self.assertEqual({pid for pid, _ in self.machine.signals}, {3501})
+        self.assertTrue(self.untouched <= set(self.machine.procs))
+
+    def test_force_does_not_kill_what_ended_on_its_own_during_the_grace_period(self):
+        self.machine.ignore_term.add(3501)
+        self.machine.later(2.0, lambda: self.machine.remove(3501))
+        self.assertTrue(self.stop(force=True)['stopped'])
+        self.assertEqual(self.machine.signals, [(3501, signal.SIGTERM)])
+
+    def test_a_signal_that_is_not_permitted_is_a_failure_not_a_crash(self):
+        self.machine.deny.add(3501)
+        self.assertEqual(self.stop(force=True), {'ok': False, 'stopped': False, 'released': False, 'reason': 'permission_denied'})
+        self.assertEqual(self.machine.signals, [(3501, signal.SIGTERM)])
+
+    def test_a_process_whose_identity_cannot_be_checked_is_not_signalled(self):
+        original = self.machine.run
+
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/bin/ps' and '-p' in argv:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return original(argv, timeout=timeout, environment=environment)
+        result = engine_actions.stop_connection(self.context(run=run), CMUX_ID, force=True)
+        self.assertEqual(result, {'ok': False, 'stopped': False, 'released': False, 'reason': 'unverified'})
+        self.assertEqual(self.machine.signals, [])
+
+    def test_a_pid_that_is_used_by_another_process_by_the_time_of_the_signal_counts_as_gone_and_is_not_signalled(self):
+        for change in (lambda: self.machine.procs[3501].update(start=NOW-3),                         # a new process
+                       lambda: self.machine.procs[3501].update(uid=UID+1),                           # another user's
+                       lambda: self.machine.procs[3501].update(command=self.commands.cmux_serve),    # the daemon's program
+                       lambda: self.machine.procs[3501].update(command='/usr/bin/python3 other.py')):
+            self.setUp()
+            result = engine_actions.stop_connection(self.after_the_view_was_read(change), CMUX_ID, force=True)
+            self.assertEqual(result, {'ok': True, 'stopped': True, 'released': False, 'reason': None})
+            self.assertEqual(self.machine.signals, [])
+            self.assertIn(3501, self.machine.procs)
+
+    def changes_a_second_after_sigterm(self, **changes):
+        self.machine.ignore_term.add(3501)
+
+        def replaced(number):
+            if number == signal.SIGTERM:
+                self.machine.later(1.0, lambda: self.machine.procs[3501].update(**changes))
+        self.machine.on_signal[3501] = replaced
+
+    def test_a_pid_that_is_reused_while_waiting_does_not_get_the_kill(self):
+        self.changes_a_second_after_sigterm(start=NOW-1)
+        self.assertTrue(self.stop(force=True)['stopped'])
+        self.assertEqual(self.machine.signals, [(3501, signal.SIGTERM)])
+
+    def test_a_process_that_turns_into_another_program_while_waiting_does_not_get_the_kill(self):
+        self.changes_a_second_after_sigterm(command='/usr/bin/python3 other.py')
+        self.assertTrue(self.stop(force=True)['stopped'])
+        self.assertEqual(self.machine.signals, [(3501, signal.SIGTERM)])
+
+    def test_the_engine_and_everything_above_it_is_protected(self):
+        self.machine.add(ENGINE_PID, 3501, '/usr/bin/python3 setup.py stop')        # the engine runs below this process
+        self.assertEqual(self.stop(force=True), {'ok': False, 'stopped': False, 'released': False, 'reason': 'protected'})
+        self.assertEqual(self.machine.signals, [])
+
+    def test_an_mcp_process_that_started_another_one_is_a_client_and_stays_protected(self):
+        self.machine.add(3503, 3501, self.commands.cmux_mcp, start=NOW-100)
+        self.assertEqual(self.stop(force=True)['reason'], 'protected')
+        self.assertEqual(self.machine.signals, [])
+        self.assertEqual(self.stop('cmux-3503-%d' % (NOW-100)), {'ok': True, 'stopped': True, 'released': False, 'reason': None})
+        self.assertEqual(self.machine.signals, [(3503, signal.SIGTERM)])
+
+    def test_the_daemon_and_the_ai_client_cannot_be_asked_for_by_a_cmux_id(self):
+        for wanted in ('cmux-3500-%d' % (NOW-7000), 'cmux-500-%d' % (NOW-8000), 'cmux-1100-%d' % (NOW-7100),
+                       'cmux-1000-%d' % (NOW-7200)):
+            for force in (False, True):
+                self.assertEqual(self.stop(wanted, force=force), {'ok': False, 'stopped': False, 'released': False,
+                                                                  'reason': 'not_found'}, wanted)
+            self.assertEqual(self.release(wanted)['reason'], 'not_found', wanted)
+        self.assertEqual(self.machine.signals, [])
+
+    def test_unknown_stale_and_wrongly_named_cmux_ids_are_not_found(self):
+        wrong = ('cmux-9999-%d' % (NOW-600), 'cmux-3501-%d' % (NOW-601), 'cmux-3501-%d' % (NOW-605), 'cmux-3501-%d' % (NOW-599),
+                 'claude-3501-%d' % (NOW-600), 'codex-3501-%d' % (NOW-600), 'cmux-3501', 'cmux-3501-', 'cmux--%d' % (NOW-600),
+                 'cmux-3501-%d; rm -rf' % (NOW-600), 'CMUX-3501-%d' % (NOW-600), 'cmux')
+        for wanted in wrong:
+            self.assertEqual(self.stop(wanted, force=True), {'ok': False, 'stopped': False, 'released': False,
+                                                             'reason': 'not_found'}, wanted)
+        self.machine.remove(3501)
+        self.assertEqual(self.stop(CMUX_ID), {'ok': False, 'stopped': False, 'released': False, 'reason': 'not_found'})
+        self.assertEqual(self.machine.signals, [])
+
+    def test_another_users_mcp_process_is_not_found(self):
+        self.machine.add(3600, 1, self.commands.cmux_mcp, start=NOW-100, uid=UID+1)
+        self.assertEqual(self.stop('cmux-3600-%d' % (NOW-100), force=True)['reason'], 'not_found')
+        self.assertEqual(self.machine.signals, [])
+
+    def test_a_connection_that_ended_before_the_signal_counts_as_stopped(self):
+        result = engine_actions.stop_connection(self.after_the_view_was_read(lambda: self.machine.remove(3501)), CMUX_ID)
+        self.assertEqual(result, {'ok': True, 'stopped': True, 'released': False, 'reason': None})
+        self.assertEqual(self.machine.signals, [])
+
+    def test_two_connections_of_one_ai_client_are_stopped_one_by_one(self):
+        self.assertTrue(self.stop('cmux-3502-%d' % (NOW-300))['stopped'])
+        self.assertEqual(self.machine.signals, [(3502, signal.SIGTERM)])
+        self.assertIn(3501, self.machine.procs)
+        self.assertEqual(self.stop('cmux-3502-%d' % (NOW-300))['reason'], 'not_found')       # and only once
+
+    def test_there_is_no_release_step_for_a_cmux_connection(self):
+        self.assertEqual(self.release(), {'ok': False, 'released': False, 'reason': 'unsupported', 'scope_count': 0})
+        self.assertEqual(self.release('cmux-3999-%d' % (NOW-600)),
+                         {'ok': False, 'released': False, 'reason': 'not_found', 'scope_count': 0})
+        self.assertEqual((self.machine.signals, self.events), ([], []))
+        self.assertIn(3501, self.machine.procs)
+
+
 class GroupStopTests(ActionCase):
     def world(self):
         """Two bridges (one with a relay runtime), a codex relay and an unrecorded runtime, next to everything
@@ -551,6 +723,19 @@ class GroupStopTests(ActionCase):
     def test_an_empty_group_is_fine(self):
         self.machine.add(5, 1, '/bin/x')
         self.assertEqual(engine_actions.stop_group(self.ctx(), 'all'), {'ok': True, 'stopped': 0, 'failed': 0, 'results': []})
+
+    def test_no_group_stop_reaches_cmux_cua_not_even_with_force(self):
+        for group in ('all', 'claude', 'codex'):
+            self.setUp()
+            self.world()
+            self.machine.add(3502, 500, self.commands.cmux_mcp, start=NOW-300)       # a second connection of that client
+            self.untouchable.add(3502)
+            result = engine_actions.stop_group(self.ctx(), group, force=True)
+            self.assertEqual([item['connection_id'] for item in result['results'] if item['connection_id'].startswith('cmux-')],
+                             [], group)
+            self.assertTrue(self.machine.signals, group)                             # the group itself was stopped
+            self.assertFalse({pid for pid, _ in self.machine.signals} & {500, 3500, 3501, 3502}, group)
+            self.assertTrue(self.untouchable <= set(self.machine.procs), group)
 
     def test_the_whole_machine_survives_a_group_stop(self):
         self.world()

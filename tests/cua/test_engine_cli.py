@@ -117,6 +117,22 @@ class JsonCommandTests(CliCase):
         result = self.run_json('stop', '--group', 'claude', '--json')
         self.assertEqual((result['stopped'], [item['connection_id'] for item in result['results']]), (1, [BRIDGE_ID]))
 
+    def test_a_cmux_cua_connection_is_stopped_by_the_id_status_shows_and_is_never_released_or_grouped(self):
+        self.add_claude(500)
+        self.machine.add(3500, 1, self.commands.cmux_serve)
+        self.machine.add(3501, 500, self.commands.cmux_mcp, start=NOW-600)
+        [client] = self.run_json('status', '--json')['other_tools'][0]['clients']
+        self.assertEqual((client['id'], client['pid'], client['mcp_pid'], client['can_stop']),
+                         ('cmux-3501-%d' % (NOW-600), 500, 3501, True))
+        self.assertEqual(self.run_json('release', '--connection', client['id'], '--json'),
+                         {'ok': False, 'released': False, 'reason': 'unsupported', 'scope_count': 0})
+        self.assertEqual(self.run_json('stop', '--group', 'all', '--json'), {'ok': True, 'stopped': 0, 'failed': 0, 'results': []})
+        self.assertEqual(self.machine.signals, [])
+        self.assertEqual(self.run_json('stop', '--connection', client['id'], '--force', '--json'),
+                         {'ok': True, 'stopped': True, 'released': False, 'reason': None})
+        self.assertEqual(self.machine.signals, [(3501, signal.SIGTERM)])
+        self.assertEqual(self.run_json('stop', '--connection', client['id'], '--json')['reason'], 'not_found')
+
     def test_release_session_passes_the_users_click_on(self):
         import host_mcp
         self.start_world()
@@ -162,6 +178,7 @@ class DiagnoseTests(CliCase):
         self.add_claude(501)
         self.machine.add(3500, 1, self.commands.cmux_serve)
         self.machine.add(3501, 501, self.commands.cmux_mcp)
+        self.machine.add(3502, 501, self.commands.cmux_mcp)          # a second connection of the same AI client
         self.machine.cwds[501] = str(self.home/'secret-project')
         self.state.activity([State.line('bridge-8001-%d' % (NOW-8000), 400-index, SESSION_A, tool='js', ms=100+index,
                                         ok=index % 2 == 1) for index in range(30)])
@@ -186,7 +203,7 @@ class DiagnoseTests(CliCase):
         self.assertIn('relay left out at the last Codex start: unknown_field', lines)
         self.assertIn('connections: 2 (claude 1, codex 1); active 1, idle 1, ended 0', lines)
         self.assertIn('leases: the list cannot be read; may be left behind: 1 (releasable now: 1)', lines)
-        self.assertIn('other tool: cmux-cua running, 1 process, 1 client (claude 1)', lines)
+        self.assertIn('other tool: cmux-cua running, 1 process, 2 connections (claude 2)', lines)
         operations = lines[lines.index('latest operations (newest first, 20 of 30):')+1:]
         self.assertEqual(len(operations), 20)
         self.assertTrue(all(re.match(r'^  \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ claude js (ok|failed) \d+ ms$', line) for line in operations))

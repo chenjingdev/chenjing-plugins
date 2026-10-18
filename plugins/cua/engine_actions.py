@@ -2,9 +2,10 @@
 
 Safety rules that hold everywhere in this module:
 - A process is signalled only after its identity (pid and start time) was verified again a moment before.
-- Only connection processes are ever signalled: a bridge, a relay, or a runtime's cua-repl. The Codex app, its
-  servers, the AI client that owns a connection, Chrome and cmux-cua are on a protected list that is checked
-  before every signal.
+- Only connection processes are ever signalled: a bridge, a relay, a runtime's cua-repl, or the one `cmux-cua mcp`
+  process that was asked for by its id. The Codex app, its servers, the AI client that owns a connection, Chrome
+  and the cmux-cua daemon are on a protected list that is checked before every signal. For every other kind of stop
+  that list holds all of cmux-cua, and a group stop never reaches it.
 - Codex is quit through Apple Events, never killed; restart-codex runs only because a person clicked it.
 """
 from collections import namedtuple
@@ -13,10 +14,10 @@ import signal
 import subprocess
 
 from engine_core import CONNECTION_ID, REASON
-from engine_inventory import app_pids, find_installation, lookup, read_host, same_process, snapshot
+from engine_inventory import app_pids, cmux_mode, find_installation, lookup, read_host, same_process, snapshot
 from engine_records import ControlError, control_request, release_timeout
 from engine_release import release_sessions
-from engine_status import build_view
+from engine_status import CmuxConnection, build_view
 
 STOP_GRACE = 8.0
 KILL_WAIT = 3.0
@@ -29,6 +30,7 @@ POLL = 0.2
 REASON_MAP = {'cleanup_tool_unavailable': 'cleanup_not_confirmed'}
 
 Release = namedtuple('Release', 'released reason count nothing')
+NO_RELEASE = Release(False, None, 0, False)      # a connection without a release step: nothing was asked, nothing failed
 
 
 # --- release ----------------------------------------------------------------------------------------------
@@ -61,7 +63,7 @@ def release_one(ctx, conn, timeout=None):
 
 
 def find_connection(ctx, wanted):
-    """(view, connection) for a connection id, or (None, None) when there is no such live connection."""
+    """(view, connection) for a connection id (also a cmux-cua one), or (None, None) when there is no such live one."""
     if not CONNECTION_ID.match(wanted):
         return None, None
     view = build_view(ctx, with_folders=False, with_checks=False)
@@ -73,6 +75,8 @@ def release_connection(ctx, wanted):
     _, conn = find_connection(ctx, wanted)
     if conn is None:
         return {'ok': False, 'released': False, 'reason': 'not_found', 'scope_count': 0}
+    if isinstance(conn, CmuxConnection):       # cmux-cua holds no browser lease of ours: there is nothing to release
+        return {'ok': False, 'released': False, 'reason': 'unsupported', 'scope_count': 0}
     result = release_one(ctx, conn)
     return {'ok': result.released or result.nothing, 'released': result.released, 'reason': result.reason,
             'scope_count': result.count}
@@ -110,13 +114,21 @@ def release_ended(ctx):
 
 # --- stop -------------------------------------------------------------------------------------------------
 
+def _same(ctx, conn, proc):
+    """Whether proc is still the process this connection is: the same pid, user and start time (within a second).
+    A cmux-cua connection must also still be a `cmux-cua mcp`: a process can start another program under its pid."""
+    if not same_process(proc, ctx.uid, conn.pid, conn.started):
+        return False
+    return not isinstance(conn, CmuxConnection) or cmux_mode(proc.command) == 'mcp'
+
+
 def _signal(ctx, conn, number):
     """'sent', 'gone' (nothing of that identity is left), 'denied' or 'unverified'. The identity is checked first."""
     try:
         proc = lookup(ctx, conn.pid)
     except (OSError, subprocess.TimeoutExpired):
         return 'unverified'
-    if not same_process(proc, ctx.uid, conn.pid, conn.started):
+    if not _same(ctx, conn, proc):
         return 'gone'
     try:
         ctx.kill(conn.pid, number)
@@ -137,7 +149,7 @@ def _wait_gone(ctx, waiting, seconds):
         except Exception:
             procs = None    # when in doubt a process counts as running; it is never reported stopped by mistake
         if procs is not None:
-            waiting = [conn for conn in waiting if same_process(procs.get(conn.pid), ctx.uid, conn.pid, conn.started)]
+            waiting = [conn for conn in waiting if _same(ctx, conn, procs.get(conn.pid))]
         if not waiting or ctx.clock() >= deadline:
             break
         ctx.sleep(POLL)
@@ -145,12 +157,15 @@ def _wait_gone(ctx, waiting, seconds):
 
 
 def stop_connections(ctx, conns, force, protected):
-    """Release, then stop the given connections together. One result per connection, in the same order."""
-    release = {}
-    if conns:
-        with ThreadPoolExecutor(max_workers=min(8, len(conns))) as pool:
-            futures = [(conn, pool.submit(release_one, ctx, conn)) for conn in conns]
-            release = {conn.id: future.result() for conn, future in futures}
+    """Release, then stop the given connections together. One result per connection, in the same order.
+
+    A cmux-cua connection has no release step: its result says `released: false` and has no reason when it stopped."""
+    release = {conn.id: NO_RELEASE for conn in conns}
+    asked = [conn for conn in conns if not isinstance(conn, CmuxConnection)]
+    if asked:
+        with ThreadPoolExecutor(max_workers=min(8, len(asked))) as pool:
+            futures = [(conn, pool.submit(release_one, ctx, conn)) for conn in asked]
+            release.update({conn.id: future.result() for conn, future in futures})
     outcome = {}
     waiting = []
     for conn in conns:
@@ -192,13 +207,14 @@ def stop_connection(ctx, wanted, force=False):
     view, conn = find_connection(ctx, wanted)
     if conn is None:
         return {'ok': False, 'stopped': False, 'released': False, 'reason': 'not_found'}
-    result = stop_connections(ctx, [conn], force, view.protected_pids())[0]
+    protected = view.protected_pids(cmux_connections=isinstance(conn, CmuxConnection))
+    result = stop_connections(ctx, [conn], force, protected)[0]
     return {'ok': result['stopped'], 'stopped': result['stopped'], 'released': result['released'],
             'reason': result['reason']}
 
 
 def stop_group(ctx, group, force=False):
-    """Group stop covers claude and codex connections only; cmux-cua and the rest are never connections.
+    """Group stop covers claude and codex connections only; a cmux-cua connection is never part of a group.
 
     "Codex only" leaves alone every codex connection whose session is unknown (R8): a runtime that no record covers,
     or a relay with neither an open scope nor an activity line naming a session. Such a runtime may serve a Claude

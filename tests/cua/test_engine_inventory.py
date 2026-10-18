@@ -410,18 +410,39 @@ class InventoryTests(EngineCase):
         self.assertEqual(sorted(inv.subtree(2000)), [2000, 2001, 2002])
         self.assertEqual(inv.rss_bytes(inv.subtree(2000)), 600*1024)
         self.assertEqual(inv.app_servers, [1100])
-        self.assertEqual((inv.cmux_daemons, inv.cmux_clients), ([3000], [4000]))
+        self.assertEqual((inv.cmux_daemons, inv.cmux_mcp, inv.cmux_clients), ([3000], [3001], [4000]))
         self.assertEqual(inv.chrome_started, NOW-100)
         protected = inv.protected_pids(owners=[7000])
         self.assertTrue({1000, 1100, 3000, 3001, 4000, 5000, 7000, ENGINE_PID, 6000} <= protected)
         self.assertFalse({2000, 2001, 2002} & protected)
 
+    def test_stopping_one_cmux_connection_protects_everything_except_the_mcp_process_itself(self):
+        c = self.commands
+        self.machine.add(1000, 1, c.app_main)
+        self.machine.add(1100, 1000, c.app_server)
+        self.machine.add(3000, 1, c.cmux_serve)
+        self.machine.add(3001, 4000, c.cmux_mcp)
+        self.machine.add(3002, 3001, c.cmux_mcp)             # an mcp process that started another one is a client too
+        self.machine.add(4000, 1, c.claude)
+        self.machine.add(5000, 1, c.chrome)
+        self.machine.add(ENGINE_PID, 6000, '/usr/bin/python3 setup.py stop')
+        self.machine.add(6000, 3003, '/bin/zsh')
+        self.machine.add(3003, 1, c.cmux_mcp)                # the engine's shell runs below this mcp process
+        inv = inventory.collect(self.context())
+        everything = inv.protected_pids(owners=[7000])
+        cmux_only = inv.protected_pids(owners=[7000], cmux_connections=True)
+        self.assertEqual(everything-cmux_only, {3002})
+        self.assertTrue({1000, 1100, 3000, 3001, 3003, 4000, 5000, 7000, ENGINE_PID, 6000} <= cmux_only)
+        self.assertNotIn(3002, cmux_only)
+
     def test_other_users_processes_are_not_considered(self):
         self.machine.add(2000, 1, self.commands.cua_repl, uid=UID+1)
         self.machine.add(2001, 1, self.commands.bridge, uid=UID+1)
         self.machine.add(2002, 1, self.commands.cmux_serve, uid=UID+1)
+        self.machine.add(2003, 1, self.commands.cmux_mcp, uid=UID+1)
         inv = inventory.collect(self.context())
-        self.assertEqual((inv.cua_repl, inv.bridges, inv.cmux_daemons), ([], [], []))
+        self.assertEqual((inv.cua_repl, inv.bridges, inv.cmux_daemons, inv.cmux_mcp, inv.cmux_clients),
+                         ([], [], [], [], []))
 
 
 if __name__ == '__main__':
