@@ -79,6 +79,24 @@ class ShapeTests(StatusCase):
         self.status()
         self.assertEqual(sorted(str(item) for item in self.root.rglob('*')), before)
 
+    def test_a_setup_check_that_fails_does_not_fail_the_status(self):
+        def broken(ctx):
+            raise OSError('launchctl is not there')
+        self.machine.add(5, 1, '/bin/x')
+        setup_section = self.status(checks=broken)['setup']
+        self.assertEqual(setup_section, {'command': 'missing', 'dependencies': 'missing', 'login_environment': 'unknown',
+                                         'wrapper': 'broken', 'relay': 'unavailable'})
+
+    def test_the_actions_do_not_run_the_setup_checks(self):
+        import engine_actions
+        self.machine.add(5, 1, '/bin/x')
+
+        def never(ctx):
+            raise AssertionError('the setup checks are for the status only')
+        engine_actions.release_connection(self.context(checks=never), 'claude-1-2')
+        engine_actions.stop_group(self.context(checks=never), 'all')
+        engine_actions.release_ended(self.context(checks=never))
+
     def test_host_codex_and_setup_sections(self):
         self.machine.add(5, 1, '/bin/x')
         status = self.status()
@@ -280,6 +298,18 @@ class AttributionTests(StatusCase):
         self.assertEqual((connection['id'], connection['agent'], connection['state'], connection['owner_alive'],
                           connection['owner_pid'], connection['can_release']),
                          ('claude-2001-%d' % (NOW-890), 'claude', 'ended', False, 501, True))
+
+
+    def test_the_runtime_of_a_dead_bridge_has_ended_even_while_the_claude_process_that_owned_it_lives(self):
+        self.start_world()
+        self.add_claude(500)
+        self.add_runtime(2000, NOW-890)
+        self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_A)])
+        self.state.bridge('d1', 7001, NOW-5000, owner_pid=500, session_id=SESSION_A, scopes=[State.scope(SESSION_A)],
+                          cleanup='open')                      # the bridge crashed; Claude Code itself still runs
+        [connection] = self.status()['connections']
+        self.assertEqual((connection['agent'], connection['state'], connection['owner_pid'], connection['owner_alive']),
+                         ('claude', 'ended', 500, False))
 
 
 class StateTests(StatusCase):

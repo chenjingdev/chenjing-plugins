@@ -22,7 +22,7 @@ from engine_records import remove_sessions
 from engine_status import build_view
 
 TITLE = 'Release an ended CUA session'
-DEFAULT_OPTIONS = {'boot': 15.0, 'call': 30.0, 'end': 10.0, 'cleanup': 5.0}
+DEFAULT_OPTIONS = {'boot': 15.0, 'call': 45.0, 'end': 10.0, 'cleanup': 5.0}
 # The whole call is one async function, so its names never clash with those of earlier calls in the same runtime.
 SNIPPET = '''await (async () => {
   const { setupBrowserRuntime } = await import(%s);

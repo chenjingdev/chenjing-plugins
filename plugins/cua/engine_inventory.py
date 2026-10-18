@@ -329,6 +329,10 @@ def working_folders(ctx, pids):
 
 # --- the inventory ----------------------------------------------------------------------------------------
 
+UNCHECKED = {'command': 'missing', 'dependencies': 'missing', 'login_environment': 'unknown',
+             'wrapper': 'broken', 'relay_files': 'invalid'}
+
+
 class Inventory:
     def __init__(self, ctx, procs, installation, host, checks):
         self.ctx = ctx
@@ -341,7 +345,7 @@ class Inventory:
         self.app_version = app_version(installation) if installation is not None else None
         self.app_pids = app_pids(procs, installation, ctx.uid)
         self.host = host
-        self.checks = checks
+        self._checks = checks          # the setup checks, or a Future that still has them to deliver
         self.cua_repl = sorted(pid for pid, proc in self.mine.items() if is_cua_repl(proc.command))
         self.bridges = sorted(pid for pid, proc in self.mine.items() if is_bridge(proc.command, ctx.plugin_root))
         self.app_servers = sorted(pid for pid, proc in self.mine.items() if is_app_server(proc.command))
@@ -350,6 +354,16 @@ class Inventory:
         self.cmux_clients = sorted({self.mine[pid].ppid for pid, mode in modes.items() if mode == 'mcp'})
         starts = [proc.start for proc in self.mine.values() if is_chrome_main(proc.command)]
         self.chrome_started = min(starts) if starts else None
+
+    @property
+    def checks(self):
+        """The setup checks. They run beside the process list and the lsof call, so this may wait for them."""
+        if hasattr(self._checks, 'result'):
+            try:
+                self._checks = self._checks.result()
+            except Exception:
+                self._checks = UNCHECKED
+        return self._checks
 
     def subtree(self, root):
         """root and every process below it."""
@@ -384,18 +398,11 @@ class Inventory:
 
 
 def collect(ctx, with_checks=True):
-    """One consistent look at the machine. The process list and the setup checks run side by side."""
-    unchecked = {'command': 'missing', 'dependencies': 'missing', 'login_environment': 'unknown',
-                 'wrapper': 'broken', 'relay_files': 'invalid'}
-    if not with_checks:
-        procs, checks = snapshot(ctx), unchecked
-    else:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            processes = pool.submit(snapshot, ctx)
-            checking = pool.submit(ctx.checks or setup_checks, ctx)
-            procs = processes.result()
-            try:
-                checks = checking.result()
-            except Exception:
-                checks = unchecked
+    """One consistent look at the machine. The setup checks (a Python start, launchctl) run while the rest is read."""
+    checks = UNCHECKED
+    if with_checks:
+        pool = ThreadPoolExecutor(max_workers=1)
+        checks = pool.submit(ctx.checks or setup_checks, ctx)
+        pool.shutdown(wait=False)      # the worker ends after this one job; nobody has to wait for it here
+    procs = snapshot(ctx)
     return Inventory(ctx, procs, find_installation(ctx), read_host(ctx, procs), checks)
