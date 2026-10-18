@@ -126,6 +126,28 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(results, [{'socket_path': '/ready'}]*4)
 
 
+class FrontAppTests(unittest.TestCase):
+    """Which app is in front, from what lsappinfo prints."""
+
+    def front(self, printed):
+        answers = ['ASN:0x0-0x1001:\n', printed]
+
+        def run(argv, **options):
+            return types.SimpleNamespace(returncode=0, stdout=answers.pop(0))
+        with patch.object(host_autostart.subprocess, 'run', side_effect=run):
+            return host_autostart.front_bundle()
+
+    def test_the_bundle_id_is_read_from_the_output_of_macos_27_and_of_older_versions(self):
+        self.assertEqual(self.front('[ NULL ] ASN:0x0-0x1001: (in front) \n    bundleID="com.cmuxterm.app"\n'
+                                    '    bundle path="/Applications/cmux.app" \n    executable path=[ NULL ] \n'),
+                         'com.cmuxterm.app')
+        self.assertEqual(self.front('"CFBundleIdentifier"="com.apple.Terminal"\n'), 'com.apple.Terminal')
+
+    def test_no_bundle_id_is_none(self):
+        for printed in ('', '[ NULL ] ASN:0x0-0x1001: (in front) \n    bundleID=[ NULL ]\n', 'bundle path="x"'):
+            self.assertIsNone(self.front(printed))
+
+
 class LoginEnvironmentTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

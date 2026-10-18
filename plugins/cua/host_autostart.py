@@ -2,6 +2,7 @@
 import fcntl
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import time
@@ -9,6 +10,9 @@ import time
 from runtime_paths import discover_installation, runtime_home
 
 TIMEOUT_ENV = 'CODEX_HOST_CUA_AUTOSTART_TIMEOUT'
+# `lsappinfo info -only bundleid` prints `"CFBundleIdentifier"="…"` on older macOS and several lines with
+# `bundleID="…"` on macOS 27.
+_BUNDLE_ID = re.compile(r'(?:"CFBundleIdentifier"|\bbundleID)\s*=\s*"([^"\s]+)"')
 
 
 class AutostartFailure(RuntimeError):
@@ -45,9 +49,8 @@ def front_bundle():
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=3).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
-    _, _, value = info.partition('=')
-    value = value.strip().strip('"')
-    return value or None
+    match = _BUNDLE_ID.search(info)
+    return match.group(1) if match else None
 
 
 def _timeout(environment):
