@@ -77,6 +77,15 @@ class JsonCommandTests(CliCase):
         self.assertEqual(status['schema_version'], 1)
         self.assertEqual(self.run_json('status')['schema_version'], 1)       # --json is not needed
 
+    def test_work_folders_with_any_characters_survive_as_plain_ascii_json(self):
+        self.start_world()
+        self.bridge_with_runtime(cwd='/work/프로젝트 "x"\\y')
+        status, text = self.run_cli('status', '--json')
+        self.assertEqual(status, 0)
+        text.encode('ascii')                                     # escaped, so no console encoding can break it
+        [connection] = json.loads(text)['connections']
+        self.assertEqual(connection['cwd'], '/work/프로젝트 "x"\\y')
+
     def test_a_failed_action_still_exits_zero_with_ok_false(self):
         self.machine.add(5, 1, '/bin/x')
         self.assertEqual(self.run_json('release', '--connection', 'claude-1-2', '--json'),

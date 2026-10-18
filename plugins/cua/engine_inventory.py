@@ -119,6 +119,8 @@ def is_chrome_main(command):
 def read_host(ctx, procs):
     """State of the Codex host registry (host.json in the host state directory)."""
     directory = ctx.host_state_dir
+    if not directory.is_absolute():
+        return Host('unknown', None, None, False, None)       # the bridge refuses such a path too
     path = directory/'host.json'
     try:
         info = os.lstat(path)

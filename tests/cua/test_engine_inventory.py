@@ -154,6 +154,12 @@ class HostRegistryTests(EngineCase):
         self.assertEqual(self.host().state, 'unknown')
         self.host_dir.chmod(0o700)
 
+    def test_a_state_directory_given_as_a_relative_path_is_not_read(self):
+        self.alive(1000, 1100, 1200)
+        self.write_host()
+        ctx = self.context(environment={'CODEX_HOST_CUA_STATE_DIR': 'relative/host'})
+        self.assertEqual(inventory.read_host(ctx, inventory.snapshot(ctx)).state, 'unknown')
+
     def test_processes_of_another_user_do_not_count(self):
         self.alive(1000, 1100)
         self.machine.add(1200, 1, '/bin/host-part', uid=UID+1)
