@@ -53,7 +53,7 @@ class Fixture(unittest.TestCase):
         self.launcher = self.directory/'node-repl-relay'
         self.launcher.write_text('#!/bin/sh\n')
         self.launcher.chmod(0o700)
-        self.rewrite = unix_ws_stdio.RelayRewrite(str(self.launcher), NODE_REPL, NODE)
+        self.rewrite = unix_ws_stdio.RelayRewrite(str(self.launcher), NODE_REPL, NODE, SCRIPT)
 
 
 class RewriteTests(Fixture):
@@ -73,7 +73,7 @@ class RewriteTests(Fixture):
         self.assertNotIn(b'\\u', result)
 
     def test_the_state_directory_is_added_when_there_is_one(self):
-        rewrite = unix_ws_stdio.RelayRewrite(str(self.launcher), NODE_REPL, NODE, '/private/state')
+        rewrite = unix_ws_stdio.RelayRewrite(str(self.launcher), NODE_REPL, NODE, SCRIPT, '/private/state')
         env = json.loads(rewrite(line(request())))['params']['config']['mcp_servers.cua_repl']['env']
         self.assertEqual(env['CODEX_CUA_STATE_DIR'], '/private/state')
 
@@ -97,6 +97,10 @@ class RewriteTests(Fixture):
             'unknown runtime path': line(with_env(CUA_REPL_NODE_REPL_PATH='/elsewhere/node_repl')),
             'runtime path missing': line(request(entry=thread_config(env={'X': '1'}))),
             'other command': line(request(entry=thread_config(command='/usr/bin/node'))),
+            'other script': line(request(entry=thread_config(args=['/elsewhere/cua-repl.mjs']))),
+            'extra argument': line(request(entry=thread_config(args=[SCRIPT, '--flag']))),
+            'no arguments': line(request(entry=thread_config(args=[]))),
+            'arguments missing': line(request(entry={k: v for k, v in thread_config().items() if k != 'args'})),
             'no command': line(request(entry={k: v for k, v in thread_config().items() if k != 'command'})),
             'the relay is already named': line(with_env(CODEX_CUA_RELAY_NODE='/x')),
             'a response': line(responses),
@@ -249,7 +253,8 @@ class ProcessTests(Fixture):
         return child.returncode, output+rest, stderr, (self.sent.read_bytes() if self.sent.exists() else b'')
 
     def relay_arguments(self, *extra):
-        return ['--relay-launcher', str(self.launcher), '--relay-native-runtime', NODE_REPL, '--relay-node', NODE, *extra]
+        return ['--relay-launcher', str(self.launcher), '--relay-native-runtime', NODE_REPL, '--relay-node', NODE,
+                '--relay-script', SCRIPT, *extra]
 
     def test_with_the_relay_the_one_thread_configuration_is_pointed_at_it_and_everything_else_is_untouched(self):
         plain = [line({'id': 1, 'method': 'initialize', 'params': {'clientInfo': {'name': 'desktop'}}}),
@@ -276,9 +281,11 @@ class ProcessTests(Fixture):
 
     def test_without_the_relay_arguments_the_transport_forwards_everything_as_it_always_did(self):
         body = [line(request()), line(request('thread/resume')), b'{"id":1,"method":"ping"}']
-        for arguments in ([], self.relay_arguments()[:2], self.relay_arguments()[:4], ['--relay-node', NODE],
-                          ['--relay-launcher', 'node-repl-relay', '--relay-native-runtime', NODE_REPL, '--relay-node', NODE],
-                          ['--relay-launcher', str(self.launcher), '--relay-native-runtime', '', '--relay-node', NODE]):
+        full = self.relay_arguments()
+        for arguments in ([], full[:2], full[:4], full[:6], ['--relay-node', NODE], ['--relay-script', SCRIPT],
+                          [*full[:6], '--relay-script', 'cua-repl.mjs'],
+                          ['--relay-launcher', 'node-repl-relay', *full[2:]],
+                          [*full[:2], '--relay-native-runtime', '', *full[4:]]):
             with self.subTest(arguments=arguments):
                 if self.sent.exists():
                     self.sent.unlink()

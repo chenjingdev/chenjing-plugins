@@ -242,7 +242,8 @@ def _launch(native, arguments, environment, state_dir, progress):
     try:
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, request_stop)
-        # All original argv, env, and cwd are preserved. Only listen is added.
+        # All original argv, env, and cwd are preserved. Only listen is added, and, when the relay was verified,
+        # the one -c override that backend_arguments carries.
         backend = _spawn_backend(native, backend_arguments, endpoint, environment)
         progress["backend"] = True
         record["backend_pid"] = backend.pid

@@ -141,8 +141,10 @@ class TomlTests(unittest.TestCase):
 class ArgumentTests(unittest.TestCase):
     def test_config_flags_keep_the_order_of_every_configuration_option(self):
         arguments = ['-c', 'a=1', '--enable', 'f', 'app-server', '--analytics-default-enabled', '--config=b=2',
-                     '-c', 'c=3', '--disable', 'g', '--listen']
-        self.assertEqual(relay_install.config_flags(arguments), ['-c', 'a=1', '--enable', 'f', '--config=b=2', '-c', 'c=3', '--disable', 'g'])
+                     '-c', 'c=3', '-c=e=5', '--disable', 'g', '--enable=h', '--listen']
+        self.assertEqual(relay_install.config_flags(arguments), ['-c', 'a=1', '--enable', 'f', '--config=b=2', '-c', 'c=3',
+                                                                  '-c=e=5', '--disable', 'g', '--enable=h'])
+        self.assertEqual(relay_install.config_flags(['-c', 'a=1', '-c']), ['-c', 'a=1'], 'an option without its value is dropped')
 
     def test_the_subcommand_is_the_first_argument_that_is_no_root_option(self):
         self.assertEqual(relay_install.subcommand_index(APP_ARGUMENTS), 2)
@@ -192,7 +194,10 @@ class PlanTests(MachineCase):
         plan, _ = self.machine.plan(environment=environment)
         first, second = self.machine.cli.calls
         self.assertEqual(first.flags, ['-c', 'features.code_mode_host=true', '-c', 'plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true'])
-        self.assertEqual(second.flags, first.flags + ['-c', plan.override])
+        # The override stands where it stands in the real start: after the root-level options, before the subcommand's own.
+        self.assertEqual(second.flags, ['-c', 'features.code_mode_host=true', '-c', plan.override, '-c',
+                                        'plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true'])
+        self.assertEqual(second.flags, relay_install.config_flags(plan.arguments), 'same options in the same order as the start')
         for call in (first, second):
             self.assertEqual(call.command[0], str(self.machine.native))
             self.assertEqual(call.command[-4:], ['mcp', 'get', 'cua_repl', '--json'])
@@ -200,6 +205,17 @@ class PlanTests(MachineCase):
             self.assertLessEqual(call.kwargs['timeout'], 5)
             self.assertIs(call.kwargs['stdin'], subprocess.DEVNULL)
             self.assertIs(call.kwargs['stderr'], subprocess.DEVNULL)
+
+    def test_options_in_the_attached_form_reach_the_cli_and_keep_their_place(self):
+        arguments = ['-c=features.code_mode_host=true', 'app-server', '--analytics-default-enabled', '--config=a.b=1']
+        plan, reason = self.machine.plan(arguments=arguments)
+        self.assertIsNone(reason)
+        self.assertEqual(plan.arguments[0], '-c=features.code_mode_host=true')
+        self.assertEqual(plan.arguments[1:3], ['-c', plan.override])
+        self.assertEqual(plan.arguments[3:], arguments[1:])
+        first, second = self.machine.cli.calls
+        self.assertEqual(first.flags, ['-c=features.code_mode_host=true', '--config=a.b=1'])
+        self.assertEqual(second.flags, ['-c=features.code_mode_host=true', '-c', plan.override, '--config=a.b=1'])
 
     def test_the_state_directory_is_passed_on_only_when_the_launcher_has_one(self):
         plan, _ = self.machine.plan()
@@ -214,7 +230,8 @@ class PlanTests(MachineCase):
     def test_the_proxy_gets_the_verified_paths(self):
         plan, _ = self.machine.plan()
         self.assertEqual(plan.proxy_arguments(), ['--relay-launcher', str(self.machine.launcher),
-            '--relay-native-runtime', str(self.machine.cua/'bin/node_repl'), '--relay-node', str(self.machine.cua/'bin/node')])
+            '--relay-native-runtime', str(self.machine.cua/'bin/node_repl'), '--relay-node', str(self.machine.cua/'bin/node'),
+            '--relay-script', str(self.machine.cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')])
 
     def test_optional_fields_of_the_definition_are_reproduced_too(self):
         definition = self.machine.definition
@@ -736,7 +753,7 @@ class AcceptRelayTests(MachineCase):
         path.write_text(json.dumps(record))
         path.chmod(0o600)
 
-    def accept(self, answer, adapter=None):
+    def accept(self, answer, adapter=None, selected=None):
         asked = []
 
         async def request(method, params):
@@ -744,7 +761,8 @@ class AcceptRelayTests(MachineCase):
             if isinstance(answer, Exception):
                 raise answer
             return answer
-        result = asyncio.run(relay_install.accept_relay(adapter or self.adapter, request, home=self.machine.home))
+        result = asyncio.run(relay_install.accept_relay(adapter or self.adapter, request, {'pluginId': None} if selected is None else selected,
+                                                        home=self.machine.home))
         return result, asked
 
     def test_config_read_that_shows_the_relay_is_enough(self):
@@ -812,6 +830,36 @@ class AcceptRelayTests(MachineCase):
         self.assertFalse(self.accept(None)[0])
         self.machine.launcher.unlink()
         self.assertFalse(self.accept(entry)[0], 'no launcher at all')
+
+    def test_a_server_that_reports_a_plugin_is_never_the_relay(self):
+        shown = {'config': {'mcp_servers': {'cua_repl': relay_entry(self.machine)}}}
+        self.registry()
+        for plugin in ('unrelated-plugin@market', 'unified-computer-use@somewhere-else', ''):
+            accepted, asked = self.accept(shown, selected={'name': 'cua_repl', 'pluginId': plugin})
+            self.assertFalse(accepted, plugin)
+            self.assertEqual(asked, [], 'the host is not even asked')
+        self.assertTrue(self.accept(shown, selected={'name': 'cua_repl'})[0], 'a server without any plugin id is judged by its transport')
+
+    def test_the_answer_is_asked_for_once_per_boot_and_not_on_every_pass(self):
+        shown = {'config': {'mcp_servers': {'cua_repl': relay_entry(self.machine)}}}
+        asked = []
+
+        def new_boot():
+            async def request(method, params):                  # every boot has its own request function
+                asked.append(method)
+                return shown
+            return request
+
+        async def passes(request):
+            return [await relay_install.accept_relay(self.adapter, request, {'pluginId': None}, home=self.machine.home) for _ in range(5)]
+        first = new_boot()
+        self.assertEqual(asyncio.run(passes(first)), [True]*5)
+        self.assertEqual(asked, ['config/read'])
+        shown['config']['mcp_servers']['cua_repl'] = relay_entry(self.machine, command='/usr/bin/node')
+        self.assertEqual(asyncio.run(passes(first)), [True]*5, 'the same boot keeps its answer')
+        self.assertEqual(asked, ['config/read'])
+        self.assertEqual(asyncio.run(passes(new_boot())), [False]*5, 'the next boot decides again')
+        self.assertEqual(asked, ['config/read', 'config/read'])
 
     def test_without_a_verified_bundled_runtime_nothing_is_accepted(self):
         adapter = FakeAdapter(self.machine, Path(self.socket))

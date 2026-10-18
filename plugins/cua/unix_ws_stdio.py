@@ -1,13 +1,15 @@
 #!/usr/bin/python3
 """JSONL stdio <-> native app-server WebSocket-over-Unix transport.
 
-Message bodies are forwarded as they are: this starts no execution server, and nothing is logged, approved or
-retried here. There is one exception, and only when the host launcher verified the CUA relay and passed the
---relay-* arguments. The desktop app starts and resumes its own threads with a configuration of the bundled
-cua_repl server (params.config["mcp_servers.cua_repl"] of a client request); that environment is pointed at the
-relay launcher, so Codex's own threads get the relay as well. Only lines containing that literal are decoded,
-and only the environment of that server is changed. Every other line, every response and everything the
-app-server sends goes through byte for byte, and so does a request that does not have exactly the expected shape.
+Lines are framed, not interpreted: nothing is logged, approved or retried here, and this starts no execution server.
+Every line goes to the other side as it came in, except in one case that exists only when the host launcher verified
+the CUA relay and passed the --relay-* arguments. The desktop app starts and resumes its own threads with a
+configuration of the bundled cua_repl server (params.config["mcp_servers.cua_repl"] of a client request). A line
+that contains that literal key is decoded; if it is a client request whose cua_repl configuration is exactly the
+verified bundled one (command, script, runtime path), it is encoded again as compact JSON with one change: the
+environment of that server points at the relay launcher (more variables name the original runtime and node, and the
+state directory when there is one). A line that is decoded but does not have exactly that shape goes out as it came
+in, and so does every line without the key, every response and everything the app-server sends.
 """
 import argparse
 import asyncio
@@ -62,8 +64,9 @@ def _launcher_trusted(path):
 class RelayRewrite:
     """Point the bundled cua_repl thread configuration of a client request at the relay launcher."""
 
-    def __init__(self, launcher, native_runtime, node, state_dir=None):
-        self.launcher, self.native_runtime, self.node, self.state_dir = launcher, native_runtime, node, state_dir
+    def __init__(self, launcher, native_runtime, node, script, state_dir=None):
+        self.launcher, self.native_runtime, self.node, self.script = launcher, native_runtime, node, script
+        self.state_dir = state_dir
 
     def __call__(self, body):
         if MARKER not in body:
@@ -81,7 +84,7 @@ class RelayRewrite:
         config = params.get('config') if isinstance(params, dict) else None
         entry = config.get(CONFIG_KEY) if isinstance(config, dict) else None
         env = entry.get('env') if isinstance(entry, dict) else None
-        if (not isinstance(env, dict) or entry.get('command') != self.node
+        if (not isinstance(env, dict) or entry.get('command') != self.node or entry.get('args') != [self.script]
                 or env.get(RUNTIME_PATH) != self.native_runtime or any(name in env for name in RELAY_NAMES)
                 or not _launcher_trusted(self.launcher)):
             return body
@@ -152,12 +155,12 @@ if __name__ == '__main__':
     parser.add_argument('--relay-launcher')
     parser.add_argument('--relay-native-runtime')
     parser.add_argument('--relay-node')
+    parser.add_argument('--relay-script')
     parser.add_argument('--relay-state-dir')
     args = parser.parse_args()
     # The relay is all or nothing; a half-given set of paths means no rewriting at all.
-    paths = (args.relay_launcher, args.relay_native_runtime, args.relay_node)
-    relay = (RelayRewrite(args.relay_launcher, args.relay_native_runtime, args.relay_node, args.relay_state_dir)
-             if all(item and os.path.isabs(item) for item in paths) else None)
+    paths = (args.relay_launcher, args.relay_native_runtime, args.relay_node, args.relay_script)
+    relay = (RelayRewrite(*paths, args.relay_state_dir) if all(item and os.path.isabs(item) for item in paths) else None)
     try:
         asyncio.run(serve(args.socket, relay))
     except (Exception, KeyboardInterrupt) as error:

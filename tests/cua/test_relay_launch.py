@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -69,11 +68,6 @@ class RelayLaunchTests(unittest.TestCase):
             for stream in (child.stdin, child.stdout, child.stderr):
                 if stream is not None and not stream.closed:
                     stream.close()
-        for event in self.events():
-            try:
-                os.kill(event['pid'], signal.SIGKILL)       # fake children recorded in this test folder only
-            except ProcessLookupError:
-                pass
 
     def events(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -151,14 +145,17 @@ class RelayLaunchTests(unittest.TestCase):
         del rest[position-1:position+1]
         self.assertEqual(rest, PRIMARY+['--listen', 'unix://'+record['socket_path']], 'every argument of the app stays, in order')
         self.assertEqual(self.proxy()['argv'], ['--socket', record['socket_path'], '--relay-launcher', str(launcher),
-            '--relay-native-runtime', str(self.machine.cua/'bin/node_repl'), '--relay-node', str(self.machine.cua/'bin/node')])
+            '--relay-native-runtime', str(self.machine.cua/'bin/node_repl'), '--relay-node', str(self.machine.cua/'bin/node'),
+            '--relay-script', str(self.machine.cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')])
         # The definition was read with the app's own options, and the backend gets the environment unchanged.
         reads = self.mcp_gets()
         self.assertEqual(len(reads), 2)
         self.assertEqual(reads[0]['argv'], ['-c', 'features.code_mode_host=true', '-c',
             'plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true', '-c',
             'plugins.code-review@openai-bundled.mcp_servers.code-review.enabled=true', 'mcp', 'get', 'cua_repl', '--json'])
-        self.assertEqual(reads[1]['argv'][:-4], reads[0]['argv'][:-4]+['-c', override[0]])
+        # The read-back has the override where the real start has it: after the root-level options, before the others.
+        first = reads[0]['argv'][:-4]
+        self.assertEqual(reads[1]['argv'][:-4], first[:2]+['-c', override[0]]+first[2:])
         expected = hashlib.sha256(b'fixture-environment-value').hexdigest()
         self.assertEqual({read['fixture_hash'] for read in reads}, {expected})
         self.assertEqual(self.backend()['fixture_hash'], expected)

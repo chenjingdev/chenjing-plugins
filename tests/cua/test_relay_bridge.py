@@ -51,8 +51,12 @@ class RelayBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.state = self.machine.root/'host-state'
         self.state.mkdir(mode=0o700)
         self.adapters = []
+        # Whatever the bridge records or reads lands in this fake Mac, never in the real home or state folders.
+        self.records = self.machine.root/'cua-state'
+        self.records.mkdir(mode=0o700)
         for patcher in (patch.object(Path, 'home', return_value=self.machine.home),
-                        patch.dict(os.environ, {'CODEX_HOST_CUA_STATE_DIR': str(self.state)})):
+                        patch.dict(os.environ, {'HOME': str(self.machine.home), 'CODEX_CUA_STATE_DIR': str(self.records),
+                                                'CODEX_HOST_CUA_STATE_DIR': str(self.state)})):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -150,6 +154,20 @@ class RelayBridgeTests(unittest.IsolatedAsyncioTestCase):
                 await self.initialize(adapter)
                 await self.assert_rejected(adapter, host, output)
             self.machine.launcher.chmod(0o700)
+
+    async def test_a_server_that_reports_another_plugin_is_never_the_relay(self):
+        self.registry()
+        adapter, host, output = self.connect(config=self.shown(), plugin_id='unrelated-plugin@market')
+        await self.initialize(adapter)
+        await self.assert_rejected(adapter, host, output)
+        self.assertEqual(host.config_reads, [], 'the host is not even asked')
+
+    async def test_the_host_is_asked_once_while_the_runtime_is_starting(self):
+        adapter, host, output = self.connect(config=self.shown(), states=['notStarted', 'starting', 'starting', 'connected'])
+        await self.initialize(adapter)
+        await self.assert_connected(adapter, host, output)
+        self.assertEqual(sum(m.get('method') == 'mcpServerStatus/list' for m in host.received), 4)
+        self.assertEqual(host.config_reads, [{'includeLayers': False}])
 
     async def test_a_server_that_is_the_bundled_plugin_never_needs_any_of_this(self):
         adapter, host, output = self.connect(config=None, plugin_id=bridge.NATIVE_PLUGIN_ID)

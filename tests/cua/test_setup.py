@@ -201,13 +201,17 @@ class SetupTests(unittest.TestCase):
         with patch.object(setup.os, 'kill', side_effect=PermissionError), self.assertRaises(RuntimeError):
             setup.uninstall(self.home, {'CODEX_HOST_CUA_STATE_DIR': str(state)})
 
+    def no_app(self):
+        # Without an app of its own the launcher text is written without looking at the machine's real /Applications.
+        return {'CODEX_CUA_APP_PATH': str(self.home/'no-such.app')}
+
     def with_relay_files(self):
         shutil.copytree(Path(setup.__file__).parent/'relay', self.plugin/'relay')
 
     def test_setup_copies_the_relay_files_to_the_support_directory(self):
         self.with_relay_files()
         with patch.object(setup, 'ensure_dependencies', return_value=self.root/'venv/bin/python3'):
-            setup.install_command(self.plugin, self.home)
+            setup.install_command(self.plugin, self.home, self.no_app())
         directory = self.root/'relay'
         for name in ('relay.mjs', 'node-repl-relay'):
             self.assertEqual((directory/name).read_bytes(), (Path(setup.__file__).parent/'relay'/name).read_bytes())
@@ -217,12 +221,12 @@ class SetupTests(unittest.TestCase):
         # A second setup after a plugin update replaces what changed and nothing else.
         (directory/'relay.mjs').write_text('stale')
         with patch.object(setup, 'ensure_dependencies', return_value=self.root/'venv/bin/python3'):
-            setup.install_command(self.plugin, self.home)
+            setup.install_command(self.plugin, self.home, self.no_app())
         self.assertEqual((directory/'relay.mjs').read_bytes(), (Path(setup.__file__).parent/'relay/relay.mjs').read_bytes())
 
     def test_a_plugin_without_relay_files_still_sets_up_and_doctor_says_so(self):
         with patch.object(setup, 'ensure_dependencies', return_value=self.root/'venv/bin/python3'):
-            setup.install_command(self.plugin, self.home)
+            setup.install_command(self.plugin, self.home, self.no_app())
         self.assertTrue((self.home/'.local/bin/codex-cua').is_file())
         self.assertFalse((self.root/'relay').exists())
         self.assertEqual(setup.relay_status(self.home), 'missing')

@@ -24,6 +24,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import weakref
 
 SERVER = 'cua_repl'
 SERVER_KEY = 'mcp_servers.' + SERVER
@@ -248,20 +249,26 @@ def toml_value(value):
 
 # ------------------------------------------------------------------ reading what Codex would start
 
+CONFIG_OPTIONS = ('-c', '--config', '--enable', '--disable')          # take the next argument as their value
+CONFIG_PREFIXES = ('--config=', '--enable=', '--disable=', '-c=')       # carry their value in the same argument
+
+
+def _option_width(item):
+    """How many arguments a configuration option takes (0: this is not one). The same rules as is_primary_launch."""
+    if item in CONFIG_OPTIONS:
+        return 2
+    return 1 if item.startswith(CONFIG_PREFIXES) else 0
+
+
 def config_flags(arguments):
-    """The configuration options of the app-server command line, in order: what shapes the effective config."""
+    """The configuration options in `arguments`, in order: what shapes the effective config."""
     flags = []
     index = 0
     while index < len(arguments):
-        item = arguments[index]
-        if item in ('-c', '--config', '--enable', '--disable') and index + 1 < len(arguments):
-            flags += [item, arguments[index + 1]]
-            index += 2
-        elif item.startswith(('--config=', '--enable=', '--disable=')):
-            flags.append(item)
-            index += 1
-        else:
-            index += 1
+        width = _option_width(arguments[index])
+        if width and index + width <= len(arguments):
+            flags += arguments[index:index + width]
+        index += width or 1
     return flags
 
 
@@ -269,13 +276,10 @@ def subcommand_index(arguments):
     """Where the subcommand is: the first argument that is not a root-level option (or its value)."""
     index = 0
     while index < len(arguments):
-        item = arguments[index]
-        if item in ('-c', '--config', '--enable', '--disable'):
-            index += 2
-        elif item.startswith(('--config=', '--enable=', '--disable=')) or item.startswith('-c='):
-            index += 1
-        else:
+        width = _option_width(arguments[index])
+        if not width:
             return index
+        index += width
     raise RelayRefused('not_a_launch')
 
 
@@ -454,18 +458,19 @@ def build_override(definition, hidden, launcher, state_dir=None):
 class RelayPlan:
     """What the launcher does for this start: the arguments of the backend and the proxy, and what was verified."""
 
-    def __init__(self, arguments, override, launcher, native_runtime, node, state_dir):
+    def __init__(self, arguments, override, launcher, native_runtime, node, script, state_dir):
         self.arguments = arguments
         self.override = override
         self.launcher = launcher
         self.native_runtime = native_runtime
         self.node = node
+        self.script = script
         self.state_dir = state_dir
 
     def proxy_arguments(self):
         """For the desktop transport: the verified paths it needs to point the app's own threads at the relay."""
         arguments = ['--relay-launcher', str(self.launcher), '--relay-native-runtime', self.native_runtime,
-                     '--relay-node', self.node]
+                     '--relay-node', self.node, '--relay-script', self.script]
         if self.state_dir:
             arguments += ['--relay-state-dir', self.state_dir]
         return arguments
@@ -486,8 +491,11 @@ def _plan(native, arguments, environment, plugin_root, home, run):
         installation = installation_from_native_cli(native)
     except (InstallationError, OSError):
         raise RelayRefused('not_original_cli') from None
-    flags = config_flags(arguments)
-    definition = bundled_definition(read_definition(native, flags, environment, run), installation.cua_root)
+    # The options are given to `mcp get` in the order of the real start: the root-level ones, then (below) our
+    # override, then the subcommand's own.
+    index = subcommand_index(arguments)
+    root_flags, own_flags = config_flags(arguments[:index]), config_flags(arguments[index + 1:])
+    definition = bundled_definition(read_definition(native, root_flags + own_flags, environment, run), installation.cua_root)
     hidden = _hidden_fields(definition, _bundled_plugin_entry(installation, definition, environment, home))
     state = environment.get(ENV_STATE)
     state = state if isinstance(state, str) and os.path.isabs(state) else None
@@ -495,11 +503,11 @@ def _plan(native, arguments, environment, plugin_root, home, run):
     # Ask the native CLI's own parser whether it reads the override back as intended, before the backend gets it.
     expected = json.loads(json.dumps(definition))
     expected['transport']['env'] = env
-    if read_definition(native, flags + ['-c', override], environment, run) != expected:
+    if read_definition(native, root_flags + ['-c', override] + own_flags, environment, run) != expected:
         raise RelayRefused('override_rejected')
-    index = subcommand_index(arguments)
     return RelayPlan(list(arguments[:index]) + ['-c', override] + list(arguments[index:]), override, launcher,
-                     definition['transport']['env'][ENV_RUNTIME_PATH], definition['transport']['command'], state)
+                     definition['transport']['env'][ENV_RUNTIME_PATH], definition['transport']['command'],
+                     definition['transport']['args'][0], state)
 
 
 def plan_relay(native, arguments, environment, plugin_root, home=None, run=subprocess.run):
@@ -560,13 +568,26 @@ def transport_is_relay(entry, cua_root, launcher):
             and env.get(ENV_NODE) == command)
 
 
-async def accept_relay(adapter, request, home=None):
+_decided = weakref.WeakKeyDictionary()      # one decision per boot: `request` is a new function in every boot
+
+
+async def accept_relay(adapter, request, selected, home=None):
     """True when the host's `cua_repl` is this plugin's relay, so the bridge may use it like the bundled plugin.
 
-    `config/read` is asked first. If it shows the server, the transport has to be exactly the relay's. If it does
-    not show the server at all, the host registry has to say the launcher put the relay there. In both cases the
-    launcher must be a file only this user can write.
+    `selected` is the server entry of mcpServerStatus/list. A server that reports a plugin is not the relay (a
+    config-defined server, which the relay is, reports none). `config/read` is asked first. If it shows the server,
+    the transport has to be exactly the relay's. If it does not show the server at all, the host registry has to
+    say the launcher put the relay there. In both cases the launcher must be a file only this user can write.
+    The answer is asked for once per boot: the caller asks again on every pass while the runtime starts.
     """
+    if selected.get('pluginId') is not None:
+        return False
+    if request not in _decided:
+        _decided[request] = await _decide(adapter, request, home)
+    return _decided[request]
+
+
+async def _decide(adapter, request, home):
     try:
         from runtime_paths import runtime_home
         if adapter.native_cua_root is None:

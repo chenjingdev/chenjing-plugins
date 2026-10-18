@@ -262,7 +262,7 @@ class HostMcp:
             selected = matches[0]
             if self.expected_plugin_id is not None and selected.get('pluginId') != self.expected_plugin_id:
                 from relay_install import accept_relay  # only this plugin's relay in front of the bundled runtime
-                if not await accept_relay(self, request):
+                if not await accept_relay(self, request, selected):
                     raise BridgeFailure('The selected host server is not identified as the original bundled CUA plugin.')
             state = selected.get('runtimeStatus')
             tools = selected.get('tools')
