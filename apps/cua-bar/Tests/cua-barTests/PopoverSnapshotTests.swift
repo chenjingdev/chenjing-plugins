@@ -216,6 +216,27 @@ struct PopoverSnapshotTests {
         }
     }
 
+    /// The 다른 도구 tab with two cmux-cua clients, one of them an orphan (A4-other-tools.png), and the same
+    /// tab after a normal stop of the first one timed out: its row offers 강제 종료 too.
+    @Test func theOtherToolsTabDrawsTheCmuxClients() async throws {
+        let first = "cmux-12892-1792284408"
+        let rig = await Rig(try Fixtures.status("status-cmux"))
+        rig.model.selectedTab = .otherTools
+        let plain = try #require(Snapshot.bitmap(of: SnapshotScene(model: rig.model), dark: dark))
+        #expect(NSApplication.shared.windows.allSatisfy { !$0.isVisible })
+        #expect(Snapshot.inkRatio(plain) > 0.15, "the render looks blank")
+
+        rig.engine.configure { $0.stopConnectionByID[first] = StopResult(ok: false, stopped: false, released: false, reason: "timeout") }
+        await rig.model.send(.stopConnection(first, force: false))?.value
+        #expect(rig.model.stopTimedOutIDs == [first])
+        let timedOut = try #require(Snapshot.bitmap(of: SnapshotScene(model: rig.model), dark: dark))
+        #expect(Snapshot.inkRatio(timedOut) > 0.15)
+        if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] {
+            try Snapshot.write(plain, named: "A4-other-tools", to: directory)
+            try Snapshot.write(timedOut, named: "A4-other-tools-timed-out", to: directory)
+        }
+    }
+
     @Test func eachTabDrawsWhenEverythingIsEmpty() async throws {
         let engine = FakeEngineClient(status: EngineStatus())
         let model = CUABarViewModel(engine: engine, appVersion: "0.7.0", clock: { Fixtures.now }, calendar: Fixtures.utc)

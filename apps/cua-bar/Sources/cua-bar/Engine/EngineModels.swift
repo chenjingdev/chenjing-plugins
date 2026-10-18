@@ -163,10 +163,28 @@ struct LeftoverLease: Equatable, Sendable {
     var releasable = false
 }
 
+/// One client of another tool. For cmux-cua each is one `cmux-cua mcp` process: what one AI
+/// conversation holds open to it.
 struct ToolClient: Equatable, Sendable {
+    /// `cmux-<mcp pid>-<process start epoch seconds>`, what `stop --connection` takes. nil from an
+    /// engine that does not name its clients yet.
+    var id: String?
+    /// The AI client that started it. One client can hold several connections, so this repeats and
+    /// is no key. nil when that AI client is gone.
     var pid: Int?
+    /// The `cmux-cua mcp` process itself, the one a stop signals.
+    var mcpPID: Int?
     var agent: AgentKind = .other("")
     var cwd: String?
+    var startedAt: Date?
+    /// The engine may signal this process.
+    var canStop = false
+
+    /// Nobody is on the other end: the engine reports no `pid` (nor agent or folder) for it.
+    var isOrphan: Bool { pid == nil }
+
+    /// A cmux-cua connection id starts with `cmux-`, the way the others start with their agent.
+    static func isCmuxConnection(id: String) -> Bool { id.hasPrefix("cmux-") }
 }
 
 struct OtherTool: Equatable, Sendable {
@@ -333,12 +351,18 @@ extension LeftoverLease: Decodable {
 }
 
 extension ToolClient: Decodable {
-    private enum CodingKeys: String, CodingKey { case pid, agent, cwd }
+    private enum CodingKeys: String, CodingKey {
+        case id, pid, mcpPID = "mcp_pid", agent, cwd, startedAt = "started_at", canStop = "can_stop"
+    }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.lenientString(.id)
         pid = c.lenientInt(.pid)
+        mcpPID = c.lenientInt(.mcpPID)
         agent = AgentKind(raw: c.lenientString(.agent))
         cwd = c.lenientString(.cwd)
+        startedAt = c.lenientDate(.startedAt)
+        canStop = c.lenientBool(.canStop) ?? false
     }
 }
 

@@ -73,12 +73,23 @@ enum Confirmations {
     /// Whether the connection a question is about is still in the content. Every "is its target
     /// still there" check goes through here.
     static func targetExists(_ id: String, in content: PopoverContent?) -> Bool {
-        row(id, in: content) != nil
+        // A cmux-cua connection is a line of the 다른 도구 tab, not one of the connections (R17).
+        if ToolClient.isCmuxConnection(id: id) { return cmuxRow(id, in: content) != nil }
+        return row(id, in: content) != nil
+    }
+
+    /// The 다른 도구 line of a cmux-cua connection, by its connection id.
+    static func cmuxRow(_ id: String, in content: PopoverContent?) -> ToolClientRow? {
+        content?.otherTools.tools.flatMap(\.clients).first { $0.connectionID == id }
     }
 
     /// The question, or nil when the action asks none now (it needs none, or there is nothing for
     /// it to act on: see `gate` for which of the two).
     static func prompt(for action: CUAAction, content: PopoverContent?) -> ConfirmationPrompt? {
+        // A cmux-cua connection is a line of the 다른 도구 tab, not one of the connections (R17).
+        if case .stopConnection(let id, force: true) = action, ToolClient.isCmuxConnection(id: id) {
+            return cmuxForceStop(id, content: content)
+        }
         switch action {
         case .restartCodex:
             return ConfirmationPrompt(
@@ -145,6 +156,21 @@ enum Confirmations {
         title: "AI가 하던 조작이 아직 안 끝났어요. 한 번 더 놓아 볼까요?",
         detail: "한 번 더 안 되면 줄에서 다시 하기나 강제 종료를 고를 수 있어요.", warning: nil,
         confirmTitle: "한 번 더 놓기", cancelTitle: "그만두기", isDestructive: false)
+
+    static let cmuxForceDetail = "먼저 정상 종료를 해 보고, 그래도 안 꺼지면 강제로 끝내요."
+    static let cmuxForceWarning = "이 대화의 cmux-cua 도구가 다시 붙을 때까지 끊겨요"
+
+    /// 강제 종료 of one cmux-cua connection, offered once its normal stop ran out of time. It has
+    /// nothing to release first; it cuts off the conversation it serves, if that is still there.
+    /// Nil when the line is gone: then `gate` refuses, as for any force stop whose target left.
+    private static func cmuxForceStop(_ id: String, content: PopoverContent?) -> ConfirmationPrompt? {
+        guard let row = cmuxRow(id, in: content) else { return nil }
+        let who = row.isOrphan ? row.title : "\(row.title) 연결"
+        return ConfirmationPrompt(
+            title: "cmux-cua · \(who) 1개를 강제로 끌까요?",
+            detail: cmuxForceDetail, warning: row.isOrphan ? nil : cmuxForceWarning,
+            confirmTitle: "강제 종료", isDestructive: true)
+    }
 
     private static func row(_ id: String, in content: PopoverContent?) -> ConnectionRow? {
         content?.connections.groups.flatMap(\.rows).first { $0.id == id }

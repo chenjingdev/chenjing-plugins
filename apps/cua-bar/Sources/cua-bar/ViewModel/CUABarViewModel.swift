@@ -71,6 +71,8 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var refusedReleaseIDs: Set<String> = []
     /// The automatic cleanup (F5) is running: the buttons that would touch what it releases wait.
     @Published private(set) var isCleaningUp = false
+    /// cmux-cua connections whose normal stop ran out of time (R17): their row offers 강제 종료.
+    @Published private(set) var stopTimedOutIDs: Set<String> = []
 
     /// The raw answer of the last good read, for what needs more than `content` shows.
     private(set) var lastStatus: EngineStatus?
@@ -253,6 +255,7 @@ final class CUABarViewModel: ObservableObject {
         sessionResults = [:]
         refusedReleaseIDs = []
         releaseRefusals = [:]
+        stopTimedOutIDs = []
         revalidatePending()
     }
 
@@ -264,6 +267,7 @@ final class CUABarViewModel: ObservableObject {
         let sessions = Set(status.leases.items.compactMap(\.sessionID) + status.leases.maybeLeft.compactMap(\.sessionID))
         failedSessionIDs.formIntersection(sessions)
         sessionResults = sessionResults.filter { sessions.contains($0.key) }
+        stopTimedOutIDs.formIntersection(status.otherTools.flatMap(\.clients).compactMap(\.id))
     }
 
     private func sleepUntilNextRefresh(generation: Int) async {
@@ -386,6 +390,10 @@ final class CUABarViewModel: ObservableObject {
         switch question.action {
         case .retryRelease(let id):
             return !Confirmations.targetExists(id, in: content)
+        case .stopConnection(let id, force: true) where ToolClient.isCmuxConnection(id: id):
+            // Asked from the line's 강제 종료, so it goes when that button does.
+            guard let row = Confirmations.cmuxRow(id, in: content) else { return true }
+            return row.timedOutButtons.isEmpty || !stopTimedOutIDs.contains(id)
         case .restartCodex:
             // The restart is the fix for Codex running without its host; with that over it would only cut work off.
             return !codexRunsWithoutHost(in: status)
@@ -460,6 +468,15 @@ final class CUABarViewModel: ObservableObject {
             }
             refusedReleaseIDs.insert(id)
             return (ActionOutcome(kind: .failure, message: ConnectionRow.refusedNote), true)
+        case .stopConnection(let id, _) where ToolClient.isCmuxConnection(id: id):
+            // R17: a cmux-cua row offers 강제 종료 only once a stop ran out of time; a stop that went
+            // through takes the offer away.
+            if result.reason == "timeout", result.outcome.kind == .failure {
+                stopTimedOutIDs.insert(id)
+            } else if result.outcome.kind != .failure {
+                stopTimedOutIDs.remove(id)
+            }
+            return (result.outcome, true)
         default:
             return (result.outcome, true)
         }
@@ -484,7 +501,9 @@ final class CUABarViewModel: ObservableObject {
                 return ActionResult(outcome: outcome, reason: result.reason)
             case .stopConnection(let id, let force):
                 let result = try await engine.stopConnection(id: id, force: force)
-                return ActionResult(outcome: ActionMessages.stopConnection(result, force: force), reason: result.reason)
+                let outcome = ToolClient.isCmuxConnection(id: id)
+                    ? ActionMessages.stopCmuxConnection(result, force: force) : ActionMessages.stopConnection(result, force: force)
+                return ActionResult(outcome: outcome, reason: result.reason)
             case .stopGroup(let group, let force):
                 let result = try await engine.stopGroup(group, force: force)
                 return ActionResult(

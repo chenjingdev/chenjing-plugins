@@ -64,7 +64,7 @@ struct PopoverView: View {
             case .leases:
                 LeasesTabView(content: content.leases, failedSessionIDs: model.failedSessionIDs, model: model)
             case .otherTools:
-                OtherToolsTabView(content: content.otherTools)
+                OtherToolsTabView(content: content.otherTools, model: model)
             case .activity:
                 EmptyView()
             }
