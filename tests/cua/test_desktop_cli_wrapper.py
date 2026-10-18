@@ -354,22 +354,27 @@ class LifecycleTests(unittest.TestCase):
             self.state.mkdir(mode=0o700)
             (self.root/'elsewhere').write_text('')
             (self.state/'owner.lock').symlink_to(self.root/'elsewhere')
+        def lease_is_dangling_symlink(environment):
+            self.state.mkdir(mode=0o700)
+            (self.state/'owner.lock').symlink_to(self.root/'nowhere')
         def state_parent_is_a_file(environment):
             (self.root/'blocker').write_text('x')
             environment['CODEX_HOST_CUA_STATE_DIR']=str(self.root/'blocker/state')
         cases={'public state directory':public_state,'relative state directory':relative_state,
                'invalid timeout':invalid_timeout,'lease held by another launcher':lease_held_elsewhere,
-               'lease file is a symlink':lease_is_symlink,'state directory cannot be created':state_parent_is_a_file}
+               'lease file is a symlink':lease_is_symlink,'lease file is a dangling symlink':lease_is_dangling_symlink,
+               'state directory cannot be created':state_parent_is_a_file}
         for name,prepare in cases.items():
             with self.subTest(name):
                 shutil.rmtree(self.state,ignore_errors=True)
-                (self.root/'blocker').unlink() if (self.root/'blocker').exists() else None
+                for leftover in ('blocker','nowhere','elsewhere'):(self.root/leftover).unlink(missing_ok=True)
                 environment=dict(self.environment);prepare(environment)
                 before=dict(environment)
                 execute=self.run_main(environment)
                 self.assertEqual(execute.call_count,1)
                 self.assertEqual(execute.call_args.args,(str(self.native),[str(self.native),*PRIMARY],before))
                 self.assertEqual(environment,before)
+                self.assertFalse((self.root/'nowhere').exists(),'The lease must not be created through a symlink')
                 for holder in holders:holder.close()
                 holders.clear()
 

@@ -181,10 +181,10 @@ def _launch(native, arguments, environment, state_dir, progress):
     shutdown_timeout = _positive_timeout(environment, "CODEX_HOST_CUA_SHUTDOWN_TIMEOUT", 8)
     _private_directory(state_dir)
     lock_path = state_dir / "owner.lock"
-    if lock_path.exists() and lock_path.is_symlink():
-        raise RuntimeError("The owned launcher lock must not be a symlink.")
-    lock = lock_path.open("a+")
-    os.chmod(lock_path, 0o600)
+    # O_NOFOLLOW: a symlink, even a dangling one, is never opened or created through.
+    flags = os.O_RDWR | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    lock = os.fdopen(os.open(lock_path, flags, 0o600), "a+")
+    os.fchmod(lock.fileno(), 0o600)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
