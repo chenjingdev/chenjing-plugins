@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "generated_at": null,
+  "plugin": {"version": null},
+  "codex": {"installed": false, "app_path": null, "app_version": null, "running": false, "pids": []},
+  "host": {"state": "missing", "since": null},
+  "setup": {"command": null, "dependencies": null, "login_environment": null, "wrapper": null, "relay": null},
+  "connections": [
+    {
+      "id": "codex-9-1792300000",
+      "agent": "codex",
+      "state": "active",
+      "pid": null,
+      "owner_pid": null,
+      "owner_alive": null,
+      "cwd": null,
+      "started_at": null,
+      "memory_bytes": null,
+      "last_call_at": null,
+      "idle_seconds": null,
+      "session_id": null,
+      "busy": false,
+      "can_release": false,
+      "can_stop": false
+    }
+  ],
+  "leases": {"readable": false, "items": [], "maybe_left": null},
+  "other_tools": [{"name": "cmux-cua", "running": false, "pids": [], "clients": null}],
+  "screen": {"active_connection_id": null, "last_call_at": null},
+  "activity": [
+    {"at": null, "connection_id": null, "agent": null, "tool": null, "ok": null, "ms": null}
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-18T12:00:00Z",
+  "plugin": {"version": "0.7.0"},
+  "codex": {"installed": true, "app_path": "/Applications/ChatGPT.app", "app_version": "26.1013.40934", "running": true, "pids": [15400]},
+  "host": {"state": "closed", "since": null},
+  "setup": {"command": "ready", "dependencies": "ready", "login_environment": "ready", "wrapper": "ready", "relay": "inactive"},
+  "connections": [
+    {
+      "id": "claude-4001-1792300000", "agent": "claude", "state": "ended", "pid": 4001, "owner_pid": null, "owner_alive": false,
+      "cwd": "/Users/chenjing/dev/unified-login", "started_at": "2026-10-18T07:11:00Z", "memory_bytes": 335544320,
+      "last_call_at": "2026-10-18T09:02:00Z", "idle_seconds": 10680, "session_id": "019a1b2c-0003", "busy": false,
+      "can_release": true, "can_stop": true
+    },
+    {
+      "id": "claude-12345-1792320000", "agent": "claude", "state": "active", "pid": 12345, "owner_pid": 11111, "owner_alive": true,
+      "cwd": "/Users/chenjing/dev/computer-use", "started_at": "2026-10-18T09:39:00Z", "memory_bytes": 220200960,
+      "last_call_at": "2026-10-18T11:59:30Z", "idle_seconds": 30, "session_id": "019a1b2c-0001", "busy": false,
+      "can_release": true, "can_stop": true
+    },
+    {
+      "id": "codex-15888-1792319000", "agent": "codex", "state": "idle", "pid": 15888, "owner_pid": 15400, "owner_alive": true,
+      "cwd": "/Users/chenjing/dev/new-chat", "started_at": "2026-10-18T04:35:00Z", "memory_bytes": 188743680,
+      "last_call_at": "2026-10-18T11:18:00Z", "idle_seconds": 2520, "session_id": null, "busy": false,
+      "can_release": false, "can_stop": true
+    }
+  ],
+  "leases": {
+    "readable": false,
+    "items": [],
+    "maybe_left": [
+      {"session_id": "019a1b2c-0009", "agent": "claude", "connection_id": "claude-222-1792310000",
+       "cwd": "/Users/chenjing/dev/y", "ended_at": "2026-10-18T11:40:00Z", "releasable": true},
+      {"session_id": null, "agent": "codex", "connection_id": "codex-333-1792311000",
+       "cwd": "/Users/chenjing/dev/z/app", "ended_at": "2026-10-18T11:10:00Z", "releasable": false}
+    ]
+  },
+  "other_tools": [
+    {"name": "cmux-cua", "running": true, "pids": [11807, 11812], "clients": [{"pid": 12221, "agent": "claude", "cwd": "/Users/chenjing/dev/z"}]}
+  ],
+  "screen": {"active_connection_id": null, "last_call_at": "2026-10-18T11:59:30Z"},
+  "activity": [
+    {"at": "2026-10-18T11:59:30Z", "connection_id": "claude-12345-1792320000", "agent": "claude", "tool": "js", "ok": true, "ms": 1234},
+    {"at": "2026-10-18T11:58:12Z", "connection_id": "claude-12345-1792320000", "agent": "claude", "tool": "click", "ok": false, "ms": 87},
+    {"at": "2026-10-18T09:02:00Z", "connection_id": "claude-4001-1792300000", "agent": "claude", "tool": "get_window_state", "ok": true, "ms": 540}
+  ]
+}

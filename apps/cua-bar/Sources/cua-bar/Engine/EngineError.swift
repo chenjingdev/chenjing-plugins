@@ -1,0 +1,31 @@
+import Foundation
+
+/// Why the engine could not give an answer at all. (An action that ran but did not succeed is
+/// not an error: it comes back as a result with `ok == false` and a reason.)
+enum EngineError: Error, Equatable, Sendable {
+    /// Neither the command nor the plugin is installed.
+    case pluginMissing
+    /// The plugin is installed but `codex-cua` has not been set up yet.
+    case setupNeeded(installPath: String)
+    case timeout
+    case commandFailed(exitCode: Int32, message: String)
+    case launchFailed(String)
+    /// The command ran but printed something that is not the contract's JSON.
+    case invalidOutput(String)
+    /// The document's `schema_version` is newer than this app understands.
+    case unsupportedSchema(Int)
+
+    /// One short Korean line for the status card and for result banners.
+    var message: String {
+        switch self {
+        case .pluginMissing: "CUA 플러그인이 없어요"
+        case .setupNeeded: "연결 설정이 아직 안 됐어요"
+        case .timeout: "응답이 없어 기다리다 멈췄어요"
+        case .commandFailed(let code, let message):
+            message.isEmpty ? "명령이 오류로 끝났어요 (종료 코드 \(code))" : "명령이 오류로 끝났어요 (종료 코드 \(code)): \(message)"
+        case .launchFailed(let message): "명령을 실행하지 못했어요: \(message)"
+        case .invalidOutput: "출력을 읽지 못했어요"
+        case .unsupportedSchema(let version): "앱이 모르는 출력 판이에요 (schema \(version))"
+        }
+    }
+}
