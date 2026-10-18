@@ -161,6 +161,12 @@ class Commands:
         self.cua_repl = '%s %s' % (node, app/'Contents/Resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
         self.node_repl = str(app/'Contents/Resources/cua_node/bin/node_repl')
         self.relay = '%s %s' % (node, home/'.local/share/codex-cua/relay/relay.mjs')
+        # The host's proxy between the app and its app-server names node and cua-repl.mjs as option values.
+        self.host_proxy = ('/usr/bin/python3 %s --socket /fixture/rpc.sock --relay-launcher %s --relay-native-runtime %s '
+                           '--relay-node %s --relay-script %s' % (
+                               home/'.claude/plugins/cache/chenjing-plugins/cua/0.7.0/unix_ws_stdio.py',
+                               home/'.local/share/codex-cua/relay/node-repl-relay', self.node_repl, node,
+                               app/'Contents/Resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'))
         self.bridge = '%s %s' % (home/'.local/share/codex-cua/venv/bin/python3',
                                  home/'.claude/plugins/cache/chenjing-plugins/cua/0.7.0/mcp_stdio.py')
         self.old_bridge = '/usr/bin/python3 %s' % (home/'.claude/plugins/cache/chenjing-plugins/cua/0.5.0/mcp_stdio.py')
@@ -456,7 +462,7 @@ class EngineCase(unittest.TestCase):
         self.machine.add(1000, 1, self.commands.app_main, start=NOW-7200)
         self.machine.add(1100, 1000, self.commands.app_server, start=NOW-7100)
         if host:
-            self.machine.add(1200, 1000, '/usr/bin/python3 unix_ws_stdio.py --socket x', start=NOW-7100)
+            self.machine.add(1200, 1000, self.commands.host_proxy, start=NOW-7100)
             self.write_host(relay=relay)
 
     def add_claude(self, pid=500, start=NOW-8000):

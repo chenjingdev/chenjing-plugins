@@ -80,9 +80,15 @@ def mark_live(records, procs, uid):
 # --- what a process is ------------------------------------------------------------------------------------
 
 def is_cua_repl(command):
-    """A CUA runtime root: the bundled node running cua-repl.mjs (it starts node_repl or the relay)."""
+    """A CUA runtime root: the bundled node running cua-repl.mjs (it starts node_repl or the relay).
+
+    That node is the program and the script its first argument, with no option before it. The host's proxy names
+    both as option values (`--relay-node <node> --relay-script <cua-repl.mjs>`) and is no runtime."""
     index = command.find(CUA_REPL_SCRIPT)
-    return index > 0 and re.search(r'(?:^|/)node\s', command[:index]) is not None
+    if index <= 0:
+        return False
+    head = command[:index]
+    return re.search(r'(?:^|/)node\s', head) is not None and re.search(r'\s--?[A-Za-z]', head) is None
 
 
 def is_bridge(command, plugin_root):
@@ -400,6 +406,10 @@ class Inventory:
         if not cmux_connections:
             protected |= set(self.cmux_mcp)
         protected |= {pid for pid, proc in self.mine.items() if is_chrome_main(proc.command)}
+        # The host itself: its wrapper, app-server and the proxy between them and the app.
+        registry = self.host.registry if isinstance(self.host.registry, dict) else {}
+        protected |= {pid for pid in (registry.get(key) for key in ('owner_pid', 'backend_pid', 'desktop_proxy_pid'))
+                      if type(pid) is int and pid > 1}
         protected |= set(owners)
         protected |= set(self.ancestors(self.ctx.pid))
         return protected

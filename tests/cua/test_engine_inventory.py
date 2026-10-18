@@ -56,6 +56,10 @@ class ClassificationTests(EngineCase):
         self.assertFalse(inventory.is_cua_repl('grep /@oai/cua-repl/bin/cua-repl.mjs'))
         self.assertFalse(inventory.is_cua_repl('/usr/bin/python3 /x/@oai/cua-repl/bin/cua-repl.mjs'))
         self.assertFalse(inventory.is_cua_repl(self.commands.relay))
+        # The host's proxy names node and the script as option values: no runtime (it was listed as a Codex connection).
+        self.assertFalse(inventory.is_cua_repl(self.commands.host_proxy))
+        beta = '/Applications/ChatGPT - Beta.app/Contents/Resources/cua_node'
+        self.assertTrue(inventory.is_cua_repl('%s/bin/node %s/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs' % (beta, beta)))
 
     def test_claude_bridges_of_this_and_older_plugins(self):
         root = Path('/work/plugins/cua')
@@ -415,6 +419,16 @@ class InventoryTests(EngineCase):
         protected = inv.protected_pids(owners=[7000])
         self.assertTrue({1000, 1100, 3000, 3001, 4000, 5000, 7000, ENGINE_PID, 6000} <= protected)
         self.assertFalse({2000, 2001, 2002} & protected)
+
+    def test_the_hosts_wrapper_app_server_and_proxy_are_protected(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.machine.add(8000, 1, '/usr/bin/python3 desktop_cli_wrapper.py app-server')
+        self.machine.add(8100, 8000, self.commands.app_server)
+        self.machine.add(8200, 8000, self.commands.host_proxy)
+        self.write_host(owner=8000, backend=8100, proxy=8200)
+        inv = inventory.collect(self.context())
+        self.assertEqual(inv.cua_repl, [])
+        self.assertTrue({8000, 8100, 8200} <= inv.protected_pids())
 
     def test_stopping_one_cmux_connection_protects_everything_except_the_mcp_process_itself(self):
         c = self.commands
