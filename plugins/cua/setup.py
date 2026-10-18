@@ -22,6 +22,7 @@ MARKER = '# codex-cua authored command v1'
 DEPENDENCY = 'websockets==12.0'
 LOGIN_LABEL = 'com.chenjingdev.codex-cua.env'
 FALLBACK_ENV = 'CODEX_CUA_FALLBACK_NATIVE'
+ROOT_RESOLVED_FLAG = '--root-resolved'
 
 
 def support_root(home=None):
@@ -454,20 +455,56 @@ def exec_native_fallback(arguments):
         os.execve(native, [native, *arguments], dict(os.environ))
 
 
+def split_forwarded(arguments):
+    """Everything after the first `--` belongs to the original Codex CLI and is never inspected."""
+    if '--' in arguments:
+        separator = arguments.index('--')
+        return arguments[:separator], arguments[separator+1:]
+    return arguments, []
+
+
+def hand_over_to_registered_plugin(arguments):
+    """Make the installed plugin version decide what the stable command does.
+
+    command.py is a copy of the setup.py that was current when `codex-cua setup` last ran, so
+    after a plugin update it is stale and does not know newer commands. Resolve the registered
+    plugin and, unless this file already is its setup.py, run that setup.py with the same
+    interpreter and arguments plus ROOT_RESOLVED_FLAG, which tells it the root is settled.
+    Returns the registered root when there is nothing to hand over to.
+    """
+    root = resolve_plugin_root()
+    target = root/'setup.py'
+    if target.resolve() == Path(__file__).resolve():
+        return root
+    # This file has not run on this machine yet; a damaged update must fail here, not after exec.
+    compile(target.read_bytes(), str(target), 'exec', dont_inherit=True)
+    handed = list(arguments)
+    handed.insert(handed.index('--control')+1, ROOT_RESOLVED_FLAG)
+    os.execve(sys.executable, [sys.executable, str(target), *handed], dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
+
+
 def main(arguments=None):
+    arguments = list(sys.argv[1:] if arguments is None else arguments)
+    original = list(arguments)
+    arguments, forwarded = split_forwarded(arguments)
+    registered = None
+    if '--control' in arguments and ROOT_RESOLVED_FLAG not in arguments:
+        # Before argparse: a stale copy's parser would reject any command added since it was made.
+        try:
+            registered = hand_over_to_registered_plugin(original)
+        except Exception:
+            if '--exec-wrapper' in arguments:
+                exec_native_fallback(forwarded)
+            raise
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--control', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument(ROOT_RESOLVED_FLAG, action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('command', choices=('install', 'setup', 'ensure', 'start', 'doctor', 'uninstall'))
     parser.add_argument('--exec-mcp', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--exec-wrapper', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--probe', action='store_true')
     parser.add_argument('--json', action='store_true')
     parser.add_argument('--timeout', type=float, default=15)
-    arguments = list(sys.argv[1:] if arguments is None else arguments)
-    forwarded = []
-    if '--' in arguments:
-        separator = arguments.index('--')
-        arguments, forwarded = arguments[:separator], arguments[separator+1:]
     args, remainder = parser.parse_known_args(arguments)
     remainder += forwarded
     if not math.isfinite(args.timeout) or not 0 < args.timeout <= 60:
@@ -475,7 +512,7 @@ def main(arguments=None):
     if sys.version_info < (3, 9) or sys.platform != 'darwin':
         raise RuntimeError('This plugin requires macOS and Python 3.9 or newer.')
     try:
-        plugin_root = resolve_plugin_root() if args.control else Path(__file__).resolve().parent
+        plugin_root = registered or Path(__file__).resolve().parent
         sys.path.insert(0, str(plugin_root))
         if args.command == 'ensure':
             python = ensure_dependencies()
