@@ -104,14 +104,21 @@ enum ActionMessages {
                 : ActionOutcome(kind: .failure, message: "놓지 못했어요 — \(reason(result.reason))")
         }
         let isBeforeRestart = { (item: EndedRelease) in status?.isLive(connectionID: item.connectionID) ?? false }
+        // The engine lists a live bridge's sessions from before the restart as one item per bridge,
+        // so that group is not counted in sessions.
         let groups = [
-            (label: "끝난 연결", tally: ReleaseTally(items.filter { !isBeforeRestart($0) })),
-            (label: "다시 연결되기 전 세션", tally: ReleaseTally(items.filter(isBeforeRestart))),
+            (label: "끝난 연결", counted: true, tally: ReleaseTally(items.filter { !isBeforeRestart($0) })),
+            (label: "다시 연결되기 전 세션", counted: false, tally: ReleaseTally(items.filter(isBeforeRestart))),
         ].filter { $0.tally.count > 0 }
-        var parts = groups.map { $0.tally.phrase($0.label) }
         let failed = groups.map { $0.tally.failed }.reduce(0, +)
+        // `ok: false` with nothing failed: some had nobody to ask, and the items cannot say which (P4).
+        let nothing = !result.ok && failed == 0 ? noWayToRelease : nothingToRelease
+        var parts = groups.map { $0.tally.phrase($0.label, counted: $0.counted, nothing: nothing) }
         if failed == 0 {
             guard result.ok else {
+                if groups.contains(where: { $0.tally.nothing > 0 }) {
+                    return ActionOutcome(kind: .warning, message: parts.joined(separator: " · "))
+                }
                 parts.append("마무리는 확인되지 않았어요")
                 return ActionOutcome(kind: .warning, message: parts.joined(separator: " · "))
             }
@@ -142,12 +149,19 @@ enum ActionMessages {
         var count: Int { released + nothing + failed }
 
         /// `끝난 연결 2개를 놓았어요`; with nothing to release for some, it says how many; with
-        /// failures, how many went and why the rest did not.
-        func phrase(_ label: String) -> String {
+        /// failures, how many went and why the rest did not. A group that is not `counted` says
+        /// what happened without numbers. `nothing` is what an item without a release reads as.
+        func phrase(_ label: String, counted: Bool = true, nothing nothingText: String = ActionMessages.nothingToRelease) -> String {
             let done = released + nothing
+            guard counted else {
+                if done == 0 { return "\(label)의 점유를 놓지 못했어요 — \(ActionMessages.why(failedReasons))" }
+                if released == 0 && failed == 0 { return "\(label) — \(nothingText)" }
+                if failed == 0 { return "\(label)의 점유를 놓았어요" }
+                return "\(label)의 점유를 일부만 놓았어요 — 나머지는 \(ActionMessages.why(failedReasons))"
+            }
             if done == 0 { return "\(label) \(count)개를 놓지 못했어요 — \(ActionMessages.why(failedReasons))" }
-            if released == 0 && failed == 0 { return "\(label) \(count)개 — \(ActionMessages.nothingToRelease)" }
-            let empty = nothing > 0 ? " (\(nothing)개는 \(ActionMessages.nothingToRelease))" : ""
+            if released == 0 && failed == 0 { return "\(label) \(count)개 — \(nothingText)" }
+            let empty = nothing > 0 ? " (\(nothing)개는 \(nothingText))" : ""
             if failed == 0 { return "\(label) \(count)개를 놓았어요\(empty)" }
             return "\(label) \(count)개 중 \(done)개를 놓았어요\(empty) — 나머지는 \(ActionMessages.why(failedReasons))"
         }

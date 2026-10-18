@@ -520,10 +520,12 @@ final class CUABarViewModel: ObservableObject {
                 let result = try await engine.releaseConnection(id: id)
                 return ActionResult(outcome: ActionMessages.releaseConnection(result), reason: result.reason)
             case .releaseEnded:
-                let result = try await engine.releaseEnded(ReleaseEndedLoad(status: lastStatus))
+                // The status the release started from: a read during the release may already miss what it ended.
+                let before = lastStatus
+                let result = try await engine.releaseEnded(ReleaseEndedLoad(status: before))
                 noteReleaseTried(result)
                 return ActionResult(
-                    outcome: ActionMessages.releaseEnded(result, in: lastStatus),
+                    outcome: ActionMessages.releaseEnded(result, in: before),
                     reason: result.results.first { !$0.released && $0.reason != "no_trusted_scope" }?.reason ?? result.reason)
             case .releaseSession(let id, let user):
                 let result = try await engine.releaseSession(id: id, user: user)

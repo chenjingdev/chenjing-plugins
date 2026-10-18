@@ -105,6 +105,23 @@ struct ActionMessagesTests {
                 == ActionOutcome(kind: .warning, message: "끝난 연결 3개 중 2개를 놓았어요 (1개는 놓을 점유 없음) — 나머지는 중계기를 쓸 수 없어요"))
     }
 
+    @Test func withNobodyToAskTheEmptyItemsAreNotNothingToRelease() {
+        // `ok: false` and nothing failed: some item had no endpoint, and the items cannot say which (P4).
+        func ended(_ released: Bool, _ reason: String? = nil) -> EndedRelease { EndedRelease(connectionID: "x", released: released, reason: reason) }
+        let empty = ended(false, "no_trusted_scope")
+        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [empty]))
+                == ActionOutcome(kind: .warning, message: "끝난 연결 1개 — 놓아줄 길을 확인하지 못했어요"))
+        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(true), empty]))
+                == ActionOutcome(kind: .warning, message: "끝난 연결 2개를 놓았어요 (1개는 놓아줄 길을 확인하지 못했어요)"))
+    }
+
+    @Test func sessionsFromBeforeTheRestartAreNotCountedBecauseTheEngineGroupsThemPerBridge() throws {
+        let status = try Fixtures.status("status-problem") // claude-12345 is live
+        let result = ReleaseEndedResult(ok: true, results: [EndedRelease(connectionID: "claude-12345-1792320000", released: false, reason: "no_trusted_scope")])
+        #expect(ActionMessages.releaseEnded(result, in: status)
+                == ActionOutcome(kind: .success, message: "다시 연결되기 전 세션 — 놓을 점유 없음"))
+    }
+
     @Test func aLiveBridgesSessionsFromBeforeTheRestartAreNotEndedConnections() throws {
         // P4: `release --ended` lists a live bridge whose old-host sessions it released under that bridge's own id.
         let status = try Fixtures.status("status-problem") // claude-4001 ended, claude-12345 active
@@ -113,12 +130,12 @@ struct ActionMessagesTests {
             EndedRelease(connectionID: "claude-12345-1792320000", released: true),
         ])
         #expect(ActionMessages.releaseEnded(result, in: status)
-                == ActionOutcome(kind: .success, message: "끝난 연결 1개를 놓았어요 · 다시 연결되기 전 세션 1개를 놓았어요"))
+                == ActionOutcome(kind: .success, message: "끝난 연결 1개를 놓았어요 · 다시 연결되기 전 세션의 점유를 놓았어요"))
         let onlyBeforeRestart = ReleaseEndedResult(ok: false, results: [
             EndedRelease(connectionID: "claude-12345-1792320000", released: false, reason: "timeout"),
         ])
         #expect(ActionMessages.releaseEnded(onlyBeforeRestart, in: status)
-                == ActionOutcome(kind: .failure, message: "다시 연결되기 전 세션 1개를 놓지 못했어요 — 시간이 너무 오래 걸렸어요"))
+                == ActionOutcome(kind: .failure, message: "다시 연결되기 전 세션의 점유를 놓지 못했어요 — 시간이 너무 오래 걸렸어요"))
         // A connection the status no longer lists is not live.
         #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [EndedRelease(connectionID: "claude-1-1", released: true)]), in: status)
                 == ActionOutcome(kind: .success, message: "끝난 연결 1개를 놓았어요"))
