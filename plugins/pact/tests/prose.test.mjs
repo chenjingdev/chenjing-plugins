@@ -121,6 +121,27 @@ test('build.md checks git, uses worker and reviewer, records Rulings', () => {
   assert.equal(text.trimEnd().split('\n').at(-1), '다음: verify.md');
 });
 
+test('the report is written for the person who approved the spec: plain fields on top, working notes folded', () => {
+  const verifier = read('agents/verifier.md');
+  assert.match(verifier, /## 사람이 읽는 칸/);
+  assert.match(verifier, /30초 안에 알아듣게/);
+  assert.match(verifier, /단계의 `action`은 스크린샷 아래에 붙는다/);
+  assert.ok(verifier.includes('"summary": "…"'));
+  assert.match(verifier, /당신이 지어낸 이름은 쓰지 않는다/);
+  assert.match(verifier, /`summary`를 새 결과로 고쳐 쓰고/);
+  const verify = read('skills/pact/verify.md');
+  assert.match(verify, /## 보고서 맨 위/);
+  for (const field of ['`headline`', '`todo`', '`changes`', '`decision`']) assert.ok(verify.includes(field), field);
+  assert.match(verify, /첫 문장이 결론이다/);
+  assert.match(verify, /쉬운 말로 풀 수 없는 기술 세부는 맨 위에 올리지 않는다/);
+  assert.match(verify, /`headline`에도 화면 없이 확인했다고 쓴다/);
+  assert.match(verify, /한 항목에 한 문장이고, 정할 것이면 추천을 붙인다/);
+  assert.match(verify, /나중에 부탁할 일도 언제인지와 함께 넣는다/);
+  assert.match(verify, /여기서는 열지 않는다/);
+  assert.match(verify, /남긴 이유를 그 시나리오의 `decision`에 적는다/);
+  assert.match(verify, /채팅은 보고서 맨 위와 같은 말로 보낸다/);
+});
+
 test('verify.md runs the verifier, builds the report, merges locally and asks only before push', () => {
   const text = read('skills/pact/verify.md');
   for (const s of ['pact:verifier', 'report.mjs', 'merge --no-ff', 'push']) assert.ok(text.includes(s), s);
