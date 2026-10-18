@@ -1,14 +1,14 @@
 # Codex CUA 개발용 테스트
 
-`plugins/cua`(0.7.0)의 회귀 시험이다. Python 시험 539개와 Node 시험 84개가 있고, 둘 다 저장소 루트에서 실행한다. 각각 1분쯤 걸린다.
+`plugins/cua`(0.7.0)의 회귀 시험이다. Python 시험 540개와 Node 시험 84개가 있고, 둘 다 저장소 루트에서 실행한다. Python 시험과 `node --test`는 1분쯤 걸리고, `node tests/cua/relay`로 직접 돌리면 네 파일이 한 프로세스에서 차례로 돌아 1분 20초쯤 걸린다.
 
 ```sh
-python3 tests/cua/run.py       # Python 시험 539개
+python3 tests/cua/run.py       # Python 시험 540개
 node --test tests/cua/relay    # Node 시험 84개 (중계기)
 ```
 
 - Python 시험은 표준 라이브러리의 `unittest`만 쓰고 Python 3.9 이상이면 된다. `run.py`가 `plugins/cua`를 모듈 검색 경로에 추가한 뒤 이 폴더의 `test_*.py`를 찾아 실행한다. `bridge_case.py`, `fake_host.py`, `engine_support.py`, `fake_native_cli.py`, `toml_subset.py`는 시험이 쓰는 도우미라 수집되지 않는다.
-- Node 시험은 `node:test`만 쓴다. 이 맥의 Node 26.8.1에서 확인했다. `relay/index.js`는 `node --test`에 폴더를 넘기면 그 폴더를 모듈 경로로 읽는 판(22, 24)에서 네 시험 파일을 대신 불러오는 입구다. 폴더를 직접 펼치는 판에서는 쓰이지 않는다.
+- Node 시험은 `node:test`만 쓴다. 이 맥의 Node 26.8.1에서 확인했다. `relay/index.js`는 네 시험 파일을 한 프로세스에서 불러오는 입구다. `node tests/cua/relay`로 직접 돌리면 어느 판에서나 이 입구를 거친다. `node --test tests/cua/relay`는 폴더를 모듈 경로로 읽는 판(22, 24)에서만 이 입구를 거치고, 폴더를 직접 펼치는 판(이 맥의 26)에서는 `index.js` 없이 네 파일을 각각 따로 돌린다.
 
 ## CUA를 쓰지 않을 때 돌린다
 
@@ -19,7 +19,7 @@ node --test tests/cua/relay    # Node 시험 84개 (중계기)
 | 종료 코드 | 뜻 |
 |---|---|
 | 0 | 모두 통과했다. |
-| 1 | 시험이 실패했거나, 시험이 버리는 HOME에 썼다(자기 폴더를 주입하지 않았다). |
+| 1 | 시험이 실패했거나, 시험이 버리는 HOME에 썼거나(자기 폴더를 주입하지 않았다), 인자를 잘못 줬다(argparse는 이때 2로 끝나지만 2는 보호 장치의 코드라 1로 바꿨다). |
 | 2 | 보호 장치가 실제 지원 폴더의 변화를 봤다. 시험 결과도 같이 출력되지만 1보다 우선한다. |
 
 바뀐 경로는 하나씩, 무엇이 일어났는지(`new`, `changed`, `removed`)와 새 수정 시각(로컬 시간, 오프셋 포함)과 함께 출력한다. 30개를 넘으면 나머지는 개수만 적는다.
@@ -43,7 +43,7 @@ Node 시험도 같은 출력과 종료 코드를 시험 프로세스가 낸다. 
 | 시작(launch) | `test_relay_launch`(19) | Codex를 켤 때 중계기를 앞에 끼우거나, 끼울 수 없으면 원래대로 시작하는 것. `host.json`의 `relay`와 `relay_reason`, 백엔드가 시작 중에 죽으면 중계기 없이 한 번 더 시작하는 것. |
 | 브리지와 통로 | `test_relay_bridge`(8), `test_unix_ws_stdio`(12) | 브리지가 번들 플러그인이 아닌 `cua_repl` 서버를 이 플러그인의 중계기일 때만 받아들이는 것, 데스크톱 통로가 바이트 그대로 전달하되 중계기를 가리키는 값 하나만 바꾸는 것(그 밖의 줄과 응답은 그대로). |
 | 엔진 | `test_engine_inventory`(34), `test_engine_records`(27), `test_engine_status`(59), `test_engine_release`(36), `test_engine_actions`(60), `test_engine_cli`(21) | `codex-cua`의 엔진 명령. 프로세스와 기록을 읽어 연결·점유·조작 기록·화면 상태로 만드는 `status`(JSON의 모든 필드, 연결의 주인 가르기, 쉼과 끝남), `release`와 `release-session`(주인이 사라진 세션만, `--user`, `session_live`, `not_found`), `stop`과 묶음 종료(보호 목록, 신원 재확인, `unattributed`), `restart-codex`(정상 종료만), `diagnose`(홈은 `~`), 명령줄과 JSON 한 덩어리 출력. 가짜 프로세스 표와 임시 파일·소켓으로 세상을 만들고, 진짜 프로세스로는 임시 HOME에서 `status`, `diagnose`, `doctor`를 돌려 본다(실제 프로세스 목록을 읽기만 한다). |
-| 보호 장치 | `test_guard`(15) | 지문이 같은 크기로 덮어쓴 파일과 원자적 교체, 새로 생기거나 사라진 항목을 보는 것, 링크를 따라가지 않는 것, 우리 로그인 항목만 지켜보는 것, 바뀐 경로의 출력, `run.py`의 종료 코드 0·1·2. |
+| 보호 장치 | `test_guard`(16) | 지문이 같은 크기로 덮어쓴 파일과 원자적 교체, 새로 생기거나 사라진 항목을 보는 것, 링크를 따라가지 않는 것, 우리 로그인 항목만 지켜보는 것, 바뀐 경로의 출력, `run.py`의 종료 코드 0·1·2(잘못된 인자는 1). |
 | 기본(0.6.0부터) | `test_host_mcp`(24), `test_setup`(22), `test_autostart`(12), `test_registry`(5), `test_runtime_paths`(4) | MCP catalog·이미지·오류·승인 전달, 전용 thread 종료, 다른 client 유지, launcher의 인자·환경·stdio 보존, registry와 원본 앱 탐색, 설치 캐시 업데이트, 의존성 준비의 동시 실행과 부분 설치 복구, 닫힌 앱의 백그라운드 실행과 포커스 복귀, 켜져 있는 앱 보존, 동시 실행 시 한 번만 열기, 로그인 항목 설정·충돌 보존·제거. 릴리스 버전은 플러그인 manifest에서 읽어 실행 정보와 비교한다. 설치 캐시 업데이트를 흉내 내는 `0.4.0`과 `0.4.1`은 시험 데이터다. |
 
 ## Node 시험 (`tests/cua/relay`)
