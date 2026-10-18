@@ -41,6 +41,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         case restartCodex
         case diagnose
         case runSetup
+        case uninstall
     }
 
     struct Script: Sendable {
@@ -67,6 +68,10 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var statusGate: AsyncGate?
         /// While shut, action calls wait here after being recorded.
         var actionGate: AsyncGate?
+        /// What `uninstall` throws; nil means it worked. (Unlike other actions, only `uninstall` is affected.)
+        var uninstallError: EngineError?
+        /// Runs when `uninstall` is called, so a test can put it in order with other events.
+        var onUninstall: (@Sendable () -> Void)?
     }
 
     private let lock = NSLock()
@@ -137,6 +142,12 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
 
     func runSetup() async throws {
         _ = try await begin(.runSetup, isAction: true)
+    }
+
+    func uninstall() async throws {
+        let script = try await begin(.uninstall, isAction: true)
+        script.onUninstall?()
+        if let error = script.uninstallError { throw error }
     }
 
     /// Records the call, waits at the gate if one is shut, and hands back the script as it is now.

@@ -5,6 +5,8 @@ enum NotificationKind: String, Equatable, Sendable {
     case codexWithoutHost
     /// A lease the owner left behind is still listed a minute later (R16).
     case lingeringLease
+    /// A newer CUA Bar release is out (F7); posted once per version.
+    case newVersion
 }
 
 enum NotificationButton: String, Equatable, Sendable {
@@ -37,6 +39,15 @@ struct AppNotification: Equatable, Sendable {
     }
 }
 
+extension AppNotification {
+    /// The footer shows the same news as its 새 버전 button; clicking the notification opens the popover.
+    static func newVersion(_ version: String) -> AppNotification {
+        AppNotification(
+            key: "new-version-\(version)", kind: .newVersion, title: "CUA Bar 새 버전 \(version)이 나왔어요",
+            body: "창 아래 '새 버전 \(version)'을 누르면 받는 곳이 열려요.")
+    }
+}
+
 /// What the person did with a notification, already turned into what the app should do.
 enum NotificationResponse: Equatable, Sendable {
     /// Clicking the body opens the popover; a lingering lease opens it on 브라우저 점유.
@@ -54,6 +65,7 @@ enum NotificationResponse: Equatable, Sendable {
         switch (tap, kind) {
         case (.body, .codexWithoutHost): .openPopover(nil)
         case (.body, .lingeringLease): .openPopover(.leases)
+        case (.body, .newVersion): .openPopover(nil)
         case (.button(.restartCodex), .codexWithoutHost): .restartCodex(key: key)
         default: nil
         }

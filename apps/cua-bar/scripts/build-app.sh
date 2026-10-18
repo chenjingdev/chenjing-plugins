@@ -2,7 +2,10 @@
 # Builds CUABar.app next to Package.swift and signs it ad hoc (no notarization, like agent-bar).
 # The app's version is the cua plugin's version: they ship together and the app compares them.
 #
-#   ./scripts/build-app.sh
+#   ./scripts/build-app.sh             build only
+#   ./scripts/build-app.sh --install   build, then copy it into ~/Applications the way agent-bar does:
+#                                      back up what is there, refuse while the app runs, verify the
+#                                      signature of the copy before it replaces anything
 #
 # CUABAR_CODE_SIGN_IDENTITY picks another signing identity; the default is ad hoc ("-").
 
@@ -18,12 +21,22 @@ executable_name="cua-bar"
 bundle_identifier="dev.chenjing.cua-bar"
 build_configuration="release"
 signing_identity="${CUABAR_CODE_SIGN_IDENTITY:--}"
+install_dir="$HOME/Applications"
+install_path="$install_dir/$bundle_name"
+should_install=0
 
-if [[ $# -gt 0 ]]; then
-  echo "Unknown option: $1" >&2
-  echo "Usage: ./scripts/build-app.sh" >&2
-  exit 1
-fi
+for arg in "$@"; do
+  case "$arg" in
+    --install)
+      should_install=1
+      ;;
+    *)
+      echo "Unknown option: $arg" >&2
+      echo "Usage: ./scripts/build-app.sh [--install]" >&2
+      exit 1
+      ;;
+  esac
+done
 
 if [[ ! -f "$plugin_manifest" ]]; then
   echo "Plugin manifest not found: $plugin_manifest" >&2
@@ -32,6 +45,16 @@ fi
 version=$(plutil -extract version raw -o - "$plugin_manifest")
 if [[ ! "$version" =~ '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' ]]; then
   echo "Plugin version is not a plain version number: '$version'" >&2
+  exit 1
+fi
+
+# Replacing the files of a running app would leave the old copy running, and a new copy leaves at
+# once because only one copy runs at a time. So an install waits until it has been quit.
+app_is_running() {
+  pgrep -x "$executable_name" >/dev/null
+}
+if [[ "$should_install" -eq 1 ]] && app_is_running; then
+  echo "CUA Bar is still running; nothing was built or installed. Quit it (끝내기 in its popover) and run this again." >&2
   exit 1
 fi
 
@@ -94,4 +117,44 @@ echo "Signing with: $([[ "$signing_identity" == "-" ]] && echo "ad hoc" || echo 
 codesign --force --deep -s "$signing_identity" "$bundle_path" >/dev/null
 codesign --verify --deep --strict "$bundle_path"
 
-echo "Built $bundle_path (version $version)"
+if [[ "$should_install" -eq 1 ]]; then
+  umask 077
+  mkdir -p "$install_dir"
+  backup_dir="$HOME/Library/Application Support/CUABar/Backups/$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$backup_dir"
+  if [[ -d "$install_path" ]]; then
+    ditto "$install_path" "$backup_dir/$bundle_name"
+  fi
+  defaults export "$bundle_identifier" "$backup_dir/settings.plist" >/dev/null 2>&1 || true
+
+  staging_dir=$(mktemp -d "$install_dir/.CUABar-install.XXXXXX")
+  ditto "$bundle_path" "$staging_dir/new.app"
+  if ! codesign --verify --deep --strict "$staging_dir/new.app"; then
+    rm -rf "$staging_dir"
+    echo "The copy failed signature verification; nothing was replaced. Backup: $backup_dir" >&2
+    exit 1
+  fi
+  if [[ -d "$install_path" ]]; then
+    # Checked again right before the swap: it may have been opened while this script was building.
+    if app_is_running; then
+      rm -rf "$staging_dir"
+      echo "CUA Bar is running; installation stopped. Backup: $backup_dir" >&2
+      exit 1
+    fi
+    mv "$install_path" "$staging_dir/previous.app"
+  fi
+  if ! mv "$staging_dir/new.app" "$install_path"; then
+    if [[ -d "$staging_dir/previous.app" ]]; then mv "$staging_dir/previous.app" "$install_path"; fi
+    echo "Installation failed; previous app restored. Backup: $backup_dir" >&2
+    exit 1
+  fi
+  rm -rf "$staging_dir"
+  echo "Backup: $backup_dir"
+  echo "Installed to $install_path (version $version)"
+  echo "You can launch it with:"
+  echo "open \"$install_path\""
+else
+  echo "Built $bundle_path (version $version)"
+  echo "You can launch it with:"
+  echo "open \"$bundle_path\""
+fi

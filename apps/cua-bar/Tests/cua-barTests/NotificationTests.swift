@@ -153,6 +153,8 @@ struct NotificationPlannerTests {
     @Test func whatEachClickMeans() {
         #expect(NotificationResponse.make(tap: .body, kind: .codexWithoutHost, key: "codex:1") == .openPopover(nil))
         #expect(NotificationResponse.make(tap: .body, kind: .lingeringLease, key: "lease:a") == .openPopover(.leases))
+        #expect(NotificationResponse.make(tap: .body, kind: .newVersion, key: "new-version-0.7.1") == .openPopover(nil))
+        #expect(NotificationResponse.make(tap: .dismissed, kind: .newVersion, key: "new-version-0.7.1") == nil)
         #expect(NotificationResponse.make(tap: .button(.restartCodex), kind: .codexWithoutHost, key: "codex:1") == .restartCodex(key: "codex:1"))
         #expect(NotificationResponse.make(tap: .button(.restartCodex), kind: .lingeringLease, key: "lease:a") == nil)
         #expect(NotificationResponse.make(tap: .dismissed, kind: .codexWithoutHost, key: "codex:1") == nil)
@@ -295,5 +297,17 @@ struct NotificationViewModelTests {
         rig.notifier.tap(.restartCodex(key: key))
         await rig.model.waitForBackgroundWork()
         #expect(rig.actionCalls.isEmpty)
+    }
+}
+
+@Suite struct NewVersionNotificationTests {
+    @Test func aNewReleaseIsOneNotificationPerVersionThatPointsAtTheFooter() {
+        let note = AppNotification.newVersion("0.7.1")
+        #expect(note.kind == .newVersion)
+        #expect(note.key == "new-version-0.7.1")
+        #expect(note.title.contains("0.7.1"))
+        #expect(note.body.contains("새 버전 0.7.1"))
+        #expect(note.buttons.isEmpty)
+        #expect(AppNotification.newVersion("0.7.2").key != note.key)
     }
 }

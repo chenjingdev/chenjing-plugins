@@ -35,11 +35,11 @@ enum CUAAction: Hashable, Sendable {
     case showLeases
     /// Codex 열기, after a restart whose relaunch failed. Opens the app the person just chose to open.
     case openCodex
-    /// TODO(A3): open the page where Codex is downloaded.
+    /// Open the page where Codex is downloaded.
     case openCodexDownload
-    /// TODO(A3): install the Claude plugin (`cua@chenjing-plugins`).
+    /// Install the Claude plugin (`cua@chenjing-plugins`) and set it up.
     case installPlugin
-    /// TODO(A3): install or update whichever side is older so app and plugin versions match.
+    /// Update the plugin when it is older than the app, or open the app's release page when it is newer.
     case matchPluginVersion
     /// Read the status again now.
     case refresh

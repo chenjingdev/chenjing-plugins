@@ -131,12 +131,26 @@ struct EngineClientTests {
         #expect(runner.calls.map(\.arguments) == [["diagnose"]])
     }
 
-    @Test func setupRunsTheCommandsOwnInstaller() async throws {
+    @Test func withoutARegisteredPluginFolderSetupRunsTheCommandsOwnInstaller() async throws {
         let runner = ScriptedRunner(stdout: "done")
         let (client, home) = try client(runner)
         defer { home.remove() }
+        try await client.runSetup() // nothing registered
+        try home.installPlugin(createFolder: false)
+        try await client.runSetup() // registered, but its folder is gone
+        let commandSetup = ScriptedRunner.Call(executable: home.command.path, arguments: ["setup"], timeout: EngineTimeouts().setup)
+        #expect(runner.calls == [commandSetup, commandSetup])
+    }
+
+    @Test func setupRunsTheRegisteredPluginsSetupScriptEvenWhenACommandExists() async throws {
+        // The command may be an old one (0.6.0 or lower) that does not hand over to the plugin
+        // Claude Code registered and would keep its old launcher.
+        let runner = ScriptedRunner(stdout: "done")
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        let install = try home.installPlugin(version: "0.7.0")
         try await client.runSetup()
-        #expect(runner.calls == [.init(executable: home.command.path, arguments: ["setup"], timeout: .seconds(600))])
+        #expect(runner.calls == [.init(executable: "/bin/sh", arguments: [install.appendingPathComponent("setup.sh").path, "setup"], timeout: EngineTimeouts().setup)])
     }
 
     @Test func setupBeforeTheCommandExistsRunsThePluginsSetupScript() async throws {
@@ -145,7 +159,73 @@ struct EngineClientTests {
         defer { home.remove() }
         let install = try home.installPlugin()
         try await client.runSetup()
-        #expect(runner.calls == [.init(executable: "/bin/sh", arguments: [install.appendingPathComponent("setup.sh").path, "setup"], timeout: .seconds(600))])
+        #expect(runner.calls == [.init(executable: "/bin/sh", arguments: [install.appendingPathComponent("setup.sh").path, "setup"], timeout: EngineTimeouts().setup)])
+    }
+
+    @Test func uninstallRunsTheRemoverWithItsOwnTimeout() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        try home.writeCommand()
+        let runner = ScriptedRunner(stdout: "")
+        let client = CodexCUAEngineClient(locator: CommandLocator(home: home.url), runner: runner)
+        try await client.uninstall()
+        #expect(runner.calls == [.init(executable: home.command.path, arguments: ["uninstall"], timeout: EngineTimeouts().uninstall)])
+        #expect(EngineTimeouts().uninstall <= .seconds(120))
+    }
+
+    @Test func aRemoverThatExitsNonZeroIsACommandFailure() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        try home.writeCommand()
+        let client = CodexCUAEngineClient(
+            locator: CommandLocator(home: home.url), runner: ScriptedRunner(stdout: "", exitCode: 1, stderr: "codex-cua could not complete.\n"))
+        await #expect(throws: EngineError.commandFailed(exitCode: 1, message: "codex-cua could not complete.")) { try await client.uninstall() }
+    }
+
+    @Test func uninstallWithoutThePluginHasNothingToRun() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let runner = ScriptedRunner()
+        let client = CodexCUAEngineClient(locator: CommandLocator(home: home.url), runner: runner)
+        await #expect(throws: EngineError.pluginMissing) { try await client.uninstall() }
+        #expect(runner.calls.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func withoutItsCommandThePluginsOwnRemoverRuns(foreignCommand: Bool) async throws {
+        // An earlier setup may have left the login environment and the relay behind (R3).
+        let home = try TempHome()
+        defer { home.remove() }
+        if foreignCommand { try home.writeCommand("#!/bin/sh\necho someone else's command\n") }
+        let install = try home.installPlugin()
+        try home.addSupportInstallation()
+        let runner = ScriptedRunner(stdout: "")
+        let client = CodexCUAEngineClient(locator: CommandLocator(home: home.url), runner: runner)
+        try await client.uninstall()
+        #expect(runner.calls == [.init(executable: "/bin/sh", arguments: [install.appendingPathComponent("setup.sh").path, "uninstall"], timeout: EngineTimeouts().uninstall)])
+    }
+
+    @Test func thatRemoverFailingWithNothingInstalledMeansNothingWasSetUp() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let install = try home.installPlugin()
+        let client = CodexCUAEngineClient(
+            locator: CommandLocator(home: home.url), runner: ScriptedRunner(stdout: "", exitCode: 1, stderr: "codex-cua could not complete.\n"))
+        await #expect(throws: EngineError.setupNeeded(installPath: install.path)) { try await client.uninstall() }
+    }
+
+    @Test func anyOtherFailureOfThatRemoverIsAFailure() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        try home.installPlugin()
+        try home.addSupportInstallation() // there was something to undo, so the remover was refused or broke
+        let failing = CodexCUAEngineClient(
+            locator: CommandLocator(home: home.url), runner: ScriptedRunner(stdout: "", exitCode: 1, stderr: "codex-cua could not complete.\n"))
+        await #expect(throws: EngineError.commandFailed(exitCode: 1, message: "codex-cua could not complete.")) { try await failing.uninstall() }
+        // Nothing installed, but the remover never finished: that is not its "nothing installed" answer.
+        try FileManager.default.removeItem(at: CommandLocator(home: home.url).supportBindingURL)
+        let stuck = CodexCUAEngineClient(locator: CommandLocator(home: home.url), runner: ScriptedRunner(failing: ProcessRunError.timedOut))
+        await #expect(throws: EngineError.timeout) { try await stuck.uninstall() }
     }
 
     @Test func setupWithoutThePluginSaysSo() async throws {
@@ -169,7 +249,9 @@ struct EngineClientTests {
         #expect(runner.calls.map(\.timeout) == [timeouts.release, timeouts.stop, timeouts.groupStop, timeouts.restartCodex, timeouts.diagnose])
         // Status is polled, so it must give up fast; nothing may wait forever.
         #expect(timeouts.status <= .seconds(15))
-        #expect(timeouts.setup <= .seconds(900))
+        // Setup may be installing packages; stopping it halfway breaks the environment, so it gets 15 minutes at least.
+        #expect(timeouts.setup >= .seconds(15 * 60))
+        #expect(timeouts.setup <= .seconds(60 * 60))
     }
 
     /// A limit shorter than the engine's own worst case (P4) kills an engine that would still

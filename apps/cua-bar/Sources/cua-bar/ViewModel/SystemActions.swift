@@ -1,16 +1,15 @@
 import AppKit
 
 /// Fixes that reach outside the engine: opening a web page, installing or updating the Claude
-/// plugin. They are not wired yet; the task after this one fills them in by passing its own
-/// `SystemActions` to the view model, so nothing else has to change.
+/// plugin. `LiveSystemActions` does them in the real app; tests and previews pass their own.
 protocol SystemActions: Sendable {
     func openCodexDownload() async -> ActionOutcome
     func installPlugin() async -> ActionOutcome
     func matchPluginVersion() async -> ActionOutcome
 }
 
-/// TODO(A3): replace with the real thing (Codex download page, `claude plugin install` /
-/// `update`, and the app's own update).
+/// Says each of them is not available. The default for tests and previews, where nothing may be
+/// opened or installed; the app itself uses `LiveSystemActions`.
 struct UnwiredSystemActions: SystemActions {
     func openCodexDownload() async -> ActionOutcome {
         ActionOutcome(kind: .info, message: "Codex 받는 곳 열기는 아직 연결되지 않았어요")
