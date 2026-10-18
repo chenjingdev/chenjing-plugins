@@ -325,12 +325,64 @@ struct ScreenLine: Equatable, Sendable {
     var detail: String?
 }
 
+/// One client of another tool, as its line in the 다른 도구 tab. For cmux-cua each is one connection
+/// (one `cmux-cua mcp` process), stopped one at a time and never in a group (R17).
+struct ToolClientRow: Equatable, Identifiable, Sendable {
+    /// What a client whose AI client is gone reads as.
+    static let orphanTitle = "주인 없는 연결"
+    /// The line a row shows after its normal stop ran out of time.
+    static let timedOutNote = "정상 종료가 시간 안에 안 끝남"
+
+    /// The connection id. `pid` is no key: one AI client can hold several connections. An engine
+    /// that does not name its clients gets a stand-in by position.
+    var id: String
+    /// What `stop --connection` takes; nil from an engine that does not name its clients.
+    var connectionID: String?
+    /// `Claude · dev/z`, `Claude` when the folder is unknown, or 주인 없는 연결.
+    var title: String
+    /// The full path, for a hover hint.
+    var path: String?
+    /// `11시간 전 시작`
+    var startedText: String
+    /// Its AI client is gone, so stopping it cuts nobody off.
+    var isOrphan: Bool
+    /// 끄기, only when the engine may stop it and named it. A single normal stop asks nothing.
+    var buttons: [ButtonSpec]
+    /// After a normal stop ran out of time: 끄기 · 강제 종료 (the force stop asks once).
+    var timedOutButtons: [ButtonSpec]
+
+    init(_ client: ToolClient, tool: String, index: Int, now: Date) {
+        id = client.id ?? "client-\(index)"
+        connectionID = client.id
+        isOrphan = client.isOrphan
+        title = client.isOrphan
+            ? Self.orphanTitle
+            : client.cwd.map { "\(client.agent.label) · \(Format.folder($0))" } ?? client.agent.label
+        path = client.cwd
+        startedText = Format.startedAgo(client.startedAt, now: now)
+        guard client.canStop, let connection = client.id else {
+            buttons = []
+            timedOutButtons = []
+            return
+        }
+        let cutOff = client.isOrphan ? "띄운 AI가 없어서 끊길 대화도 없어요" : "그 대화의 \(tool) 도구는 다시 붙을 때까지 끊겨요"
+        let stop = ButtonSpec(
+            title: "끄기", action: .stopConnection(connection, force: false), help: "이 \(tool) 연결만 정상 종료해요. \(cutOff)")
+        let forceStop = ButtonSpec(
+            title: "강제 종료", action: .stopConnection(connection, force: true), isDestructive: true,
+            help: "정상 종료가 시간 안에 안 끝났어요. 이 연결만 강제로 끝내요")
+        buttons = [stop]
+        timedOutButtons = [stop, forceStop]
+    }
+}
+
 struct OtherToolRow: Equatable, Identifiable, Sendable {
     var name: String
     var isRunning: Bool
     var statusText: String
+    /// The tool's own processes (`프로세스 n개`). Text only: the daemon is never stopped.
     var detail: String?
-    var clients: [String]
+    var clients: [ToolClientRow]
     var id: String { name }
 }
 
@@ -354,9 +406,7 @@ struct OtherToolsContent: Equatable, Sendable {
             OtherToolRow(
                 name: tool.name, isRunning: tool.running, statusText: tool.running ? "실행 중" : "꺼져 있음",
                 detail: tool.running && !tool.pids.isEmpty ? "프로세스 \(tool.pids.count)개" : nil,
-                clients: tool.clients.map { client in
-                    client.cwd.map { "\(client.agent.label) · \(Format.folder($0))" } ?? client.agent.label
-                })
+                clients: tool.clients.enumerated().map { ToolClientRow($1, tool: tool.name, index: $0, now: now) })
         }
         emptyText = tools.isEmpty ? PopoverTab.otherTools.emptyText : nil
     }

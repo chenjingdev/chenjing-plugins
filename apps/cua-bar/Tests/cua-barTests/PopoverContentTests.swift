@@ -327,7 +327,12 @@ struct PopoverContentTests {
         #expect(tool.isRunning)
         #expect(tool.statusText == "실행 중")
         #expect(tool.detail == "프로세스 2개")
-        #expect(tool.clients == ["Claude · dev/z"])
+        // This fixture is an engine that does not name its clients: the row reads as it always did.
+        let client = try #require(tool.clients.first)
+        #expect(tool.clients.count == 1)
+        #expect(client.title == "Claude · dev/z")
+        #expect(client.connectionID == nil)
+        #expect(client.buttons.isEmpty)
     }
 
     @Test func aToolWithoutClientsHasNoClientLines() throws {

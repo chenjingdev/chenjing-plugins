@@ -98,24 +98,28 @@ struct ButtonWiringTests {
         #expect(button.isEnabled)
     }
 
-    @Test func everyButtonHasAHelpText() throws {
-        let content = try content("status-problem")
+    @Test(arguments: ["status-problem", "status-cmux"])
+    func everyButtonHasAHelpText(fixture: String) throws {
+        let content = try content(fixture)
         var specs = content.connections.groups.flatMap(\.rows).flatMap(\.buttons)
         specs += content.connections.stopButtons + [content.connections.releaseEndedButton, content.activity.copyButton]
         specs += content.leases.rows.compactMap(\.releaseButton)
+        specs += content.otherTools.tools.flatMap(\.clients).flatMap { $0.buttons + $0.timedOutButtons }
         #expect(!specs.isEmpty)
         #expect(specs.allSatisfy { !$0.help.isEmpty })
     }
 
     // MARK: Pressing them reaches the engine
 
-    /// Every button of the popover for the problem fixture, with the card's fix button.
-    private func everyButton() throws -> [ButtonSpec] {
-        let status = try Fixtures.status("status-problem")
+    /// Every button of the popover for a fixture, with the card's fix button.
+    private func everyButton(_ fixture: String) throws -> [ButtonSpec] {
+        let status = try Fixtures.status(fixture)
         let content = PopoverContent(status: status, now: Fixtures.now, calendar: Fixtures.utc)
         var specs = content.connections.groups.flatMap(\.rows).flatMap(\.buttons)
         specs += content.connections.stopButtons + [content.connections.releaseEndedButton]
         specs += content.leases.rows.compactMap(\.releaseButton)
+        // A cmux-cua row's 강제 종료 shows only after a timeout, but it is a button all the same.
+        specs += content.otherTools.tools.flatMap(\.clients).flatMap { $0.buttons + $0.timedOutButtons }
         specs.append(content.activity.copyButton)
         let summary = StatusEvaluator.evaluate(status, appVersion: "0.7.0")
         if let fix = summary.fix, let label = summary.fixLabel {
@@ -124,11 +128,12 @@ struct ButtonWiringTests {
         return specs.filter(\.isEnabled)
     }
 
-    @Test func noButtonIsDead() async throws {
-        let specs = try everyButton()
+    @Test(arguments: ["status-problem", "status-cmux"])
+    func noButtonIsDead(fixture: String) async throws {
+        let specs = try everyButton(fixture)
         #expect(specs.count >= 12)
         for spec in specs {
-            let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
+            let engine = FakeEngineClient(status: try Fixtures.status(fixture))
             let model = CUABarViewModel(
                 engine: engine, appVersion: "0.7.0", pasteboard: RecordingPasteboard(),
                 clock: { Fixtures.now }, calendar: Fixtures.utc, sleep: ManualSleeper().sleep)

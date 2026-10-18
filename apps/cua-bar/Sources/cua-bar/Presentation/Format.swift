@@ -54,6 +54,12 @@ enum Format {
         return when(date, now: now, calendar: calendar) + " 시작"
     }
 
+    /// `3시간 전 시작`, `방금 시작`; `시작 시각 알 수 없음` when the engine did not say.
+    static func startedAgo(_ date: Date?, now: Date) -> String {
+        guard let date else { return "시작 시각 알 수 없음" }
+        return ago(date, now: now) + " 시작"
+    }
+
     static func clock(_ date: Date?, calendar: Calendar) -> String {
         guard let date else { return unknown }
         let parts = calendar.dateComponents([.hour, .minute, .second], from: date)

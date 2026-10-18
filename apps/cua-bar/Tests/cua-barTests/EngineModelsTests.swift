@@ -56,7 +56,11 @@ struct EngineModelsTests {
         #expect(tool.name == "cmux-cua")
         #expect(tool.running)
         #expect(tool.pids == [11807, 11812])
-        #expect(tool.clients == [ToolClient(pid: 12221, agent: .claude, cwd: "/Users/chenjing/dev/z")])
+        #expect(tool.clients == [
+            ToolClient(
+                id: "cmux-12892-1792310808", pid: 12221, mcpPID: 12892, agent: .claude, cwd: "/Users/chenjing/dev/z",
+                startedAt: Date(timeIntervalSince1970: 1_792_284_408), canStop: true)
+        ])
 
         #expect(status.screen.activeConnectionID == "claude-12345-1792320000")
         #expect(status.screen.lastCallAt == Date(timeIntervalSince1970: 1_792_324_798))

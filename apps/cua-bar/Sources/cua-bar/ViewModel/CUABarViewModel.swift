@@ -62,6 +62,8 @@ final class CUABarViewModel: ObservableObject {
     /// Connections whose release the engine refused twice (R15): their row says so and offers
     /// 다시 하기 and 강제 종료.
     @Published private(set) var refusedReleaseIDs: Set<String> = []
+    /// cmux-cua connections whose normal stop ran out of time (R17): their row offers 강제 종료.
+    @Published private(set) var stopTimedOutIDs: Set<String> = []
 
     /// The raw answer of the last good read, for what needs more than `content` shows.
     private(set) var lastStatus: EngineStatus?
@@ -240,6 +242,7 @@ final class CUABarViewModel: ObservableObject {
         sessionResults = [:]
         refusedReleaseIDs = []
         releaseRefusals = [:]
+        stopTimedOutIDs = []
         revalidatePending()
     }
 
@@ -251,6 +254,7 @@ final class CUABarViewModel: ObservableObject {
         let sessions = Set(status.leases.items.compactMap(\.sessionID) + status.leases.maybeLeft.compactMap(\.sessionID))
         failedSessionIDs.formIntersection(sessions)
         sessionResults = sessionResults.filter { sessions.contains($0.key) }
+        stopTimedOutIDs.formIntersection(status.otherTools.flatMap(\.clients).compactMap(\.id))
     }
 
     private func sleepUntilNextRefresh(generation: Int) async {
@@ -394,6 +398,15 @@ final class CUABarViewModel: ObservableObject {
             }
             refusedReleaseIDs.insert(id)
             return (ActionOutcome(kind: .failure, message: ConnectionRow.refusedNote), true)
+        case .stopConnection(let id, _) where ToolClient.isCmuxConnection(id: id):
+            // R17: a cmux-cua row offers 강제 종료 only once a stop ran out of time; a stop that went
+            // through takes the offer away.
+            if result.reason == "timeout", result.outcome.kind == .failure {
+                stopTimedOutIDs.insert(id)
+            } else if result.outcome.kind != .failure {
+                stopTimedOutIDs.remove(id)
+            }
+            return (result.outcome, true)
         default:
             return (result.outcome, true)
         }
@@ -417,7 +430,9 @@ final class CUABarViewModel: ObservableObject {
                 return ActionResult(outcome: outcome, reason: result.reason)
             case .stopConnection(let id, let force):
                 let result = try await engine.stopConnection(id: id, force: force)
-                return ActionResult(outcome: ActionMessages.stopConnection(result, force: force), reason: result.reason)
+                let outcome = ToolClient.isCmuxConnection(id: id)
+                    ? ActionMessages.stopCmuxConnection(result, force: force) : ActionMessages.stopConnection(result, force: force)
+                return ActionResult(outcome: outcome, reason: result.reason)
             case .stopGroup(let group, let force):
                 let result = try await engine.stopGroup(group, force: force)
                 return ActionResult(

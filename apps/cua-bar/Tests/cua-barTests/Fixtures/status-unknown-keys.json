@@ -59,7 +59,8 @@
   },
   "other_tools": [
     {"name": "cmux-cua", "running": true, "pids": [11807, 11812], "version": "1.2",
-     "clients": [{"pid": 12221, "agent": "claude", "cwd": "/Users/chenjing/dev/z", "extra": true}]}
+     "clients": [{"id": "cmux-12892-1792310808", "pid": 12221, "mcp_pid": 12892, "agent": "claude",
+                  "cwd": "/Users/chenjing/dev/z", "started_at": "2026-10-18T00:46:48Z", "can_stop": true, "extra": true}]}
   ],
   "screen": {"active_connection_id": "claude-12345-1792320000", "last_call_at": "2026-10-18T11:59:58Z", "focus": "Chrome"},
   "activity": [

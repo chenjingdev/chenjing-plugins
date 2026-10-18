@@ -169,6 +169,17 @@ enum ActionMessages {
             fallback: (stopped: 0, failed: 0), ok: results.allSatisfy(\.ok), topReason: results.first { !$0.ok }?.reason)
     }
 
+    /// One cmux-cua connection (R17). It has no release step, so the engine's `released: false`
+    /// with no reason is a plain stop, never "the release is unknown". A stop that did not happen
+    /// reads as for the other connections.
+    static func stopCmuxConnection(_ result: StopResult, force: Bool) -> ActionOutcome {
+        guard result.stopped else { return stopConnection(result, force: force) }
+        let done = "cmux-cua 연결을 \(force ? "강제로 " : "")껐어요"
+        return result.ok
+            ? ActionOutcome(kind: .success, message: done)
+            : ActionOutcome(kind: .warning, message: "\(done). 마무리는 확인되지 않았어요")
+    }
+
     private static func stopSummary(
         label: String, force: Bool, items: [StopItem], fallback: (stopped: Int, failed: Int), ok: Bool, topReason: String?
     ) -> ActionOutcome {

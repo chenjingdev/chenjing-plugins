@@ -42,9 +42,11 @@ struct ConfirmationTests {
 
     @Test func cmuxCuaIsNeverCountedInAGroup() async throws {
         var status = try Fixtures.status("status-problem")
-        // cmux-cua runs with clients and processes of its own; none of that is a connection.
+        // cmux-cua runs with clients and processes of its own, each client one the engine may stop
+        // (`can_stop`); none of that is a connection.
         status.otherTools.append(OtherTool(name: "cmux-cua", running: true, pids: [1, 2, 3, 4, 5], clients: [
-            ToolClient(pid: 9, agent: .claude, cwd: "/a/b"), ToolClient(pid: 10, agent: .codex, cwd: "/a/c"),
+            ToolClient(id: "cmux-5-1", pid: 9, mcpPID: 5, agent: .claude, cwd: "/a/b", canStop: true),
+            ToolClient(id: "cmux-6-1", pid: 10, mcpPID: 6, agent: .codex, cwd: "/a/c", canStop: true),
         ]))
         let rig = await Rig(status)
         rig.model.send(.stopGroup(.all, force: false))
