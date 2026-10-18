@@ -14,7 +14,10 @@ process.env.HOME = DEFAULT_HOME;
 // A child that is given an environment without HOME would find the real home through the account database, and an
 // overwrite inside an existing file changes no name. So the real support folders are fingerprinted (read only: lstat
 // and readdir) when the tests start and again when they end, and any difference fails the run. tests/cua/guard.py
-// does the same for the Python tests.
+// does the same for the Python tests, with the same exit codes: 1 for a failing test or a stray in the throw-away
+// home, 2 for a change in the real folders. A run that saw such a change proves nothing, so 2 wins over 1; the
+// changed paths are printed with their new modification time in local time. `node --test` reports every failing
+// file as 1 itself, the 2 is the exit code of the test process: run `node tests/cua/relay` to see it.
 export const WATCHED = ['.local/share/codex-cua', '.local/bin/codex-cua', 'Library/Caches/codex-cua',
   'Library/Caches/codex-host-cua'];
 // Shared folders, of which only the entries with our own prefix count: other tools change their own entries all
@@ -49,20 +52,54 @@ export function changes(before, after) {
   return [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key)).sort();
 }
 
-const realBefore = fingerprint(REAL_HOME);
+// A modification time (in nanoseconds) in the local time zone, to the second and with its offset:
+// 2026-10-19 00:12:34 +0900.
+export function localTime(ns) {
+  const date = new Date(Number(BigInt(ns) / 1000000n));
+  const two = value => String(value).padStart(2, '0');
+  const offset = -date.getTimezoneOffset();
+  const zone = (offset < 0 ? '-' : '+') + two(Math.floor(Math.abs(offset) / 60)) + two(Math.abs(offset) % 60);
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} `
+    + `${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${zone}`;
+}
+
+// One line per changed path: what happened to it and, for what is still there, its new modification time.
+export function describe(before, after) {
+  const absent = value => value === null || value === undefined;
+  return changes(before, after).map(key => {
+    const now = after.get(key);
+    if (absent(now)) return `${key}  removed`;
+    return `${key}  ${absent(before.get(key)) ? 'new' : 'changed'}, modified ${localTime(now.split(':')[2])}`;
+  });
+}
+
+export const EXIT_GUARD = 2;
+const SHOWN = 30;                       // changed paths that are printed; the rest is only counted
+const MOVED = 'The real support folders changed while the tests ran. The tests only read them, so most likely '
+  + 'something else did: using CUA, starting Codex or installing the plugin during the run. Run the tests again while '
+  + 'CUA is not in use; if it repeats with everything idle, a test writes there. New modification time, local time:';
+
+// Fingerprint the watched folders of `home` now and, when the process ends, fail it with EXIT_GUARD if anything
+// differs.
+export function watchHome(home) {
+  const before = fingerprint(home);
+  process.on('exit', () => {
+    const moved = describe(before, fingerprint(home));
+    if (moved.length === 0) return;
+    const more = moved.length > SHOWN ? [`... and ${moved.length - SHOWN} more`] : [];
+    process.stderr.write(MOVED + '\n  ' + [...moved.slice(0, SHOWN), ...more].join('\n  ') + '\n');
+    process.exitCode = EXIT_GUARD;
+  });
+}
+
+watchHome(REAL_HOME);
 process.on('exit', () => {
   let strays = [];
   try {strays = fs.readdirSync(DEFAULT_HOME, {recursive: true});} catch {/* gone */}
   fs.rmSync(DEFAULT_HOME, {recursive: true, force: true});
-  const moved = changes(realBefore, fingerprint(REAL_HOME));
   if (strays.length > 0) {
     process.stderr.write('Tests wrote into the default home instead of an injected one:\n  ' + strays.join('\n  ') + '\n');
-    process.exitCode = 1;
-  }
-  if (moved.length > 0) {
-    process.stderr.write('The real support folders changed while the tests ran (the tests only read them; if you installed or '
-      + 'started Codex yourself in the meantime, run them again):\n  ' + moved.slice(0, 30).join('\n  ') + '\n');
-    process.exitCode = 1;
+    if (process.exitCode !== EXIT_GUARD) process.exitCode = 1;
   }
 });
 

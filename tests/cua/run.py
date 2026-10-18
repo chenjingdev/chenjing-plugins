@@ -6,26 +6,49 @@ a throw-away home. A test that forgets to inject its own root writes there inste
 run fails if anything shows up there: a forgotten injection is loud, not silent. A child process that is given an
 environment without HOME would find the real home through the account database, so the real support folders are
 also fingerprinted before and after the run (read only, see guard.py) and the run fails on any difference.
+
+Exit code: 0 when everything passed. 1 when a test failed or a test wrote into the throw-away home. 2 when the real
+support folders changed while the run was going; the changed paths are listed with their new modification time in
+local time. Using CUA, starting Codex or installing the plugin during the run does that, and then the run proves
+nothing, so 2 wins over 1 (the test results are printed above it all the same). Run the tests again while CUA is
+not in use; if 2 repeats with everything idle, a test writes there.
+
+--tests and --real-home point the runner at a stand-in suite and a stand-in home. They exist for the runner's own
+tests (test_guard.py) and are not needed otherwise.
 """
+import argparse
 import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
 
+EXIT_FAILED = 1
+EXIT_GUARD = 2
+SHOWN = 30                       # changed paths that are printed; the rest is only counted
+MOVED = ('The real support folders changed while the tests ran. The tests only read them, so most likely '
+         'something else did: using CUA, starting Codex or installing the plugin during the run. Run the tests '
+         'again while CUA is not in use; if it repeats with everything idle, a test writes there. New '
+         'modification time, local time:')
 
-def main():
+
+def main(argv=None):
     sys.dont_write_bytecode = True
-    tests = Path(__file__).resolve().parent
-    plugin = tests.parents[1] / 'plugins/cua'
+    here = Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser(description='Run the development regressions of the cua plugin.')
+    parser.add_argument('--tests', type=Path, default=here, help='folder to discover test_*.py in (default: this one)')
+    parser.add_argument('--real-home', type=Path,
+                        help='home whose support folders the guard watches (default: the home of this account)')
+    args = parser.parse_args(argv)
+    plugin = here.parents[1] / 'plugins/cua'
     sys.path.insert(0, str(plugin))
-    sys.path.insert(0, str(tests))
+    sys.path.insert(0, str(here))
     import guard
-    real_home = guard.real_home()
+    real_home = args.real_home or guard.real_home()
     before = guard.fingerprint(real_home)
     with tempfile.TemporaryDirectory(prefix='cua-tests-home-') as home:
         os.environ['HOME'] = home
-        suite = unittest.defaultTestLoader.discover(str(tests), pattern='test_*.py')
+        suite = unittest.defaultTestLoader.discover(str(args.tests), pattern='test_*.py')
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         # The interpreter's own bytecode cache lives under the home on this Mac; it is not ours.
         strays = sorted(str(path.relative_to(home)) for path in Path(home).rglob('*')
@@ -34,13 +57,15 @@ def main():
     problems = []
     if strays:
         problems.append('Tests wrote into the default home instead of an injected one:\n  ' + '\n  '.join(strays))
-    moved = guard.changes(before, guard.fingerprint(real_home))
+    moved = guard.describe(before, guard.fingerprint(real_home))
     if moved:
-        problems.append('The real support folders changed while the tests ran (the tests only read them; if you installed or '
-                        'started Codex yourself in the meantime, run them again):\n  ' + '\n  '.join(moved[:30]))
+        more = ['... and %d more' % (len(moved) - SHOWN)] if len(moved) > SHOWN else []
+        problems.append(MOVED + '\n  ' + '\n  '.join(moved[:SHOWN] + more))
     for problem in problems:
         print(problem, file=sys.stderr)
-    return 0 if result.wasSuccessful() and not problems else 1
+    if moved:
+        return EXIT_GUARD
+    return 0 if result.wasSuccessful() and not strays else EXIT_FAILED
 
 
 if __name__ == '__main__':
