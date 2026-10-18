@@ -33,6 +33,7 @@ LOST_DURING_CALL = ('The Codex host connection was lost while this call ran, so 
 # turn_ended never starts or reopens Codex: a new host could not end the turn of the old one anyway.
 TURN_ENDED_WITHOUT_HOST = ('The Codex host connection was lost, so the CUA turn of this connection could not be ended. '
                            'turn_ended never connects to Codex again; the next CUA tool call does.')
+NOTHING_TO_END = 'No CUA turn of this connection is open, so there was nothing to end.'
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
 
@@ -666,9 +667,11 @@ class HostMcp:
             if self.stopping:
                 raise BridgeFailure('This owned CUA connection is stopping.')
             if not self.connected:
-                if self.scopes:
-                    self.cleanup_unconfirmed = True
-                    self.changed()
+                if not self.scopes:
+                    # Nothing was opened, so there is nothing to confirm: not an error, like an empty turn on a host.
+                    return {'content': [{'type': 'text', 'text': NOTHING_TO_END}]}
+                self.cleanup_unconfirmed = True
+                self.changed()
                 raise BridgeFailure(TURN_ENDED_WITHOUT_HOST)
             rpc, scope = self.rpc, self.current_scope()
             relay = bool(self.host and self.host.get('relay'))

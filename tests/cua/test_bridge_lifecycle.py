@@ -816,9 +816,8 @@ class ReconnectTests(RegisteredCase):
         with self.assertRaises(host_mcp.BridgeFailure) as raised:
             await adapter.call_tool('js', {'code': 'PRIVATE_SCRIPT'})
         self.assertEqual(str(raised.exception), host_mcp.LOST_BEFORE_SEND)
-        with self.assertRaises(host_mcp.BridgeFailure) as raised:
-            await adapter.end_turn_tool()
-        self.assertEqual(str(raised.exception), host_mcp.TURN_ENDED_WITHOUT_HOST)
+        # No scope was opened, so ending the turn without a host is not an error.
+        self.assertEqual(await adapter.end_turn_tool(), {'content': [{'type': 'text', 'text': host_mcp.NOTHING_TO_END}]})
         self.assertEqual((host1.calls, adapter.scopes, adapter.active_tool_calls), ([], {}, 0))
         self.assertEqual(self.activity(), [])
 
