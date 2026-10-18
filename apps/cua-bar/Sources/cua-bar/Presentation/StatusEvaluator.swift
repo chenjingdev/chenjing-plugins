@@ -78,7 +78,15 @@ enum StatusEvaluator {
     }
 
     /// The summary when the engine gave no usable status.
-    static func summary(for error: EngineError) -> StatusSummary {
+    ///
+    /// A command that fails or prints something unreadable while the plugin registered with
+    /// Claude Code is a different version from the app is most likely an old plugin that does not
+    /// know `status` yet (0.5.0 exits 2), so it is the version problem, not a read problem.
+    static func summary(for error: EngineError, appVersion: String? = nil, registeredPluginVersion: String? = nil) -> StatusSummary {
+        if error.mayComeFromAnOldCommand, let pluginVersion = nonEmpty(registeredPluginVersion),
+           let appVersion = nonEmpty(appVersion), pluginVersion != appVersion {
+            return summary(for: versionMismatchProblem(appVersion: appVersion, pluginVersion: pluginVersion))
+        }
         switch error {
         case .pluginMissing:
             return summary(for: Problem(
@@ -116,10 +124,7 @@ enum StatusEvaluator {
                 warning: nil, fix: .openCodexDownload, fixLabel: "받는 곳 열기")
         }
         if let pluginVersion = nonEmpty(status.plugin.version), let appVersion = nonEmpty(appVersion), pluginVersion != appVersion {
-            return Problem(
-                kind: .versionMismatch, title: "앱과 플러그인 판이 달라요",
-                nextStep: "앱 \(appVersion) · 플러그인 \(pluginVersion) — 맞는 판을 받아 주세요",
-                warning: nil, fix: .matchPluginVersion, fixLabel: "맞는 판 받기")
+            return versionMismatchProblem(appVersion: appVersion, pluginVersion: pluginVersion)
         }
         let issues = setupIssues(in: status.setup)
         if !issues.isEmpty {
@@ -152,6 +157,14 @@ enum StatusEvaluator {
                 warning: nil, fix: releasable ? .releaseLeftover : nil, fixLabel: releasable ? "놓아주기" : nil)
         }
         return nil
+    }
+
+    /// "앱 0.7.0 · 플러그인 0.5.0 — 맞는 판을 받아 주세요", with 맞는 판 받기.
+    private static func versionMismatchProblem(appVersion: String, pluginVersion: String) -> Problem {
+        Problem(
+            kind: .versionMismatch, title: "앱과 플러그인 판이 달라요",
+            nextStep: "앱 \(appVersion) · 플러그인 \(pluginVersion) — 맞는 판을 받아 주세요",
+            warning: nil, fix: .matchPluginVersion, fixLabel: "맞는 판 받기")
     }
 
     private static func summary(for problem: Problem) -> StatusSummary {

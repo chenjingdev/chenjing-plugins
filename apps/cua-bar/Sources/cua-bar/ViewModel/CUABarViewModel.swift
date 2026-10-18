@@ -31,7 +31,9 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var content: PopoverContent?
     @Published private(set) var updatedAt: Date?
     @Published var selectedTab: PopoverTab = .connections
-    @Published private(set) var inFlight: Set<CUAAction> = []
+    @Published private(set) var inFlight: Set<CUAAction> = [] {
+        didSet { publishSummary() }
+    }
     @Published private(set) var banner: ActionBanner?
     /// Sessions whose release by session id did not work; the extension-reset guidance opens for them.
     @Published private(set) var failedSessionIDs: Set<String> = []
@@ -51,7 +53,11 @@ final class CUABarViewModel: ObservableObject {
     private let calendar: Calendar
     private let bannerDuration: Duration
     private let sleep: @Sendable (Duration) async throws -> Void
+    private let setupActivity: SetupActivity
+    private let registeredPluginVersion: @Sendable () -> String?
 
+    /// What the evaluator said about the last answer, before setup's own state is put over it.
+    private var evaluatedSummary: StatusSummary = StatusEvaluator.loading
     private var lastStatus: EngineStatus?
     private var consecutiveFailures = 0
     private var refreshTask: Task<Void, Never>?
@@ -72,7 +78,12 @@ final class CUABarViewModel: ObservableObject {
         calendar: Calendar = .current,
         bannerDuration: Duration = .seconds(6),
         // Waiting is injected so tests can pass time without waiting for it.
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        // What the card says while the plugin is being set up, installed or updated.
+        setupActivity: SetupActivity = SetupActivity(),
+        // The plugin version Claude Code registered (nil when unknown): an old plugin that cannot
+        // answer `status` is told from a broken one by comparing it with `appVersion`.
+        registeredPluginVersion: @escaping @Sendable () -> String? = { nil }
     ) {
         self.engine = engine
         self.appVersion = appVersion
@@ -83,6 +94,9 @@ final class CUABarViewModel: ObservableObject {
         self.calendar = calendar
         self.bannerDuration = bannerDuration
         self.sleep = sleep
+        self.setupActivity = setupActivity
+        self.registeredPluginVersion = registeredPluginVersion
+        setupActivity.onChange = { [weak self] in self?.publishSummary() }
     }
 
     var currentInterval: Duration { isPopoverOpen ? policy.open : policy.closed }
@@ -90,6 +104,23 @@ final class CUABarViewModel: ObservableObject {
     /// The footer line: when the status was last read.
     var updatedText: String {
         updatedAt.map { "갱신 \(Format.clock($0, calendar: calendar))" } ?? "읽는 중…"
+    }
+
+    // MARK: Summary
+
+    private func publish(_ evaluated: StatusSummary) {
+        evaluatedSummary = evaluated
+        // A failed setup is only remembered while the card still shows a setup problem.
+        if evaluated.problem?.kind != .setupIncomplete { setupActivity.forgetFailure() }
+        publishSummary()
+    }
+
+    /// `summary` is the evaluator's card with setup's state over it: while a setup runs, or an
+    /// install or update that ends in one, the card says so instead of showing a problem.
+    private func publishSummary() {
+        let next = SetupOverlay.apply(
+            to: evaluatedSummary, setup: setupActivity.phase, flowRunning: inFlight.contains(where: SetupOverlay.runsSetup))
+        if next != summary { summary = next }
     }
 
     // MARK: Refresh loop
@@ -162,7 +193,7 @@ final class CUABarViewModel: ObservableObject {
     private func accept(_ status: EngineStatus) {
         let now = clock()
         lastStatus = status
-        summary = StatusEvaluator.evaluate(status, appVersion: appVersion)
+        publish(StatusEvaluator.evaluate(status, appVersion: appVersion))
         content = PopoverContent(status: status, now: now, calendar: calendar)
         updatedAt = now
         let known = Set(status.leases.items.compactMap(\.sessionID) + status.leases.maybeLeft.compactMap(\.sessionID))
@@ -179,7 +210,7 @@ final class CUABarViewModel: ObservableObject {
             if lastStatus != nil, consecutiveFailures < Self.failuresBeforeProblem { return }
         }
         lastStatus = nil
-        summary = StatusEvaluator.summary(for: error)
+        publish(StatusEvaluator.summary(for: error, appVersion: appVersion, registeredPluginVersion: registeredPluginVersion()))
         content = nil
         updatedAt = clock()
         failedSessionIDs = []
@@ -270,8 +301,8 @@ final class CUABarViewModel: ObservableObject {
                 pasteboard.copy(try await engine.diagnose())
                 return ActionOutcome(kind: .success, message: "진단을 복사했어요")
             case .runSetup:
-                try await engine.runSetup()
-                return ActionOutcome(kind: .success, message: "연결 설정을 다시 맞췄어요")
+                // Through the shared setup slot: one setup at a time, said on the card while it runs.
+                return await setupActivity.run { try await self.engine.runSetup() }
             case .releaseLeftover:
                 return try await releaseLeftovers()
             case .openCodexDownload:
