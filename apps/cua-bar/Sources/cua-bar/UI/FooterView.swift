@@ -6,6 +6,8 @@ struct FooterView: View {
     var updatedText: String
     /// nil leaves just the time and 끝내기 (previews and tests).
     var maintenance: Maintenance?
+    /// 알림 켜기 shows while notifications cannot be shown.
+    var notifications: NotificationPermission = .unavailable
     var quit: () -> Void
 
     var body: some View {
@@ -19,6 +21,7 @@ struct FooterView: View {
                     .foregroundStyle(.secondary)
                 if let maintenance {
                     NewVersionButton(releases: maintenance.releases, opener: maintenance.opener)
+                    if notifications.offersSettings { NotificationsButton(opener: maintenance.opener) }
                 }
                 Spacer(minLength: 4)
                 if let maintenance {
@@ -54,6 +57,27 @@ struct NewVersionButton: View {
             .buttonStyle(.plain)
             .help("새 앱 판이 나왔어요. 받는 곳(GitHub Release)을 열어요")
         }
+    }
+}
+
+/// 알림 켜기: opens this app's notifications in System Settings. Without them nothing is lost (R21),
+/// so it only says so and shows where they are turned on.
+struct NotificationsButton: View {
+    var opener: any URLOpening
+
+    var body: some View {
+        Button {
+            Task { _ = await opener.open(NotificationPermission.settingsURL) }
+        } label: {
+            Text("알림 켜기")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.orangeText)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.orange.opacity(0.14)))
+        }
+        .buttonStyle(.plain)
+        .help("알림이 꺼져 있어 문제는 아이콘과 카드로만 알려요. 눌러서 시스템 설정의 알림을 열어요")
     }
 }
 

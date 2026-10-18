@@ -54,10 +54,10 @@ struct ReviewFixTests {
         #expect(activity.copyButton.action == .copyDiagnosis)
         #expect(activity.copyButton.isEnabled)
         #expect(activity.emptyText == "상태를 읽지 못해서 기록을 보일 수 없어요")
-        // And it works: the engine's own `diagnose` is what lands on the pasteboard.
+        // And it works: the engine's own `diagnose` is what lands on the pasteboard, with the notification line.
         engine.configure { $0.diagnosis = "CUA diagnosis\nhost: unknown\n" }
         await rig.model.send(activity.copyButton.action)?.value
-        #expect(rig.pasteboard.copied == ["CUA diagnosis\nhost: unknown\n"])
+        #expect(rig.pasteboard.copied == ["CUA diagnosis\nhost: unknown\n알림: 켜짐\n"])
     }
 
     @Test func theActivityTabKeepsTheButtonWhileTheFirstReadIsStillPending() async throws {

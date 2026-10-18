@@ -27,6 +27,10 @@ final class FakeNotifier: Notifier, @unchecked Sendable {
         }
     }
 
+    func permission() async -> NotificationPermission {
+        lock.withLock { allowed ? .allowed : .off }
+    }
+
     func post(_ notification: AppNotification) async -> Bool {
         lock.withLock {
             recordedAttempts += 1

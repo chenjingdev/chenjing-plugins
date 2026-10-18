@@ -72,6 +72,38 @@ enum NotificationResponse: Equatable, Sendable {
     }
 }
 
+/// Where this app's notifications stand in System Settings. The system asks the person once; a
+/// question nobody answered, or a no, can then be changed only in System Settings.
+enum NotificationPermission: Equatable, Sendable {
+    /// Alerts may be shown.
+    case allowed
+    /// Not answered yet.
+    case notDecided
+    /// Turned off for this app.
+    case off
+    /// Not the installed app (`swift run`, the tests): there is no setting.
+    case unavailable
+
+    /// The footer offers 알림 켜기 while notifications cannot be shown and the person can change that.
+    var offersSettings: Bool { self == .off || self == .notDecided }
+
+    /// Its line in the copied diagnosis.
+    var diagnosisLine: String {
+        switch self {
+        case .allowed: "알림: 켜짐"
+        case .notDecided: "알림: 아직 허용하지 않음"
+        case .off: "알림: 꺼짐"
+        case .unavailable: "알림: 쓸 수 없음"
+        }
+    }
+
+    /// This app's page in System Settings → 알림.
+    static var settingsURL: URL {
+        let id = Bundle.main.bundleIdentifier ?? "dev.chenjing.cua-bar"
+        return URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)")!
+    }
+}
+
 /// Notifications behind a seam: `UserNotificationCenterNotifier` in the app, a fake in tests.
 /// Nothing in the app depends on a notification being shown: the icon and the status card carry
 /// every problem (R21).
@@ -79,6 +111,8 @@ protocol Notifier: Sendable {
     /// Asks for permission (the system shows its question only the first time) and says whether
     /// alerts are allowed.
     func requestAuthorization() async -> Bool
+    /// What System Settings says now. Never asks.
+    func permission() async -> NotificationPermission
     /// Posts it and says whether it went out. False when notifications are off or denied.
     func post(_ notification: AppNotification) async -> Bool
     /// Where clicks on a notification go.
@@ -88,6 +122,7 @@ protocol Notifier: Sendable {
 /// For anything that is not the installed app (`swift run`, tests): nothing is asked or posted.
 struct NoopNotifier: Notifier {
     func requestAuthorization() async -> Bool { false }
+    func permission() async -> NotificationPermission { .unavailable }
     func post(_ notification: AppNotification) async -> Bool { false }
     func setResponseHandler(_ handler: @escaping @MainActor @Sendable (NotificationResponse) -> Void) {}
 }

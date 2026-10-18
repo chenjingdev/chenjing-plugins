@@ -182,6 +182,39 @@ struct NotificationViewModelTests {
         #expect(rig.notifier.authorizationRequests == 1)
     }
 
+    @Test func theSettingIsReadAtTheStartAndEachTimeThePopoverOpens() async throws {
+        let notifier = FakeNotifier(allowed: false)
+        let rig = await Rig(try codexProblem(), notifier: notifier, refresh: false)
+        #expect(rig.model.notificationPermission == .unavailable, "nothing read before the start")
+        rig.model.start()
+        await rig.model.waitForBackgroundWork()
+        rig.model.stop()
+        #expect(rig.model.notificationPermission == .off)
+        // Turned on in System Settings: the next look at the popover knows.
+        notifier.setAllowed(true)
+        rig.model.setPopoverOpen(true)
+        await rig.model.waitForBackgroundWork()
+        #expect(rig.model.notificationPermission == .allowed)
+        #expect(notifier.authorizationRequests == 1, "reading never asks")
+    }
+
+    @Test func theCopiedDiagnosisSaysWhereNotificationsStand() async throws {
+        let rig = await Rig(try codexProblem(), notifier: FakeNotifier(allowed: false))
+        rig.engine.configure { $0.diagnosis = "codex-cua diagnose\n" }
+        await rig.model.perform(.copyDiagnosis)
+        #expect(rig.pasteboard.copied.last == "codex-cua diagnose\n알림: 꺼짐\n")
+    }
+
+    @Test func eachSettingHasItsLineAndOnlyOffOrUnansweredOffersTheSettings() {
+        #expect(NotificationPermission.allowed.diagnosisLine == "알림: 켜짐")
+        #expect(NotificationPermission.notDecided.diagnosisLine == "알림: 아직 허용하지 않음")
+        #expect(NotificationPermission.off.diagnosisLine == "알림: 꺼짐")
+        #expect(NotificationPermission.unavailable.diagnosisLine == "알림: 쓸 수 없음")
+        #expect([NotificationPermission.allowed, .notDecided, .off, .unavailable].filter(\.offersSettings) == [.notDecided, .off])
+        #expect(NotificationPermission.settingsURL.absoluteString.hasPrefix(
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id="))
+    }
+
     @Test func codexWithoutAHostIsPostedOnceAndTheCardShowsItToo() async throws {
         let rig = await Rig(try codexProblem())
         #expect(rig.notifier.delivered.count == 1)

@@ -435,13 +435,14 @@ struct ViewModelTests {
 
     // MARK: Special actions
 
-    @Test func copyingTheDiagnosisPutsTheEnginesTextOnThePasteboard() async throws {
+    @Test func copyingTheDiagnosisPutsTheEnginesTextOnThePasteboardWithTheNotificationLine() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        engine.configure { $0.diagnosis = "CUA diagnosis\nhost: ready\n" }
+        engine.configure { $0.diagnosis = "CUA diagnosis\nhost: ready" }
         let pasteboard = RecordingPasteboard()
         let model = makeModel(engine, pasteboard: pasteboard)
         let outcome = await model.perform(.copyDiagnosis)
-        #expect(pasteboard.copied == ["CUA diagnosis\nhost: ready\n"])
+        // Outside the app bundle there is no notification setting.
+        #expect(pasteboard.copied == ["CUA diagnosis\nhost: ready\n알림: 쓸 수 없음\n"])
         #expect(outcome == ActionOutcome(kind: .success, message: "진단을 복사했어요"))
     }
 

@@ -38,6 +38,15 @@ final class UserNotificationCenterNotifier: NSObject, Notifier, UNUserNotificati
         (try? await center.requestAuthorization(options: [.alert])) ?? false
     }
 
+    func permission() async -> NotificationPermission {
+        switch await center.notificationSettings().authorizationStatus {
+        case .authorized, .provisional: .allowed
+        case .denied: .off
+        case .notDetermined: .notDecided
+        @unknown default: .notDecided
+        }
+    }
+
     func post(_ notification: AppNotification) async -> Bool {
         // The person may have turned notifications off since the question was asked.
         let status = await center.notificationSettings().authorizationStatus

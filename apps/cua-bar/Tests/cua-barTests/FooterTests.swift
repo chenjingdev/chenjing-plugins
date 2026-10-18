@@ -82,6 +82,24 @@ struct FooterTests {
         #expect(width(newer) > width(same) + 60, "newer \(width(newer)) vs same \(width(same))")
     }
 
+    // MARK: Notifications off
+
+    @Test func theNotificationsButtonShowsOnlyWhileTheyCannotBeShownAndTheRowStillFits() async {
+        let kit = kit()
+        defer { kit.suite.remove() }
+        await kit.releases.checkIfDue() // the new-version button too: the fullest row
+        func footer(_ permission: NotificationPermission) -> FooterView {
+            FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, notifications: permission, quit: {})
+        }
+        let allowed = fittingSize(footer(.allowed)).width
+        #expect(fittingSize(footer(.off)).width > allowed + 40)
+        #expect(fittingSize(footer(.notDecided)).width == fittingSize(footer(.off)).width)
+        #expect(fittingSize(footer(.unavailable)).width == allowed)
+        let row = Theme.popoverWidth - 2 * Theme.padding
+        #expect(fittingSize(footer(.off)).width <= row, "everything fits the row side by side")
+        #expect(fittingSize(footer(.off).frame(width: row)).height < 40, "one line")
+    }
+
     // MARK: Layout
 
     @Test func theFooterFitsTheRowInEveryStateAndTheRemoveQuestionAddsOnlyItsOwnCard() async throws {

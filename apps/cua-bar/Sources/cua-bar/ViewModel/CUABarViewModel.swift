@@ -73,6 +73,9 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var refusedReleaseIDs: Set<String> = []
     /// The automatic cleanup (F5) is running: the buttons that would touch what it releases wait.
     @Published private(set) var isCleaningUp = false
+    /// Where this app's notifications stand: read when the app asks at its start and each time the
+    /// popover opens, because the person turns them on in System Settings.
+    @Published private(set) var notificationPermission: NotificationPermission = .unavailable
     /// The ended connections the automatic cleanup is releasing, while it runs.
     private var cleaningIDs: Set<String> = []
     /// cmux-cua connections whose normal stop ran out of time (R17): their row offers 강제 종료.
@@ -233,6 +236,7 @@ final class CUABarViewModel: ObservableObject {
         isPopoverOpen = open
         if open {
             wake()
+            readNotificationPermission()
         } else {
             // A question belongs to the moment it was asked: closing the popover withdraws it.
             cancelPending()
@@ -613,7 +617,10 @@ final class CUABarViewModel: ObservableObject {
                 }
                 return ActionResult(outcome: ActionMessages.restartCodex(result), reason: result.reason)
             case .copyDiagnosis:
-                pasteboard.copy(try await engine.diagnose())
+                let text = try await engine.diagnose()
+                notificationPermission = await notifier.permission()
+                let separator = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
+                pasteboard.copy(text + separator + notificationPermission.diagnosisLine + "\n")
                 return ActionResult(outcome: ActionOutcome(kind: .success, message: "진단을 복사했어요"), reason: nil)
             case .runSetup:
                 // Through the shared setup slot: one setup at a time, said on the card while it runs.
@@ -801,11 +808,23 @@ final class CUABarViewModel: ObservableObject {
 
     // MARK: Notifications (F1 case 2, R16)
 
+    /// The question waits for the person's answer, so the setting is read before it and again after.
     private func requestNotificationAuthorizationOnce() {
         guard !didRequestAuthorization else { return }
         didRequestAuthorization = true
         let notifier = notifier
-        runInBackground { _ = await notifier.requestAuthorization() }
+        runInBackground { [weak self] in
+            self?.notificationPermission = await notifier.permission()
+            _ = await notifier.requestAuthorization()
+            self?.notificationPermission = await notifier.permission()
+        }
+    }
+
+    private func readNotificationPermission() {
+        let notifier = notifier
+        runInBackground { [weak self] in
+            self?.notificationPermission = await notifier.permission()
+        }
     }
 
     private func postDueNotifications(now: Date) {
