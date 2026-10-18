@@ -26,19 +26,27 @@ struct ViewModelTests {
     private func makeModel(
         _ engine: FakeEngineClient,
         appVersion: String? = "0.7.0",
-        policy: RefreshPolicy = RefreshPolicy(closed: .seconds(60), open: .seconds(60)),
+        sleeper: ManualSleeper = ManualSleeper(),
+        bannerDuration: Duration = .seconds(7),
         systemActions: any SystemActions = RecordingSystemActions(),
         pasteboard: RecordingPasteboard = RecordingPasteboard()
     ) -> CUABarViewModel {
         CUABarViewModel(
-            engine: engine, appVersion: appVersion, systemActions: systemActions, pasteboard: pasteboard, policy: policy,
-            clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: .seconds(60))
+            engine: engine, appVersion: appVersion, systemActions: systemActions, pasteboard: pasteboard,
+            clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: bannerDuration, sleep: sleeper.sleep)
     }
 
-    private func waitUntil(_ timeout: Double = 3, _ condition: () -> Bool) async -> Bool {
+    /// Polls until `condition` holds. The limit is long on purpose: a passing test returns at
+    /// once, and a busy machine (the snapshot tests keep the main actor occupied) only slows it.
+    private func waitUntil(_ timeout: Double = 30, _ condition: () -> Bool) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+        while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(2)) }
         return condition()
+    }
+
+    /// Lets everything that is ready to run on the main actor run.
+    private func settle() async {
+        for _ in 0..<30 { await Task.yield() }
     }
 
     // MARK: Refresh
@@ -112,29 +120,39 @@ struct ViewModelTests {
 
     @Test func refreshesDoNotOverlap() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        engine.configure { $0.delay = .milliseconds(150) }
+        let gate = AsyncGate()
+        engine.configure { $0.statusGate = gate }
+        defer { gate.open() }
         let model = makeModel(engine)
-        async let first: Void = model.refresh()
-        async let second: Void = model.refresh()
-        async let third: Void = model.refresh()
-        _ = await (first, second, third)
+        let first = Task { await model.refresh() }
+        #expect(await waitUntil { engine.statusCallCount == 1 })
+        // The first read is stuck in the engine; two more asks join it instead of starting their own.
+        let second = Task { await model.refresh() }
+        let third = Task { await model.refresh() }
+        await settle()
         #expect(engine.statusCallCount == 1)
+        gate.open()
+        await first.value
+        await second.value
+        await third.value
+        #expect(engine.statusCallCount == 1)
+        #expect(model.summary.icon == .ready)
     }
 
     @Test func aSlowEngineNeverBlocksTheMainActor() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        engine.configure { $0.delay = .milliseconds(600) }
+        let gate = AsyncGate()
+        engine.configure { $0.statusGate = gate }
+        defer { gate.open() }
         let model = makeModel(engine)
-        var ticks = 0
-        let ticker = Task { @MainActor in
-            while !Task.isCancelled {
-                ticks += 1
-                try? await Task.sleep(for: .milliseconds(10))
-            }
-        }
-        await model.refresh()
-        ticker.cancel()
-        #expect(ticks >= 15)
+        let refreshing = Task { await model.refresh() }
+        // This line runs on the main actor while the engine call is stuck at the gate, which only
+        // happens because refresh() suspended instead of holding the actor.
+        #expect(await waitUntil { engine.statusCallCount == 1 })
+        #expect(model.summary.isPlaceholder, "nothing has answered yet")
+        gate.open()
+        await refreshing.value
+        #expect(model.summary.icon == .ready)
     }
 
     // MARK: Cadence (every 5 s; every 2 s while the popover is open; at once after an action)
@@ -152,49 +170,108 @@ struct ViewModelTests {
         model.stop()
     }
 
-    @Test func theLoopKeepsRefreshingUntilStopped() async throws {
+    @Test func theLoopReadsAtOnceThenWaitsFiveSecondsAndGoesOn() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        let model = makeModel(engine, policy: RefreshPolicy(closed: .milliseconds(20), open: .milliseconds(20)))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper)
         model.start()
-        #expect(await waitUntil { engine.statusCallCount >= 4 })
+        #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
+        #expect(engine.statusCallCount == 1, "the first read does not wait for anything")
+        #expect(sleeper.requestedDurations == [.seconds(5)])
+        #expect(sleeper.releaseAll() == 1) // five seconds pass
+        #expect(await waitUntil { sleeper.requestedDurations.count == 2 })
+        #expect(engine.statusCallCount == 2)
+        #expect(sleeper.requestedDurations == [.seconds(5), .seconds(5)])
         model.stop()
-        try await Task.sleep(for: .milliseconds(80))
-        let after = engine.statusCallCount
-        try await Task.sleep(for: .milliseconds(120))
-        #expect(engine.statusCallCount == after, "stop() ends the loop")
+    }
+
+    @Test func openingThePopoverReadsAtOnceAndThenEveryTwoSeconds() async throws {
+        let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper)
+        model.start()
+        #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
+        model.setPopoverOpen(true) // no five seconds of waiting first
+        #expect(await waitUntil { sleeper.requestedDurations.count == 2 })
+        #expect(engine.statusCallCount == 2)
+        #expect(sleeper.requestedDurations == [.seconds(5), .seconds(2)])
+        #expect(sleeper.cancelledCount == 1, "the five-second wait was cut short")
+        model.stop()
+    }
+
+    @Test func closingThePopoverReadsNothingAndGoesBackToFiveSeconds() async throws {
+        let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper)
+        model.start()
+        #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
+        model.setPopoverOpen(true)
+        #expect(await waitUntil { sleeper.requestedDurations.count == 2 })
+        model.setPopoverOpen(false)
+        await settle()
+        #expect(engine.statusCallCount == 2, "closing is not a reason to read")
+        #expect(sleeper.pendingDurations == [.seconds(2)])
+        sleeper.releaseAll()
+        #expect(await waitUntil { sleeper.requestedDurations.count == 3 })
+        #expect(engine.statusCallCount == 3)
+        #expect(sleeper.requestedDurations == [.seconds(5), .seconds(2), .seconds(5)])
+        model.stop()
+    }
+
+    @Test func openingAnOpenPopoverDoesNothingTwice() async throws {
+        let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper)
+        model.start()
+        #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
+        model.setPopoverOpen(true)
+        #expect(await waitUntil { sleeper.requestedDurations.count == 2 })
+        model.setPopoverOpen(true)
+        await settle()
+        #expect(engine.statusCallCount == 2)
+        model.stop()
     }
 
     @Test func startingTwiceStillRunsOneLoop() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        let model = makeModel(engine, policy: RefreshPolicy(closed: .seconds(60), open: .seconds(60)))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper)
         model.start()
         model.start()
-        #expect(await waitUntil { engine.statusCallCount >= 1 })
-        try await Task.sleep(for: .milliseconds(100))
+        #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
+        await settle()
         #expect(engine.statusCallCount == 1)
+        #expect(sleeper.requestedDurations.count == 1)
         model.stop()
     }
 
-    @Test func openingThePopoverRefreshesAtOnceInsteadOfWaitingOutTheInterval() async throws {
+    @Test func stoppingEndsTheLoop() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        let model = makeModel(engine, policy: RefreshPolicy(closed: .seconds(3600), open: .seconds(3600)))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper)
         model.start()
-        #expect(await waitUntil { engine.statusCallCount == 1 })
-        model.setPopoverOpen(true)
-        #expect(await waitUntil { engine.statusCallCount == 2 })
+        #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
         model.stop()
+        await settle()
+        #expect(sleeper.pendingDurations.isEmpty, "the wait was cancelled")
+        #expect(sleeper.releaseAll() == 0)
+        await settle()
+        #expect(engine.statusCallCount == 1)
+        #expect(sleeper.requestedDurations.count == 1)
     }
 
-    @Test func closingThePopoverDoesNotRefresh() async throws {
+    @Test func theLoopCanBeStoppedAndStartedAgain() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        let model = makeModel(engine, policy: RefreshPolicy(closed: .seconds(3600), open: .seconds(3600)))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper)
         model.start()
+        #expect(await waitUntil { engine.statusCallCount == 1 && sleeper.pendingDurations.count == 1 })
+        model.stop()
+        model.start()
+        #expect(await waitUntil { engine.statusCallCount == 2 }, "a new loop reads at once")
+        #expect(await waitUntil { sleeper.pendingDurations.count == 1 })
         model.setPopoverOpen(true)
-        #expect(await waitUntil { engine.statusCallCount >= 2 })
-        let before = engine.statusCallCount
-        model.setPopoverOpen(false)
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(engine.statusCallCount == before)
+        #expect(await waitUntil { engine.statusCallCount == 3 }, "and the new loop can be woken")
         model.stop()
     }
 
@@ -221,43 +298,56 @@ struct ViewModelTests {
     }
 
     @Test func theRefreshAfterAnActionWaitsForOneAlreadyInFlight() async throws {
-        // A refresh that started before the action finished may predate its effect, so the
-        // post-action refresh has to be a fresh one.
+        // A read that started before the action finished may predate its effect, so the read
+        // after the action has to be a fresh one, started once the earlier one is done.
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        engine.configure { $0.delay = .milliseconds(100) }
+        let gate = AsyncGate()
+        engine.configure { $0.statusGate = gate }
+        defer { gate.open() }
         let model = makeModel(engine)
         let early = Task { await model.refresh() }
-        try await Task.sleep(for: .milliseconds(20))
-        await model.perform(.releaseEnded)
+        #expect(await waitUntil { engine.statusCallCount == 1 }) // read #1 is stuck in the engine
+        let acting = Task { await model.perform(.releaseEnded) }
+        #expect(await waitUntil { engine.calls.contains(.releaseEnded) })
+        await settle()
+        #expect(engine.statusCallCount == 1, "the read after the action does not start beside read #1")
+        gate.open()
+        await acting.value
         await early.value
-        #expect(engine.calls.filter { $0 == .status }.count == 2)
+        #expect(engine.statusCallCount == 2, "it read once more, after the action")
         #expect(engine.calls.last == .status)
     }
 
     @Test func aButtonCannotStartTheSameActionTwice() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        engine.configure { $0.delay = .milliseconds(120) }
+        let gate = AsyncGate()
+        engine.configure { $0.actionGate = gate }
+        defer { gate.open() }
         let model = makeModel(engine)
-        async let first = model.perform(.releaseConnection("claude-1-1"))
-        try await Task.sleep(for: .milliseconds(20))
+        let first = Task { await model.perform(.releaseConnection("claude-1-1")) }
+        #expect(await waitUntil { engine.calls.contains(.releaseConnection("claude-1-1")) })
         #expect(model.inFlight.contains(.releaseConnection("claude-1-1")))
         #expect(model.isWaiting(onConnection: "claude-1-1"))
         #expect(model.isWaiting(onConnection: "codex-9-9") == false)
         let second = await model.perform(.releaseConnection("claude-1-1"))
-        #expect(second.kind == .info)
-        _ = await first
+        #expect(second == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
+        gate.open()
+        await first.value
         #expect(engine.calls.filter { $0 == .releaseConnection("claude-1-1") }.count == 1)
         #expect(model.inFlight.isEmpty)
     }
 
     @Test func groupAndRestartActionsMakeEveryRowWait() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        engine.configure { $0.delay = .milliseconds(120) }
+        let gate = AsyncGate()
+        engine.configure { $0.actionGate = gate }
+        defer { gate.open() }
         let model = makeModel(engine)
         let running = Task { await model.perform(.stopGroup(.all, force: false)) }
-        try await Task.sleep(for: .milliseconds(30))
+        #expect(await waitUntil { engine.calls.contains(.stopGroup(.all, force: false)) })
         #expect(model.isWaiting(onConnection: "anything"))
-        _ = await running.value
+        gate.open()
+        await running.value
         #expect(model.isWaiting(onConnection: "anything") == false)
     }
 
@@ -285,28 +375,28 @@ struct ViewModelTests {
 
     @Test func theBannerClearsItselfAfterAWhile() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        let model = CUABarViewModel(
-            engine: engine, appVersion: "0.7.0", systemActions: RecordingSystemActions(), pasteboard: RecordingPasteboard(),
-            policy: RefreshPolicy(closed: .seconds(60), open: .seconds(60)), clock: { Fixtures.now }, calendar: Fixtures.utc,
-            bannerDuration: .milliseconds(80))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper, bannerDuration: .seconds(7))
         await model.perform(.releaseEnded)
         #expect(model.banner != nil)
+        #expect(sleeper.pendingDurations == [.seconds(7)])
+        sleeper.releaseAll() // seven seconds pass
         #expect(await waitUntil { model.banner == nil })
     }
 
-    @Test func aNewerBannerIsNotClearedByAnOlderTimer() async throws {
+    @Test func aNewerBannerReplacesTheOlderOneAndOnlyItsOwnTimerClearsIt() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        let model = CUABarViewModel(
-            engine: engine, appVersion: "0.7.0", systemActions: RecordingSystemActions(), pasteboard: RecordingPasteboard(),
-            policy: RefreshPolicy(closed: .seconds(60), open: .seconds(60)), clock: { Fixtures.now }, calendar: Fixtures.utc,
-            bannerDuration: .milliseconds(200))
+        let sleeper = ManualSleeper()
+        let model = makeModel(engine, sleeper: sleeper, bannerDuration: .seconds(7))
         await model.perform(.releaseEnded)
-        try await Task.sleep(for: .milliseconds(120))
+        let first = model.banner
         await model.perform(.restartCodex)
-        let newer = model.banner
-        try await Task.sleep(for: .milliseconds(120)) // the first timer is due now
-        #expect(model.banner == newer)
-        #expect(model.banner != nil)
+        let second = model.banner
+        #expect(first != nil && second != nil && first != second)
+        #expect(sleeper.cancelledCount == 1, "the older banner's timer was cancelled")
+        #expect(sleeper.pendingDurations == [.seconds(7)])
+        sleeper.releaseAll()
+        #expect(await waitUntil { model.banner == nil })
     }
 
     // MARK: Special actions
@@ -364,6 +454,19 @@ struct ViewModelTests {
         engine.configure { $0.releaseSession = ReleaseResult(ok: true, released: true) }
         await model.perform(.releaseSession("019a1b2c-0009"))
         #expect(model.failedSessionIDs.isEmpty)
+    }
+
+    @Test func aNewFailedReleaseOpensTheGuidanceAgainEvenIfThePersonClosedIt() async throws {
+        let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
+        engine.configure { $0.releaseSession = ReleaseResult(ok: true, released: false, reason: "unsupported") }
+        let model = makeModel(engine)
+        await model.refresh()
+        model.guidanceOpenByUser = false
+        await model.perform(.releaseSession("019a1b2c-0009"))
+        #expect(model.guidanceOpenByUser == nil, "left to the popover again: open, because a release failed")
+        model.guidanceOpenByUser = false
+        await model.perform(.releaseSession("019a1b2c-0009")) // the same session failing again is not news
+        #expect(model.guidanceOpenByUser == false)
     }
 
     @Test func refreshAsAnActionJustReads() async throws {

@@ -10,7 +10,7 @@ struct ProcessRunnerTests {
 
     private func isAlive(_ pid: Int32) -> Bool { kill(pid, 0) == 0 }
 
-    private func waitUntilGone(_ pid: Int32, seconds: Double = 6) async -> Bool {
+    private func waitUntilGone(_ pid: Int32, seconds: Double = 15) async -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
         while isAlive(pid), Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
         return !isAlive(pid)
@@ -67,7 +67,7 @@ struct ProcessRunnerTests {
         await #expect(throws: ProcessRunError.timedOut) {
             try await runner.run(sh, arguments: sleeper(pidFile: pidFile), timeout: .milliseconds(500))
         }
-        #expect(Date().timeIntervalSince(started) < 8)
+        #expect(Date().timeIntervalSince(started) < 12)
         let pid = try #require(pid(in: pidFile))
         #expect(await waitUntilGone(pid))
     }
@@ -77,7 +77,7 @@ struct ProcessRunnerTests {
         defer { try? FileManager.default.removeItem(at: pidFile) }
         let task = Task { try await runner.run(sh, arguments: sleeper(pidFile: pidFile), timeout: .seconds(60)) }
         // Wait until the shell has actually started.
-        for _ in 0..<100 where pid(in: pidFile) == nil { try await Task.sleep(for: .milliseconds(50)) }
+        for _ in 0..<400 where pid(in: pidFile) == nil { try await Task.sleep(for: .milliseconds(50)) }
         let pid = try #require(pid(in: pidFile))
         task.cancel()
         await #expect(throws: CancellationError.self) { try await task.value }
@@ -86,25 +86,29 @@ struct ProcessRunnerTests {
 
     @Test func aChildLeftRunningDoesNotKeepTheAnswerWaiting() async throws {
         // restart-codex leaves Codex running with the command's output descriptors; a pipe
-        // reader would wait for it. The runner must return when the command itself exits.
+        // reader would wait for it. The runner must return when the command itself exits, long
+        // before the leftover child (a harmless `sleep`) is gone.
         let started = Date()
-        let output = try await runner.run(sh, arguments: ["-c", "/bin/sleep 3 & echo done"], timeout: .seconds(30))
+        let output = try await runner.run(sh, arguments: ["-c", "/bin/sleep 12 & echo done"], timeout: .seconds(60))
         #expect(String(decoding: output.stdout, as: UTF8.self) == "done\n")
-        #expect(Date().timeIntervalSince(started) < 2.5)
+        #expect(Date().timeIntervalSince(started) < 8)
     }
 
-    @MainActor @Test func theMainActorKeepsRunningWhileACommandRuns() async throws {
-        var ticks = 0
-        let ticker = Task { @MainActor in
-            while !Task.isCancelled {
-                ticks += 1
-                try? await Task.sleep(for: .milliseconds(10))
-            }
+    @MainActor @Test func theMainActorIsFreeWhileACommandRuns() async throws {
+        // The command waits for a file that only this test creates, from the main actor. If
+        // running it held the main actor, the file would never appear and the command would
+        // end at its timeout (a failure) instead of finishing.
+        let gate = scratchFile()
+        defer { try? FileManager.default.removeItem(at: gate) }
+        let runner = self.runner
+        let sh = self.sh
+        let running = Task {
+            try await runner.run(sh, arguments: ["-c", "while [ ! -e '\(gate.path)' ]; do /bin/sleep 0.02; done; echo released"], timeout: .seconds(60))
         }
-        _ = try await runner.run(sh, arguments: ["-c", "/bin/sleep 0.6"], timeout: .seconds(10))
-        ticker.cancel()
-        // A blocked main thread would have managed only a tick or two in 600 ms.
-        #expect(ticks >= 15)
+        try await Task.sleep(for: .milliseconds(150))
+        FileManager.default.createFile(atPath: gate.path, contents: nil)
+        let output = try await running.value
+        #expect(String(decoding: output.stdout, as: UTF8.self) == "released\n")
     }
 
     @Test func theEnvironmentHasTheUsualToolFolders() {

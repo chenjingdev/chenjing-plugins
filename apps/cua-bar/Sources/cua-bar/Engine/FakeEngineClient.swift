@@ -1,5 +1,33 @@
 import Foundation
 
+/// A door that stays shut until `open()`, then stays open. Holds a fake engine call in flight
+/// for exactly as long as a test wants, with no clock involved.
+final class AsyncGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let passThrough = lock.withLock { () -> Bool in
+                if isOpen { return true }
+                waiters.append(continuation)
+                return false
+            }
+            if passThrough { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            isOpen = true
+            defer { waiters = [] }
+            return waiters
+        }
+        for continuation in pending { continuation.resume() }
+    }
+}
+
 /// An engine for tests and previews: answers from values it is given and remembers what it was
 /// asked. Nothing leaves the process.
 final class FakeEngineClient: EngineClient, @unchecked Sendable {
@@ -30,6 +58,10 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var releaseSessionByID: [String: ReleaseResult] = [:]
         /// How long each call takes, to exercise slow engines.
         var delay: Duration = .zero
+        /// While shut, `status` calls wait here after being recorded.
+        var statusGate: AsyncGate?
+        /// While shut, action calls wait here after being recorded.
+        var actionGate: AsyncGate?
     }
 
     private let lock = NSLock()
@@ -100,6 +132,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
             return self.script
         }
         if script.delay > .zero { try await Task.sleep(for: script.delay) }
+        await (isAction ? script.actionGate : script.statusGate)?.wait()
         if isAction, let error = script.actionError { throw error }
         return script
     }

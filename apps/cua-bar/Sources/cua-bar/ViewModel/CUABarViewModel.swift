@@ -35,6 +35,10 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var banner: ActionBanner?
     /// Sessions whose release by session id did not work; the extension-reset guidance opens for them.
     @Published private(set) var failedSessionIDs: Set<String> = []
+    /// Whether the person opened or closed the extension-reset guidance; nil leaves it to the
+    /// popover (open when a leftover cannot be released one by one). Kept here because this
+    /// toolchain has no `@State` (SwiftUIMacros is not in the Command Line Tools).
+    @Published var guidanceOpenByUser: Bool?
 
     private(set) var isPopoverOpen = false
 
@@ -46,6 +50,7 @@ final class CUABarViewModel: ObservableObject {
     private let clock: @Sendable () -> Date
     private let calendar: Calendar
     private let bannerDuration: Duration
+    private let sleep: @Sendable (Duration) async throws -> Void
 
     private var lastStatus: EngineStatus?
     private var consecutiveFailures = 0
@@ -54,6 +59,7 @@ final class CUABarViewModel: ObservableObject {
     private var sleeper: CheckedContinuation<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
     private var wakeRequested = false
+    private var loopGeneration = 0
     private var bannerTimer: Task<Void, Never>?
 
     init(
@@ -64,7 +70,9 @@ final class CUABarViewModel: ObservableObject {
         policy: RefreshPolicy = RefreshPolicy(),
         clock: @escaping @Sendable () -> Date = { Date() },
         calendar: Calendar = .current,
-        bannerDuration: Duration = .seconds(6)
+        bannerDuration: Duration = .seconds(6),
+        // Waiting is injected so tests can pass time without waiting for it.
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
         self.engine = engine
         self.appVersion = appVersion
@@ -74,20 +82,28 @@ final class CUABarViewModel: ObservableObject {
         self.clock = clock
         self.calendar = calendar
         self.bannerDuration = bannerDuration
+        self.sleep = sleep
     }
 
     var currentInterval: Duration { isPopoverOpen ? policy.open : policy.closed }
+
+    /// The footer line: when the status was last read.
+    var updatedText: String {
+        updatedAt.map { "갱신 \(Format.clock($0, calendar: calendar))" } ?? "읽는 중…"
+    }
 
     // MARK: Refresh loop
 
     func start() {
         guard loopTask == nil else { return }
         wakeRequested = false
+        loopGeneration += 1
+        let generation = loopGeneration
         loopTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self else { return }
+                guard let self, self.loopGeneration == generation else { return }
                 await self.refresh()
-                await self.sleepUntilNextRefresh()
+                await self.sleepUntilNextRefresh(generation: generation)
             }
         }
     }
@@ -95,6 +111,7 @@ final class CUABarViewModel: ObservableObject {
     func stop() {
         loopTask?.cancel()
         loopTask = nil
+        loopGeneration += 1
         wakeRequested = false
         resumeSleeper()
     }
@@ -111,10 +128,14 @@ final class CUABarViewModel: ObservableObject {
             await running.value
             return
         }
-        let task = Task { await self.fetch() }
+        // The task clears `refreshTask` itself, before anyone waiting on it resumes, so a caller
+        // that comes right after it finished starts a new read instead of joining a finished one.
+        let task = Task {
+            await self.fetch()
+            self.refreshTask = nil
+        }
         refreshTask = task
         await task.value
-        refreshTask = nil
     }
 
     /// For after an action: waits for a read that started earlier (it may predate the action)
@@ -164,7 +185,9 @@ final class CUABarViewModel: ObservableObject {
         failedSessionIDs = []
     }
 
-    private func sleepUntilNextRefresh() async {
+    private func sleepUntilNextRefresh(generation: Int) async {
+        // A loop that was stopped (and maybe replaced) must not touch the shared wait state.
+        guard generation == loopGeneration, !Task.isCancelled else { return }
         if wakeRequested {
             wakeRequested = false
             return
@@ -173,8 +196,8 @@ final class CUABarViewModel: ObservableObject {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 sleeper = continuation
-                sleepTimer = Task { [weak self] in
-                    do { try await Task.sleep(for: interval) } catch { return }
+                sleepTimer = Task { [weak self, sleep] in
+                    do { try await sleep(interval) } catch { return }
                     self?.resumeSleeper()
                 }
             }
@@ -284,7 +307,12 @@ final class CUABarViewModel: ObservableObject {
     }
 
     private func noteSessionRelease(_ id: String, _ result: ReleaseResult) {
-        if result.ok, result.released { failedSessionIDs.remove(id) } else { failedSessionIDs.insert(id) }
+        if result.ok, result.released {
+            failedSessionIDs.remove(id)
+        } else if failedSessionIDs.insert(id).inserted {
+            // A new failure opens the extension-reset guidance again, even if it was closed before.
+            guidanceOpenByUser = nil
+        }
     }
 
     private static func failureLead(for action: CUAAction) -> String {
@@ -306,8 +334,8 @@ final class CUABarViewModel: ObservableObject {
         let banner = ActionBanner(outcome: outcome)
         self.banner = banner
         bannerTimer?.cancel()
-        bannerTimer = Task { [weak self, duration = bannerDuration] in
-            do { try await Task.sleep(for: duration) } catch { return }
+        bannerTimer = Task { [weak self, sleep, duration = bannerDuration] in
+            do { try await sleep(duration) } catch { return }
             self?.clearBanner(banner.id)
         }
     }
