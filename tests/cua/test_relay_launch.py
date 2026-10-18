@@ -176,15 +176,12 @@ class RelayLaunchTests(unittest.TestCase):
 
     def test_the_stable_copy_is_refreshed_at_every_primary_start(self):
         self.machine.plan()                                     # creates the copy
-        (self.machine.data/'relay/relay.mjs').write_text('stale')
-        shutil.rmtree(self.machine.data/'relay/node-repl-relay', ignore_errors=True)
+        (self.machine.data/'relay/relay.mjs').write_text('stale copy of an older plugin version')
         (self.machine.data/'relay/node-repl-relay').unlink()
-        self.finish_after(self.start())
+        child = self.start()
+        self.ready()
         for name in ('relay.mjs', 'node-repl-relay'):
             self.assertEqual((self.machine.data/'relay'/name).read_bytes(), (PLUGIN_ROOT/'relay'/name).read_bytes())
-
-    def finish_after(self, child):
-        self.ready()
         self.finish(child)
 
     def refuse(self, change, reason):
@@ -264,6 +261,42 @@ class RelayLaunchTests(unittest.TestCase):
                 self.assertEqual(child.returncode, 0)
         self.assertEqual(self.mcp_gets(), [])
         self.assertFalse((self.machine.data/'relay').exists())
+
+    def test_a_backend_that_leaves_while_it_starts_with_the_relay_gets_one_more_chance_without_it(self):
+        self.environment['FIXTURE_REJECT_OVERRIDE'] = '1'
+        child = self.start()
+        record = self.ready()
+        starts = [event for event in self.events() if event['role'] == 'backend']
+        deadline = time.monotonic()+5
+        while len(starts) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+            starts = [event for event in self.events() if event['role'] == 'backend']
+        self.assertEqual(len(starts), 2)
+        self.assertTrue(any(item.startswith(OVERRIDE_PREFIX) for item in starts[0]['argv']))
+        self.assertEqual(starts[1]['argv'], PRIMARY+['--listen', 'unix://'+record['socket_path']], 'the second start is the original one')
+        self.assertIs(record['relay'], False)
+        self.assertIsNone(record['relay_launcher'])
+        self.assertEqual(record['relay_reason'], 'backend_rejected')
+        self.assertEqual(record['backend_pid'], starts[1]['pid'])
+        self.assertEqual(self.proxy()['argv'], ['--socket', record['socket_path']], 'no relay arguments for the proxy either')
+        self.finish(child)
+
+    def test_a_backend_that_cannot_start_at_all_is_not_started_again_and_again(self):
+        self.environment['FIXTURE_REJECT_LISTEN'] = '1'
+        child = self.start()
+        stdout, stderr = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 1)
+        self.assertEqual(len([event for event in self.events() if event['role'] == 'backend']), 2, 'once with the relay, once without')
+        self.assertNotIn(b'mcp_servers', stderr)
+        self.assertEqual(json.loads((self.state/'host.json').read_text())['status'], 'closed')
+
+    def test_a_backend_that_leaves_without_a_relay_is_not_started_again(self):
+        shutil.rmtree(self.machine.data)                             # no support directory: no relay in this start
+        self.environment['FIXTURE_REJECT_LISTEN'] = '1'
+        child = self.start()
+        child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 1)
+        self.assertEqual(len([event for event in self.events() if event['role'] == 'backend']), 1)
 
     def test_a_second_primary_start_does_not_touch_the_relay_files_or_ask_again(self):
         first = self.start()

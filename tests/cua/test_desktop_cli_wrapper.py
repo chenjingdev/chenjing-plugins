@@ -56,6 +56,8 @@ if 'app-server' in args and 'proxy' in args:
     stream.close();connection.close()
 elif '--listen' in args:
     record('backend')
+    if os.environ.get('FIXTURE_REJECT_OVERRIDE') and any(item.startswith('mcp_servers.cua_repl=') for item in args):sys.exit(1)
+    if os.environ.get('FIXTURE_REJECT_LISTEN'):sys.exit(1)
     mode=os.environ.get('FIXTURE_MODE','normal')
     if mode=='hang':time.sleep(60)
     if mode=='stubborn':signal.signal(signal.SIGTERM,signal.SIG_IGN)

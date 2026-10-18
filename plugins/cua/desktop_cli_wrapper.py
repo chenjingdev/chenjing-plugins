@@ -175,6 +175,12 @@ def _relay_plan(native, arguments, environment):
         return None, "unavailable"
 
 
+def _spawn_backend(native, arguments, endpoint, environment):
+    return subprocess.Popen([str(native), *arguments, "--listen", "unix://" + str(endpoint)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=None,
+        env=environment, cwd=os.getcwd(), close_fds=True)
+
+
 def launch(native, arguments, environment, state_dir):
     """Own one original backend; raise BackendNotStarted if it cannot even be started."""
     progress = {"backend": False}
@@ -237,13 +243,28 @@ def _launch(native, arguments, environment, state_dir, progress):
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, request_stop)
         # All original argv, env, and cwd are preserved. Only listen is added.
-        backend = subprocess.Popen([str(native), *backend_arguments, "--listen", "unix://" + str(endpoint)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=None,
-            env=environment, cwd=os.getcwd(), close_fds=True)
+        backend = _spawn_backend(native, backend_arguments, endpoint, environment)
         progress["backend"] = True
         record["backend_pid"] = backend.pid
         _write_metadata(metadata_path, record)
-        _wait_for_owned_socket(endpoint, backend, stop, startup_timeout)
+        try:
+            _wait_for_owned_socket(endpoint, backend, stop, startup_timeout)
+        except RuntimeError:
+            # The relay is the one thing in this start that Codex never had before. A backend that leaves while
+            # it starts, with the relay in its arguments, gets one more chance without it.
+            if relay is None or backend.poll() is None or caught_signal[0] is not None:
+                raise
+            try:
+                if endpoint.is_socket() or endpoint.is_symlink():
+                    endpoint.unlink()
+            except OSError:
+                pass
+            relay, relay_reason = None, "backend_rejected"
+            record.update(relay=False, relay_launcher=None, relay_reason=relay_reason)
+            backend = _spawn_backend(native, list(arguments), endpoint, environment)
+            record["backend_pid"] = backend.pid
+            _write_metadata(metadata_path, record)
+            _wait_for_owned_socket(endpoint, backend, stop, startup_timeout)
         desktop_proxy = subprocess.Popen([sys.executable, str(Path(__file__).with_name("unix_ws_stdio.py")),
                                          "--socket", str(endpoint), *(relay.proxy_arguments() if relay else [])],
             stdin=None, stdout=None, stderr=None, env=environment, cwd=os.getcwd(), close_fds=True)
