@@ -261,7 +261,9 @@ class HostMcp:
                 raise BridgeFailure('The owned Codex thread has no configured CUA server. No fallback runtime was started.')
             selected = matches[0]
             if self.expected_plugin_id is not None and selected.get('pluginId') != self.expected_plugin_id:
-                raise BridgeFailure('The selected host server is not identified as the original bundled CUA plugin.')
+                from relay_install import accept_relay  # only this plugin's relay in front of the bundled runtime
+                if not await accept_relay(self, request):
+                    raise BridgeFailure('The selected host server is not identified as the original bundled CUA plugin.')
             state = selected.get('runtimeStatus')
             tools = selected.get('tools')
             if state in ('notStarted', 'starting', None) or (state == 'connected' and tools == {} and selected.get('toolsError') is None):
