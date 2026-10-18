@@ -26,4 +26,8 @@ protocol EngineClient: Sendable {
     func diagnose() async throws -> String
     /// `setup`: the existing installer (command, dependencies, login environment).
     func runSetup() async throws
+    /// `uninstall`: the existing remover. It also removes the login environment, and it refuses
+    /// while a Codex host is running (the command then exits non-zero and nothing is removed).
+    /// Throws `pluginMissing` or `setupNeeded` when there is no command to run: nothing was set up.
+    func uninstall() async throws
 }

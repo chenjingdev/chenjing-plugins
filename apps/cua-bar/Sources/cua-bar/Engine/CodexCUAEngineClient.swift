@@ -9,7 +9,10 @@ struct EngineTimeouts: Equatable, Sendable {
     var groupStop: Duration = .seconds(120)
     var restartCodex: Duration = .seconds(120)
     var diagnose: Duration = .seconds(30)
-    var setup: Duration = .seconds(600)
+    /// Setup may be installing packages, and stopping that halfway leaves a broken environment,
+    /// so it gets well over 15 minutes before anyone gives up on it.
+    var setup: Duration = .seconds(20 * 60)
+    var uninstall: Duration = .seconds(60)
 }
 
 /// The real engine client: runs `~/.local/bin/codex-cua` (found as the contract describes) and
@@ -82,6 +85,15 @@ struct CodexCUAEngineClient: EngineClient {
                 timeout: timeouts.setup)
         case .pluginMissing:
             throw EngineError.pluginMissing
+        }
+    }
+
+    /// Runs the remover. Without the command there is nothing set up to remove.
+    func uninstall() async throws {
+        switch locator.locate() {
+        case .ready(let command): _ = try await execute(command, ["uninstall"], timeout: timeouts.uninstall)
+        case .installedNotSetUp(let installPath): throw EngineError.setupNeeded(installPath: installPath.path)
+        case .pluginMissing: throw EngineError.pluginMissing
         }
     }
 
