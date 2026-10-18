@@ -79,19 +79,23 @@ class SetupTests(unittest.TestCase):
             setup.resolve_plugin_root(self.home)
 
     def test_install_preserves_unrelated_command_and_writes_owned_dispatcher(self):
+        # A fake app, so that a Codex installed on the machine running the tests is never read.
+        app, native, _ = fake_app(self.home/'Applications')
+        environment = {'CODEX_CUA_APP_PATH': str(app)}
         target = self.home/'.local/bin/codex-cua'
         target.parent.mkdir(parents=True)
         target.write_text('unrelated')
         with patch.object(setup, 'ensure_dependencies', side_effect=AssertionError('No bootstrap')):
             with self.assertRaises(RuntimeError):
-                setup.install_command(self.plugin, self.home)
+                setup.install_command(self.plugin, self.home, environment)
         self.assertEqual(target.read_text(), 'unrelated')
         target.unlink()
         with patch.object(setup, 'ensure_dependencies', return_value=self.root/'venv/bin/python3'):
-            self.assertEqual(setup.install_command(self.plugin, self.home), target)
+            self.assertEqual(setup.install_command(self.plugin, self.home, environment), target)
         self.assertIn('--control "$@"', target.read_text())
         launcher = (self.root/'start-desktop-cli.sh').read_text()
         self.assertIn('--control ensure --exec-wrapper -- "$@"', launcher)
+        self.assertIn(setup.FALLBACK_ENV+'='+str(native), launcher)
         self.assertNotIn(str(self.plugin), launcher)
         self.assertEqual((self.root/'source.json').stat().st_mode & 0o777, 0o600)
 
