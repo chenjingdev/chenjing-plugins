@@ -354,7 +354,8 @@ class Inventory:
         self.app_servers = sorted(pid for pid, proc in self.mine.items() if is_app_server(proc.command))
         modes = {pid: cmux_mode(proc.command) for pid, proc in self.mine.items()}
         self.cmux_daemons = sorted(pid for pid, mode in modes.items() if mode is not None and mode != 'mcp')
-        self.cmux_clients = sorted({self.mine[pid].ppid for pid, mode in modes.items() if mode == 'mcp'})
+        self.cmux_mcp = sorted(pid for pid, mode in modes.items() if mode == 'mcp')     # one per AI conversation
+        self.cmux_clients = sorted({self.mine[pid].ppid for pid in self.cmux_mcp})     # the AI clients that started them
         starts = [proc.start for proc in self.mine.values() if is_chrome_main(proc.command)]
         self.chrome_started = min(starts) if starts else None
 
@@ -389,11 +390,15 @@ class Inventory:
             pid = self.procs[pid].ppid
         return found
 
-    def protected_pids(self, owners=()):
+    def protected_pids(self, owners=(), cmux_connections=False):
         """Processes the engine never signals: the Codex app and its servers, the AI clients that own a
-        connection, cmux-cua, Chrome, and the engine itself with everything above it."""
+        connection, cmux-cua, Chrome, and the engine itself with everything above it.
+
+        cmux_connections is the list for stopping one cmux-cua connection. The `cmux-cua mcp` processes are what
+        that stops, so they are not on it; the daemon, every AI client and the engine's own chain still are."""
         protected = set(self.app_pids) | set(self.app_servers) | set(self.cmux_daemons) | set(self.cmux_clients)
-        protected |= {pid for pid, proc in self.mine.items() if cmux_mode(proc.command) is not None}
+        if not cmux_connections:
+            protected |= set(self.cmux_mcp)
         protected |= {pid for pid, proc in self.mine.items() if is_chrome_main(proc.command)}
         protected |= set(owners)
         protected |= set(self.ancestors(self.ctx.pid))

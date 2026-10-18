@@ -7,12 +7,14 @@ import unittest
 import engine_records
 import engine_status
 from engine_core import iso
-from engine_support import APP_VERSION, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase, State, at
+from engine_support import (APP_VERSION, ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase,
+                            State, at)
 
 TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'codex', 'host', 'setup', 'connections', 'leases',
             'other_tools', 'screen', 'activity']
 CONNECTION_KEYS = ['id', 'agent', 'state', 'pid', 'owner_pid', 'owner_alive', 'cwd', 'started_at', 'memory_bytes',
                    'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop']
+CMUX_CLIENT_KEYS = ['id', 'pid', 'mcp_pid', 'agent', 'cwd', 'started_at', 'can_stop']
 TIME = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
 
 
@@ -217,20 +219,37 @@ class AttributionTests(StatusCase):
         self.machine.add(2100, 1100, self.commands.node_repl)
         self.assertEqual(self.status()['connections'], [])
 
-    def test_cmux_cua_is_never_a_connection_only_a_tool_with_clients(self):
+    def test_cmux_cua_is_never_a_connection_only_a_tool_with_one_client_entry_per_mcp_process(self):
         self.start_world()
         self.add_claude(500)
         self.machine.add(3000, 1, self.commands.cmux_serve)
         self.machine.add(3001, 1, self.commands.cmux_serve)
-        self.machine.add(3002, 500, self.commands.cmux_mcp)
-        self.machine.add(3003, 500, self.commands.cmux_mcp)
-        self.machine.add(3004, 1100, self.commands.cmux_mcp)
+        self.machine.add(3002, 500, self.commands.cmux_mcp, start=NOW-900)
+        self.machine.add(3003, 500, self.commands.cmux_mcp, start=NOW-300)
+        self.machine.add(3004, 1100, self.commands.cmux_mcp, start=NOW-60)
         self.machine.cwds.update({500: '/work/claude-project', 1100: '/work/codex-project'})
         status = self.status()
         self.assertEqual(status['connections'], [])
         self.assertEqual(status['other_tools'], [{'name': 'cmux-cua', 'running': True, 'pids': [3000, 3001], 'clients': [
-            {'pid': 500, 'agent': 'claude', 'cwd': '/work/claude-project'},
-            {'pid': 1100, 'agent': 'codex', 'cwd': '/work/codex-project'}]}])
+            {'id': 'cmux-3002-%d' % (NOW-900), 'pid': 500, 'mcp_pid': 3002, 'agent': 'claude',
+             'cwd': '/work/claude-project', 'started_at': iso(NOW-900), 'can_stop': True},
+            {'id': 'cmux-3003-%d' % (NOW-300), 'pid': 500, 'mcp_pid': 3003, 'agent': 'claude',
+             'cwd': '/work/claude-project', 'started_at': iso(NOW-300), 'can_stop': True},
+            {'id': 'cmux-3004-%d' % (NOW-60), 'pid': 1100, 'mcp_pid': 3004, 'agent': 'codex',
+             'cwd': '/work/codex-project', 'started_at': iso(NOW-60), 'can_stop': True}]}])
+
+    def test_a_client_entry_has_exactly_the_contract_keys_and_types(self):
+        self.add_claude(500)
+        self.machine.add(3001, 500, self.commands.cmux_mcp)
+        [tool] = self.status()['other_tools']
+        [client] = tool['clients']
+        self.assertEqual(list(client), CMUX_CLIENT_KEYS)
+        self.assertTrue(re.match(r'^cmux-\d+-\d+$', client['id']))
+        self.assertTrue(TIME.match(client['started_at']))
+        for key in ('pid', 'mcp_pid'):
+            self.assertIsInstance(client[key], int)
+        self.assertIsInstance(client['can_stop'], bool)
+        json.dumps(tool)
 
     def test_cmux_cua_that_is_installed_but_not_running_is_listed_as_stopped_and_unknown_clients_have_null_fields(self):
         self.machine.add(5, 1, '/bin/x')
@@ -240,7 +259,34 @@ class AttributionTests(StatusCase):
         self.machine.add(3002, 77, self.commands.cmux_mcp)
         self.machine.add(77, 1, '/bin/sh -c something')
         self.assertEqual(self.status()['other_tools'], [{'name': 'cmux-cua', 'running': True, 'pids': [], 'clients': [
-            {'pid': 77, 'agent': None, 'cwd': None}]}])
+            {'id': 'cmux-3002-%d' % (NOW-3600), 'pid': 77, 'mcp_pid': 3002, 'agent': None, 'cwd': None,
+             'started_at': iso(NOW-3600), 'can_stop': True}]}])
+
+    def test_an_mcp_process_whose_ai_client_is_gone_is_still_listed_and_can_be_stopped(self):
+        self.machine.add(3002, 1, self.commands.cmux_mcp, start=NOW-500)          # its parent is launchd now
+        self.machine.add(3003, 4444, self.commands.cmux_mcp, start=NOW-400)       # its parent vanished from the list
+        clients = self.status()['other_tools'][0]['clients']
+        self.assertEqual([(item['mcp_pid'], item['pid'], item['agent'], item['cwd'], item['can_stop']) for item in clients],
+                         [(3002, 1, None, None, True), (3003, 4444, None, None, True)])
+        self.assertEqual(self.status()['other_tools'][0]['running'], True)
+
+    def test_can_stop_is_false_where_stop_would_refuse(self):
+        self.add_claude(500)
+        self.machine.add(3001, 500, self.commands.cmux_mcp, start=NOW-900)
+        self.machine.add(3002, 500, self.commands.cmux_mcp, start=NOW-800)       # the engine runs below this one
+        self.machine.add(3003, 500, self.commands.cmux_mcp, start=NOW-700)       # an mcp process that is itself a client
+        self.machine.add(3004, 3003, self.commands.cmux_mcp, start=NOW-600)
+        self.machine.add(ENGINE_PID, 3002, '/usr/bin/python3 setup.py status')
+        clients = {item['mcp_pid']: item['can_stop'] for item in self.status()['other_tools'][0]['clients']}
+        self.assertEqual(clients, {3001: True, 3002: False, 3003: False, 3004: True})
+
+    def test_other_users_mcp_processes_are_not_listed(self):
+        self.add_claude(500)
+        self.machine.add(3001, 500, self.commands.cmux_mcp)
+        self.machine.add(3002, 500, self.commands.cmux_mcp, uid=UID+1)
+        self.machine.add(3003, 1, self.commands.cmux_serve, uid=UID+1)
+        [tool] = self.status()['other_tools']
+        self.assertEqual(([item['mcp_pid'] for item in tool['clients']], tool['pids']), ([3001], []))
 
     def test_a_session_less_relay_is_paired_with_the_bridge_that_connected_right_after_it_started(self):
         self.start_world()

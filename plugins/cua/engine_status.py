@@ -5,7 +5,8 @@ A connection is one AI conversation that uses CUA (R8):
           thread. The runtime is found through the sessions that relay records and the activity log share with
           the bridge. A runtime that still serves a dead bridge's thread is a claude connection that has ended.
   codex   a live relay record that serves no bridge, or a runtime without any record.
-cmux-cua is never a connection; it is listed under other_tools.
+cmux-cua is none of these; it is listed under other_tools. Each of its `cmux-cua mcp` processes (one per AI
+conversation) is a CmuxConnection that can be stopped on its own.
 """
 import re
 
@@ -63,6 +64,29 @@ class Connection:
                 'can_stop': self.can_stop}
 
 
+class CmuxConnection:
+    """One `cmux-cua mcp` process: what an AI conversation holds open to cmux-cua.
+
+    It is not one of the connections above. It is stopped one at a time, never in a group, and it has nothing to
+    release. `pid` is the process that is signalled; `client_pid` is the AI client that started it, which never is."""
+
+    def __init__(self, proc, client):
+        self.pid = proc.pid
+        self.started = proc.start
+        self.client_pid = proc.ppid
+        self.agent = client_agent(client.command) if client is not None else None
+        self.cwd = None
+        self.can_stop = False
+
+    @property
+    def id(self):
+        return connection_id('cmux', self.pid, self.started)
+
+    def to_json(self):
+        return {'id': self.id, 'pid': self.client_pid, 'mcp_pid': self.pid, 'agent': self.agent, 'cwd': self.cwd,
+                'started_at': iso(self.started), 'can_stop': self.can_stop}
+
+
 def _owner_alive(inv, owner_pid, child_started):
     """The owner is alive when that pid is a process that started before its child (a reused pid did not)."""
     proc = inv.mine.get(owner_pid) if owner_pid and owner_pid > 1 else None
@@ -118,6 +142,7 @@ class View:
         self.records = records
         self.now = ctx.clock()
         self.connections = []
+        self.cmux = []                 # CmuxConnection, one per `cmux-cua mcp` process; not in `connections`
         self.maybe_left = []
         self.prunable = []
         self.activity = []
@@ -140,6 +165,7 @@ class View:
         self._claude_connections()
         self._relay_connections()
         self._runtime_connections()
+        self._cmux_connections()
         self._map_activity(activity)
         self._finish(with_folders)
         self._leases()
@@ -237,6 +263,14 @@ class View:
                 conn.owner_alive = _owner_alive(inv, conn.owner_pid, proc.start)
                 self.connections.append(conn)
 
+    def _cmux_connections(self):
+        """Every `cmux-cua mcp` process of this user, also one whose AI client is gone (its parent is then launchd)."""
+        inv = self.inv
+        for pid in inv.cmux_mcp:
+            proc = inv.mine[pid]
+            self.cmux.append(CmuxConnection(proc, inv.procs.get(proc.ppid) if proc.ppid > 1 else None))
+        self.cmux.sort(key=lambda conn: (conn.client_pid, conn.started, conn.pid))
+
     def _map_activity(self, activity):
         """Which connection each line of the activity log belongs to, and each connection's newest call."""
         session_bridge = {}
@@ -267,12 +301,17 @@ class View:
         protected = self.protected_pids()
         for conn in self.connections:
             conn.can_stop = conn.pid > 1 and conn.pid not in protected     # what stop would refuse is not offered
+        protected = self.protected_pids(cmux_connections=True)
+        for conn in self.cmux:
+            conn.can_stop = conn.pid > 1 and conn.pid not in protected
         if with_folders:
             wanted = [conn.pid for conn in self.connections if conn.cwd is None]
             wanted += [pid for pid in inv.cmux_clients if pid > 1]
             self.folders = working_folders(self.ctx, wanted)
             for conn in self.connections:
                 conn.cwd = conn.cwd or self.folders.get(conn.pid)
+            for conn in self.cmux:
+                conn.cwd = self.folders.get(conn.client_pid)
 
     @staticmethod
     def _newest_session(relay):
@@ -347,11 +386,12 @@ class View:
     # --- lookups -------------------------------------------------------------------------------------
 
     def find(self, wanted):
-        return next((conn for conn in self.connections if conn.id == wanted), None)
+        """A connection or a cmux-cua connection by id."""
+        return next((conn for conn in self.connections + self.cmux if conn.id == wanted), None)
 
-    def protected_pids(self):
+    def protected_pids(self, cmux_connections=False):
         owners = {conn.owner_pid for conn in self.connections if conn.owner_pid}
-        return self.inv.protected_pids(owners)
+        return self.inv.protected_pids(owners, cmux_connections=cmux_connections)
 
     def prune(self):
         """Delete dead records that hold nothing a release could still act on, and forget what was released for
@@ -390,12 +430,7 @@ class View:
 
     def _other_tools(self):
         inv, ctx = self.inv, self.ctx
-        clients = []
-        for pid in inv.cmux_clients:
-            proc = inv.procs.get(pid)
-            if proc is None or pid <= 1:
-                continue
-            clients.append({'pid': pid, 'agent': client_agent(proc.command), 'cwd': self.folders.get(pid)})
+        clients = [conn.to_json() for conn in self.cmux]
         running = bool(inv.cmux_daemons or clients)
         installed = (ctx.home/'Library/Application Support/cmux/cmux-cua').is_dir()
         if not running and not installed:
