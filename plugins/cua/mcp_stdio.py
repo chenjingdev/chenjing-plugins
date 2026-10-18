@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 import stat
 import sys
+from bridge_control import BridgeControl
 from host_autostart import AutostartFailure, ensure_host
 from host_mcp import HostMcp, serve, BridgeFailure
-from portwarden_control import PortwardenControl
 from runtime_paths import default_state, installation_from_native_cli, InstallationError
 
 DEFAULT_STATE = default_state()
@@ -77,7 +77,7 @@ async def main():
                 raise BridgeFailure('Start Codex with the prepared host launcher before using this MCP plugin. No runtime was started.') from None
             await super().boot()
     adapter = RegisteredHost(None, Path('/unconfigured-codex-host'), 'cua_repl')
-    cleanup = await serve(adapter, control_factory=PortwardenControl)
+    cleanup = await serve(adapter, control_factory=BridgeControl)
     return 0 if cleanup['owned_thread_unsubscribe'] != 'unconfirmed' and cleanup['connection_close'] == 'confirmed' else 1
 
 

@@ -30,19 +30,17 @@ TOOLS = {
                    'annotations': {'readOnlyHint': False}, '_meta': {'original': True}},
 }
 HOST_THREAD = 'host-issued-owned-thread'
-FIXTURE_CUA_ROOT = Path('/fixture/Installed Codex.app/Contents/Resources/cua_node')
 
 
 class FakeProxy:
     def __init__(self, *, mode='normal', tools=None, result=None, unsubscribe=None, states=None,
-                 plugin_id=bridge.NATIVE_PLUGIN_ID, relay_cua_root=FIXTURE_CUA_ROOT):
+                 plugin_id=bridge.NATIVE_PLUGIN_ID):
         self.mode = mode
         self.tools = copy.deepcopy(TOOLS if tools is None else tools)
         self.result = copy.deepcopy(result if result is not None else {'content': [{'type': 'text', 'text': 'fixture'}]})
         self.unsubscribe = {'status': 'unsubscribed'} if unsubscribe is None else unsubscribe
         self.states = list(states or ['connected'])
         self.plugin_id = plugin_id
-        self.relay_cua_root = relay_cua_root
         self.incoming = asyncio.Queue()
         self.was_closed = False
         self.received, self.tasks = [], set()
@@ -105,13 +103,6 @@ class FakeProxy:
             result = {'data': [{'name': 'cua_repl', 'pluginId': self.plugin_id, 'runtimeStatus': state, 'tools': self.tools, 'toolsError': None}], 'nextCursor': None}
             if self.mode == 'missing_catalogue':
                 result = {'data': [], 'nextCursor': None}
-        elif method == 'config/read':
-            result = {'config': {'mcp_servers': {'cua_repl': {
-                'command': str(self.relay_cua_root/'bin/node'),
-                'args': [str(self.relay_cua_root/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')],
-                'env': {'CUA_REPL_NODE_REPL_PATH': str(bridge.PORTWARDEN_RELAY),
-                        'PORTWARDEN_CUA_NATIVE_RUNTIME': str(self.relay_cua_root/'bin/node_repl')}
-            }}}} if self.mode == 'verified_relay' else {'config': {}}
         elif method == 'mcpServer/tool/call':
             if self.mode == 'rpc_error':
                 self.emit({'id': ident, 'error': {'code': -32000, 'message': 'PRIVATE_NATIVE_ERROR', 'data': {'original': [1, 2]}}})
@@ -140,7 +131,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         for stack in reversed(self.stacks):
             stack.close()
 
-    def fixture(self, *, native_cua_root=FIXTURE_CUA_ROOT, **options):
+    def fixture(self, **options):
         proxy = FakeProxy(**options)
         stack = ExitStack()
         stack.enter_context(patch.object(Path, 'stat', new=lambda path: SimpleNamespace(
@@ -152,8 +143,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         stack.enter_context(patch.object(bridge.asyncio, 'create_subprocess_exec', side_effect=AssertionError('No subprocess is permitted')))
         output, logs = [], []
         adapter = bridge.HostMcp(Path('/fixture/codex'), Path('/fixture/existing-host.sock'),
-            emit=output.append, log=logs.append, startup_timeout=0.3, cleanup_timeout=0.2,
-            native_cua_root=native_cua_root)
+            emit=output.append, log=logs.append, startup_timeout=0.3, cleanup_timeout=0.2)
         self.stacks.append(stack)
         self.adapters.append(adapter)
         return adapter, proxy, output, logs, spawn
@@ -188,33 +178,15 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(m.get('method') in ('thread/resume', 'turn/start', 'thread/fork') for m in proxy.received))
         self.assertNotIn('PRIVATE', json.dumps(logs))
 
-    async def test_verified_native_portwarden_relay_is_accepted(self):
-        adapter, proxy, output, _, _ = self.fixture(plugin_id=None, mode='verified_relay')
-        await self.initialize(adapter)
-        self.assertNotIn('error', output[-1])
-        self.assertTrue(any(m.get('method') == 'config/read' for m in proxy.received))
-
-    async def test_portwarden_relay_uses_the_explicit_installed_runtime_location(self):
-        relocated = Path('/fixture/Custom Location/Codex.app/Contents/Resources/cua_node')
-        adapter, _, output, _, _ = self.fixture(plugin_id=None, mode='verified_relay',
-            native_cua_root=relocated, relay_cua_root=relocated)
-        await self.initialize(adapter)
-        self.assertNotIn('error', output[-1])
-
-    async def test_portwarden_relay_requires_a_matching_explicit_runtime_location(self):
-        for root in (None, Path('/fixture/another-app/cua_node'), Path('relative/cua_node')):
-            adapter, proxy, output, _, _ = self.fixture(plugin_id=None, mode='verified_relay',
-                native_cua_root=root)
-            await self.initialize(adapter)
-            self.assertIn('verified Portwarden relay', output[-1]['error']['message'])
-            self.assertTrue(proxy.was_closed)
-            self.assertFalse(any(m.get('method') == 'mcpServer/tool/call' for m in proxy.received))
-
-    async def test_unverified_non_plugin_server_is_rejected(self):
+    async def test_server_without_the_bundled_plugin_identity_is_rejected_and_owned_thread_is_cleaned(self):
         adapter, proxy, output, _, _ = self.fixture(plugin_id=None)
         await self.initialize(adapter)
-        self.assertIn('verified Portwarden relay', output[-1]['error']['message'])
+        self.assertIn('original bundled CUA plugin', output[-1]['error']['message'])
         self.assertTrue(proxy.was_closed)
+        self.assertTrue(any(m.get('method') == 'thread/unsubscribe' for m in proxy.received))
+        # No other source of identity is consulted, and nothing is ever called on the unidentified server.
+        self.assertFalse(any(m.get('method') in ('config/read', 'mcpServer/tool/call') for m in proxy.received))
+        self.assertFalse(adapter.initialized)
 
     async def test_catalogue_preserves_native_tools_except_owned_lifecycle_contract(self):
         adapter, proxy, output, _, _ = self.fixture()

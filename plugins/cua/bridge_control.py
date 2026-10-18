@@ -9,20 +9,22 @@ import subprocess
 import tempfile
 
 
-class PortwardenControl:
+class BridgeControl:
     def __init__(self, adapter, state=None):
         self.adapter = adapter
-        self.root = state or Path.home()/'Library/Caches/portwarden-cua'
+        self.root = state or Path.home()/'Library/Caches/codex-cua/bridges'
         self.directory = None
         self.server = None
         self.lock = asyncio.Lock()
 
     async def start(self):
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # The codex-cua directory above also holds other private records; mkdir(parents=True) would give it default permissions.
+        self.root.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.root.mkdir(exist_ok=True, mode=0o700)
         info = self.root.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
             raise RuntimeError('Private control directory required.')
-        self.directory = Path(tempfile.mkdtemp(prefix='relay-', dir=str(self.root)))
+        self.directory = Path(tempfile.mkdtemp(prefix='bridge-', dir=str(self.root)))
         os.chmod(self.directory, 0o700)
         socket = self.directory/'control.sock'
         self.server = await asyncio.start_unix_server(self.handle, path=str(socket), limit=2048)

@@ -23,7 +23,6 @@ except ImportError:
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
 VERSION = '0.6.0'
-PORTWARDEN_RELAY = Path.home()/'dev/portwarden/scripts/cua-runtime-proxy.mjs'
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
 
@@ -178,26 +177,6 @@ class ProxyRpc:
             raise failure
 
 
-def verified_portwarden_transport(transport, native_cua_root):
-    """Check effective host configuration; never trust caller-supplied metadata."""
-    if (native_cua_root is None or not Path(native_cua_root).is_absolute()
-            or not isinstance(transport, dict) or not isinstance(transport.get('env'), dict)):
-        return False
-    native_cua_root = Path(native_cua_root)
-    env = transport['env']
-    if (transport.get('command') != str(native_cua_root/'bin/node')
-            or transport.get('args') != [str(native_cua_root/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')]
-            or env.get('CUA_REPL_NODE_REPL_PATH') != str(PORTWARDEN_RELAY)
-            or env.get('PORTWARDEN_CUA_NATIVE_RUNTIME') != str(native_cua_root/'bin/node_repl')):
-        return False
-    try:
-        info = PORTWARDEN_RELAY.lstat()
-        return (stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
-                and not stat.S_IMODE(info.st_mode) & 0o022)
-    except OSError:
-        return False
-
-
 class HostMcp:
     def __init__(self, cli_path, socket_path, server='cua_repl', emit=None, log=None,
                  startup_timeout=15.0, cleanup_timeout=5.0,
@@ -282,14 +261,7 @@ class HostMcp:
                 raise BridgeFailure('The owned Codex thread has no configured CUA server. No fallback runtime was started.')
             selected = matches[0]
             if self.expected_plugin_id is not None and selected.get('pluginId') != self.expected_plugin_id:
-                # A user-configured stdio relay has no pluginId. Accept only the
-                # original engine through the explicitly configured owned relay.
-                if selected.get('pluginId') is not None:
-                    raise BridgeFailure('The selected host server is not identified as the original bundled CUA plugin.')
-                config = await request('config/read', {'includeLayers': False, 'cwd': os.getcwd()})
-                transport = config.get('config', {}).get('mcp_servers', {}).get(self.server, {})
-                if not verified_portwarden_transport(transport, self.native_cua_root):
-                    raise BridgeFailure('The selected host server is not the original bundled CUA plugin or its verified Portwarden relay.')
+                raise BridgeFailure('The selected host server is not identified as the original bundled CUA plugin.')
             state = selected.get('runtimeStatus')
             tools = selected.get('tools')
             if state in ('notStarted', 'starting', None) or (state == 'connected' and tools == {} and selected.get('toolsError') is None):
