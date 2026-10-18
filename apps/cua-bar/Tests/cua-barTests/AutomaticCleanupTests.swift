@@ -110,9 +110,10 @@ struct AutomaticCleanupTests {
         engine.setStatus(status)
         await rig.model.refresh()
         #expect(releaseEndedCalls(rig) == 1)
-        // The person's own 끝난 연결 놓아주기 is not a second one either.
+        // The person's own 끝난 연결 놓아주기 is not a second one either: it says why and does not run.
         let outcome = await rig.model.perform(.releaseEnded)
-        #expect(outcome == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
+        #expect(outcome == ActionOutcome(kind: .info, message: "자동 정리 중이에요. 끝나면 다시 눌러 주세요"))
+        #expect(rig.model.banner?.outcome == outcome)
         #expect(releaseEndedCalls(rig) == 1)
 
         gate.open()

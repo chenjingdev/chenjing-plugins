@@ -55,9 +55,15 @@ struct ActionMessagesTests {
                 == ActionOutcome(kind: .success, message: "놓았어요"))
     }
 
-    @Test func nothingToRelease() {
+    @Test func nothingToReleaseIsASuccess() {
         #expect(ActionMessages.releaseConnection(ReleaseResult(ok: true, released: false, reason: "no_trusted_scope", scopeCount: 0))
-                == ActionOutcome(kind: .info, message: "놓을 점유가 없어요"))
+                == ActionOutcome(kind: .success, message: "놓을 점유가 없어요"))
+    }
+
+    @Test func nobodyToAskIsNotNothingToRelease() {
+        // `ok: false` with the same reason: there was no endpoint to ask, so the runtime may still hold tabs (P4).
+        #expect(ActionMessages.releaseConnection(ReleaseResult(ok: false, released: false, reason: "no_trusted_scope", scopeCount: 0))
+                == ActionOutcome(kind: .warning, message: "놓아줄 길을 확인하지 못했어요"))
     }
 
     @Test func releaseRefusedBecauseACallIsStillRunning() {
@@ -79,13 +85,43 @@ struct ActionMessagesTests {
         #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [ended(true), ended(true)]))
                 == ActionOutcome(kind: .success, message: "끝난 연결 2개를 놓았어요"))
         #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(true), ended(true)]))
-                == ActionOutcome(kind: .warning, message: "끝난 연결 2개를 놓았지만 마무리는 확인되지 않았어요"))
+                == ActionOutcome(kind: .warning, message: "끝난 연결 2개를 놓았어요 · 마무리는 확인되지 않았어요"))
         #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(true), ended(false, "request_in_flight")]))
                 == ActionOutcome(kind: .warning, message: "끝난 연결 2개 중 1개를 놓았어요 — 나머지는 도구 호출이 아직 끝나지 않았어요"))
         #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(false, "relay_unavailable")]))
                 == ActionOutcome(kind: .failure, message: "끝난 연결 1개를 놓지 못했어요 — 중계기를 쓸 수 없어요"))
         #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(false, "request_in_flight"), ended(false, "relay_unavailable")]))
                 == ActionOutcome(kind: .failure, message: "끝난 연결 2개를 놓지 못했어요 — 도구 호출이 아직 끝나지 않았어요, 중계기를 쓸 수 없어요"))
+    }
+
+    @Test func anEndedConnectionWithNothingToReleaseIsNotAFailure() {
+        func ended(_ released: Bool, _ reason: String? = nil) -> EndedRelease { EndedRelease(connectionID: "x", released: released, reason: reason) }
+        let nothing = ended(false, "no_trusted_scope")
+        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [nothing, nothing]))
+                == ActionOutcome(kind: .success, message: "끝난 연결 2개 — 놓을 점유 없음"))
+        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [ended(true), nothing]))
+                == ActionOutcome(kind: .success, message: "끝난 연결 2개를 놓았어요 (1개는 놓을 점유 없음)"))
+        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(true), nothing, ended(false, "relay_unavailable")]))
+                == ActionOutcome(kind: .warning, message: "끝난 연결 3개 중 2개를 놓았어요 (1개는 놓을 점유 없음) — 나머지는 중계기를 쓸 수 없어요"))
+    }
+
+    @Test func aLiveBridgesSessionsFromBeforeTheRestartAreNotEndedConnections() throws {
+        // P4: `release --ended` lists a live bridge whose old-host sessions it released under that bridge's own id.
+        let status = try Fixtures.status("status-problem") // claude-4001 ended, claude-12345 active
+        let result = ReleaseEndedResult(ok: true, results: [
+            EndedRelease(connectionID: "claude-4001-1792300000", released: true),
+            EndedRelease(connectionID: "claude-12345-1792320000", released: true),
+        ])
+        #expect(ActionMessages.releaseEnded(result, in: status)
+                == ActionOutcome(kind: .success, message: "끝난 연결 1개를 놓았어요 · 다시 연결되기 전 세션 1개를 놓았어요"))
+        let onlyBeforeRestart = ReleaseEndedResult(ok: false, results: [
+            EndedRelease(connectionID: "claude-12345-1792320000", released: false, reason: "timeout"),
+        ])
+        #expect(ActionMessages.releaseEnded(onlyBeforeRestart, in: status)
+                == ActionOutcome(kind: .failure, message: "다시 연결되기 전 세션 1개를 놓지 못했어요 — 시간이 너무 오래 걸렸어요"))
+        // A connection the status no longer lists is not live.
+        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [EndedRelease(connectionID: "claude-1-1", released: true)]), in: status)
+                == ActionOutcome(kind: .success, message: "끝난 연결 1개를 놓았어요"))
     }
 
     @Test func anOkFalseAnswerWithNothingInItIsAFailureNeverNoEndedConnections() {
@@ -153,6 +189,13 @@ struct ActionMessagesTests {
                 == ActionOutcome(kind: .warning, message: "껐어요. 도구 호출이 끝나지 않아 점유는 못 놓았어요 — 플러그인이 끝날 때 한 번 더 놓고, 남으면 브라우저 점유 탭에 보여요"))
     }
 
+    @Test func aStopWithNothingToReleaseIsAPlainSuccess() {
+        // P4: `released` stays literal, with `no_trusted_scope` when there was nothing to release.
+        let result = StopResult(ok: true, stopped: true, released: false, reason: "no_trusted_scope")
+        #expect(ActionMessages.stopConnection(result, force: false) == ActionOutcome(kind: .success, message: "껐어요"))
+        #expect(ActionMessages.stopConnection(result, force: true) == ActionOutcome(kind: .success, message: "강제로 껐어요"))
+    }
+
     @Test func stoppedButNotOkIsStillReportedAsStopped() {
         #expect(ActionMessages.stopConnection(StopResult(ok: false, stopped: true, released: true), force: false)
                 == ActionOutcome(kind: .warning, message: "껐어요. 마무리는 확인되지 않았어요"))
@@ -201,6 +244,13 @@ struct ActionMessagesTests {
         let result = GroupStopResult(ok: true, stopped: 1, failed: 0, results: [entry(true, released: false, "cleanup_not_confirmed")])
         #expect(ActionMessages.stopGroup(result, group: .all, force: false)
                 == ActionOutcome(kind: .warning, message: "연결 1개를 껐어요 · 점유를 놓았는지 확인되지 않은 연결 1개 — 브라우저 점유 탭을 보세요"))
+    }
+
+    @Test func aStoppedConnectionWithNothingToReleaseIsNotCountedAsNotReleased() {
+        let result = GroupStopResult(ok: true, stopped: 2, failed: 0, results: [entry(true), entry(true, released: false, "no_trusted_scope")])
+        #expect(ActionMessages.stopGroup(result, group: .all, force: false) == ActionOutcome(kind: .success, message: "연결 2개를 껐어요"))
+        let ended = StopResult(ok: true, stopped: true, released: false, reason: "no_trusted_scope")
+        #expect(ActionMessages.stopEnded([ended]) == ActionOutcome(kind: .success, message: "끝난 연결 1개를 껐어요"))
     }
 
     @Test func aGroupStopThatStoppedNothingIsAFailureWithItsReason() {

@@ -74,31 +74,83 @@ enum ActionMessages {
 
     // MARK: Release
 
+    /// `no_trusted_scope` is "nothing to release", not a failure. `ok` tells the two answers apart
+    /// (P4): a verified writer that holds nothing (`ok: true`), or nobody to ask at all (`ok: false`).
     static func releaseConnection(_ result: ReleaseResult) -> ActionOutcome {
         if result.ok, result.released { return ActionOutcome(kind: .success, message: "놓았어요") }
-        if result.reason == "no_trusted_scope" { return ActionOutcome(kind: .info, message: reason(result.reason)) }
+        if result.reason == "no_trusted_scope" {
+            return result.ok
+                ? ActionOutcome(kind: .success, message: reason(result.reason))
+                : ActionOutcome(kind: .warning, message: noWayToRelease)
+        }
         return ActionOutcome(kind: .failure, message: "놓지 못했어요 — \(reason(result.reason))")
     }
 
+    /// `release --connection` found nobody to ask: the runtime may still hold tabs.
+    static let noWayToRelease = "놓아줄 길을 확인하지 못했어요"
+    /// An item the engine had nothing to release for (`no_trusted_scope`).
+    static let nothingToRelease = "놓을 점유 없음"
+
     /// Reads `ok` and every item: an `ok: false` answer with nothing in it is a failure, never
-    /// "no ended connections".
-    static func releaseEnded(_ result: ReleaseEndedResult) -> ActionOutcome {
+    /// "no ended connections". An item with nothing to release is not a failure. The engine also
+    /// lists a live bridge whose sessions from before Codex restarted it released, under that
+    /// bridge's own id (P4): with `status` (the one the release started from) those are told apart
+    /// from the ended connections.
+    static func releaseEnded(_ result: ReleaseEndedResult, in status: EngineStatus? = nil) -> ActionOutcome {
         let items = result.results
         guard !items.isEmpty else {
             return result.ok
                 ? ActionOutcome(kind: .info, message: "끝난 연결이 없어요")
                 : ActionOutcome(kind: .failure, message: "놓지 못했어요 — \(reason(result.reason))")
         }
-        let released = items.filter(\.released).count
-        let failed = items.count - released
+        let isBeforeRestart = { (item: EndedRelease) in status?.isLive(connectionID: item.connectionID) ?? false }
+        let groups = [
+            (label: "끝난 연결", tally: ReleaseTally(items.filter { !isBeforeRestart($0) })),
+            (label: "다시 연결되기 전 세션", tally: ReleaseTally(items.filter(isBeforeRestart))),
+        ].filter { $0.tally.count > 0 }
+        var parts = groups.map { $0.tally.phrase($0.label) }
+        let failed = groups.map { $0.tally.failed }.reduce(0, +)
         if failed == 0 {
-            return result.ok
-                ? ActionOutcome(kind: .success, message: "끝난 연결 \(items.count)개를 놓았어요")
-                : ActionOutcome(kind: .warning, message: "끝난 연결 \(items.count)개를 놓았지만 마무리는 확인되지 않았어요")
+            guard result.ok else {
+                parts.append("마무리는 확인되지 않았어요")
+                return ActionOutcome(kind: .warning, message: parts.joined(separator: " · "))
+            }
+            return ActionOutcome(kind: .success, message: parts.joined(separator: " · "))
         }
-        let why = why(items.filter { !$0.released }.map(\.reason))
-        if released == 0 { return ActionOutcome(kind: .failure, message: "끝난 연결 \(items.count)개를 놓지 못했어요 — \(why)") }
-        return ActionOutcome(kind: .warning, message: "끝난 연결 \(items.count)개 중 \(released)개를 놓았어요 — 나머지는 \(why)")
+        return ActionOutcome(kind: failed == items.count ? .failure : .warning, message: parts.joined(separator: " · "))
+    }
+
+    /// How the items of one `release --ended` group came out.
+    private struct ReleaseTally {
+        var released = 0
+        var nothing = 0
+        var failedReasons: [String?] = []
+
+        init(_ items: [EndedRelease]) {
+            for item in items {
+                if item.released {
+                    released += 1
+                } else if item.reason == "no_trusted_scope" {
+                    nothing += 1
+                } else {
+                    failedReasons.append(item.reason)
+                }
+            }
+        }
+
+        var failed: Int { failedReasons.count }
+        var count: Int { released + nothing + failed }
+
+        /// `끝난 연결 2개를 놓았어요`; with nothing to release for some, it says how many; with
+        /// failures, how many went and why the rest did not.
+        func phrase(_ label: String) -> String {
+            let done = released + nothing
+            if done == 0 { return "\(label) \(count)개를 놓지 못했어요 — \(ActionMessages.why(failedReasons))" }
+            if released == 0 && failed == 0 { return "\(label) \(count)개 — \(ActionMessages.nothingToRelease)" }
+            let empty = nothing > 0 ? " (\(nothing)개는 \(ActionMessages.nothingToRelease))" : ""
+            if failed == 0 { return "\(label) \(count)개를 놓았어요\(empty)" }
+            return "\(label) \(count)개 중 \(done)개를 놓았어요\(empty) — 나머지는 \(ActionMessages.why(failedReasons))"
+        }
     }
 
     /// `release-session`: the engine counts the tabs it just released; that is a result, not a
@@ -137,6 +189,10 @@ enum ActionMessages {
         let how = force ? "강제로 " : ""
         guard result.stopped else {
             return ActionOutcome(kind: .failure, message: "끄지 못했어요 — \(reason(result.reason))")
+        }
+        // Nothing to release is not a failure: stopping was all there was to do (P4).
+        if !result.released, result.reason == "no_trusted_scope" {
+            return ActionOutcome(kind: .success, message: "\(how)껐어요")
         }
         if result.released {
             return result.ok
@@ -186,7 +242,8 @@ enum ActionMessages {
             stopped = items.filter(\.stopped).count
             unattributed = items.filter { !$0.stopped && $0.reason == "unattributed" }.count
             failedReasons = items.filter { !$0.stopped && $0.reason != "unattributed" }.map(\.reason)
-            notReleased = items.filter { $0.stopped && !$0.released }.count
+            // A stopped one that had nothing to release (`no_trusted_scope`) is not "not released".
+            notReleased = items.filter { $0.stopped && !$0.released && $0.reason != "no_trusted_scope" }.count
         }
         let failed = failedReasons.count
         if stopped == 0, failed == 0, unattributed == 0 {

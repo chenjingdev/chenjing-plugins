@@ -31,6 +31,8 @@ enum CUAAction: Hashable, Sendable {
     case retryRelease(String)
     /// 안내 보기: select the 브라우저 점유 tab and open its guidance.
     case showLeaseGuidance
+    /// 점유 보기: select the 브라우저 점유 tab only (Codex chats are released from their own rows).
+    case showLeases
     /// Codex 열기, after a restart whose relaunch failed. Opens the app the person just chose to open.
     case openCodex
     /// TODO(A3): open the page where Codex is downloaded.

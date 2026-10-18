@@ -26,11 +26,14 @@ struct AppNotification: Equatable, Sendable {
             body: "다시 켜면 Claude가 붙어요. 하던 Codex 작업이 끊겨요.", buttons: [.restartCodex])
     }
 
-    static func lingeringLease(key: String, entry: LeftoverLease) -> AppNotification {
+    /// `beforeRestart`: a session a still-running bridge had before Codex restarted (`ended_at`
+    /// null); its connection did not end, so the body does not say it did.
+    static func lingeringLease(key: String, entry: LeftoverLease, beforeRestart: Bool = false) -> AppNotification {
         let who = entry.cwd.map { "\(entry.agent.label) · \(Format.folder($0))" } ?? entry.agent.label
-        return AppNotification(
-            key: key, kind: .lingeringLease, title: "브라우저 탭이 아직 잡혀 있을 수 있어요",
-            body: "\(who) 연결이 끝난 지 1분이 넘었는데 점유가 풀렸는지 확인되지 않았어요. 눌러서 확인해 보세요.")
+        let body = beforeRestart
+            ? "Codex가 다시 켜지기 전 세션의 점유가 1분 넘게 남아 있어요 (\(who)). 눌러서 확인해 보세요."
+            : "\(who) 연결이 끝난 지 1분이 넘었는데 점유가 풀렸는지 확인되지 않았어요. 눌러서 확인해 보세요."
+        return AppNotification(key: key, kind: .lingeringLease, title: "브라우저 탭이 아직 잡혀 있을 수 있어요", body: body)
     }
 }
 

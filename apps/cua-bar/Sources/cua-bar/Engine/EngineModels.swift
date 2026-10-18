@@ -23,6 +23,12 @@ struct EngineStatus: Equatable, Sendable {
         guard let id else { return nil }
         return connections.first { $0.id == id }
     }
+
+    /// A listed connection that has not ended: its runtime still runs.
+    func isLive(connectionID id: String?) -> Bool {
+        guard let connection = connection(withID: id) else { return false }
+        return connection.state != .ended
+    }
 }
 
 // MARK: - Kinds

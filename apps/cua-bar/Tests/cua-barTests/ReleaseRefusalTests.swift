@@ -9,10 +9,13 @@ struct ReleaseRefusalTests {
     private static let ended = "claude-4001-1792300000" // ended: releasing it asks nothing first
     private static let refused = ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0)
 
+    /// The popover is open: that is where the question appears (closed, the row state shows instead).
     private func rig(_ results: [ReleaseResult]) async throws -> Rig {
         let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
         engine.configure { $0.releaseConnectionQueue = results }
-        return await Rig(try Fixtures.status("status-problem"), engine: engine)
+        let rig = await Rig(try Fixtures.status("status-problem"), engine: engine)
+        rig.model.setPopoverOpen(true)
+        return rig
     }
 
     private func releaseCalls(_ rig: Rig) -> Int {
@@ -115,6 +118,7 @@ struct ReleaseRefusalTests {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
         engine.configure { $0.releaseConnection = Self.refused }
         let rig = await Rig(try Fixtures.status("status-ready"), engine: engine)
+        rig.model.setPopoverOpen(true)
         let id = "claude-12345-1792320000"
         rig.model.send(.releaseConnection(id))
         #expect(rig.model.pending?.kind == .standard, "first: it may be working")

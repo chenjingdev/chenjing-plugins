@@ -26,6 +26,16 @@ struct ConfirmationPrompt: Equatable, Sendable {
     var isDestructive: Bool
 }
 
+/// What a press comes to before anything runs.
+enum PressGate: Equatable, Sendable {
+    /// Ask this first; run only on yes.
+    case ask(ConfirmationPrompt)
+    /// The click is its own consent.
+    case run
+    /// Neither: an action that has to ask cannot ask now. It does not run; this line says why.
+    case refuse(String)
+}
+
 /// Which actions ask first, and what they ask. Everything else is a click that is its own consent:
 /// a single normal stop, releasing an idle or ended connection, 끝난 연결 놓아주기, 콕 집어 풀기.
 enum Confirmations {
@@ -33,8 +43,41 @@ enum Confirmations {
     static let forceDetail = "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요."
     static let restartWarning = "하던 Codex 작업이 끊겨요"
     static let activeReleaseWarning = "이 대화가 아직 일하는 중이면 하던 브라우저 작업이 끊겨요"
+    /// An action that asks from the status (a count, the row's state) while there is no status.
+    static let readStatusFirst = "상태를 읽은 뒤 다시 눌러 주세요"
+    static let targetGone = "그 연결은 이제 목록에 없어요"
+    static let nothingToStop = "끌 연결이 없어요"
 
-    /// nil when the action needs no question (or there is nothing for it to act on).
+    /// Whether a press asks, runs, or does neither. An action whose question comes from the status
+    /// never runs without that question: with no status, or with its target or count gone, it
+    /// does not run at all.
+    static func gate(for action: CUAAction, content: PopoverContent?) -> PressGate {
+        switch action {
+        case .restartCodex, .stopGroup, .stopConnection(_, force: true), .stopEnded, .releaseConnection:
+            guard content != nil else { return .refuse(readStatusFirst) }
+        default:
+            return .run
+        }
+        if let prompt = prompt(for: action, content: content) { return .ask(prompt) }
+        switch action {
+        case .stopConnection(let id, _), .releaseConnection(let id):
+            guard targetExists(id, in: content) else { return .refuse(targetGone) }
+            return .run // releasing an idle or ended connection
+        case .stopGroup, .stopEnded:
+            return .refuse(nothingToStop)
+        default:
+            return .run
+        }
+    }
+
+    /// Whether the connection a question is about is still in the content. Every "is its target
+    /// still there" check goes through here.
+    static func targetExists(_ id: String, in content: PopoverContent?) -> Bool {
+        row(id, in: content) != nil
+    }
+
+    /// The question, or nil when the action asks none now (it needs none, or there is nothing for
+    /// it to act on: see `gate` for which of the two).
     static func prompt(for action: CUAAction, content: PopoverContent?) -> ConfirmationPrompt? {
         switch action {
         case .restartCodex:
@@ -66,6 +109,7 @@ enum Confirmations {
                 confirmTitle: confirmTitle, isDestructive: false)
 
         case .stopConnection(let id, force: true):
+            guard targetExists(id, in: content) else { return nil }
             let who = row(id, in: content).map(describe) ?? "이 연결"
             return ConfirmationPrompt(
                 title: "\(who) 연결 1개를 강제로 끌까요?", detail: forceDetail, warning: forceWarning,
@@ -76,7 +120,7 @@ enum Confirmations {
             guard count > 0 else { return nil }
             return ConfirmationPrompt(
                 title: "끝난 연결 \(count)개를 끌까요?",
-                detail: "놓아줄 길이 없는 연결이라 하나씩 정상 종료해요. 끄기 전에 점유를 놓아 봐요.", warning: nil,
+                detail: "하나씩 정상 종료해요. 끄기 전에 탭을 한 번 더 놓아줘요.", warning: nil,
                 confirmTitle: "끝난 연결 끄기", isDestructive: false)
 
         case .releaseConnection(let id):

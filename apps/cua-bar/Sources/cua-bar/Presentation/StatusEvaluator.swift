@@ -58,8 +58,9 @@ struct StatusSummary: Equatable, Sendable {
 enum StatusEvaluator {
     // MARK: Entry points
 
-    static func evaluate(_ status: EngineStatus, appVersion: String?) -> StatusSummary {
-        if let problem = problem(in: status, appVersion: appVersion) { return summary(for: problem) }
+    /// `releaseTried`: the ended connections this app run has already tried to release (see `problem`).
+    static func evaluate(_ status: EngineStatus, appVersion: String?, releaseTried: Set<String> = []) -> StatusSummary {
+        if let problem = problem(in: status, appVersion: appVersion, releaseTried: releaseTried) { return summary(for: problem) }
         if let use = screenUse(in: status) {
             let sentence = "\(use.subject)가 화면을 쓰는 중"
             return StatusSummary(
@@ -109,7 +110,10 @@ enum StatusEvaluator {
     /// `summary(for:)`, because without the command there is no status to look at):
     /// Codex missing > version mismatch > setup incomplete > Codex without a host >
     /// ended connections > leftover leases.
-    static func problem(in status: EngineStatus, appVersion: String?) -> Problem? {
+    ///
+    /// `releaseTried` holds the ended connections this app run has tried to release (the automatic
+    /// cleanup's finished runs, a person's successful release).
+    static func problem(in status: EngineStatus, appVersion: String?, releaseTried: Set<String> = []) -> Problem? {
         if status.codex.installed == false {
             return Problem(
                 kind: .codexMissing, title: "Codex 앱이 없어요", nextStep: "Codex 앱을 받아 설치해 주세요",
@@ -138,12 +142,17 @@ enum StatusEvaluator {
         let ended = status.connections.filter { $0.state == .ended }
         if !ended.isEmpty {
             let title = "끝난 연결이 \(ended.count)개 남아 있어요"
-            // A connection without a control endpoint cannot be released (0.5.0 bridges); if none of
-            // them can, the way to clean up is to stop them (the plugin releases once more on exit).
+            // The engine keeps a released connection `ended` while its runtime lives, so releasing
+            // never clears this card. Once every one was tried this run, or cannot be released at all
+            // (no control endpoint: 0.5.0 bridges), the way to clean up is to stop them (the plugin
+            // releases once more on exit). Until then the fix is the release (R13, changed by main).
             let stoppable = ended.filter(\.canStop).count
-            if ended.allSatisfy({ !$0.canRelease }), stoppable > 0 {
+            let untried = ended.filter { $0.canRelease && !releaseTried.contains($0.id) }
+            if untried.isEmpty, stoppable > 0 {
+                let nextStep = ended.contains(where: \.canRelease)
+                    ? "놓아주기는 해 봤어요. 꺼서 정리해요" : "놓아줄 길이 없는 연결이라 꺼서 정리해요"
                 return Problem(
-                    kind: .endedConnections, title: title, nextStep: "놓아줄 길이 없는 연결이라 꺼서 정리해요",
+                    kind: .endedConnections, title: title, nextStep: nextStep,
                     warning: nil, fix: .stopEnded, fixLabel: "끝난 연결 끄기 \(stoppable)")
             }
             return Problem(
@@ -163,7 +172,7 @@ enum StatusEvaluator {
             if !aimable.isEmpty {
                 return Problem(
                     kind: .leasesMaybeLeft, title: title, nextStep: "Codex 대화의 점유는 점유 탭에서 줄마다 직접 풀어 주세요",
-                    warning: nil, fix: .showLeaseGuidance, fixLabel: "점유 보기")
+                    warning: nil, fix: .showLeases, fixLabel: "점유 보기")
             }
             return Problem(
                 kind: .leasesMaybeLeft, title: title, nextStep: "하나씩 풀 방법이 없어요 — 안내를 따라 주세요",

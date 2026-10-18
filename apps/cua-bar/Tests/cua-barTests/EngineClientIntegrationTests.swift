@@ -57,7 +57,7 @@ struct EngineClientIntegrationTests {
         defer { rig.home.remove() }
         let client = rig.client
         _ = try await client.releaseConnection(id: "claude-1-1")
-        _ = try await client.releaseEnded()
+        _ = try await client.releaseEnded(ReleaseEndedLoad())
         let session = try await client.releaseSession(id: "019a-1", user: true)
         _ = try await client.stopConnection(id: "codex-2-2", force: true)
         _ = try await client.stopGroup(.claude, force: false)

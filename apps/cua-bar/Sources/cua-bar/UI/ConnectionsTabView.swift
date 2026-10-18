@@ -27,7 +27,9 @@ struct ConnectionsTabView: View {
             }
             // The group buttons act on connections: with none, there is nothing for them to say.
             if content.showsGroupButtons {
-                GroupButtonsView(content: content, busy: model.inFlight.contains { $0.isWide }) { model.send($0) }
+                GroupButtonsView(
+                    content: content, busy: model.inFlight.contains { $0.isWide },
+                    cleanupHelp: model.cleanupHelp(for: content.releaseEndedButton.action)) { model.send($0) }
             }
         }
     }
@@ -85,6 +87,8 @@ struct ConnectionRowView: View {
 struct GroupButtonsView: View {
     var content: ConnectionsContent
     var busy: Bool
+    /// Set while 끝난 연결 놓아주기 waits for the automatic cleanup: it shows busy and says why.
+    var cleanupHelp: String?
     var send: (CUAAction) -> Void
 
     var body: some View {
@@ -97,7 +101,8 @@ struct GroupButtonsView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 6) {
-                SpecButton(spec: content.releaseEndedButton, waiting: busy, send: send)
+                if cleanupHelp != nil { ProgressView().controlSize(.small) }
+                SpecButton(spec: content.releaseEndedButton, waiting: busy || cleanupHelp != nil, waitingHelp: cleanupHelp, send: send)
                 Spacer(minLength: 0)
             }
         }

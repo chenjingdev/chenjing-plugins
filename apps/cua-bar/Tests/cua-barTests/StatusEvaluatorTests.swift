@@ -382,8 +382,9 @@ struct StatusEvaluatorTests {
         var status = try healthy()
         status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
         let problem = try #require(evaluate(status).problem)
-        // The card's 놓아주기 never releases a Codex chat; its own row's 콕 집어 풀기 does.
-        #expect(problem.fix == .showLeaseGuidance)
+        // The card's 놓아주기 never releases a Codex chat; its own row's 콕 집어 풀기 does. The button
+        // only shows that tab: nothing failed, so the extension-reset guidance stays shut.
+        #expect(problem.fix == .showLeases)
         #expect(problem.fixLabel == "점유 보기")
         #expect(problem.nextStep == "Codex 대화의 점유는 점유 탭에서 줄마다 직접 풀어 주세요")
         // With a Claude session to aim at the card's own release is back.
@@ -411,6 +412,33 @@ struct StatusEvaluatorTests {
         status.connections[0].canStop = false
         status.connections[1].canStop = false
         #expect(evaluate(status).problem?.fix == .releaseEnded)
+    }
+
+    /// The engine keeps a released connection `ended` while its runtime lives (R13, changed by main):
+    /// once this run tried to release every ended connection, the card stops them instead.
+    @Test func endedConnectionsAlreadyTriedThisRunAreStoppedInstead() throws {
+        var status = try healthy()
+        status.connections[0].state = .ended
+        status.connections[1].state = .ended
+        let first = status.connections[0].id, second = status.connections[1].id
+        let untried = try #require(StatusEvaluator.problem(in: status, appVersion: "0.7.0"))
+        #expect(untried.fix == .releaseEnded)
+        #expect(untried.fixLabel == "놓아주기")
+        let half = try #require(StatusEvaluator.problem(in: status, appVersion: "0.7.0", releaseTried: [first]))
+        #expect(half.fix == .releaseEnded, "one is still untried")
+        let tried = try #require(StatusEvaluator.problem(in: status, appVersion: "0.7.0", releaseTried: [first, second]))
+        #expect(tried.fix == .stopEnded)
+        #expect(tried.fixLabel == "끝난 연결 끄기 2")
+        #expect(tried.nextStep == "놓아주기는 해 봤어요. 꺼서 정리해요")
+        #expect(tried.title == "끝난 연결이 2개 남아 있어요")
+        // One that cannot be released at all needs no try.
+        status.connections[1].canRelease = false
+        #expect(StatusEvaluator.problem(in: status, appVersion: "0.7.0", releaseTried: [first])?.fix == .stopEnded)
+        // Nothing the engine may stop: the release stays.
+        status.connections[0].canStop = false
+        status.connections[1].canStop = false
+        #expect(StatusEvaluator.problem(in: status, appVersion: "0.7.0", releaseTried: [first, second])?.fix == .releaseEnded)
+        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", releaseTried: [first, second]).fix == .releaseEnded)
     }
 
     @Test func theCountOnTheStopButtonIsOnlyWhatTheEngineMayStop() throws {

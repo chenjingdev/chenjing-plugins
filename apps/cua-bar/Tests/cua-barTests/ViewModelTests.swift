@@ -465,6 +465,8 @@ struct ViewModelTests {
         engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: false, reason: "unsupported") }
         let model = makeModel(engine)
         await model.refresh()
+        // The fixture's Claude leftover is the automatic cleanup's first; a click waits for it (F5).
+        await model.waitForBackgroundWork()
         await model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(model.failedSessionIDs == ["019a1b2c-0009"])
         engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: true) }
@@ -477,6 +479,7 @@ struct ViewModelTests {
         engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: false, reason: "unsupported") }
         let model = makeModel(engine)
         await model.refresh()
+        await model.waitForBackgroundWork()
         model.guidanceOpenByUser = false
         await model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(model.guidanceOpenByUser == nil, "left to the popover again: open, because a release failed")

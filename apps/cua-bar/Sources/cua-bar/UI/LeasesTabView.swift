@@ -23,7 +23,10 @@ struct LeasesTabView: View {
                     ForEach(content.rows) { row in
                         LeaseRowView(row: row, failed: row.sessionID.map(failedSessionIDs.contains) ?? false,
                                      result: row.sessionID.flatMap { model.sessionResults[$0] },
-                                     waiting: row.releaseButton.map { model.inFlight.contains($0.action) } ?? false) {
+                                     waiting: row.releaseButton.map {
+                                         model.inFlight.contains($0.action) || model.waitsForAutomaticCleanup($0.action)
+                                     } ?? false,
+                                     waitingHelp: row.releaseButton.flatMap { model.cleanupHelp(for: $0.action) }) {
                             model.send($0)
                         }
                     }
@@ -46,6 +49,8 @@ struct LeaseRowView: View {
     /// What the last release of this session said (shown unless it succeeded).
     var result: ActionOutcome?
     var waiting: Bool
+    /// Why the button waits, when it waits for the automatic cleanup.
+    var waitingHelp: String?
     var send: (CUAAction) -> Void
 
     var body: some View {
@@ -86,7 +91,7 @@ struct LeaseRowView: View {
                 if let button = row.releaseButton {
                     HStack(spacing: 4) {
                         if waiting { ProgressView().controlSize(.small) }
-                        SpecButton(spec: button, waiting: waiting, send: send)
+                        SpecButton(spec: button, waiting: waiting, waitingHelp: waitingHelp, send: send)
                     }
                 }
             }

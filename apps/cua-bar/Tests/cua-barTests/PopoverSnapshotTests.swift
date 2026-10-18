@@ -71,6 +71,9 @@ struct PopoverSnapshotTests {
             engine: engine, appVersion: "0.7.0", policy: RefreshPolicy(closed: .seconds(3600), open: .seconds(3600)),
             clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: .seconds(3600))
         await model.refresh()
+        // The fixture has an ended connection the app releases by itself (F5): let that finish, so
+        // the picture does not catch it half way.
+        await model.waitForBackgroundWork()
         model.selectedTab = tab
         return model
     }
@@ -116,6 +119,7 @@ struct PopoverSnapshotTests {
         // A refused release, asked about once more, then refused again: the row says so.
         var rig = await Rig(try Fixtures.status("status-problem"))
         rig.engine.configure { $0.releaseConnectionQueue = [refused, refused] }
+        rig.model.setPopoverOpen(true) // a question appears only in an open popover
         await rig.model.send(.releaseConnection(ended))?.value
         try draw("state-retry-question", rig.model)
         await rig.model.confirmPending()
@@ -161,6 +165,44 @@ struct PopoverSnapshotTests {
         ]
         rig = await Rig(status)
         try draw("state-card-leftover", rig.model)
+
+        // Ended connections already tried this run: the card stops them now.
+        status = try Fixtures.status("status-ready")
+        status.connections[0].state = .ended
+        rig = await Rig(status)
+        #expect(rig.model.summary.fix == .stopEnded)
+        try draw("state-tried-ended-card", rig.model)
+    }
+
+    /// The automatic cleanup is running: the card's fix, 끝난 연결 놓아주기 and the Claude session
+    /// rows wait for it (A2-popover-cleaning-up.png, with the 브라우저 점유 tab as an extra).
+    @Test func aRunningCleanupDraws() async throws {
+        var status = try Fixtures.status("status-ready")
+        status.connections[0].state = .ended
+        status.leases.maybeLeft = [
+            LeftoverLease(sessionID: "019a-a", agent: .claude, connectionID: nil, cwd: "/Users/chenjing/dev/y", endedAt: Fixtures.now.addingTimeInterval(-20), releasable: true),
+        ]
+        let gate = AsyncGate()
+        let engine = FakeEngineClient(status: status)
+        engine.configure { $0.actionGate = gate }
+        defer { gate.open() }
+        let rig = await Rig(status, engine: engine, refresh: false)
+        await rig.model.refresh()
+        #expect(rig.model.isCleaningUp)
+        #expect(rig.model.fixIsBusy)
+        let connections = try #require(Snapshot.bitmap(of: SnapshotScene(model: rig.model), dark: dark))
+        #expect(Snapshot.inkRatio(connections) > 0.1)
+        rig.model.selectedTab = .leases
+        let leases = try #require(Snapshot.bitmap(of: SnapshotScene(model: rig.model), dark: dark))
+        if let directory = environment["CUABAR_SNAPSHOT_DIR"] {
+            try Snapshot.write(connections, named: "A2-popover-cleaning-up", to: directory)
+        }
+        if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] {
+            try Snapshot.write(leases, named: "state-cleaning-up-leases", to: directory)
+        }
+        gate.open()
+        await rig.model.waitForBackgroundWork()
+        #expect(!rig.model.isCleaningUp)
     }
 
     @Test func eachTabDrawsForTheProblemFixture() async throws {

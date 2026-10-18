@@ -4,8 +4,10 @@ import SwiftUI
 /// fixes the problem when there is one.
 struct StatusCardView: View {
     var summary: StatusSummary
-    /// The fix is running; the button waits.
+    /// The fix is running, or waits for the automatic cleanup; the button waits.
     var fixIsRunning: Bool
+    /// Why it waits, on hover (자동 정리 중이에요); nil for none.
+    var fixHelp: String?
     var fix: () -> Void
 
     /// Neutral until the first answer, so the card never says "ready" before it is known.
@@ -54,6 +56,7 @@ struct StatusCardView: View {
                         Button(action: fix) { Text(label).font(.system(size: 12, weight: .semibold)) }
                             .buttonStyle(FixButtonStyle())
                             .disabled(fixIsRunning)
+                            .help(fixHelp ?? "")
                     }
                     .padding(.top, 3)
                 }

@@ -61,7 +61,7 @@ struct EngineClientTests {
         let runner = ScriptedRunner(stdout: #"{"ok": true, "results": [{"connection_id": "a", "released": true, "reason": null}, {"connection_id": "b", "released": false, "reason": "request_in_flight"}]}"#)
         let (client, home) = try client(runner)
         defer { home.remove() }
-        let result = try await client.releaseEnded()
+        let result = try await client.releaseEnded(ReleaseEndedLoad())
         #expect(result.ok)
         #expect(result.results == [
             EndedRelease(connectionID: "a", released: true, reason: nil),
@@ -172,6 +172,35 @@ struct EngineClientTests {
         #expect(timeouts.setup <= .seconds(900))
     }
 
+    /// A limit shorter than the engine's own worst case (P4) kills an engine that would still
+    /// have finished, before its clean-up.
+    @Test func eachLimitCoversTheEnginesWorstCase() async throws {
+        let runner = ScriptedRunner(stdout: "{}")
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        _ = try await client.releaseConnection(id: "a")
+        _ = try await client.stopConnection(id: "a", force: false)
+        _ = try await client.stopConnection(id: "a", force: true)
+        _ = try await client.releaseSession(id: "019a-1", user: false)
+        _ = try await client.releaseEnded(ReleaseEndedLoad())
+        _ = try await client.releaseEnded(ReleaseEndedLoad(endedConnections: 2, claudeSessions: 3))
+        _ = try await client.restartCodex()
+        #expect(runner.calls.map(\.timeout) == [
+            .seconds(60), .seconds(70), .seconds(70), .seconds(100),
+            .seconds(60), .seconds(60 + 2 * 20 + 3 * 90),
+            .seconds(120),
+        ])
+        // restart-codex at worst: 10 s, 30 s for the quit, 15 s, 15 s, 20 s for the reopen (P4).
+        #expect(EngineTimeouts().restartCodex >= .seconds(10 + 30 + 15 + 15 + 20))
+    }
+
+    @Test func theLoadOfReleaseEndedIsCountedFromTheStatus() throws {
+        // One ended connection; a releasable Claude leftover and a Codex one (Codex chats are not released by it).
+        let status = try Fixtures.status("status-problem")
+        #expect(ReleaseEndedLoad(status: status) == ReleaseEndedLoad(endedConnections: 1, claudeSessions: 1))
+        #expect(ReleaseEndedLoad(status: nil) == ReleaseEndedLoad())
+    }
+
     // MARK: Failures
 
     @Test func aMissingPluginNeverRunsAnything() async throws {
@@ -179,7 +208,7 @@ struct EngineClientTests {
         let (client, home) = try client(runner, ready: false)
         defer { home.remove() }
         await #expect(throws: EngineError.pluginMissing) { try await client.status() }
-        await #expect(throws: EngineError.pluginMissing) { try await client.releaseEnded() }
+        await #expect(throws: EngineError.pluginMissing) { try await client.releaseEnded(ReleaseEndedLoad()) }
         #expect(runner.calls.isEmpty)
     }
 
@@ -215,7 +244,7 @@ struct EngineClientTests {
     @Test func aCommandThatCannotStartIsALaunchFailure() async throws {
         let (client, home) = try client(ScriptedRunner(failing: ProcessRunError.launchFailed("nope")))
         defer { home.remove() }
-        await #expect(throws: EngineError.launchFailed("nope")) { try await client.releaseEnded() }
+        await #expect(throws: EngineError.launchFailed("nope")) { try await client.releaseEnded(ReleaseEndedLoad()) }
     }
 
     @Test func aNewerSchemaIsRefusedInsteadOfGuessed() async throws {

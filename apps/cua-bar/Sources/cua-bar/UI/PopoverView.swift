@@ -9,7 +9,8 @@ struct PopoverView: View {
         VStack(spacing: 10) {
             StatusCardView(
                 summary: model.summary,
-                fixIsRunning: model.summary.fix.map { model.inFlight.contains($0) } ?? false
+                fixIsRunning: model.fixIsBusy,
+                fixHelp: model.summary.fix.flatMap { model.cleanupHelp(for: $0) }
             ) {
                 if let fix = model.summary.fix { model.send(fix) }
             }

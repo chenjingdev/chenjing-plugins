@@ -61,6 +61,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var actionError: EngineError?
         /// Per-session answers for `releaseSession`, before falling back to `releaseSession`.
         var releaseSessionByID: [String: SessionReleaseResult] = [:]
+        /// Sessions whose `releaseSession` throws this instead of answering.
+        var releaseSessionErrorByID: [String: EngineError] = [:]
         /// While shut, `status` calls wait here after being recorded.
         var statusGate: AsyncGate?
         /// While shut, action calls wait here after being recorded.
@@ -70,12 +72,16 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
     private let lock = NSLock()
     private var script: Script
     private var recorded: [Call] = []
+    private var recordedLoads: [ReleaseEndedLoad] = []
 
     init(status: EngineStatus = EngineStatus()) {
         script = Script(status: .success(status))
     }
 
     var calls: [Call] { lock.withLock { recorded } }
+
+    /// What each `releaseEnded` call was told it would have to do, in order.
+    var releaseEndedLoads: [ReleaseEndedLoad] { lock.withLock { recordedLoads } }
 
     var statusCallCount: Int { calls.filter { $0 == .status }.count }
 
@@ -101,12 +107,14 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         }
     }
 
-    func releaseEnded() async throws -> ReleaseEndedResult {
-        try await begin(.releaseEnded, isAction: true).releaseEnded
+    func releaseEnded(_ load: ReleaseEndedLoad) async throws -> ReleaseEndedResult {
+        lock.withLock { recordedLoads.append(load) }
+        return try await begin(.releaseEnded, isAction: true).releaseEnded
     }
 
     func releaseSession(id: String, user: Bool) async throws -> SessionReleaseResult {
         let script = try await begin(.releaseSession(id, user: user), isAction: true)
+        if let error = script.releaseSessionErrorByID[id] { throw error }
         return script.releaseSessionByID[id] ?? script.releaseSession
     }
 

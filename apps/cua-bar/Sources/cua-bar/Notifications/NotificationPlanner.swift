@@ -46,7 +46,10 @@ struct NotificationPlanner: Sendable {
             if CleanupPlanner.isCandidate(entry) {
                 guard let cleanupKey = CleanupPlanner.key(for: entry), cleanupTried.contains(cleanupKey), !cleanupRunning else { continue }
             }
-            if canPost(key, now: now) { result.append(.lingeringLease(key: key, entry: entry)) }
+            // `ended_at` null on an entry of a bridge that still runs: a session from before Codex
+            // restarted (contract, P4), not a connection that ended.
+            let beforeRestart = entry.endedAt == nil && status.isLive(connectionID: entry.connectionID)
+            if canPost(key, now: now) { result.append(.lingeringLease(key: key, entry: entry, beforeRestart: beforeRestart)) }
         }
         // An entry that is no longer listed starts over if it ever comes back.
         firstSeen = firstSeen.filter { listed.contains($0.key) }

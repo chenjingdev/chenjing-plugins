@@ -1,11 +1,23 @@
 import Foundation
 
 /// How long each command may run before the app gives up on it. `status` is polled every few
-/// seconds and answers in well under a second; the rest wait for Codex or a process to quit.
+/// seconds and answers in well under a second; the rest wait for Codex, a process or the browser.
+/// Each limit covers the engine's own worst case (P4), so the app never kills an engine that would
+/// still have finished: a killed engine skips its own clean-up.
 struct EngineTimeouts: Equatable, Sendable {
     var status: Duration = .seconds(10)
-    var release: Duration = .seconds(30)
-    var stop: Duration = .seconds(45)
+    /// `release --connection`: 2 s to connect, then up to 53 s for the reply (ten open scopes).
+    var release: Duration = .seconds(60)
+    /// `stop`, normal or forced: the release first, 8 s of grace, 3 s more after a kill.
+    var stop: Duration = .seconds(70)
+    /// `release-session`: host boot 17 s, the browser call 45 s, ending the turn 10 s, closing 8 s.
+    var releaseSession: Duration = .seconds(100)
+    /// `release --ended` asks each ended connection in turn, then releases the Claude sessions left
+    /// behind: this much, plus the two below for each of them in the latest status
+    /// (`releaseEnded(for:)`).
+    var releaseEndedBase: Duration = .seconds(60)
+    var releaseEndedPerConnection: Duration = .seconds(20)
+    var releaseEndedPerSession: Duration = .seconds(90)
     var groupStop: Duration = .seconds(120)
     var restartCodex: Duration = .seconds(120)
     var diagnose: Duration = .seconds(30)
@@ -42,13 +54,13 @@ struct CodexCUAEngineClient: EngineClient {
         try await json(ReleaseResult.self, ["release", "--connection", id, "--json"], timeout: timeouts.release)
     }
 
-    func releaseEnded() async throws -> ReleaseEndedResult {
-        try await json(ReleaseEndedResult.self, ["release", "--ended", "--json"], timeout: timeouts.release)
+    func releaseEnded(_ load: ReleaseEndedLoad) async throws -> ReleaseEndedResult {
+        try await json(ReleaseEndedResult.self, ["release", "--ended", "--json"], timeout: timeouts.releaseEnded(for: load))
     }
 
     func releaseSession(id: String, user: Bool) async throws -> SessionReleaseResult {
         let arguments = ["release-session", "--session", id] + (user ? ["--user"] : []) + ["--json"]
-        return try await json(SessionReleaseResult.self, arguments, timeout: timeouts.release)
+        return try await json(SessionReleaseResult.self, arguments, timeout: timeouts.releaseSession)
     }
 
     func stopConnection(id: String, force: Bool) async throws -> StopResult {
@@ -119,5 +131,13 @@ struct CodexCUAEngineClient: EngineClient {
             throw EngineError.commandFailed(exitCode: output.exitCode, message: output.errorSummary)
         }
         return output
+    }
+}
+
+extension EngineTimeouts {
+    /// `release --ended` for what the latest status lists: the base, plus each ended connection and
+    /// each releasable Claude session.
+    func releaseEnded(for load: ReleaseEndedLoad) -> Duration {
+        releaseEndedBase + releaseEndedPerConnection * load.endedConnections + releaseEndedPerSession * load.claudeSessions
     }
 }

@@ -39,6 +39,8 @@ struct SpecButton: View {
     var spec: ButtonSpec
     /// Something is already running that this button would collide with.
     var waiting = false
+    /// Said on hover instead of the button's own help while it waits (자동 정리 중이에요).
+    var waitingHelp: String?
     var send: (CUAAction) -> Void
 
     var body: some View {
@@ -49,7 +51,7 @@ struct SpecButton: View {
         }
         .buttonStyle(RowButtonStyle(isDestructive: spec.isDestructive))
         .disabled(!spec.isEnabled || waiting)
-        .help(spec.help)
+        .help(waitingHelp ?? spec.help)
     }
 }
 
