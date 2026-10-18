@@ -84,16 +84,20 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         isBusy = connection.busy
         canRelease = connection.canRelease
         canStop = connection.canStop
+        // A button that is off says why when the pointer rests on it.
+        let releaseOffHelp = "놓아줄 길이 확인되지 않은 연결이에요. 중계기가 없거나 기록이 없을 때 그래요"
+        let stopOffHelp = "신원을 확인하지 못한 프로세스라 앱이 끌 수 없어요"
         buttons = [
             ButtonSpec(
                 title: "놓아주기", action: .releaseConnection(connection.id), isEnabled: connection.canRelease,
-                help: "이 연결이 잡고 있는 브라우저 탭만 놓아줘요. 연결은 그대로예요"),
+                help: connection.canRelease ? "이 연결이 잡고 있는 브라우저 탭만 놓아줘요. 연결은 그대로예요" : releaseOffHelp),
             ButtonSpec(
                 title: "끄기", action: .stopConnection(connection.id, force: false), isEnabled: connection.canStop,
-                help: "탭을 놓아준 뒤 정상 종료해요"),
+                help: connection.canStop ? "탭을 놓아준 뒤 정상 종료해요" : stopOffHelp),
             ButtonSpec(
                 title: "강제 종료", action: .stopConnection(connection.id, force: true), isDestructive: true,
-                isEnabled: connection.canStop, help: "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요. 하던 작업이 끊겨요"),
+                isEnabled: connection.canStop,
+                help: connection.canStop ? "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요. 하던 작업이 끊겨요" : stopOffHelp),
         ]
     }
 }

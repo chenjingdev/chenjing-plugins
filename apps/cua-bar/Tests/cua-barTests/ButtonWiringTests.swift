@@ -50,6 +50,20 @@ struct ButtonWiringTests {
         #expect(unknownButtons.allSatisfy { !$0.isEnabled })
     }
 
+    @Test func aButtonThatIsOffSaysWhyInsteadOfSayingWhatItWouldDo() throws {
+        let content = try content("status-problem")
+        let codex = try row("codex-15888-1792319000", in: content) // can_release false, can_stop true
+        let claude = try row("claude-12345-1792320000", in: content)
+        #expect(codex.buttons[0].isEnabled == false)
+        #expect(codex.buttons[0].help == "놓아줄 길이 확인되지 않은 연결이에요. 중계기가 없거나 기록이 없을 때 그래요")
+        #expect(codex.buttons[0].help != claude.buttons[0].help)
+        #expect(codex.buttons[1].help == claude.buttons[1].help, "an enabled button keeps its own help")
+        let unknown = try self.content("status-nulls").connections.groups.flatMap(\.rows)
+        let stopOff = try #require(unknown.first).buttons[1]
+        #expect(stopOff.isEnabled == false)
+        #expect(stopOff.help == "신원을 확인하지 못한 프로세스라 앱이 끌 수 없어요")
+    }
+
     @Test func groupButtonsCarryTheirCountsAndTheirGroups() throws {
         let connections = try content("status-problem").connections
         #expect(connections.stopButtons.map(\.title) == ["전체 끄기 3", "Claude만 2", "Codex만 1"])
