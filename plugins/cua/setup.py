@@ -465,7 +465,7 @@ def split_forwarded(arguments):
 
 def readable_source(path):
     """Compile a script before exec'ing it, while a failure can still fall back to the original CLI."""
-    compile(path.read_bytes(), str(path), 'exec', dont_inherit=True)
+    return compile(path.read_bytes(), str(path), 'exec', dont_inherit=True)
 
 
 def hand_over_to_registered_plugin(arguments):
@@ -476,15 +476,20 @@ def hand_over_to_registered_plugin(arguments):
     plugin and, unless this file already is its setup.py, run that setup.py with the same
     interpreter and arguments plus ROOT_RESOLVED_FLAG, which tells it the root is settled.
     Returns the registered root when there is nothing to hand over to.
+
+    A setup.py older than 0.7.0 does not know the flag and would pass it on as an unrecognized
+    argument, so the flag goes only to a setup.py that defines it. An older one never hands over
+    again, and a newer one finds that it is the registered file, so nothing can loop.
     """
     root = resolve_plugin_root()
     target = root/'setup.py'
     if target.resolve() == Path(__file__).resolve():
         return root
     # This file has not run on this machine yet; a damaged update must fail here, not after exec.
-    readable_source(target)
+    code = readable_source(target)
     handed = list(arguments)
-    handed.insert(handed.index('--control')+1, ROOT_RESOLVED_FLAG)
+    if 'ROOT_RESOLVED_FLAG' in code.co_names:
+        handed.insert(handed.index('--control')+1, ROOT_RESOLVED_FLAG)
     os.execve(sys.executable, [sys.executable, str(target), *handed], dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
 
 
@@ -516,6 +521,7 @@ def main(arguments=None):
         parser.error('--timeout must be finite, positive and at most 60 seconds')
     if sys.version_info < (3, 9) or sys.platform != 'darwin':
         raise RuntimeError('This plugin requires macOS and Python 3.9 or newer.')
+    launching_codex = args.exec_wrapper and not args.exec_mcp
     try:
         plugin_root = registered or Path(__file__).resolve().parent
         sys.path.insert(0, str(plugin_root))
@@ -523,16 +529,17 @@ def main(arguments=None):
             python = ensure_dependencies()
             if args.exec_mcp or args.exec_wrapper:
                 script = plugin_root/('mcp_stdio.py' if args.exec_mcp else 'desktop_cli_wrapper.py')
-                if not args.exec_mcp:
+                if launching_codex:
                     # Codex itself starts through these two: a missing or damaged file must not stop it.
                     for needed in (script, plugin_root/'unix_ws_stdio.py'):
                         readable_source(needed)
                 environment = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-                os.execve(str(python), [str(python), str(script), *remainder], environment)
+                # The original CLI gets exactly what followed `--`, never anything parsed here.
+                os.execve(str(python), [str(python), str(script), *(forwarded if launching_codex else remainder)], environment)
             return 0
     except Exception:
-        if args.exec_wrapper:
-            exec_native_fallback(remainder)
+        if launching_codex:
+            exec_native_fallback(forwarded)
         raise
     if args.command in ('install', 'setup'):
         target = install_command(plugin_root)

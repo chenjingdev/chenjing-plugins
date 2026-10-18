@@ -160,6 +160,14 @@ class LaunchPathGuardTests(unittest.TestCase):
                     self.assertEqual(self.run_main('ensure', '--exec-wrapper', '--', 'app-server', '-c', 'x=1'), original)
                     (self.plugin/name).write_text('pass\n')
 
+    def test_only_the_arguments_after_the_separator_reach_the_original_cli(self):
+        # Whatever setup.py parsed or did not recognize stays here; Codex gets exactly what followed `--`.
+        arguments = ('ensure', '--exec-wrapper', '--root-resolved', '--unknown-internal', '--', 'app-server', '-c', 'x=1')
+        self.assertEqual(self.run_main(*arguments), ('/fixture/python', ['/fixture/python',
+                         str(self.plugin/'desktop_cli_wrapper.py'), 'app-server', '-c', 'x=1']))
+        (self.plugin/'desktop_cli_wrapper.py').unlink()
+        self.assertEqual(self.run_main(*arguments), (str(self.native), [str(self.native), 'app-server', '-c', 'x=1']))
+
     def test_the_mcp_entry_point_does_not_depend_on_the_launch_path_files(self):
         (self.plugin/'desktop_cli_wrapper.py').write_text('def run(:\n')
         (self.plugin/'unix_ws_stdio.py').unlink()
