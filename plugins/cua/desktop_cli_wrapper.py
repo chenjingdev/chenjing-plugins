@@ -20,6 +20,11 @@ import uuid
 
 PRIMARY_PLUGIN_KEY = "plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled="
 NON_LAUNCH_COMMANDS = frozenset(("proxy", "daemon", "generate-ts", "generate-json-schema"))
+FALLBACK_ENV = "CODEX_CUA_FALLBACK_NATIVE"
+
+
+class BackendNotStarted(RuntimeError):
+    """Raised only while no process of ours exists yet, so the original CLI can take over."""
 
 
 def is_primary_launch(arguments):
@@ -159,6 +164,18 @@ def _stop_owned(children, timeout):
 
 
 def launch(native, arguments, environment, state_dir):
+    """Own one original backend; raise BackendNotStarted if it cannot even be started."""
+    progress = {"backend": False}
+    try:
+        return _launch(native, arguments, environment, state_dir, progress)
+    except Exception:
+        if progress["backend"]:
+            raise
+        # Nothing of ours is running, so no cleanup is owed beyond what _launch did.
+        raise BackendNotStarted("The original backend was not started.") from None
+
+
+def _launch(native, arguments, environment, state_dir, progress):
     """Own one original backend; framing bridge carries Desktop's untouched stdio."""
     startup_timeout = _positive_timeout(environment, "CODEX_HOST_CUA_STARTUP_TIMEOUT", 15)
     shutdown_timeout = _positive_timeout(environment, "CODEX_HOST_CUA_SHUTDOWN_TIMEOUT", 8)
@@ -198,6 +215,7 @@ def launch(native, arguments, environment, state_dir):
         backend = subprocess.Popen([str(native), *arguments, "--listen", "unix://" + str(endpoint)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=None,
             env=environment, cwd=os.getcwd(), close_fds=True)
+        progress["backend"] = True
         record["backend_pid"] = backend.pid
         _write_metadata(metadata_path, record)
         _wait_for_owned_socket(endpoint, backend, stop, startup_timeout)
@@ -236,25 +254,55 @@ def launch(native, arguments, environment, state_dir):
     return exit_status if exit_status >= 0 else 128 - exit_status
 
 
-def main(arguments=None, environment=None):
-    arguments = list(sys.argv[1:] if arguments is None else arguments)
-    environment = dict(os.environ if environment is None else environment)
+def _checked_cli(native):
+    if not native.is_file() or not os.access(native, os.X_OK) or native == Path(__file__).resolve():
+        raise RuntimeError("The exact original native CLI path is missing, not executable, or recursive.")
+    return native
+
+
+def _original_cli(environment):
     configured_native = environment.get("CODEX_HOST_CUA_NATIVE_CLI")
     if configured_native:
         native = Path(configured_native).expanduser().resolve()
     else:
         from runtime_paths import discover_installation
         native = discover_installation(environment).native_cli
-    if not native.is_file() or not os.access(native, os.X_OK) or native == Path(__file__).resolve():
-        raise RuntimeError("The exact original native CLI path is missing, not executable, or recursive.")
-    state_value = environment.get("CODEX_HOST_CUA_STATE_DIR", "")
-    if not state_value or not is_primary_launch(arguments):
-        # Version/schema/auxiliary commands retain exact original execution.
+    return _checked_cli(native)
+
+
+def _state_directory(value):
+    try:
+        path = Path(value).expanduser()
+    except RuntimeError:
+        raise BackendNotStarted("The explicit launcher state directory is invalid.") from None
+    if not path.is_absolute():
+        raise BackendNotStarted("The explicit launcher state directory must be absolute.")
+    return path
+
+
+def main(arguments=None, environment=None):
+    arguments = list(sys.argv[1:] if arguments is None else arguments)
+    environment = dict(os.environ if environment is None else environment)
+    try:
+        native = _original_cli(environment)
+    except Exception:
+        # Without a verified CLI nothing can be hosted. The launcher script recorded the
+        # installed CLI when it was written, and Codex still starts that way, just without CUA.
+        recorded = environment.get(FALLBACK_ENV, "")
+        if not recorded or not os.path.isabs(recorded):
+            raise
+        native = _checked_cli(Path(recorded).resolve())
         os.execve(str(native), [str(native), *arguments], environment)
-    state_dir = Path(state_value).expanduser()
-    if not state_dir.is_absolute():
-        raise RuntimeError("The explicit launcher state directory must be absolute.")
-    return launch(native, arguments, environment, state_dir)
+    state_value = environment.get("CODEX_HOST_CUA_STATE_DIR", "")
+    if state_value and is_primary_launch(arguments):
+        try:
+            return launch(native, arguments, environment, _state_directory(state_value))
+        except BackendNotStarted:
+            # Nothing of ours is running, so the original CLI simply starts as it would without us.
+            pass
+    # Version/schema/auxiliary commands and every failure before the backend started
+    # retain exact original execution: same argv, same environment.
+    os.execve(str(native), [str(native), *arguments], environment)
 
 
 if __name__ == "__main__":

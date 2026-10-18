@@ -1,9 +1,11 @@
 """Launcher tests use an isolated fake CLI, never Codex, CUA, or a GUI."""
+import fcntl
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import socket
 import stat
@@ -282,13 +284,16 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(json.loads(stdout)['argv'],PRIMARY)
         self.assertFalse(self.state.exists())
 
-    def test_existing_primary_lease_is_not_replaced(self):
+    def test_existing_primary_lease_is_not_replaced_and_the_duplicate_runs_the_original_cli(self):
         desktop=self.start();metadata=self.ready()
         duplicate=self.start();stdout,stderr=duplicate.communicate(timeout=3)
-        self.assertEqual(duplicate.returncode,1)
-        self.assertEqual(stdout,b'')
-        self.assertNotIn(b'fixture-environment-value',stderr)
+        self.assertEqual(duplicate.returncode,0,stderr.decode())
+        reported=json.loads(stdout)
+        self.assertEqual(reported['argv'],PRIMARY)
+        self.assertEqual(reported['fixture_hash'],hashlib.sha256(self.environment['FIXTURE_ENV'].encode()).hexdigest())
+        self.assertEqual(stderr,b'')
         self.assertEqual(json.loads((self.state/'host.json').read_text())['backend_pid'],metadata['backend_pid'])
+        self.assertEqual([event['role'] for event in self.events()].count('backend'),1)
         desktop.stdin.close();desktop.wait(timeout=3)
 
     def test_startup_timeout_reaps_only_owned_fake_backend(self):
@@ -298,6 +303,8 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(child.returncode,1)
         self.assertEqual(stdout,b'')
         self.assertNotIn(b'fixture-environment-value',stderr)
+        # The backend had started, so this stays a failure; the original CLI is not run a second time.
+        self.assertNotIn('passthrough',[event['role'] for event in self.events()])
         final=json.loads((self.state/'host.json').read_text())
         self.assertIsInstance(final['backend_pid'],int)
         self.assert_reaped(final['backend_pid'])
@@ -311,13 +318,81 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(child.returncode,143)
         self.assert_reaped(metadata['backend_pid']);self.assert_reaped(metadata['desktop_proxy_pid'])
 
-    def test_public_or_relative_state_paths_are_rejected_without_backend_spawn(self):
+    def test_public_or_relative_state_paths_run_the_original_cli_without_backend_spawn(self):
         self.state.mkdir(mode=0o755)
         child=self.start();stdout,stderr=child.communicate(timeout=3)
-        self.assertEqual(child.returncode,1);self.assertFalse(self.events())
+        self.assertEqual(child.returncode,0,stderr.decode());self.assertEqual(stderr,b'')
+        self.assertEqual(json.loads(stdout)['argv'],PRIMARY)
+        self.assertEqual([event['role'] for event in self.events()],['passthrough'])
+        self.assertEqual(stat.S_IMODE(self.state.stat().st_mode),0o755)
+        self.assertFalse((self.state/'host.json').exists())
         environment=dict(self.environment);environment['CODEX_HOST_CUA_STATE_DIR']='relative-state'
-        child=self.start(environment=environment);child.communicate(timeout=3)
-        self.assertEqual(child.returncode,1);self.assertFalse(self.events())
+        child=self.start(environment=environment);stdout,stderr=child.communicate(timeout=3)
+        self.assertEqual(child.returncode,0,stderr.decode());self.assertEqual(json.loads(stdout)['argv'],PRIMARY)
+        self.assertEqual([event['role'] for event in self.events()],['passthrough']*2)
+
+    def run_main(self, environment, arguments=PRIMARY):
+        """Run main() in this process with exec replaced, and return what would have been exec'd."""
+        with patch.object(wrapper.os,'execve',side_effect=SystemExit(0)) as execute:
+            with self.assertRaises(SystemExit):
+                wrapper.main(list(arguments),environment)
+        return execute
+
+    def test_failures_before_the_backend_exec_the_original_cli_with_unchanged_argv_and_environment(self):
+        holders=[]
+        def public_state(environment):
+            self.state.mkdir(mode=0o755)
+        def relative_state(environment):
+            environment['CODEX_HOST_CUA_STATE_DIR']='relative-state'
+        def invalid_timeout(environment):
+            environment['CODEX_HOST_CUA_STARTUP_TIMEOUT']='soon'
+        def lease_held_elsewhere(environment):
+            self.state.mkdir(mode=0o700)
+            holder=open(self.state/'owner.lock','a+');holders.append(holder)
+            fcntl.flock(holder,fcntl.LOCK_EX)
+        def lease_is_symlink(environment):
+            self.state.mkdir(mode=0o700)
+            (self.root/'elsewhere').write_text('')
+            (self.state/'owner.lock').symlink_to(self.root/'elsewhere')
+        def state_parent_is_a_file(environment):
+            (self.root/'blocker').write_text('x')
+            environment['CODEX_HOST_CUA_STATE_DIR']=str(self.root/'blocker/state')
+        cases={'public state directory':public_state,'relative state directory':relative_state,
+               'invalid timeout':invalid_timeout,'lease held by another launcher':lease_held_elsewhere,
+               'lease file is a symlink':lease_is_symlink,'state directory cannot be created':state_parent_is_a_file}
+        for name,prepare in cases.items():
+            with self.subTest(name):
+                shutil.rmtree(self.state,ignore_errors=True)
+                (self.root/'blocker').unlink() if (self.root/'blocker').exists() else None
+                environment=dict(self.environment);prepare(environment)
+                before=dict(environment)
+                execute=self.run_main(environment)
+                self.assertEqual(execute.call_count,1)
+                self.assertEqual(execute.call_args.args,(str(self.native),[str(self.native),*PRIMARY],before))
+                self.assertEqual(environment,before)
+                for holder in holders:holder.close()
+                holders.clear()
+
+    def test_backend_that_cannot_be_spawned_is_not_started_so_the_original_cli_runs(self):
+        environment=dict(self.environment)
+        with patch.object(wrapper.subprocess,'Popen',side_effect=OSError('PRIVATE_SPAWN_ERROR')) as spawn:
+            execute=self.run_main(environment)
+        self.assertEqual(spawn.call_count,1)
+        self.assertEqual(execute.call_args.args,(str(self.native),[str(self.native),*PRIMARY],environment))
+        self.assertEqual(stat.S_IMODE(self.state.stat().st_mode),0o700)
+        self.assertEqual(list(self.state.glob('run-*')),[])
+
+    def test_unverifiable_cli_uses_the_one_recorded_by_the_launcher_script(self):
+        environment=dict(self.environment,CODEX_HOST_CUA_NATIVE_CLI=str(self.root/'missing'),
+                         CODEX_CUA_FALLBACK_NATIVE=str(self.native))
+        execute=self.run_main(environment)
+        self.assertEqual(execute.call_args.args,(str(self.native),[str(self.native),*PRIMARY],environment))
+        self.assertFalse(self.state.exists())
+        for recorded in ('',str(self.root/'missing'),'relative/codex',str(self.launcher)):
+            environment['CODEX_CUA_FALLBACK_NATIVE']=recorded
+            with patch.object(wrapper.os,'execve',side_effect=AssertionError('Nothing may be exec\'d')), \
+                 self.assertRaises(RuntimeError):
+                wrapper.main(list(PRIMARY),environment)
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -158,7 +158,34 @@ def ensure_dependencies(home=None):
     return root/'venv/bin/python3'
 
 
-def install_command(plugin_root, home=None):
+def original_cli_path(home=None, environment=None):
+    """The installed original CLI that the launcher may start instead of the plugin, or None."""
+    try:
+        from runtime_paths import discover_installation
+        return str(discover_installation(environment, home).native_cli)
+    except Exception:
+        return None
+
+
+def desktop_launcher(python, command, native=None):
+    """Script that Codex Desktop runs as its CLI on every launch.
+
+    Codex must start even when this plugin is broken or gone, so with a known original CLI
+    the shell itself starts that CLI unless the interpreter and command copy are in place.
+    A failed exec would end a non-interactive shell, hence the checks before it.
+    """
+    run = ('exec '+shlex.quote(str(python))+' '+shlex.quote(str(command))
+           +' --control ensure --exec-wrapper -- "$@"\n')
+    head = '#!/bin/sh\n'+MARKER+'\n'
+    if native is None:
+        return head+run
+    return (head+FALLBACK_ENV+'='+shlex.quote(str(native))+'\nexport '+FALLBACK_ENV+'\n'
+            +'if [ -x '+shlex.quote(str(python))+' ] && [ -f '+shlex.quote(str(command))+' ]; then\n'
+            +'  '+run+'fi\n'
+            +'exec "$'+FALLBACK_ENV+'" "$@"\n')
+
+
+def install_command(plugin_root, home=None, environment=None):
     home = Path.home() if home is None else Path(home)
     root = support_root(home)
     plugin_root = validated_plugin_root(plugin_root)
@@ -177,15 +204,9 @@ def install_command(plugin_root, home=None):
     # Atomic replace only after inspecting the previous authored command.
     write_private(target, command)
     target.chmod(0o700)
-    fallback = ''
-    try:
-        from runtime_paths import discover_installation
-        fallback = FALLBACK_ENV+'='+shlex.quote(str(discover_installation(home=home).native_cli))+' '
-    except Exception:
-        pass
     # The app may select this launcher on every launch, so a broken plugin
     # install falls back to the original CLI instead of stopping Codex.
-    launcher = '#!/bin/sh\n'+MARKER+'\n'+fallback+'exec '+shlex.quote(str(python))+' '+shlex.quote(str(root/'command.py'))+' --control ensure --exec-wrapper -- "$@"\n'
+    launcher = desktop_launcher(python, root/'command.py', original_cli_path(home, environment))
     write_private(root/'start-desktop-cli.sh', launcher)
     (root/'start-desktop-cli.sh').chmod(0o700)
     return target
@@ -272,7 +293,7 @@ def start_host(plugin_root, environment=None, home=None):
     if app_processes(installation.executable):
         print('Finish your Codex work, quit the app normally, then run codex-cua start. This command does not quit the app.', file=sys.stderr)
         return 1
-    install_command(plugin_root, home)
+    install_command(plugin_root, home, environment)
     try:
         install_login_environment(home, environment)
     except Exception:
