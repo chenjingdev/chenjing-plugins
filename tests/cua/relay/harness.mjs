@@ -3,18 +3,56 @@
 import {execFileSync, spawn} from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 // Whatever a test forgets to inject lands in a throw-away home, and the run fails if anything shows up there.
 export const DEFAULT_HOME = fs.mkdtempSync('/tmp/crh-');
 process.env.HOME = DEFAULT_HOME;
+
+// A child that is given an environment without HOME would find the real home through the account database, and an
+// overwrite inside an existing file changes no name. So the real support folders are fingerprinted (read only: lstat
+// and readdir) when the tests start and again when they end, and any difference fails the run. tests/cua/guard.py
+// does the same for the Python tests.
+export const WATCHED = ['.local/share/codex-cua', '.local/bin/codex-cua', 'Library/Caches/codex-cua',
+  'Library/Caches/codex-host-cua', 'Library/LaunchAgents'];
+export const REAL_HOME = os.userInfo().homedir;       // from the account database, not from HOME
+
+export function fingerprint(home, watched = WATCHED) {
+  const seen = new Map();
+  const kind = BigInt(fs.constants.S_IFMT);
+  const directory = BigInt(fs.constants.S_IFDIR);
+  const visit = (full, relative) => {
+    let info;
+    try {info = fs.lstatSync(full, {bigint: true});} catch {seen.set(relative, null); return;}
+    seen.set(relative, [info.mode & kind, info.size, info.mtimeNs, info.ino].join(':'));
+    if ((info.mode & kind) === directory) {
+      let names = [];
+      try {names = fs.readdirSync(full);} catch {/* not for us to look at */}
+      for (const name of names) visit(path.join(full, name), relative + '/' + name);
+    }
+  };
+  for (const name of watched) visit(path.join(home, name), name);
+  return seen;
+}
+
+export function changes(before, after) {
+  return [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key)).sort();
+}
+
+const realBefore = fingerprint(REAL_HOME);
 process.on('exit', () => {
   let strays = [];
   try {strays = fs.readdirSync(DEFAULT_HOME, {recursive: true});} catch {/* gone */}
   fs.rmSync(DEFAULT_HOME, {recursive: true, force: true});
+  const moved = changes(realBefore, fingerprint(REAL_HOME));
   if (strays.length > 0) {
     process.stderr.write('Tests wrote into the default home instead of an injected one:\n  ' + strays.join('\n  ') + '\n');
+    process.exitCode = 1;
+  }
+  if (moved.length > 0) {
+    process.stderr.write('The real support folders changed while the tests ran:\n  ' + moved.slice(0, 30).join('\n  ') + '\n');
     process.exitCode = 1;
   }
 });
@@ -70,9 +108,12 @@ function handle(line) {
   const reply = result => out({jsonrpc: '2.0', id: m.id, result});
   if (m.method === 'initialize') return reply({protocolVersion: '2025-06-18', capabilities: {tools: {}}, serverInfo: {name: 'fake', version: '0'}});
   if (m.method === 'tools/list') {
-    if (process.env.FAKE_NO_TURN_ENDED === '1') return reply({tools: [{name: 'js', inputSchema: {type: 'object'}}]});
-    return reply({tools: [{name: 'js', inputSchema: {type: 'object'}}, {name: 'js_reset', inputSchema: {type: 'object'}},
-      {name: 'turn_ended', inputSchema: {type: 'object', required: ['hook_event_name', 'session_id', 'turn_id']}}]});
+    const tools = process.env.FAKE_NO_TURN_ENDED === '1' ? [{name: 'js', inputSchema: {type: 'object'}}]
+      : [{name: 'js', inputSchema: {type: 'object'}}, {name: 'js_reset', inputSchema: {type: 'object'}},
+        {name: 'turn_ended', inputSchema: {type: 'object', required: ['hook_event_name', 'session_id', 'turn_id']}}];
+    if (process.env.FAKE_HANG_LIST === '1') return;
+    if (process.env.FAKE_SLOW_LIST) return void setTimeout(() => {reply({tools}); append('answered', {to: 'tools/list'});}, Number(process.env.FAKE_SLOW_LIST));
+    return reply({tools});
   }
   if (m.method !== 'tools/call') return out({jsonrpc: '2.0', id: m.id, error: {code: -32601, message: 'no such method'}});
   const name = m.params?.name;
@@ -84,7 +125,7 @@ function handle(line) {
     if (process.env.FAKE_REFUSE_TURN_ENDED === '1' || a.hook_event_name === 'Refuse' || String(a.turn_id).startsWith('refuse')) return reply({content: [], isError: true});
     if (a.hook_event_name === 'RpcError') return out({jsonrpc: '2.0', id: m.id, error: {code: -32000, message: 'boom'}});
     if (process.env.FAKE_HANG_TURN_ENDED === '1') return;
-    if (process.env.FAKE_SLOW_TURN_ENDED) return void setTimeout(() => reply({content: []}), Number(process.env.FAKE_SLOW_TURN_ENDED));
+    if (process.env.FAKE_SLOW_TURN_ENDED) return void setTimeout(() => {reply({content: []}); append('answered', {to: 'turn_ended'});}, Number(process.env.FAKE_SLOW_TURN_ENDED));
     return reply({content: []});
   }
   const code = String(a.code ?? '');

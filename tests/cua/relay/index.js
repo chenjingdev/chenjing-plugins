@@ -3,5 +3,5 @@
 // only this file runs there, so it loads the other test files. Where the runner expands the directory itself
 // (20, 26) this file is not picked up, or the files run once more on their own.
 (async () => {
-  for (const name of ['relay', 'release', 'launcher']) await import('./' + name + '.test.mjs');
+  for (const name of ['relay', 'release', 'launcher', 'guard']) await import('./' + name + '.test.mjs');
 })();

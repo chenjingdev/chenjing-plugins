@@ -36,6 +36,7 @@ const EXIT_RELEASE_MS = 3000;        // the automatic release when the runtime i
 const TERM_GRACE_MS = 1000;          // after stdin ended: wait for the runtime to leave on its own
 const KILL_GRACE_MS = 5000;          // after SIGTERM: wait, then SIGKILL
 const MAX_SCOPES = 500;              // runaway guard: the oldest scopes beyond this are forgotten
+const ABANDONED_KEEP = 64;           // ids of our own requests that gave up, remembered to swallow a late answer
 const MAX_REQUEST_BYTES = 1024;
 const ACTIVITY_LIMIT_BYTES = 256 * 1024;
 const ACTIVITY_KEEP_LINES = 200;
@@ -125,6 +126,7 @@ function relay(child) {
   const scopes = new Map();      // "session\0turn" -> {session_id, turn_id, first_at, last_at, subagent}
   const pending = new Map();     // JSON id -> client request waiting for its response
   const owned = new Map();       // our own request ids -> {resolve, reject, timer}
+  const abandoned = new Set();   // ids of our own requests that timed out: a late answer must not reach the client
   const ownedPrefix = 'codex-cua-relay-' + randomUUID() + '-';
   let ownedSeq = 0;
   let callsInFlight = 0;
@@ -387,12 +389,15 @@ function relay(child) {
     const isResponse = message && typeof message === 'object' && !Array.isArray(message)
       && message.method === undefined && message.id !== undefined && message.id !== null;
     if (!isResponse) return false;
-    if (typeof message.id === 'string' && owned.has(message.id)) {
-      const waiting = owned.get(message.id);
-      owned.delete(message.id);
-      clearTimeout(waiting.timer);
-      waiting.resolve(message);
-      return true;
+    if (typeof message.id === 'string') {
+      if (owned.has(message.id)) {
+        const waiting = owned.get(message.id);
+        owned.delete(message.id);
+        clearTimeout(waiting.timer);
+        waiting.resolve(message);
+        return true;
+      }
+      if (abandoned.delete(message.id)) return true;   // the late answer to a request of ours that gave up
     }
     const key = idKey(message.id);
     const entry = pending.get(key);
@@ -412,7 +417,7 @@ function relay(child) {
   }
 
   function fromRuntime(line) {
-    if (pending.size === 0 && owned.size === 0) {toClient(line); return;}
+    if (pending.size === 0 && owned.size === 0 && abandoned.size === 0) {toClient(line); return;}
     let swallowed = false;
     try {swallowed = inspectResponse(line);} catch {/* bookkeeping never costs a message */}
     if (!swallowed) toClient(line);
@@ -423,7 +428,12 @@ function relay(child) {
     const id = ownedPrefix + (++ownedSeq);
     return new Promise((resolve, reject) => {
       if (!child.stdin.writable) {reject(new Error('closed')); return;}
-      const timer = setTimeout(() => {owned.delete(id); reject(new Error('deadline'));}, timeout);
+      const timer = setTimeout(() => {
+        owned.delete(id);
+        abandoned.add(id);                                   // the runtime may still answer; the client must never see it
+        while (abandoned.size > ABANDONED_KEEP) abandoned.delete(abandoned.values().next().value);
+        reject(new Error('deadline'));
+      }, timeout);
       owned.set(id, {resolve, reject, timer});
       toRuntimeJson({jsonrpc: '2.0', id, method, params});
     });
@@ -438,19 +448,20 @@ function relay(child) {
     return Array.isArray(required) && ['hook_event_name', 'session_id', 'turn_id'].every(field => required.includes(field));
   }
 
-  async function releaseNow({sessionId = null, waitForCalls = true, limit}) {
-    const deadline = Date.now() + limit;
+  // `deadline` is an absolute time; without it the release has `limit` milliseconds from the moment it starts.
+  async function releaseNow({sessionId = null, waitForCalls = true, limit, deadline = Date.now() + limit}) {
     if (waitForCalls) {
       const until = Date.now() + IN_FLIGHT_WAIT_MS;
-      while (callsInFlight > 0 && Date.now() < until) await sleep(25);
+      while (callsInFlight > 0 && Date.now() < until && !stopping) await sleep(25);
       if (callsInFlight > 0) return {released: false, reason: 'request_in_flight', scope_count: 0};
     }
     const targets = [...scopes.values()].filter(scope => sessionId === null || scope.session_id === sessionId);
     if (targets.length === 0) return {released: false, reason: 'no_trusted_scope', scope_count: 0};
+    const unconfirmed = reason => {releaseFailed = true; persistNow(); return {released: false, reason, scope_count: 0};};
     try {
-      if (!await cleanupToolUsable(deadline - Date.now())) return {released: false, reason: 'cleanup_tool_unavailable', scope_count: 0};
+      if (!await cleanupToolUsable(deadline - Date.now())) return unconfirmed('cleanup_tool_unavailable');
     } catch {
-      return {released: false, reason: 'cleanup_not_confirmed', scope_count: 0};
+      return unconfirmed('cleanup_not_confirmed');
     }
     let count = 0;
     let failed = false;
@@ -594,7 +605,14 @@ function relay(child) {
     stopping = (async () => {
       if (server) {try {server.close();} catch {/* closed */}}
       if (!exited && scopes.size > 0) {
-        try {await release({waitForCalls: false, limit: EXIT_RELEASE_MS});} catch {/* best effort */}
+        // A release asked for through the control socket may be running and ahead in line: the exit path waits
+        // three seconds in total, counted from the signal, and then stops the runtime whatever happened.
+        let timer;
+        const limit = new Promise(resolve => {timer = setTimeout(resolve, EXIT_RELEASE_MS);});
+        try {
+          await Promise.race([release({waitForCalls: false, deadline: Date.now() + EXIT_RELEASE_MS}), limit]);
+        } catch {/* best effort */}
+        clearTimeout(timer);
       }
       stopRuntime(stopSignal);
     })();

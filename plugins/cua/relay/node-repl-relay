@@ -15,6 +15,10 @@ if [ -n "$dir" ] && [ -n "$relay_node" ] && [ -x "$relay_node" ] && [ ! -d "$rel
   exec "$relay_node" "$dir/relay.mjs" "$@"
 fi
 if [ -n "$native" ] && [ -x "$native" ] && [ ! -d "$native" ] && [ "$native" != "$0" ] && [ "$native" != "$dir/node-repl-relay" ]; then
+  # The runtime gets the environment it would have had without the relay.
+  CUA_REPL_NODE_REPL_PATH=$native
+  export CUA_REPL_NODE_REPL_PATH
+  unset CODEX_CUA_NATIVE_RUNTIME CODEX_CUA_RELAY_NODE CODEX_CUA_STATE_DIR
   exec "$native" "$@"
 fi
 printf '%s\n' 'codex-cua relay: the original runtime is unavailable' >&2

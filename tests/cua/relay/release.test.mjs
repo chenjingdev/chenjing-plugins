@@ -119,12 +119,41 @@ test('a release is only reported when the runtime confirmed every scope', async 
   assert.deepEqual(await ask(record, 'status'), {ok: true, busy: false, open_scopes: 1});
 });
 
-test('a runtime without the turn_ended tool is not asked to end anything', async t => {
+test('a runtime without the turn_ended tool is not asked to end anything, and the record says it was tried', async t => {
   const {fixture, client} = await boot(t, {env: {FAKE_NO_TURN_ENDED: '1'}});
   const record = await open(fixture, client, ['s-1', 't1']);
   assert.deepEqual(await ask(record, 'release'), {released: false, reason: 'cleanup_tool_unavailable', scope_count: 0});
   assert.equal(fixture.events('turn_ended').length, 0);
+  const after = await readRecord(fixture, r => r.cleanup === 'not_confirmed');
+  assert.deepEqual(open_scopes(after), ['s-1/t1']);
 });
+
+test('a runtime that cannot say which tools it has leaves the scope open and the record not confirmed', async t => {
+  const {fixture, client} = await boot(t, {env: {FAKE_HANG_LIST: '1'}});
+  const record = await open(fixture, client, ['s-1', 't1']);
+  const started = Date.now();
+  assert.deepEqual(await ask(record, 'release'), {released: false, reason: 'cleanup_not_confirmed', scope_count: 0});
+  assert.ok(Date.now() - started >= 3800, 'the check was given its four seconds');
+  assert.equal(fixture.events('turn_ended').length, 0);
+  const after = await readRecord(fixture, r => r.cleanup === 'not_confirmed');
+  assert.deepEqual(open_scopes(after), ['s-1/t1']);
+});
+
+for (const [slow, label] of [['FAKE_SLOW_TURN_ENDED', 'turn_ended'], ['FAKE_SLOW_LIST', 'tools/list']]) {
+  test('a late answer to the relay\'s own ' + label + ' never reaches the client', async t => {
+    const {fixture, client} = await boot(t, {env: {[slow]: '5000'}});
+    const record = await open(fixture, client, ['s-1', 't1']);
+    assert.deepEqual(await ask(record, 'release'), {released: false, reason: 'cleanup_not_confirmed', scope_count: 0});
+    await until(() => fixture.events('answered').length === 1, 4000, 'the runtime to answer after all');
+    await sleep(300);
+    assert.deepEqual(client.messages.filter(m => typeof m.id === 'string' && m.id.startsWith('codex-cua-relay-')), [],
+      'an answer to a request the client never made must not reach it');
+    // The relay gave up on that request, so the late answer does not close the scope either, and relaying goes on.
+    assert.deepEqual(await ask(record, 'status'), {ok: true, busy: false, open_scopes: 1});
+    assert.equal((await client.call('after', turn('s-1', 't2'))).result.content[0].text, 'echo:after');
+    assert.equal(client.stderr, '');
+  });
+}
 
 test('a release waits for a call that is still running, then ends the scope after it', async t => {
   const {fixture, client} = await boot(t);
@@ -240,6 +269,42 @@ test('the same signal twice in a row does not cut the release short', async t =>
   assert.deepEqual(relayDirs(fixture), [], 'the scope was confirmed, so nothing is left behind');
   const kinds = order(fixture, 'turn_ended', 'sigterm');
   assert.equal(kinds[0], 'turn_ended');
+});
+
+test('a stop signal while a release is running waits for it three seconds at most', async t => {
+  const {fixture, client} = await boot(t, {env: {FAKE_SLOW_TURN_ENDED: '5000'}});
+  const record = await open(fixture, client, ['s-1', 't1']);
+  const running = ask(record, 'release').catch(() => null);              // holds the line for four seconds
+  await sleep(300);
+  const signalled = Date.now();
+  client.kill('SIGTERM');
+  const result = await client.exit;
+  const elapsed = Date.now() - signalled;
+  assert.equal(result.code, 0);
+  // Three seconds from the signal, not after the four seconds that the running release still has in front of it.
+  assert.ok(elapsed >= 2800 && elapsed < 3700, 'stopped after ' + elapsed + ' ms');
+  await running;
+  const [dir] = relayDirs(fixture);
+  const left = JSON.parse(fs.readFileSync(path.join(dir, 'relay.json'), 'utf8'));
+  assert.equal(left.cleanup, 'not_confirmed');
+  assert.deepEqual(open_scopes(left), ['s-1/t1']);
+});
+
+test('a stop signal while a release waits for a running call does not wait with it', async t => {
+  const {fixture, client} = await boot(t);
+  const record = await open(fixture, client, ['s-1', 't1']);
+  client.send({jsonrpc: '2.0', id: 400, method: 'tools/call', params: {name: 'js', arguments: {code: 'hang'},
+    _meta: {'x-codex-turn-metadata': turn('s-1', 't1')}}});
+  await readRecord(fixture, r => r.busy === true);
+  const waiting = ask(record, 'release').catch(() => null);              // would wait 2.5 s for the call
+  await sleep(300);
+  const signalled = Date.now();
+  client.kill('SIGTERM');
+  await client.exit;
+  assert.ok(Date.now() - signalled < 1500, 'stopped after ' + (Date.now() - signalled) + ' ms');
+  assert.deepEqual(fixture.events('turn_ended').map(e => e.turn_id), ['t1'], 'the scope was ended all the same');
+  await waiting;
+  assert.deepEqual(relayDirs(fixture), []);
 });
 
 test('a signal with a scope that cannot be ended leaves the record as not confirmed', async t => {

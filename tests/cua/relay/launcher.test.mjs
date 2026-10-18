@@ -20,7 +20,10 @@ function copyRelay(fixture, name = 'relay') {
 async function runtimeStartedDirectly(t, fixture, client) {
   const answer = await client.request('initialize', {});
   assert.equal(answer.result.serverInfo.name, 'fake');
-  assert.deepEqual(fixture.events('start')[0].argv, ARGS);
+  const [start] = fixture.events('start');
+  assert.deepEqual(start.argv, ARGS);
+  // The runtime started directly has the environment it would have had without the relay.
+  assert.deepEqual({...start.env, marker: null}, {native: null, relayNode: null, state: null, runtimePath: fixture.native, marker: null});
   assert.deepEqual(relayDirs(fixture), [], 'no relay was involved');
   const call = await client.call('plain', turn('s-1', 't-1'));
   assert.equal(call.result.content[0].text, 'echo:plain');
