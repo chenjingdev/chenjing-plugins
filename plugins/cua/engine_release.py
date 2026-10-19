@@ -7,8 +7,9 @@ session holds. The call below only counts the session's tabs; titles, URLs and p
 
 This path exists only as an engine command. It is not an MCP tool, an AI cannot choose the session, and the status
 command never runs it. It connects to the host the way the bridge does (HostMcp.boot, with its checks) and never
-starts Codex. Codex keeps the runtime of a thread until it quits, so the short-lived thread works in a new folder of
-its own, and afterwards the runtime that works there is ended.
+starts Codex. Codex keeps a thread, and the runtime of it, for about half an hour after its last use (not until it
+quits, and not only until its last client leaves), so the short-lived thread works in a new folder of its own, and
+afterwards the runtime that works there is ended.
 """
 import asyncio
 import json

@@ -6,19 +6,20 @@ import Foundation
 /// still have finished: a killed engine skips its own clean-up.
 struct EngineTimeouts: Equatable, Sendable {
     var status: Duration = .seconds(10)
-    /// `release --connection`: 2 s to connect, then up to 53 s for the reply (ten open scopes).
-    var release: Duration = .seconds(60)
-    /// `stop`, normal or forced: the release first, 8 s of grace, 3 s more after a kill.
-    var stop: Duration = .seconds(70)
+    /// `release --connection`: 2 s to connect, then up to 53 s for the reply (ten open scopes), and the same
+    /// once more when the answer was that the end of a turn could not be confirmed.
+    var release: Duration = .seconds(120)
+    /// `stop`, normal or forced: the release first (twice at worst), 8 s of grace, 3 s more after a kill.
+    var stop: Duration = .seconds(130)
     /// `release-session`: host boot 17 s, the browser call 45 s, ending the turn 10 s, closing 8 s.
     var releaseSession: Duration = .seconds(100)
-    /// `release --ended` asks each ended connection in turn, then releases the Claude sessions left
-    /// behind: this much, plus the two below for each of them in the latest status
-    /// (`releaseEnded(for:)`).
+    /// `release --ended` asks each ended connection in turn (twice at worst: 2 s to connect and 13 s for the reply,
+    /// each time), then releases the Claude sessions left behind: this much, plus the two below for each of them
+    /// in the latest status (`releaseEnded(for:)`).
     var releaseEndedBase: Duration = .seconds(60)
-    var releaseEndedPerConnection: Duration = .seconds(20)
+    var releaseEndedPerConnection: Duration = .seconds(35)
     var releaseEndedPerSession: Duration = .seconds(90)
-    var groupStop: Duration = .seconds(120)
+    var groupStop: Duration = .seconds(180)
     var restartCodex: Duration = .seconds(120)
     var diagnose: Duration = .seconds(30)
     /// Setup may be installing packages, and stopping that halfway leaves a broken environment,

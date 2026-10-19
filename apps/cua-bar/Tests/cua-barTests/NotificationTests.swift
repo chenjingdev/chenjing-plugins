@@ -140,6 +140,10 @@ struct NotificationPlannerTests {
         #expect(planner.due(status: try leaseStatus([entry]), appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).count == 1)
     }
 
+    /// S21 itself is stopped one level down. The engine asks a release that could not be confirmed once more, and a
+    /// confirmed release takes the session out of the dead bridge's record (`ReleaseBookingTests`, `SecondAskTests`
+    /// in tests/cua), so the next status has no such lease and there is nothing to notify. What is left here is a
+    /// release that stayed unconfirmed after both asks: it waits for the cleanup, and then it is worth a minute's news.
     @Test func aLeaseAnEndedConnectionStillServesWaitsForThatConnectionsCleanup() throws {
         var planner = NotificationPlanner()
         let entry = LeftoverLease(sessionID: "019a-claude", agent: .claude, connectionID: "claude-31569-1", cwd: nil, endedAt: t0.addingTimeInterval(-600), releasable: false)

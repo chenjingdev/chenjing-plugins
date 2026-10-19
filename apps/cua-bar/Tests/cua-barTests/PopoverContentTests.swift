@@ -306,6 +306,23 @@ struct PopoverContentTests {
         #expect(connections.guidance.needsAttention)
     }
 
+    @Test func anEndedConnectionTheAppCanOnlyReleaseStillTakesTheLeaseLineAway() throws {
+        var status = try runtimeAndItsDeadBridge()
+        status.connections[0].canStop = false // the app may not stop it, but its 정리 still releases the tabs
+        let tidy = try #require(content(of: status).connections.tidy)
+        #expect(tidy.rows.map(\.id) == ["ended-claude-31806-1792419210"])
+    }
+
+    @Test func anEndedConnectionTheAppCannotTidyLeavesTheLeaseLineAndItsAdviceAsTheOnlyWayOn() throws {
+        var status = try runtimeAndItsDeadBridge()
+        status.connections[0].canStop = false
+        status.connections[0].canRelease = false // 정리 is off: neither stop nor release
+        let connections = content(of: status).connections
+        let tidy = try #require(connections.tidy)
+        #expect(tidy.rows.map(\.id) == ["ended-claude-31806-1792419210", "lease-left-019a-c21"])
+        #expect(connections.guidance.needsAttention, "the extension reset is what is left, so its advice opens")
+    }
+
     @Test func onlyAnEndedConnectionTakesTheLeaseLineAway() throws {
         var status = try runtimeAndItsDeadBridge()
         status.connections[0].state = .active

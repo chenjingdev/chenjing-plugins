@@ -38,31 +38,48 @@ NO_RELEASE = Release(False, None, 0, False)      # a connection without a releas
 
 # --- release ----------------------------------------------------------------------------------------------
 
-def release_one(ctx, conn, timeout=None):
-    """Ask the connection's own control socket to release its scopes.
+UNCONFIRMED = 'cleanup_not_confirmed'
 
-    nothing is True when a verified writer answered that it holds no scope: there was nothing to release, which
-    is not a failure. When no verified endpoint exists nothing can be said, and that is no_trusted_scope too."""
-    if conn.record is None or not conn.can_release:
-        return Release(False, 'no_trusted_scope', 0, False)
-    timeout = release_timeout(conn.record) if timeout is None else timeout
+
+def _ask_release(ctx, conn, timeout):
+    """One release request to the connection's control socket: (the Release it comes to, whether the writer itself
+    answered that it could not confirm the end of a turn)."""
     try:
         reply = control_request(conn.record, 'release', ctx.uid, timeout=timeout)
     except ControlError as error:
         if error.kind == 'missing':
-            return Release(False, 'no_trusted_scope', 0, False)
+            return Release(False, 'no_trusted_scope', 0, False), False
         if error.kind == 'timeout':
-            return Release(False, 'timeout', 0, False)
-        return Release(False, 'relay_unavailable' if conn.record.kind == 'relay' else 'cleanup_not_confirmed', 0, False)
+            return Release(False, 'timeout', 0, False), False
+        return Release(False, 'relay_unavailable' if conn.record.kind == 'relay' else UNCONFIRMED, 0, False), False
     count = reply.get('scope_count', reply.get('scopeCount'))
     count = count if isinstance(count, int) and not isinstance(count, bool) and count >= 0 else 0
     if reply.get('released') is True:
-        return Release(True, None, count, False)
-    reason = reply.get('reason')
-    reason = REASON_MAP.get(reason, reason)
+        return Release(True, None, count, False), False
+    asked = reply.get('reason')
+    reason = REASON_MAP.get(asked, asked)
     if not isinstance(reason, str) or not REASON.match(reason):
-        reason = 'cleanup_not_confirmed'
-    return Release(False, reason, count, reason == 'no_trusted_scope' and count == 0)
+        reason = UNCONFIRMED
+    return Release(False, reason, count, reason == 'no_trusted_scope' and count == 0), asked == UNCONFIRMED
+
+
+def release_one(ctx, conn, timeout=None):
+    """Ask the connection's own control socket to release its scopes.
+
+    nothing is True when a verified writer answered that it holds no scope: there was nothing to release, which
+    is not a failure. When no verified endpoint exists nothing can be said, and that is no_trusted_scope too.
+
+    A writer that answers `cleanup_not_confirmed` waited for the runtime to end a turn and gave up (a limit of a few
+    seconds), though the runtime may well have ended it a little later: the tab is closed and the scope stays open (S16).
+    It is asked once more, and the second answer is the result. Nothing else is asked twice: a timeout, an endpoint
+    that is gone, a call still running or nothing to release are not made better by asking again."""
+    if conn.record is None or not conn.can_release:
+        return Release(False, 'no_trusted_scope', 0, False)
+    timeout = release_timeout(conn.record) if timeout is None else timeout
+    result, unconfirmed = _ask_release(ctx, conn, timeout)
+    if unconfirmed:
+        result, _ = _ask_release(ctx, conn, timeout)
+    return result
 
 
 def book_connection(ctx, records, conn, result):

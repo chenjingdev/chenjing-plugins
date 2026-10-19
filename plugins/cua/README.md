@@ -119,7 +119,7 @@ claude plugin uninstall cua@chenjing-plugins --scope user
 CUA Bar가 쓰는 명령을 직접 부를 수도 있습니다. 모두 `~/.local/bin/codex-cua` 뒤에 붙입니다. 이 명령들은 JSON 객체 하나만 출력하고(`diagnose`는 글), 동작이 실패해도(`"ok": false`) 종료 코드는 0입니다. 종료 코드가 0이 아니면 명령을 실행하지 못한 것입니다. 연결 id(`<ID>`)는 `status --json`의 `connections`에서 찾고, cmux-cua 연결의 id는 `other_tools[].clients[].id`에서 찾습니다. 놓아주기·끄기·다시 켜기는 사람이 직접 부르거나 CUA Bar에서 누르는 명령이고, AI는 `doctor`·`status --json`·`diagnose`만 씁니다.
 
 - `status --json`: 지금 상태(Codex·호스트·설정, 연결 목록, 남았을 수 있는 점유, 다른 도구, 최근 조작 기록)를 보여 줍니다. 아무것도 놓거나 끄지 않습니다(끝난 기록만 정리).
-- `release --connection <ID>` 또는 `release --ended`: 연결 하나의 탭을, 또는 끝난 연결의 탭을 놓아줍니다. `--ended`는 주인이 사라진 Claude 세션도 세션 ID로 풀어 보는데, 이때 살아 있는 런타임을 거쳐 브라우저를 한 번 부릅니다. 연결의 놓아주기가 확인되면(`stop`의 놓아주기 단계도 같습니다) 그 연결이 맡던 세션은 죽은 브리지 기록에서도 지워서, 이미 풀린 세션이 `status --json`의 남았을 수 있는 점유에 남지 않습니다.
+- `release --connection <ID>` 또는 `release --ended`: 연결 하나의 탭을, 또는 끝난 연결의 탭을 놓아줍니다. `--ended`는 주인이 사라진 Claude 세션도 세션 ID로 풀어 보는데, 이때 살아 있는 런타임을 거쳐 브라우저를 한 번 부릅니다. 연결의 놓아주기가 확인되면(`stop`의 놓아주기 단계도 같습니다) 그 연결이 맡던 세션은 죽은 브리지 기록에서도 지워서, 이미 풀린 세션이 `status --json`의 남았을 수 있는 점유에 남지 않습니다. 중계기나 브리지가 "끝났는지 확인하지 못했다"(`cleanup_not_confirmed`)고 답하면 같은 연결에 한 번 더 묻습니다(런타임이 한도보다 조금 늦게 끝냈을 수 있어서 탭은 닫혔는데 범위만 열려 있는 일이 있습니다). 다른 까닭(`timeout`, `request_in_flight`, `no_trusted_scope` 등)에는 다시 묻지 않습니다.
 - `release-session --session <세션ID> [--user]`: 주인이 사라진 세션의 점유를 세션 ID로 콕 집어 풉니다.
 - `stop --connection <ID> [--force]`: 연결 하나를 끕니다. 먼저 탭을 놓아주고(cmux-cua 연결은 놓아줄 점유가 없어 곧바로) 정상 종료를 요청하며, `--force`는 그래도 남은 연결 프로세스만 강제로 종료합니다.
 - `stop --group all|claude|codex [--force]`: Claude·Codex 연결을 묶음으로 끕니다. cmux-cua 연결은 어느 묶음에도 들어가지 않습니다.

@@ -268,10 +268,16 @@ struct EngineClientTests {
         _ = try await client.releaseEnded(ReleaseEndedLoad(endedConnections: 2, claudeSessions: 3))
         _ = try await client.restartCodex()
         #expect(runner.calls.map(\.timeout) == [
-            .seconds(60), .seconds(70), .seconds(70), .seconds(100),
-            .seconds(60), .seconds(60 + 2 * 20 + 3 * 90),
+            .seconds(120), .seconds(130), .seconds(130), .seconds(100),
+            .seconds(60), .seconds(60 + 2 * 35 + 3 * 90),
             .seconds(120),
         ])
+        // The release step of a connection is asked twice at worst (an answer that could not confirm is asked once more):
+        // 2 s to connect and 53 s for the reply (ten open scopes) each time, and a stop adds its 8 s of grace and 3 s after a kill.
+        #expect(EngineTimeouts().release >= .seconds(2 * (2 + 53)))
+        #expect(EngineTimeouts().stop >= .seconds(2 * (2 + 53) + 8 + 3 + 3))
+        #expect(EngineTimeouts().groupStop >= EngineTimeouts().stop)
+        #expect(EngineTimeouts().releaseEndedPerConnection >= .seconds(2 * (2 + 13)))
         // restart-codex at worst: 10 s, 30 s for the quit, 15 s, 15 s, 20 s for the reopen (P4).
         #expect(EngineTimeouts().restartCodex >= .seconds(10 + 30 + 15 + 15 + 20))
     }

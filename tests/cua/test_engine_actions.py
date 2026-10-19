@@ -208,15 +208,16 @@ class ReleaseEndedTests(ActionCase):
         self.assertEqual(self.events, [])
 
 
-class ReleaseBookingTests(ActionCase):
-    """A connection that let go of a session also takes it out of the dead bridge that opened it (S16, S21).
-
-    A bridge that was killed can never close its scopes, and the runtime it named lists the same ones. When that
-    runtime has released them, nothing may have been left behind any more; the dead bridge's record kept saying so."""
+class KilledBridgeCase(ActionCase):
+    """A bridge that was killed can never close its scopes, and the runtime it named lists the same ones (S16, S21)."""
     ENDED = 'claude-2001-%d' % (NOW-4990)
 
     def killed_bridge_and_its_runtime(self, reply=DONE, extra=()):
-        """The bridge d1 was killed with an open scope (and maybe more); the runtime it named lists the first one."""
+        """The bridge d1 was killed with an open scope (and maybe more); the runtime it named lists the first one.
+
+        `reply` is what that runtime's relay answers to a release; a list is answered one after the other, the last
+        one for good."""
+        replies = list(reply) if isinstance(reply, list) else [reply]
         scopes = [State.scope(SESSION_A, last=at(100))] + [State.scope(session, last=at(2000)) for session in extra]
         bridge = self.state.bridge('d1', 7001, NOW-5000, owner_pid=501, cwd='/work/c21', session_id=SESSION_A,
                                    scopes=scopes, cleanup='open')
@@ -226,15 +227,23 @@ class ReleaseBookingTests(ActionCase):
                                  cleanup='open')
 
         def answer(request):
+            current = replies.pop(0) if len(replies) > 1 else replies[0]
             # What the real relay does when its release is confirmed: the scopes leave its own record.
-            if reply.get('released') is True:
+            if current.get('released') is True:
                 self.update(relay, 'relay', scopes=[], cleanup='none')
-            return reply
+            return current
         self.writer(relay, 2001, NOW-4990, answer)
         return bridge, relay
 
     def left(self):
         return [item['session_id'] for item in engine_status.status(self.ctx())['leases']['maybe_left']]
+
+
+class ReleaseBookingTests(KilledBridgeCase):
+    """A connection that let go of a session also takes it out of the dead bridge that opened it.
+
+    When the runtime has released the session, nothing may have been left behind any more; the dead bridge's record
+    kept saying so."""
 
     def test_the_session_is_listed_with_no_way_to_release_it_while_the_runtime_still_lists_it(self):
         self.killed_bridge_and_its_runtime()
@@ -286,6 +295,16 @@ class ReleaseBookingTests(ActionCase):
                          {'ok': True, 'released': True, 'reason': None, 'scope_count': 1})
         self.assertFalse(bridge.exists())
 
+    def test_a_live_connections_release_takes_its_session_out_of_a_dead_record_too(self):
+        """A Codex thread whose first runtime died with a scope open and that runs again: its 탭 풀기 lets go of it for good."""
+        old = self.state.relay('d2', 7101, NOW-4000, cwd='/work/codex', scopes=[State.scope(SESSION_B, last=at(900))], cleanup='open')
+        self.codex_relay()
+        self.assertEqual(self.left(), [SESSION_B])
+        self.assertEqual(engine_actions.release_connection(self.ctx(), RELAY_ID),
+                         {'ok': True, 'released': True, 'reason': None, 'scope_count': 1})
+        self.assertFalse(old.exists())
+        self.assertEqual(self.left(), [])
+
     def test_a_live_writers_record_is_neither_rewritten_nor_remembered_for(self):
         """The bridge and the relay of a live thread both book their own scopes; a pair the engine remembered for them
         could hide a later scope of the same session."""
@@ -295,6 +314,73 @@ class ReleaseBookingTests(ActionCase):
         self.assertTrue(engine_actions.release_connection(self.ctx(), BRIDGE_ID)['released'])
         self.assertEqual([(item/name).read_bytes() for item, name in ((directory, 'bridge.json'), (relay_directory, 'relay.json'))], before)
         self.assertFalse((self.state.root/'engine-released.json').exists())
+
+
+class SecondAskTests(KilledBridgeCase):
+    """A writer that answers `cleanup_not_confirmed` gave up waiting for the runtime to end a turn, which the runtime may
+    have done a little later (the tab is closed, the scope stays open: S16). It is asked once more; nothing else is."""
+    UNCONFIRMED = {'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0}
+
+    def asked(self):
+        return len(self.servers[-1].requests)
+
+    def test_a_confirmed_second_answer_is_a_release_and_the_dead_bridge_is_booked(self):
+        bridge, _ = self.killed_bridge_and_its_runtime([self.UNCONFIRMED, DONE])
+        self.assertEqual(engine_actions.release_ended(self.ctx()),
+                         {'ok': True, 'results': [{'connection_id': self.ENDED, 'released': True, 'reason': None}]})
+        self.assertEqual(self.asked(), 2)
+        self.assertFalse(bridge.exists())
+        self.assertEqual(self.left(), [])          # so there is no line for the session, and nothing to be notified about
+
+    def test_two_unconfirmed_answers_are_two_asks_and_it_stays_unconfirmed(self):
+        bridge, _ = self.killed_bridge_and_its_runtime([self.UNCONFIRMED])
+        before = (bridge/'bridge.json').read_bytes()
+        result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result['results'][0], {'connection_id': self.ENDED, 'released': False, 'reason': 'cleanup_not_confirmed'})
+        self.assertEqual(self.asked(), 2, 'once more, and no more')
+        self.assertEqual((bridge/'bridge.json').read_bytes(), before)
+
+    def test_a_timeout_is_not_asked_again(self):
+        self.killed_bridge_and_its_runtime()
+        self.servers[-1].handler = lambda request: time.sleep(1.5) or DONE
+        with patch.object(engine_actions, 'release_timeout', return_value=0.3):
+            result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result['results'][0]['reason'], 'timeout')
+        self.assertEqual(self.asked(), 1)
+
+    def test_no_other_answer_is_asked_again(self):
+        for reply in ({'released': False, 'reason': 'request_in_flight', 'scope_count': 0},
+                      {'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0},
+                      {'released': False, 'reason': 'cleanup_tool_unavailable', 'scope_count': 0},
+                      {'released': False, 'reason': 'relay_unavailable', 'scope_count': 0},
+                      {'released': False, 'scope_count': 0}):                  # not even a reason
+            self.setUp()
+            self.killed_bridge_and_its_runtime(reply)
+            engine_actions.release_ended(self.ctx())
+            self.assertEqual(self.asked(), 1, reply)
+
+    def test_an_endpoint_that_hangs_up_is_not_asked_again_though_a_bridge_then_comes_to_the_same_reason(self):
+        directory, _ = self.bridge_with_runtime()
+        self.writer(directory, 4242, NOW-900, lambda request: None)            # closes without an answer
+        self.assertEqual(engine_actions.release_connection(self.ctx(), BRIDGE_ID)['reason'], 'cleanup_not_confirmed')
+        self.assertEqual(self.asked(), 1)
+
+    def test_release_stop_and_the_tab_release_of_a_live_bridge_all_ask_the_same_way(self):
+        self.killed_bridge_and_its_runtime([self.UNCONFIRMED, DONE])
+        self.assertTrue(engine_actions.release_connection(self.ctx(), self.ENDED)['released'])
+        self.assertEqual(self.asked(), 2)
+        self.setUp()
+        self.killed_bridge_and_its_runtime([self.UNCONFIRMED, DONE])
+        self.assertEqual(engine_actions.stop_connection(self.ctx(), self.ENDED),
+                         {'ok': True, 'stopped': True, 'released': True, 'reason': None})
+        self.assertEqual(self.asked(), 2)
+        self.setUp()
+        directory, _ = self.bridge_with_runtime()                               # a live conversation's 탭 풀기
+        replies = [self.UNCONFIRMED, {'released': True, 'reason': None, 'scope_count': 1}]
+        self.writer(directory, 4242, NOW-900, lambda request: replies.pop(0) if len(replies) > 1 else replies[0])
+        self.assertEqual(engine_actions.release_connection(self.ctx(), BRIDGE_ID),
+                         {'ok': True, 'released': True, 'reason': None, 'scope_count': 1})
+        self.assertEqual(self.asked(), 2)
 
 
 class RevivedRuntimeActionTests(ActionCase):

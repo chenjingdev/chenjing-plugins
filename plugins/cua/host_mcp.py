@@ -81,8 +81,9 @@ def quiet_config(installed, config, server='cua_repl', keep_plugin=NATIVE_PLUGIN
     """Thread configuration that turns off every MCP server of the user's set-up except the CUA one.
 
     An owned thread never runs a model turn, so the other servers would only start processes there, and the host keeps
-    them, like the thread, until Codex quits (it does not unload a thread when its last client leaves). Built from the
-    answers of plugin/installed and config/read; a name that cannot stand in a dotted key is left as it is.
+    them, like the thread, for about half an hour after its last use (it does not unload a thread when its last client
+    leaves). Built from the answers of plugin/installed and config/read; a name that cannot stand in a dotted key is
+    left as it is.
     """
     out = {}
     markets = installed.get('marketplaces') if isinstance(installed, dict) else None
