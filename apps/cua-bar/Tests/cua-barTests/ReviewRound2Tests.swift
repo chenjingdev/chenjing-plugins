@@ -167,6 +167,19 @@ struct ReviewRound2Tests {
         #expect(await rig.model.confirmPending() == nil)
     }
 
+    @Test func theRetryQuestionGoesWhenItsConnectionEnds() async throws {
+        let rig = try await refusing()
+        rig.model.setPopoverOpen(true)
+        await rig.model.send(.releaseConnection(Self.target))?.value
+        #expect(rig.model.pending?.kind == .retryRelease)
+        var later = try idleStatus()
+        let index = try #require(later.connections.firstIndex { $0.id == Self.target })
+        later.connections[index].state = .ended
+        rig.engine.setStatus(later)
+        await rig.model.refresh()
+        #expect(rig.model.pending == nil, "it is asked under a live line only; the ended line has its own 정리")
+    }
+
     @Test func theRetryQuestionGoesWhenTheStatusCannotBeRead() async throws {
         let rig = try await refusing()
         rig.model.setPopoverOpen(true)

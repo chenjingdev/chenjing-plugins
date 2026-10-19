@@ -492,6 +492,11 @@ struct StatusEvaluatorTests {
         status.connections[1].canRelease = false
         #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", tabsReleased: Set(both)).problem?.nextStep
                 == "앱이 정리할 수 없는 연결이에요 — 목록에서 까닭을 보세요")
+        // One whose tabs were released beside one the app can do nothing for: the card does not say the
+        // second one's tabs were released, and each line says its own reason.
+        status.connections[0].canRelease = true
+        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", tabsReleased: Set(both)).problem?.nextStep
+                == "앱이 정리할 수 없는 연결이에요 — 목록에서 까닭을 보세요")
     }
 
     @Test func noTooltipSaysCUATwice() throws {

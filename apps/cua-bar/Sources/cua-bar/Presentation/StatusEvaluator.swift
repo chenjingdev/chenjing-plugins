@@ -188,11 +188,13 @@ enum StatusEvaluator {
         let ended = status.connections.filter { $0.state == .ended }
         if !ended.isEmpty {
             // Still a problem for the icon, but with no button: the line itself has 정리. 정리 has
-            // something to do while one of them can be stopped, or released and not yet released.
+            // something to do while one of them can be stopped, or released and not yet released. The card
+            // says the tabs were released only when that is so for all of them; with one the app can do
+            // nothing for among them, each line says its own reason.
             let worthTidying = ended.contains { connection in
                 TidyPlan.way(for: connection) != nil && !TidyPlan.isSettled(connection, tabsReleased: tabsReleased)
             }
-            let settled = ended.contains { TidyPlan.isSettled($0, tabsReleased: tabsReleased) }
+            let settled = ended.allSatisfy { TidyPlan.isSettled($0, tabsReleased: tabsReleased) }
             return Problem(
                 kind: .endedConnections, title: "끝난 연결이 \(ended.count)개 남아 있어요",
                 nextStep: worthTidying ? tidyStep : settled ? tabsReleasedStep : cannotTidyStep,

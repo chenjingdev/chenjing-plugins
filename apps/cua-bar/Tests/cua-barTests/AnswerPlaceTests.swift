@@ -183,8 +183,9 @@ struct AnswerPlaceTests {
 
     // MARK: 진단 복사
 
-    @Test func theDiagnosisCopyAnswersAtTheBottomOfActivityAndNeverInTheBanner() async throws {
+    @Test func theDiagnosisCopyAnswersAtTheBottomOfActivityAndNotInTheBanner() async throws {
         let rig = await Rig(try Fixtures.status("status-ready"))
+        rig.model.selectedTab = .activity // where its button is
         await rig.model.send(.copyDiagnosis)?.value
         #expect(rig.model.placedResults[.diagnosis] == ActionOutcome(kind: .success, message: "진단을 복사했어요"))
         #expect(rig.model.banner == nil, "a banner would push the popover longer, and the buttons down")
@@ -202,9 +203,40 @@ struct AnswerPlaceTests {
         engine.setStatusError(.timeout)
         let rig = await Rig(EngineStatus(), engine: engine)
         #expect(rig.model.content == nil)
+        rig.model.selectedTab = .activity
         await rig.model.send(.copyDiagnosis)?.value
         #expect(rig.model.placedResults[.diagnosis]?.message == "진단을 복사했어요")
         #expect(rig.model.banner == nil)
+    }
+
+    @Test func anAnswerOnATabThatIsNotShownIsSaidInTheBanner() async throws {
+        // 진단 복사 takes up to 30 seconds: the person may have turned to 연결 by the time it answers.
+        let rig = await Rig(try Fixtures.status("status-ready"))
+        rig.model.selectedTab = .activity
+        let copying = rig.model.send(.copyDiagnosis)
+        rig.model.selectedTab = .connections
+        await copying?.value
+        #expect(rig.model.placedResults.isEmpty)
+        #expect(rig.model.banner?.outcome.message == "진단을 복사했어요")
+    }
+
+    @Test func anAnswerShownOnATabMovesToTheBannerWhenThePersonTurnsToTheOtherTab() async throws {
+        var status = try Fixtures.status("status-ready")
+        status.connections[1].state = .idle // the Codex one: no question
+        status.connections[1].idleSeconds = 2000
+        let rig = await Rig(status)
+        let id = "codex-15888-1792319000"
+        await rig.model.send(.releaseConnection(id))?.value
+        #expect(rig.model.placedResults[.connection(id)]?.message == "탭을 풀었어요")
+        rig.model.selectedTab = .activity
+        #expect(rig.model.placedResults.isEmpty, "a line of 연결 is not shown on 기록")
+        #expect(rig.model.banner?.outcome.message == "탭을 풀었어요")
+        // And the other way: 진단 복사's answer at the bottom of 기록, then 연결.
+        await rig.model.send(.copyDiagnosis)?.value
+        #expect(rig.model.placedResults[.diagnosis]?.message == "진단을 복사했어요")
+        rig.model.selectedTab = .connections
+        #expect(rig.model.placedResults.isEmpty)
+        #expect(rig.model.banner?.outcome.message == "진단을 복사했어요")
     }
 
     @Test func theCardsOwnButtonsStillAnswerInTheBanner() async throws {

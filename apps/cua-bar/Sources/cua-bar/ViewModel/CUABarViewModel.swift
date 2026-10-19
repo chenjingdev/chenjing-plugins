@@ -59,7 +59,12 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var updatedAt: Date?
     @Published var selectedTab: PopoverTab = .connections {
         // A question asked on a line of the list is not shown on 기록: it goes with the tab, as with the popover.
-        didSet { if selectedTab != oldValue, pending?.action.connectionID != nil { cancelPending() } }
+        // An answer on the tab left behind is said in the banner instead.
+        didSet {
+            guard selectedTab != oldValue else { return }
+            if pending?.action.connectionID != nil { cancelPending() }
+            moveGonePlacesToTheBanner()
+        }
     }
     @Published private(set) var inFlight: Set<CUAAction> = [] {
         didSet { publishSummary() }
@@ -508,7 +513,8 @@ final class CUABarViewModel: ObservableObject {
         guard let content, let status = lastStatus else { return true }
         switch question.action {
         case .retryRelease(let id):
-            return !Confirmations.targetExists(id, in: content)
+            // Asked again under a live line only: one that ended meanwhile has its own 정리.
+            return !content.connections.groups.contains { $0.rows.contains { $0.id == id } }
         case .restartCodex:
             // The restart is the fix for Codex running without its host; with that over it would only cut work off.
             return !codexRunsWithoutHost(in: status)
@@ -963,8 +969,8 @@ final class CUABarViewModel: ObservableObject {
     // MARK: Telling the answer
 
     /// Tells the answer to `action` where its button is: on its line, under the head of 손볼 것, or at the
-    /// bottom of 기록. Where that place is not on screen (the line is gone, or nothing was read), it is
-    /// the banner under the card, which is where the card's own buttons answer too.
+    /// bottom of 기록. Where that place is not on screen (the line is gone, its tab is not the one shown,
+    /// or nothing was read), it is the banner under the card, which is where the card's own buttons answer too.
     private func tell(_ outcome: ActionOutcome, about action: CUAAction) {
         guard !outcome.message.isEmpty else { return }
         guard let place = action.resultPlace, isOnScreen(place) else {
@@ -981,10 +987,11 @@ final class CUABarViewModel: ObservableObject {
 
     private func isOnScreen(_ place: ResultPlace) -> Bool {
         switch place {
-        case .connection(let id): Confirmations.targetExists(id, in: content)
-        case .session(let id): content?.connections.tidy?.rows.contains { $0.leaseRow?.sessionID == id } == true
-        case .tidyAll: content?.connections.tidy != nil
-        case .diagnosis: true
+        case .connection(let id): selectedTab == .connections && Confirmations.targetExists(id, in: content)
+        case .session(let id):
+            selectedTab == .connections && content?.connections.tidy?.rows.contains { $0.leaseRow?.sessionID == id } == true
+        case .tidyAll: selectedTab == .connections && content?.connections.tidy != nil
+        case .diagnosis: selectedTab == .activity
         }
     }
 
@@ -995,7 +1002,7 @@ final class CUABarViewModel: ObservableObject {
     }
 
     /// A line that left the list takes its answer with it, so the answer is said under the card instead:
-    /// a 정리 that worked is the common way for its line to go.
+    /// a 정리 that worked is the common way for its line to go. So does a tab that is no longer shown.
     private func moveGonePlacesToTheBanner() {
         for (place, outcome) in placedResults where !isOnScreen(place) {
             forgetPlaced(place)
