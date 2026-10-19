@@ -17,7 +17,8 @@ struct PopoverView: View {
                 if let fix = model.summary.fix { model.send(fix) }
             }
 
-            if let prompt = model.confirmationPrompt {
+            // Only the question that comes from the card's own button; a question about a line is under that line.
+            if let prompt = model.cardConfirmationPrompt {
                 ConfirmationView(prompt: prompt, confirm: { model.confirm() }, cancel: { model.cancelPending() })
                     .transition(.opacity)
             }
@@ -49,8 +50,8 @@ struct PopoverView: View {
             // Also without a status: 진단 복사 is most needed exactly then.
             ActivityTabView(
                 content: model.activityContent, copying: model.inFlight.contains(.copyDiagnosis),
-                note: maintenance?.loginItem.line, maintenance: maintenance, notifications: model.notificationPermission,
-                turnOnNotifications: { await model.turnOnNotifications() }
+                note: maintenance?.loginItem.line, result: model.placedResults[.diagnosis], maintenance: maintenance,
+                notifications: model.notificationPermission, turnOnNotifications: { await model.turnOnNotifications() }
             ) {
                 model.send(.copyDiagnosis)
             }

@@ -2,42 +2,62 @@ import SwiftUI
 
 /// 연결: one list. Who uses the screen, then 손볼 것 with 모두 정리 above it, then the connections
 /// whose AI is alive, the other tools, and the folded guidance for tabs that stay blocked. Every row
-/// has the one button its state calls for; the same job is never pressed in two places.
+/// has the one button its state calls for; the same job is never pressed in two places. A question
+/// about a line is asked right under that line, and the answer to a line's button is one line on it.
 struct ConnectionsTabView: View {
     var content: ConnectionsContent
     var failedSessionIDs: Set<String>
     @ObservedObject var model: CUABarViewModel
 
+    /// The question asked on a line, so the list can scroll to it: under a line near the bottom it
+    /// would be out of sight, and the press would seem to have done nothing.
+    private static let questionID = "question-on-a-line"
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 6) {
-                ScreenLineView(screen: content.screen)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 6) {
+                    ScreenLineView(screen: content.screen)
 
-                if let tidy = content.tidy {
-                    TidySectionView(tidy: tidy, failedSessionIDs: failedSessionIDs, model: model)
-                }
-
-                ForEach(content.groups) { group in
-                    SectionHeader(text: group.title)
-                    ForEach(group.rows) { row in
-                        ConnectionRowView(
-                            row: row, waiting: model.isWaiting(onConnection: row.id),
-                            waitingHelp: model.cleanupHelp(onConnection: row.id),
-                            refused: model.refusedReleaseIDs.contains(row.id)) { model.send($0) }
+                    if let tidy = content.tidy {
+                        TidySectionView(tidy: tidy, failedSessionIDs: failedSessionIDs, model: model)
                     }
+
+                    ForEach(content.groups) { group in
+                        SectionHeader(text: group.title)
+                        ForEach(group.rows) { row in
+                            ConnectionRowView(
+                                row: row, waiting: model.isWaiting(onConnection: row.id),
+                                waitingHelp: model.cleanupHelp(onConnection: row.id),
+                                refused: model.refusedReleaseIDs.contains(row.id),
+                                result: model.placedResults[.connection(row.id)]) { model.send($0) }
+                            if let prompt = model.confirmationPrompt(forConnection: row.id) {
+                                ConfirmationView(prompt: prompt, confirm: { model.confirm() }, cancel: { model.cancelPending() })
+                                    .id(Self.questionID)
+                                    .transition(.opacity)
+                            }
+                        }
+                    }
+
+                    if let empty = content.emptyText { EmptyLine(text: empty) }
+
+                    ForEach(content.tools) { tool in OtherToolView(tool: tool) }
+
+                    GuidanceView(
+                        guidance: content.guidance,
+                        isOpen: Binding(
+                            get: { model.guidanceOpenByUser ?? (content.guidance.needsAttention || !failedSessionIDs.isEmpty) },
+                            set: { model.guidanceOpenByUser = $0 }))
                 }
-
-                if let empty = content.emptyText { EmptyLine(text: empty) }
-
-                ForEach(content.tools) { tool in OtherToolView(tool: tool) }
-
-                GuidanceView(
-                    guidance: content.guidance,
-                    isOpen: Binding(
-                        get: { model.guidanceOpenByUser ?? (content.guidance.needsAttention || !failedSessionIDs.isEmpty) },
-                        set: { model.guidanceOpenByUser = $0 }))
+                .padding(.vertical, 2)
             }
-            .padding(.vertical, 2)
+            .onChange(of: model.pending?.id) { _, id in
+                guard id != nil, let line = model.pending?.action.connectionID, model.confirmationPrompt(forConnection: line) != nil else { return }
+                // After this update, when the question is in the list.
+                Task { @MainActor in
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(Self.questionID) }
+                }
+            }
         }
     }
 }
@@ -84,6 +104,8 @@ struct TidySectionView: View {
                     waitingHelp: model.cleanupHelp(for: tidy.tidyAllButton.action)) { model.send($0) }
             }
             .padding(.top, 2)
+            // The answer to 모두 정리, right under the button it came from.
+            if let result = model.placedResults[.tidyAll] { ResultLine(outcome: result) }
             if let notice = tidy.notice {
                 Label(notice, systemImage: "info.circle")
                     .font(Theme.captionFont)
@@ -96,21 +118,33 @@ struct TidySectionView: View {
                 case .ended(let ended):
                     ConnectionRowView(
                         row: ended, waiting: model.isWaiting(onConnection: ended.id),
-                        waitingHelp: model.cleanupHelp(onConnection: ended.id), refused: false) { model.send($0) }
+                        waitingHelp: model.cleanupHelp(onConnection: ended.id), refused: false,
+                        result: model.placedResults[.connection(ended.id)]) { model.send($0) }
                 case .lease(let lease):
                     LeaseRowView(
                         row: lease, failed: lease.sessionID.map(failedSessionIDs.contains) ?? false,
-                        result: lease.sessionID.flatMap { model.sessionResults[$0] },
+                        result: Self.result(of: lease, in: model),
                         waiting: lease.sessionID.map(model.isWaiting(onSession:)) ?? false,
                         waitingHelp: lease.releaseButton.flatMap { model.cleanupHelp(for: $0.action) }) { model.send($0) }
                 case .orphan(let orphan):
                     RowCard(tint: .red) {
                         ToolClientRowView(
-                            row: orphan, waiting: orphan.connectionID.map(model.isWaiting(onConnection:)) ?? false) { model.send($0) }
+                            row: orphan, waiting: orphan.connectionID.map(model.isWaiting(onConnection:)) ?? false,
+                            result: orphan.connectionID.flatMap { model.placedResults[.connection($0)] }) { model.send($0) }
                     }
                 }
             }
         }
+    }
+}
+
+extension TidySectionView {
+    /// What a lease line says about its last release: the answer just told on it, else the failure it
+    /// keeps until the lease goes (a success is not kept: the line goes with it).
+    static func result(of lease: LeaseRow, in model: CUABarViewModel) -> ActionOutcome? {
+        guard let session = lease.sessionID else { return nil }
+        if let told = model.placedResults[.session(session)] { return told }
+        return model.sessionResults[session].flatMap { $0.kind == .success ? nil : $0 }
     }
 }
 
@@ -121,6 +155,8 @@ struct ConnectionRowView: View {
     var waitingHelp: String?
     /// The engine refused to release its tabs twice (R15): the row says so, and its 탭 풀기 tries again.
     var refused = false
+    /// What its button just answered, one line on the row.
+    var result: ActionOutcome?
     var send: (CUAAction) -> Void
 
     var body: some View {
@@ -145,6 +181,10 @@ struct ConnectionRowView: View {
                             .foregroundStyle(Theme.orangeText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if let hint = row.hint {
+                        Text(hint).font(Theme.captionFont).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let result { ResultLine(outcome: result) }
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 6) {
@@ -168,7 +208,7 @@ struct LeaseRowView: View {
     var row: LeaseRow
     /// The release failed in a way the extension reset may fix: the guidance below is open for it.
     var failed: Bool
-    /// What the last release of this session said (shown unless it succeeded).
+    /// What the last release of this session said: the answer just told on the line, or the failure it keeps.
     var result: ActionOutcome?
     var waiting: Bool
     /// Why the button waits, when it waits for the automatic cleanup.
@@ -195,11 +235,8 @@ struct LeaseRowView: View {
                         .font(Theme.captionFont)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let result, result.kind != .success {
-                        Text(result.message)
-                            .font(Theme.captionFont)
-                            .foregroundStyle(Theme.text(for: result.kind))
-                            .fixedSize(horizontal: false, vertical: true)
+                    if let result {
+                        ResultLine(outcome: result)
                         if failed {
                             Text("아래 안내를 보세요")
                                 .font(Theme.captionFont)
@@ -233,7 +270,7 @@ struct OtherToolView: View {
                 Text(tool.title).font(Theme.titleFont)
                 ForEach(tool.clients) { client in
                     Divider().padding(.vertical, 2)
-                    ToolClientRowView(row: client, waiting: false) { _ in }
+                    ToolClientRowView(row: client, waiting: false, result: nil) { _ in }
                 }
             }
         }
@@ -244,6 +281,8 @@ struct OtherToolView: View {
 struct ToolClientRowView: View {
     var row: ToolClientRow
     var waiting: Bool
+    /// What its button just answered, one line on the row.
+    var result: ActionOutcome?
     var send: (CUAAction) -> Void
 
     var body: some View {
@@ -260,6 +299,10 @@ struct ToolClientRowView: View {
                 Text(row.startedText)
                     .font(Theme.captionFont)
                     .foregroundStyle(.secondary)
+                if let hint = row.hint {
+                    Text(hint).font(Theme.captionFont).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                if let result { ResultLine(outcome: result) }
             }
             Spacer(minLength: 4)
             if let button = row.button {

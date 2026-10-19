@@ -47,8 +47,11 @@ extension ButtonSpec {
     }
 
     /// 정리 of an ended connection or of a cmux-cua connection nobody owns; off when the app can do neither
-    /// of the two things it would do.
-    static func tidy(_ id: String, way: TidyPlan.Way?, isCmux: Bool = false) -> ButtonSpec {
+    /// of the two things it would do, or has already done the one it can (`settled`).
+    static func tidy(_ id: String, way: TidyPlan.Way?, isCmux: Bool = false, settled: Bool = false) -> ButtonSpec {
+        if settled {
+            return ButtonSpec(title: "정리", action: .tidy(id), isEnabled: false, help: "이 연결은 앱이 끌 수 없어요. 탭은 이미 풀었어요")
+        }
         let help: String
         switch way {
         case .stop?:
@@ -70,8 +73,9 @@ struct PopoverContent: Equatable, Sendable {
     var connections: ConnectionsContent
     var activity: ActivityContent
 
-    init(status: EngineStatus, now: Date, calendar: Calendar = .current) {
-        connections = ConnectionsContent(status: status, now: now, calendar: calendar)
+    /// `tabsReleased`: the ended connections the app may only release, whose tabs it released in this run.
+    init(status: EngineStatus, now: Date, calendar: Calendar = .current, tabsReleased: Set<String> = []) {
+        connections = ConnectionsContent(status: status, now: now, calendar: calendar, tabsReleased: tabsReleased)
         activity = ActivityContent(status: status, calendar: calendar)
     }
 }
@@ -98,6 +102,9 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
     var canStop: Bool
     /// The row's one button: 탭 풀기 when its AI is alive, 정리 when it ended.
     var button: ButtonSpec
+    /// Said on the line itself, so the reason is not only on hover: an ended connection the app cannot
+    /// tidy, or one whose tabs it already released and can do no more with.
+    var hint: String?
     /// After the engine refused a release twice (R15): the same 탭 풀기, which does not ask again. A
     /// live AI is never stopped from here.
     var retryButton: ButtonSpec
@@ -105,7 +112,10 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
     /// The line a row shows after a refused release.
     static let refusedNote = "작업이 끝나지 않아 못 풀었어요"
 
-    init(_ connection: Connection, now: Date, calendar: Calendar) {
+    static let cannotTidyHint = "정리할 수 없어요 — 탭을 풀 길이 없고, 신원을 확인하지 못한 프로세스라 앱이 끌 수도 없어요"
+    static let tabsReleasedHint = "탭은 풀었어요 — 앱이 끌 수 없는 연결이에요"
+
+    init(_ connection: Connection, now: Date, calendar: Calendar, tabsReleased: Set<String> = []) {
         id = connection.id
         agent = connection.agent
         folder = Format.folder(connection.cwd)
@@ -118,9 +128,12 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         isBusy = connection.busy
         canRelease = connection.canRelease
         canStop = connection.canStop
+        let way = TidyPlan.way(for: connection)
+        let settled = TidyPlan.isSettled(connection, tabsReleased: tabsReleased)
         button = connection.state == .ended
-            ? .tidy(connection.id, way: TidyPlan.way(for: connection))
+            ? .tidy(connection.id, way: way, settled: settled)
             : .releaseTabs(of: connection.id, isEnabled: connection.canRelease)
+        hint = connection.state != .ended ? nil : settled ? Self.tabsReleasedHint : way == nil ? Self.cannotTidyHint : nil
         retryButton = ButtonSpec(
             title: "탭 풀기", action: .retryRelease(connection.id), isEnabled: connection.canRelease,
             help: "한 번 더 풀어 봐요. AI가 하던 조작이 끝나야 풀 수 있어요")
@@ -182,6 +195,8 @@ struct ToolClientRow: Equatable, Identifiable, Sendable {
     var isOrphan: Bool
     /// 정리, only on a connection nobody owns that the engine named. A live one has no button.
     var button: ButtonSpec?
+    /// Said on the line itself when nobody owns it and the app still cannot tidy it.
+    var hint: String?
 
     init(_ client: ToolClient, index: Int, now: Date) {
         id = client.id ?? "client-\(index)"
@@ -193,9 +208,12 @@ struct ToolClientRow: Equatable, Identifiable, Sendable {
         path = client.cwd
         startedText = Format.startedAgo(client.startedAt, now: now)
         if client.isOrphan, let connection = client.id, ToolClient.isCmuxConnection(id: connection) {
-            button = .tidy(connection, way: TidyPlan.way(for: client), isCmux: true)
+            let way = TidyPlan.way(for: client)
+            button = .tidy(connection, way: way, isCmux: true)
+            hint = way == nil ? "정리할 수 없어요 — 신원을 확인하지 못한 프로세스라 앱이 끌 수 없어요" : nil
         } else {
             button = nil
+            hint = client.isOrphan ? "정리할 수 없어요 — 엔진이 이 연결의 이름을 알려 주지 않아요" : nil
         }
     }
 }
@@ -299,7 +317,7 @@ struct ConnectionsContent: Equatable, Sendable {
     var emptyText: String?
     var guidance: ExtensionResetGuidance
 
-    init(status: EngineStatus, now: Date, calendar: Calendar) {
+    init(status: EngineStatus, now: Date, calendar: Calendar, tabsReleased: Set<String> = []) {
         screen = ScreenLine(status: status, now: now)
 
         let live = status.connections.filter { $0.state != .ended }.sorted(by: TidyPlan.newestFirst)
@@ -322,8 +340,10 @@ struct ConnectionsContent: Equatable, Sendable {
         }
 
         // 손볼 것: the ended connections (newest first), the leases, the connections nobody owns.
-        let ended = TidyPlan.endedConnections(in: status).map { TidyRow.ended(ConnectionRow($0, now: now, calendar: calendar)) }
-        let leases = Self.leaseRows(in: status, live: live, now: now, calendar: calendar)
+        let ended = TidyPlan.endedConnections(in: status).map {
+            TidyRow.ended(ConnectionRow($0, now: now, calendar: calendar, tabsReleased: tabsReleased))
+        }
+        let leases = Self.leaseRows(in: status, now: now, calendar: calendar)
         let orphans = status.otherTools.flatMap { tool in
             tool.clients.enumerated().filter { $0.element.isOrphan }.map { TidyRow.orphan(ToolClientRow($0.element, index: $0.offset, now: now)) }
         }
@@ -331,7 +351,7 @@ struct ConnectionsContent: Equatable, Sendable {
         if rows.isEmpty {
             tidy = nil
         } else {
-            let hasTargets = !TidyPlan.items(in: status).isEmpty
+            let hasTargets = !TidyPlan.items(in: status, tabsReleased: tabsReleased).isEmpty
             let codexChatLeft = leases.contains { $0.agent == .codex && $0.releaseButton != nil }
             tidy = TidyContent(
                 title: "손볼 것 \(rows.count)개", rows: rows,
@@ -362,16 +382,17 @@ struct ConnectionsContent: Equatable, Sendable {
             needsAttention: leases.contains { $0.kind == .maybeLeft && !$0.canReleaseSession })
     }
 
-    /// The lease lines: what the engine could read (`items`) unless a live connection's own session
-    /// holds it, then the sessions whose owner is gone (`maybe_left`).
-    private static func leaseRows(in status: EngineStatus, live: [Connection], now: Date, calendar: Calendar) -> [LeaseRow] {
+    /// The lease lines: what the engine could read (`items`) unless a connection of the list holds it,
+    /// then the sessions whose owner is gone (`maybe_left`).
+    private static func leaseRows(in status: EngineStatus, now: Date, calendar: Calendar) -> [LeaseRow] {
         let leases = status.leases
-        let liveSessions = Set(live.compactMap(\.sessionID))
+        let connectionSessions = Set(status.connections.compactMap(\.sessionID))
         let leftSessions = Set(leases.maybeLeft.compactMap(\.sessionID))
         var rows: [LeaseRow] = []
         for (index, item) in leases.items.enumerated() {
-            // A live connection's own tabs are not for tidying; neither is a session already listed as left.
-            if let session = item.sessionID, liveSessions.contains(session) || leftSessions.contains(session) { continue }
+            // A live connection's own tabs are not for tidying, and an ended connection's line already
+            // has its 정리; neither is a session already listed as left. One tab set is one line.
+            if let session = item.sessionID, connectionSessions.contains(session) || leftSessions.contains(session) { continue }
             var parts: [String] = []
             if let since = item.since { parts.append("\(Format.when(since, now: now, calendar: calendar))부터") }
             if let session = item.sessionID { parts.append("세션 \(shortSession(session))") }

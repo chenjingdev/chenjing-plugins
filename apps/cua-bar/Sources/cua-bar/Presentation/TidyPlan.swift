@@ -26,6 +26,12 @@ enum TidyPlan {
         return connection.canRelease ? .releaseOnly : nil
     }
 
+    /// An ended connection the app may only release, and whose tabs it already released in this run:
+    /// there is nothing left for it to do with it, and 정리 would only say the same again.
+    static func isSettled(_ connection: Connection, tabsReleased: Set<String>) -> Bool {
+        way(for: connection) == .releaseOnly && tabsReleased.contains(connection.id)
+    }
+
     /// How a cmux-cua connection is tidied. Only one nobody owns any more (its AI client is gone) and
     /// that the engine named and may stop: a live one is cut off from its conversation (R17).
     static func way(for client: ToolClient) -> Way? {
@@ -60,11 +66,13 @@ enum TidyPlan {
     }
 
     /// What 모두 정리 does, in the order the list shows it: the ended connections (newest first),
-    /// the leftover Claude sessions, the cmux-cua connections nobody owns. Nothing else.
-    static func items(in status: EngineStatus?) -> [Item] {
+    /// the leftover Claude sessions, the cmux-cua connections nobody owns. Nothing else, and nothing
+    /// that is settled.
+    static func items(in status: EngineStatus?, tabsReleased: Set<String> = []) -> [Item] {
         guard let status else { return [] }
-        let connections = endedConnections(in: status).compactMap { connection in
-            way(for: connection).map { Item.connection(connection.id, $0) }
+        let connections = endedConnections(in: status).compactMap { connection -> Item? in
+            guard !isSettled(connection, tabsReleased: tabsReleased) else { return nil }
+            return way(for: connection).map { Item.connection(connection.id, $0) }
         }
         let orphans = status.otherTools.flatMap(\.clients).compactMap { client in
             way(for: client).flatMap { way in client.id.map { Item.connection($0, way) } }

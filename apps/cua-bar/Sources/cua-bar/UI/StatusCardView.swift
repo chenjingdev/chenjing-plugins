@@ -4,9 +4,9 @@ import SwiftUI
 /// fixes the problem when there is one.
 struct StatusCardView: View {
     var summary: StatusSummary
-    /// The fix is running, or waits for the automatic cleanup; the button waits.
+    /// The fix is running, or waits for the Codex a restart asked to quit; the button waits.
     var fixIsRunning: Bool
-    /// Why it waits, on hover (자동 정리 중이에요); nil for none.
+    /// Why it waits, on hover (Codex가 꺼지기를 기다리는 중이에요); nil for none.
     var fixHelp: String?
     var fix: () -> Void
 
@@ -77,18 +77,9 @@ struct BannerView: View {
     /// The message's own button, if it has one (Codex 열기).
     var followUp: (CUAAction) -> Void = { _ in }
 
-    private var symbol: String {
-        switch banner.outcome.kind {
-        case .success: "checkmark.circle.fill"
-        case .info: "info.circle.fill"
-        case .warning: "exclamationmark.triangle.fill"
-        case .failure: "xmark.octagon.fill"
-        }
-    }
-
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: symbol).foregroundStyle(Theme.tint(for: banner.outcome.kind))
+            Image(systemName: banner.outcome.kind.symbolName).foregroundStyle(Theme.tint(for: banner.outcome.kind))
             Text(banner.outcome.message)
                 .font(.system(size: 12))
                 .fixedSize(horizontal: false, vertical: true)

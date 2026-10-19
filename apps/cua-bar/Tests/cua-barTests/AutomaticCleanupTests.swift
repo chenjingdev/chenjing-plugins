@@ -113,7 +113,7 @@ struct AutomaticCleanupTests {
         // The person's own 모두 정리 is not a second one either: it says why and does not run.
         let outcome = await rig.model.perform(.tidyAll)
         #expect(outcome == ActionOutcome(kind: .info, message: "자동 정리 중이에요. 끝나면 다시 눌러 주세요"))
-        #expect(rig.model.banner?.outcome == outcome)
+        #expect(rig.model.placedResults[.tidyAll] == outcome, "said under the head of 손볼 것, where the button is")
         #expect(releaseEndedCalls(rig) == 1)
 
         gate.open()

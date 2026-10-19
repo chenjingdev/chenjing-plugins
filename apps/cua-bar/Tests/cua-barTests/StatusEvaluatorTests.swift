@@ -54,7 +54,7 @@ struct StatusEvaluatorTests {
         #expect(summary.icon == .ready)
         #expect(summary.problem == nil, "nothing is broken: no alarm and no notification")
         #expect(summary.nextStep == "Codex를 다시 켜면 새 설정이 적용돼요")
-        #expect(summary.warning == "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 놓아줄 수 없을 수 있어요")
+        #expect(summary.warning == "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 탭을 풀 수 없을 수 있어요")
         // A Codex that is no longer running needs no restart.
         status.codex.running = false
         status.codex.pids = []
@@ -68,7 +68,7 @@ struct StatusEvaluatorTests {
         let summary = evaluate(status)
         #expect(summary.icon == .working)
         #expect(summary.nextStep == "Codex를 다시 켜면 새 설정이 적용돼요")
-        #expect(summary.warning == "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 놓아줄 수 없을 수 있어요")
+        #expect(summary.warning == "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 탭을 풀 수 없을 수 있어요")
         status.host.startedBeforeSetup = false
         #expect(evaluate(status).nextStep == "없음")
     }
@@ -461,6 +461,37 @@ struct StatusEvaluatorTests {
         // One that can be tidied among them is enough to point at the list.
         status.connections[1].state = .ended
         #expect(try #require(evaluate(status).problem).nextStep == "목록 맨 위의 정리를 눌러 주세요")
+    }
+
+    @Test func onceTheTabsOfTheOnlyEndedConnectionsThatCannotBeStoppedAreReleasedTheCardSaysSoAndNotToTidyAgain() throws {
+        var status = try healthy()
+        status.connections[0].state = .ended
+        status.connections[0].canStop = false // the app may only release it
+        let id = status.connections[0].id
+        // Not known to be released: 정리 is still the way, and the card never claims what it does not know.
+        #expect(evaluate(status).problem?.nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", tabsReleased: ["claude-other"]).problem?.nextStep
+                == "목록 맨 위의 정리를 눌러 주세요")
+        // Known: that is all there is to say, and it is still a problem for the icon, with no button.
+        let summary = StatusEvaluator.evaluate(status, appVersion: "0.7.0", tabsReleased: [id])
+        #expect(summary.problem?.kind == .endedConnections)
+        #expect(summary.problem?.title == "끝난 연결이 1개 남아 있어요")
+        #expect(summary.problem?.nextStep == "앱이 끌 수 없는 끝난 연결이에요 — 탭은 풀었어요")
+        #expect(summary.icon == .problem)
+        #expect(summary.fix == nil)
+        // A connection the app can stop, or one whose tabs are not yet released, keeps the card pointing at 정리.
+        status.connections[1].state = .ended
+        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", tabsReleased: [id]).problem?.nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        status.connections[1].canStop = false
+        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", tabsReleased: [id]).problem?.nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        let both = status.connections.map(\.id)
+        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", tabsReleased: Set(both)).problem?.nextStep
+                == "앱이 끌 수 없는 끝난 연결이에요 — 탭은 풀었어요")
+        // Nothing the app can do with it at all: it says that instead.
+        status.connections[0].canRelease = false
+        status.connections[1].canRelease = false
+        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", tabsReleased: Set(both)).problem?.nextStep
+                == "앱이 정리할 수 없는 연결이에요 — 목록에서 까닭을 보세요")
     }
 
     @Test func noTooltipSaysCUATwice() throws {

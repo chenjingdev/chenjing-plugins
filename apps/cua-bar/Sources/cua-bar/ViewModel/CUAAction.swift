@@ -6,6 +6,19 @@ enum StopGroup: String, CaseIterable, Hashable, Sendable {
     case all, claude, codex
 }
 
+/// Where the answer to a button is told: next to that button, so the eyes need not leave it. A place that
+/// is gone (the line left the list) has its answer in the banner under the status card instead.
+enum ResultPlace: Hashable, Sendable {
+    /// The line of a connection: 탭 풀기 or 정리 on it.
+    case connection(String)
+    /// The line of a leftover lease: 탭 풀기 on it.
+    case session(String)
+    /// Under the head of 손볼 것: 모두 정리.
+    case tidyAll
+    /// At the bottom of 기록, right above its buttons: 진단 복사.
+    case diagnosis
+}
+
 /// Everything a button in the popover can ask for. A row has one button for its state: 탭 풀기 on a
 /// connection whose AI is alive and on a leftover lease, 정리 on an ended connection or a cmux-cua
 /// connection nobody owns any more. `CUABarViewModel.send(_:)` asks first when the action needs a
@@ -40,6 +53,17 @@ enum CUAAction: Hashable, Sendable {
     case matchPluginVersion
     /// Read the status again now.
     case refresh
+
+    /// Where its answer is told; nil for the actions that answer under the status card, whose buttons are there.
+    var resultPlace: ResultPlace? {
+        switch self {
+        case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): .connection(id)
+        case .releaseSession(let id, _): .session(id)
+        case .tidyAll: .tidyAll
+        case .copyDiagnosis: .diagnosis
+        default: nil
+        }
+    }
 
     /// The connection the action is aimed at, so its row's buttons can wait for it.
     var connectionID: String? {

@@ -7,6 +7,8 @@ struct ActivityTabView: View {
     var copying: Bool
     /// A line about the app itself under the list (the login item).
     var note: String?
+    /// What 진단 복사 just answered, right above the buttons (never in the banner, which would push them down).
+    var result: ActionOutcome?
     /// nil leaves 알림 켜기 and 앱 지우기 out (previews and tests).
     var maintenance: Maintenance?
     /// 알림 켜기 shows while notifications cannot be shown.
@@ -37,18 +39,20 @@ struct ActivityTabView: View {
                 }
             }
             ActivityBottomView(
-                copyButton: content.copyButton, copying: copying, note: note, maintenance: maintenance,
+                copyButton: content.copyButton, copying: copying, note: note, result: result, maintenance: maintenance,
                 notifications: notifications, turnOnNotifications: turnOnNotifications, copy: copy)
         }
     }
 }
 
-/// The bottom of 기록: the question or result of 앱 지우기 right above its button, the login item line,
-/// and the buttons: 진단 복사, 알림 켜기 (only while notifications cannot be shown), 앱 지우기….
+/// The bottom of 기록: the question or result of 앱 지우기 and the result of 진단 복사 right above the
+/// buttons, the login item line, and the buttons: 진단 복사, 알림 켜기 (only while notifications cannot
+/// be shown), 앱 지우기….
 struct ActivityBottomView: View {
     var copyButton: ButtonSpec
     var copying: Bool
     var note: String?
+    var result: ActionOutcome?
     var maintenance: Maintenance?
     var notifications: NotificationPermission = .unavailable
     var turnOnNotifications: () async -> Bool = { true }
@@ -66,6 +70,7 @@ struct ActivityBottomView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let result { ResultLine(outcome: result) }
             HStack(spacing: 8) {
                 if copying { ProgressView().controlSize(.small) }
                 SpecButton(spec: copyButton, waiting: copying) { _ in copy() }

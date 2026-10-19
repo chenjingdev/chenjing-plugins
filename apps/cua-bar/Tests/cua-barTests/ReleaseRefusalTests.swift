@@ -53,7 +53,9 @@ struct ReleaseRefusalTests {
         #expect(releaseCalls(rig) == 2)
         #expect(rig.model.pending == nil, "it does not ask a third time")
         #expect(rig.model.refusedReleaseIDs == [Self.target])
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .failure, message: "작업이 끝나지 않아 못 풀었어요"))
+        // The line says it by itself from now on, so it is not told a second time as a result or a banner.
+        #expect(rig.model.banner == nil)
+        #expect(rig.model.placedResults[.connection(Self.target)] == nil)
         let row = try #require(rig.model.content?.connections.groups.flatMap(\.rows).first { $0.id == Self.target })
         // The button is 탭 풀기 still; pressing it tries again without asking. There is no 끄기 and no 강제 종료.
         #expect(row.retryButton.title == "탭 풀기")
@@ -67,7 +69,7 @@ struct ReleaseRefusalTests {
         await rig.model.send(.releaseConnection(Self.target))?.value
         await rig.model.confirmPending()
         #expect(rig.model.refusedReleaseIDs.isEmpty)
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .success, message: "탭을 풀었어요"))
+        #expect(rig.model.placedResults[.connection(Self.target)] == ActionOutcome(kind: .success, message: "탭을 풀었어요"))
     }
 
     @Test func retryFromTheRowRunsWithoutAskingAndStaysRefusedUntilItWorks() async throws {
@@ -119,7 +121,8 @@ struct ReleaseRefusalTests {
         await rig.model.send(.releaseConnection(Self.target))?.value
         #expect(rig.model.pending == nil)
         #expect(rig.model.refusedReleaseIDs.isEmpty)
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 중계기를 쓸 수 없어요"))
+        #expect(rig.model.placedResults[.connection(Self.target)] == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 중계기를 쓸 수 없어요"))
+        #expect(rig.model.banner == nil, "the line is on screen, so its answer is on it")
     }
 
     @Test func aRefusalIsForgottenWhenTheConnectionIsGone() async throws {

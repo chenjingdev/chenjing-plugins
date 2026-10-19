@@ -141,6 +141,39 @@ struct SectionHeader: View {
     }
 }
 
+extension ActionOutcome.Kind {
+    /// A shape for each kind, so no result is told by its color alone.
+    var symbolName: String {
+        switch self {
+        case .success: "checkmark.circle.fill"
+        case .info: "info.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .failure: "xmark.octagon.fill"
+        }
+    }
+}
+
+/// The one line the answer to a button takes where the button is (a line of the list, the head of 손볼 것,
+/// the bottom of 기록): the banner's symbol and words, small.
+struct ResultLine: View {
+    var outcome: ActionOutcome
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: outcome.kind.symbolName)
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.tint(for: outcome.kind))
+                .accessibilityHidden(true)
+            Text(outcome.message)
+                .font(Theme.captionFont)
+                .foregroundStyle(Theme.text(for: outcome.kind))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// Shown instead of a tab's rows while there is no answer to draw from.
 struct TabPlaceholder: View {
     enum Reason { case loading, unreadable }

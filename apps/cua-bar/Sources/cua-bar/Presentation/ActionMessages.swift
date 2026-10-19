@@ -114,7 +114,7 @@ enum ActionMessages {
         case "timeout": "시간이 너무 오래 걸렸어요"
         case "needs_user": "Codex 대화의 점유는 직접 눌러야 풀 수 있어요"
         case "session_live": "살아 있는 연결이 아직 이 세션을 쓰고 있어요"
-        case "unattributed": "주인을 몰라 끄지 않았어요"
+        case "unattributed": "주인을 몰라 건드리지 않았어요"
         case "protected": "앱이 건드리지 않는 프로세스예요"
         case "unverified": "프로세스가 바뀌었거나 확인되지 않아 건드리지 않았어요"
         case "permission_denied": "종료할 권한이 없어요"

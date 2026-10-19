@@ -206,7 +206,7 @@ struct CmuxConnectionTests {
         await task?.value
         #expect(stopCalls(rig) == [.stopConnection(Self.orphan, force: false)], "that one connection, normal, nothing else")
         // No release step exists for cmux-cua: the engine says `released: false` with no reason, and it is a plain success.
-        let outcome = try #require(rig.model.banner?.outcome)
+        let outcome = try #require(rig.model.placedResults[.connection(Self.orphan)])
         #expect(outcome == ActionOutcome(kind: .success, message: "정리했어요"))
     }
 
@@ -221,7 +221,7 @@ struct CmuxConnectionTests {
         await rig.model.send(.tidy(Self.orphan))?.value
         #expect(stopCalls(rig) == [.stopConnection(Self.orphan, force: false), .stopConnection(Self.orphan, force: true)])
         #expect(rig.model.pending == nil, "no question, whatever it came to")
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .success, message: "정리했어요 — 제때 안 꺼져서 강제로 껐어요"))
+        #expect(rig.model.placedResults[.connection(Self.orphan)] == ActionOutcome(kind: .success, message: "정리했어요 — 제때 안 꺼져서 강제로 껐어요"))
     }
 
     @Test func theAppsOwnTimeLimitOnTheCommandCountsAsTimingOutToo() async throws {
@@ -231,7 +231,7 @@ struct CmuxConnectionTests {
         }
         await rig.model.send(.tidy(Self.orphan))?.value
         #expect(stopCalls(rig) == [.stopConnection(Self.orphan, force: false), .stopConnection(Self.orphan, force: true)])
-        #expect(rig.model.banner?.outcome.message == "정리했어요 — 제때 안 꺼져서 강제로 껐어요")
+        #expect(rig.model.placedResults[.connection(Self.orphan)]?.message == "정리했어요 — 제때 안 꺼져서 강제로 껐어요")
     }
 
     @Test(arguments: [
@@ -243,7 +243,7 @@ struct CmuxConnectionTests {
         rig.engine.configure { $0.stopConnectionByID[Self.orphan] = StopResult(ok: false, stopped: false, released: false, reason: reason) }
         await rig.model.send(.tidy(Self.orphan))?.value
         #expect(stopCalls(rig) == [.stopConnection(Self.orphan, force: false)], "only a timeout is repeated by force")
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .failure, message: text))
+        #expect(rig.model.placedResults[.connection(Self.orphan)] == ActionOutcome(kind: .failure, message: text))
     }
 
     @Test func aForcedStopThatDoesNotWorkEitherIsAFailureAndStopsThere() async throws {
@@ -256,7 +256,7 @@ struct CmuxConnectionTests {
         }
         await rig.model.send(.tidy(Self.orphan))?.value
         #expect(stopCalls(rig).count == 2, "normal, then once by force; never a third")
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — 응답이 없어 기다리다 멈췄어요"))
+        #expect(rig.model.placedResults[.connection(Self.orphan)] == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — 응답이 없어 기다리다 멈췄어요"))
     }
 
     @Test func aLiveCmuxConnectionCannotBeTidiedEvenByAnActionSentAnyway() async throws {
@@ -287,7 +287,7 @@ struct CmuxConnectionTests {
         let rig = await Rig(try cmuxFixture())
         await rig.model.perform(.tidyAll)
         #expect(stopCalls(rig) == [.stopConnection(Self.orphan, force: false)])
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .success, message: "1개 정리했어요"))
+        #expect(rig.model.placedResults[.tidyAll] == ActionOutcome(kind: .success, message: "1개 정리했어요"))
     }
 
     // MARK: Every button reaches the engine

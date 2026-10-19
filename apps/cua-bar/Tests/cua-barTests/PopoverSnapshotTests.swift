@@ -128,13 +128,19 @@ struct PopoverSnapshotTests {
         await rig.model.confirmPending()
         try draw("state-refused-row", rig.model)
 
-        // Releasing the tabs of a working connection and restarting Codex, each with its question.
+        // Releasing the tabs of a working connection asks right under its line; restarting Codex asks under the card.
         rig = await Rig(try Fixtures.status("status-problem"))
         rig.model.send(.releaseConnection(live))
         try draw("state-release-confirm", rig.model)
         rig.model.send(.restartCodex)
         try draw("state-restart-confirm", rig.model)
         rig.model.cancelPending()
+
+        // A line's button answers on the line, in one line.
+        rig.engine.configure { $0.releaseConnection = ReleaseResult(ok: false, released: false, reason: "relay_unavailable", scopeCount: 0) }
+        await rig.model.send(.releaseConnection("codex-15888-1792319000"))?.value
+        #expect(rig.model.banner == nil)
+        try draw("state-line-answer", rig.model)
 
         // A restart whose relaunch failed: the message has its own button.
         rig.engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "relaunch_failed") }
@@ -151,7 +157,14 @@ struct PopoverSnapshotTests {
         rig = await Rig(status)
         try draw("state-tidy-list", rig.model)
         await rig.model.send(.tidyAll)?.value
-        try draw("state-tidy-all-banner", rig.model)
+        #expect(rig.model.placedResults[.tidyAll] != nil, "under the head of 손볼 것, where 모두 정리 is")
+        try draw("state-tidy-all-answer", rig.model)
+
+        // 진단 복사 answers at the bottom of 기록, right above its button.
+        rig = await Rig(try Fixtures.status("status-ready"))
+        rig.model.selectedTab = .activity
+        await rig.model.send(.copyDiagnosis)?.value
+        try draw("state-diagnosis-answer", rig.model)
 
         // A release by session id that failed: its line says why, the guidance is open.
         rig = await Rig(try Fixtures.status("status-problem"))
@@ -167,6 +180,38 @@ struct PopoverSnapshotTests {
         ]
         rig = await Rig(status)
         try draw("state-leftover-leases", rig.model)
+    }
+
+    /// The list drawn tall enough to show all of it: a working connection's question is right under its
+    /// line, and the answer to a line's button is one line on it.
+    @Test func aQuestionAndAnAnswerAreDrawnOnTheirOwnLines() async throws {
+        let live = "claude-12345-1792320000"
+        let rig = await Rig(try Fixtures.status("status-problem"))
+        func tallList() throws -> some View {
+            let connections = try #require(rig.model.content).connections
+            return ConnectionsTabView(content: connections, failedSessionIDs: [], model: rig.model)
+                .frame(width: Theme.popoverWidth - 2 * Theme.padding, height: 780)
+                .padding(Theme.padding)
+                .background(Color(nsColor: .windowBackgroundColor))
+        }
+        func draw(_ name: String) throws -> NSBitmapImageRep {
+            let bitmap = try #require(Snapshot.bitmap(of: try tallList(), dark: dark))
+            #expect(Snapshot.inkRatio(bitmap) > 0.1, "\(name) looks blank")
+            if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] { try Snapshot.write(bitmap, named: name, to: directory) }
+            return bitmap
+        }
+        let plain = try draw("state-line-plain-tall")
+        rig.model.send(.releaseConnection(live))
+        let asked = try draw("state-line-question-tall")
+        #expect(Snapshot.inkRatio(asked) > Snapshot.inkRatio(plain), "the question is drawn in the list, under its line")
+        rig.model.cancelPending()
+
+        rig.engine.configure { $0.releaseConnection = ReleaseResult(ok: false, released: false, reason: "relay_unavailable", scopeCount: 0) }
+        await rig.model.send(.releaseConnection("codex-15888-1792319000"))?.value
+        await rig.model.send(.tidy("claude-4001-1792300000"))?.value
+        await rig.model.send(.tidyAll)?.value
+        let answered = try draw("state-line-answers-tall")
+        #expect(Snapshot.inkRatio(answered) > Snapshot.inkRatio(plain), "the answers are lines on the lines and under the head")
     }
 
     /// The automatic cleanup is running: 모두 정리 and the Claude session lines wait for it
@@ -302,12 +347,12 @@ struct PopoverSnapshotTests {
     @Test func aBannerDraws() async throws {
         let model = try await loadedModel("status-problem")
         let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
-        engine.configure { $0.stopConnectionByID["claude-4001-1792300000"] = StopResult(ok: false, stopped: false, released: false, reason: "protected") }
+        engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "quit_cancelled") }
         let withBanner = CUABarViewModel(engine: engine, appVersion: "0.7.0", clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: .seconds(3600))
         await withBanner.refresh()
         await withBanner.waitForBackgroundWork()
-        await withBanner.perform(.tidyAll)
-        #expect(withBanner.banner?.outcome.message == "1개 정리, 1개는 못 했어요 — 앱이 건드리지 않는 프로세스예요")
+        await withBanner.perform(.restartCodex) // the card's own button answers under the card
+        #expect(withBanner.banner?.outcome.message == "Codex가 종료를 취소했어요")
         let bitmap = try #require(Snapshot.bitmap(of: SnapshotScene(model: withBanner), dark: dark))
         if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] {
             try Snapshot.write(bitmap, named: "state-banner", to: directory)

@@ -112,12 +112,14 @@ struct ReviewRound2Tests {
         #expect(rig.model.cleanupHelp(onConnection: live) == nil)
 
         // A press that still arrives does not run and is not queued.
+        // Each says so where its button is: under the head, on the session's line, on the connection's line.
         #expect(rig.model.send(.tidyAll) == nil)
-        #expect(rig.model.banner?.outcome == Self.busy)
-        rig.model.dismissBanner()
+        #expect(rig.model.placedResults[.tidyAll] == Self.busy)
         #expect(rig.model.send(claudeRow.action) == nil)
-        #expect(rig.model.banner?.outcome == Self.busy)
+        #expect(rig.model.placedResults[.session("019a-claude")] == Self.busy)
         #expect(rig.model.send(.tidy(ended)) == nil)
+        #expect(rig.model.placedResults[.connection(ended)] == Self.busy)
+        #expect(rig.model.banner == nil, "nothing under the card for a press on a line")
         #expect(rig.model.pending == nil, "no question either")
         #expect(await rig.model.perform(.tidyAll) == Self.busy)
 
@@ -180,7 +182,9 @@ struct ReviewRound2Tests {
         await rig.model.send(.releaseConnection(Self.target))?.value
         #expect(rig.model.pending == nil, "a question in a closed popover would be stale when it opens")
         #expect(rig.model.refusedReleaseIDs == [Self.target])
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .failure, message: "작업이 끝나지 않아 못 풀었어요"))
+        // The line says it by itself (its label), so no banner and no extra line say it again.
+        #expect(rig.model.banner == nil)
+        #expect(rig.model.placedResults[.connection(Self.target)] == nil)
         let row = try #require(rig.model.content?.connections.groups.flatMap(\.rows).first { $0.id == Self.target })
         #expect(row.retryButton.title == "탭 풀기")
     }

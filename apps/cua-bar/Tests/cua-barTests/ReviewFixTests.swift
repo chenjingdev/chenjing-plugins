@@ -98,11 +98,11 @@ struct ReviewFixTests {
         .invalidOutput("EngineStatus"),
         .timeout,
     ])
-    func aBannerNeverShowsWhatTheCommandPrinted(error: EngineError) async throws {
+    func anAnswerNeverShowsWhatTheCommandPrinted(error: EngineError) async throws {
         let rig = await Rig(try Fixtures.status("status-ready"))
         rig.engine.configure { $0.actionError = error }
         await rig.model.perform(.releaseConnection("claude-12345-1792320000"))
-        let message = try #require(rig.model.banner?.outcome.message)
+        let message = try #require(rig.model.placedResults[.connection("claude-12345-1792320000")]?.message)
         #expect(message == "탭을 풀지 못했어요 — \(error.message)")
         #expect(!message.contains("secret"))
         #expect(!message.contains("Traceback"))
@@ -162,7 +162,7 @@ struct ReviewFixTests {
         await rig.model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(rig.model.failedSessionIDs.isEmpty)
         #expect(rig.model.sessionResults["019a1b2c-0009"] == ActionOutcome(kind: .success, message: "탭 2개를 풀었어요"))
-        #expect(rig.model.banner?.outcome.message == "탭 2개를 풀었어요")
+        #expect(rig.model.placedResults[.session("019a1b2c-0009")]?.message == "탭 2개를 풀었어요", "told on the line while it is still listed")
     }
 
     @Test func aClickOnPinpointReleasePassesUserAndNeedsNoQuestion() async throws {

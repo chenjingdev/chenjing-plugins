@@ -161,6 +161,66 @@ struct PopoverContentTests {
         #expect(neither.button.help == "탭을 풀 길이 없고, 신원을 확인하지 못한 프로세스라 앱이 끌 수도 없어요")
     }
 
+    @Test func anEndedLineTheAppCannotTidySaysWhyOnTheLineItselfAndNotOnlyOnHover() throws {
+        var status = try Fixtures.status("status-problem")
+        let ended = try #require(tidyRows(content(of: status)).compactMap(\.endedRow).first)
+        #expect(ended.hint == nil, "one the app can tidy needs no explanation")
+
+        status.connections[0].canStop = false
+        status.connections[0].canRelease = false
+        let stuck = try #require(tidyRows(content(of: status)).compactMap(\.endedRow).first)
+        #expect(stuck.hint == "정리할 수 없어요 — 탭을 풀 길이 없고, 신원을 확인하지 못한 프로세스라 앱이 끌 수도 없어요")
+        #expect(stuck.hint == ConnectionRow.cannotTidyHint)
+        #expect(stuck.button.isEnabled == false)
+
+        // A connection nobody owns that the app may not stop, and one an old engine does not name.
+        var cmux = try Fixtures.status("status-cmux")
+        cmux.otherTools[0].clients[1].canStop = false
+        let protected = try #require(tidyRows(content(of: cmux)).compactMap(\.orphanRow).first)
+        #expect(protected.hint == "정리할 수 없어요 — 신원을 확인하지 못한 프로세스라 앱이 끌 수 없어요")
+        cmux.otherTools[0].clients[1].canStop = true
+        #expect(try #require(tidyRows(content(of: cmux)).compactMap(\.orphanRow).first).hint == nil)
+        cmux.otherTools[0].clients[1].id = nil
+        let unnamed = try #require(tidyRows(content(of: cmux)).compactMap(\.orphanRow).first)
+        #expect(unnamed.hint == "정리할 수 없어요 — 엔진이 이 연결의 이름을 알려 주지 않아요")
+        #expect(unnamed.button == nil)
+    }
+
+    @Test func anEndedLineWhoseTabsTheAppReleasedAndMayDoNoMoreWithSaysSoAndItsButtonIsOff() throws {
+        var status = try Fixtures.status("status-problem")
+        status.connections[0].canStop = false // release only
+        let id = status.connections[0].id
+        let before = try #require(tidyRows(PopoverContent(status: status, now: Fixtures.now, calendar: Fixtures.utc)).compactMap(\.endedRow).first)
+        #expect(before.hint == nil)
+        #expect(before.button.isEnabled)
+        let settled = PopoverContent(status: status, now: Fixtures.now, calendar: Fixtures.utc, tabsReleased: [id])
+        let after = try #require(tidyRows(settled).compactMap(\.endedRow).first)
+        #expect(after.hint == "탭은 풀었어요 — 앱이 끌 수 없는 연결이에요")
+        #expect(after.hint == ConnectionRow.tabsReleasedHint)
+        #expect(after.button.isEnabled == false)
+        #expect(after.button.help == "이 연결은 앱이 끌 수 없어요. 탭은 이미 풀었어요")
+        // One the app can stop is never settled, whatever was released before.
+        status.connections[0].canStop = true
+        let stoppable = PopoverContent(status: status, now: Fixtures.now, calendar: Fixtures.utc, tabsReleased: [id])
+        #expect(try #require(tidyRows(stoppable).compactMap(\.endedRow).first).button.isEnabled)
+    }
+
+    @Test func aHeldSessionOfAnEndedConnectionIsNotAlsoListedAsHeld() throws {
+        var status = try Fixtures.status("status-problem")
+        status.leases.readable = true
+        // 019a1b2c-0003 is the ended Claude connection's own session; 019a1b2c-0001 the live one's.
+        status.leases.items = [
+            LeaseItem(sessionID: "019a1b2c-0003", agent: .claude, connectionID: "claude-4001-1792300000", cwd: nil, since: nil, releasable: true),
+            LeaseItem(sessionID: "019a1b2c-0001", agent: .claude, connectionID: "claude-12345-1792320000", cwd: nil, since: nil, releasable: true),
+            LeaseItem(sessionID: "019a-other", agent: .claude, connectionID: nil, cwd: "/Users/chenjing/dev/o", since: nil, releasable: true),
+        ]
+        let tidy = try #require(content(of: status).connections.tidy)
+        let held = tidy.rows.compactMap(\.leaseRow).filter { $0.kind == .held }
+        #expect(held.map(\.sessionID) == ["019a-other"], "the ended line has its own 정리; nothing is on the list twice")
+        #expect(tidy.rows.compactMap(\.endedRow).map(\.id) == ["claude-4001-1792300000"])
+        #expect(tidy.title == "손볼 것 4개", "the ended line, the held one and the two leftovers")
+    }
+
     @Test func theTidyListIsEndedNewestFirstThenLeasesThenConnectionsNobodyOwns() throws {
         var status = try Fixtures.status("status-cmux")
         status.connections.append(Connection(
@@ -393,7 +453,7 @@ struct PopoverContentTests {
 
     @Test func toolNamesAreShownInWordsAndUnknownOnesAsTheEngineWroteThem() {
         #expect(Format.tool("js") == "화면 조작")
-        #expect(Format.tool("turn_ended") == "차례 끝 · 점유 놓기")
+        #expect(Format.tool("turn_ended") == "차례 끝 · 탭 풀기")
         #expect(Format.tool("js_reset") == "런타임 초기화")
         #expect(Format.tool("list_tabs") == "list_tabs")
         #expect(Format.tool(nil) == "—")

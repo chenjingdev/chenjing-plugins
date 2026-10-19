@@ -57,11 +57,18 @@ final class CUABarViewModel: ObservableObject {
     /// nil until the first answer, and again while the engine cannot be read.
     @Published private(set) var content: PopoverContent?
     @Published private(set) var updatedAt: Date?
-    @Published var selectedTab: PopoverTab = .connections
+    @Published var selectedTab: PopoverTab = .connections {
+        // A question asked on a line of the list is not shown on 기록: it goes with the tab, as with the popover.
+        didSet { if selectedTab != oldValue, pending?.action.connectionID != nil { cancelPending() } }
+    }
     @Published private(set) var inFlight: Set<CUAAction> = [] {
         didSet { publishSummary() }
     }
+    /// The answer to a button of the status card (or to one whose place is gone), under the card.
     @Published private(set) var banner: ActionBanner?
+    /// The answer to 탭 풀기, 정리, 모두 정리 or 진단 복사, told next to the button that was pressed for as
+    /// long as a banner would stay. When that place is gone (the line left the list), it moves to the banner.
+    @Published private(set) var placedResults: [ResultPlace: ActionOutcome] = [:]
     /// Sessions whose release by session id failed in a way the extension reset may fix; the
     /// guidance opens for them.
     @Published private(set) var failedSessionIDs: Set<String> = []
@@ -83,6 +90,9 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var notificationPermission: NotificationPermission = .unavailable
     /// The ended connections the automatic cleanup is releasing, while it runs.
     private var cleaningIDs: Set<String> = []
+    /// Ended connections the app may only release (not stop) whose tabs it released in this run: the
+    /// card and the line then say there is nothing more to do, and only for these (never a guess).
+    private var tabsReleasedIDs: Set<String> = []
 
     /// The raw answer of the last good read, for what needs more than `content` shows.
     private(set) var lastStatus: EngineStatus?
@@ -117,6 +127,7 @@ final class CUABarViewModel: ObservableObject {
     private var wakeRequested = false
     private var loopGeneration = 0
     private var bannerTimer: Task<Void, Never>?
+    private var placedTimers: [ResultPlace: Task<Void, Never>] = [:]
     private var releaseRefusals: [String: Int] = [:]
     private var cleanupPlanner = CleanupPlanner()
     private var notificationPlanner = NotificationPlanner()
@@ -291,10 +302,11 @@ final class CUABarViewModel: ObservableObject {
     private func accept(_ status: EngineStatus) {
         let now = clock()
         lastStatus = status
-        publish(StatusEvaluator.evaluate(status, appVersion: appVersion))
-        content = PopoverContent(status: status, now: now, calendar: calendar)
+        publish(StatusEvaluator.evaluate(status, appVersion: appVersion, tabsReleased: tabsReleasedIDs))
+        content = PopoverContent(status: status, now: now, calendar: calendar, tabsReleased: tabsReleasedIDs)
         updatedAt = now
         forgetWhatIsGone(in: status)
+        moveGonePlacesToTheBanner()
         revalidatePending()
         // Cleanup first: the notifications look at what it has tried.
         startAutomaticCleanupIfNeeded()
@@ -351,6 +363,7 @@ final class CUABarViewModel: ObservableObject {
         sessionResults = [:]
         refusedReleaseIDs = []
         releaseRefusals = [:]
+        moveGonePlacesToTheBanner()
         revalidatePending()
     }
 
@@ -359,6 +372,7 @@ final class CUABarViewModel: ObservableObject {
         let connections = Set(status.connections.map(\.id))
         releaseRefusals = releaseRefusals.filter { connections.contains($0.key) }
         refusedReleaseIDs.formIntersection(connections)
+        tabsReleasedIDs.formIntersection(connections)
         let sessions = Set(status.leases.items.compactMap(\.sessionID) + status.leases.maybeLeft.compactMap(\.sessionID))
         failedSessionIDs.formIntersection(sessions)
         sessionResults = sessionResults.filter { sessions.contains($0.key) }
@@ -409,6 +423,17 @@ final class CUABarViewModel: ObservableObject {
         }
     }
 
+    /// The question under the status card: only one that comes from a button of the card (다시 켜기).
+    /// A question about a line of the list is asked on that line (`confirmationPrompt(forConnection:)`).
+    var cardConfirmationPrompt: ConfirmationPrompt? {
+        pending?.action.connectionID == nil ? confirmationPrompt : nil
+    }
+
+    /// The question asked on this connection's line, right under it; nil when it is about another.
+    func confirmationPrompt(forConnection id: String) -> ConfirmationPrompt? {
+        pending?.action.connectionID == id ? confirmationPrompt : nil
+    }
+
     /// The question an action asks before it runs, or nil when the click is its own consent (or
     /// when it cannot run now: see `send`).
     func confirmation(for action: CUAAction) -> PendingConfirmation? {
@@ -424,7 +449,7 @@ final class CUABarViewModel: ObservableObject {
     func send(_ action: CUAAction) -> Task<Void, Never>? {
         pending = nil
         if waitsForAutomaticCleanup(action) {
-            show(Self.cleanupBusyOutcome)
+            tell(Self.cleanupBusyOutcome, about: action)
             return nil
         }
         switch Confirmations.gate(for: action, content: content) {
@@ -432,7 +457,7 @@ final class CUABarViewModel: ObservableObject {
             pending = PendingConfirmation(action: action, kind: .standard)
             return nil
         case .refuse(let reason):
-            show(ActionOutcome(kind: .info, message: reason))
+            tell(ActionOutcome(kind: .info, message: reason), about: action)
             return nil
         case .run:
             return Task { _ = await perform(action) }
@@ -519,7 +544,7 @@ final class CUABarViewModel: ObservableObject {
     /// The same for a lease line: its own 탭 풀기, 모두 정리 when it is one of the sessions that
     /// releases, a restart or a setup, or the automatic cleanup when it is a Claude session.
     func isWaiting(onSession id: String) -> Bool {
-        let tidiedByAll = TidyPlan.items(in: lastStatus).contains(.session(id))
+        let tidiedByAll = TidyPlan.items(in: lastStatus, tabsReleased: tabsReleasedIDs).contains(.session(id))
         let running = inFlight.contains { action in
             switch action {
             case .releaseSession(let session, _): session == id
@@ -548,7 +573,7 @@ final class CUABarViewModel: ObservableObject {
         }
         // Never beside the automatic cleanup on what it is releasing. Not queued: the person presses again.
         if waitsForAutomaticCleanup(action) {
-            show(Self.cleanupBusyOutcome)
+            tell(Self.cleanupBusyOutcome, about: action)
             return Self.cleanupBusyOutcome
         }
         // Never two of the same at a time.
@@ -558,15 +583,15 @@ final class CUABarViewModel: ObservableObject {
         inFlight.insert(action)
         defer { inFlight.remove(action) }
         let result = await execute(action)
-        let (outcome, showsBanner) = settle(action, result)
-        if showsBanner { show(outcome) }
+        let (outcome, tellsIt) = settle(action, result)
+        if tellsIt { tell(outcome, about: action) }
         await refreshAfterInFlight()
         return outcome
     }
 
     /// R15: a release the engine refuses because a tool call has not finished is asked about once
     /// more; refused again, the row says so and its 탭 풀기 stays (a live AI is not stopped).
-    private func settle(_ action: CUAAction, _ result: ActionResult) -> (outcome: ActionOutcome, showsBanner: Bool) {
+    private func settle(_ action: CUAAction, _ result: ActionResult) -> (outcome: ActionOutcome, tellsIt: Bool) {
         switch action {
         case .releaseConnection(let id), .retryRelease(let id):
             guard result.reason == "request_in_flight", result.outcome.kind == .failure else {
@@ -582,8 +607,9 @@ final class CUABarViewModel: ObservableObject {
                 pending = PendingConfirmation(action: .retryRelease(id), kind: .retryRelease)
                 return (result.outcome, false)
             }
+            // The line says it by itself from now on (`ConnectionRow.refusedNote`), so it is not told twice.
             refusedReleaseIDs.insert(id)
-            return (ActionOutcome(kind: .failure, message: ConnectionRow.refusedNote), true)
+            return (ActionOutcome(kind: .failure, message: ConnectionRow.refusedNote), false)
         default:
             return (result.outcome, true)
         }
@@ -670,7 +696,10 @@ final class CUABarViewModel: ObservableObject {
     private func tidy(_ id: String, _ way: TidyPlan.Way) async throws -> TidyStep {
         switch way {
         case .releaseOnly:
-            return TidyStep(release: try await engine.releaseConnection(id: id))
+            let step = TidyStep(release: try await engine.releaseConnection(id: id))
+            // Only what the engine confirmed: the card says "탭은 풀었어요" for these and for nothing it does not know.
+            if step.kind == .tabsOnly { tabsReleasedIDs.insert(id) }
+            return step
         case .stop:
             var result: StopResult
             do {
@@ -691,7 +720,9 @@ final class CUABarViewModel: ObservableObject {
     private func tidyEverything() async throws -> ActionResult {
         var steps: [TidyStep] = []
         var asksForTheExtension = false
-        for item in TidyPlan.items(in: lastStatus) {
+        for item in TidyPlan.items(in: lastStatus, tabsReleased: tabsReleasedIDs) {
+            // A line whose own 정리 or 탭 풀기 is running is not asked the same again.
+            if isRunningOnItsOwn(item) { continue }
             do {
                 switch item {
                 case .connection(let id, let way):
@@ -722,6 +753,18 @@ final class CUABarViewModel: ObservableObject {
         // The guidance is what the person needs next, so it must be on screen.
         if asksForTheExtension { showGuidance() }
         return ActionResult(outcome: ActionMessages.tidyAll(steps), reason: steps.first { !$0.isDone }?.reason)
+    }
+
+    /// Whether the line of this item has its own button's action in flight (it started before 모두 정리
+    /// reached it, or while it was busy with the lines before).
+    private func isRunningOnItsOwn(_ item: TidyPlan.Item) -> Bool {
+        inFlight.contains { action in
+            switch (action, item) {
+            case (.tidy(let id), .connection(let target, _)): id == target
+            case (.releaseSession(let id, _), .session(let target)): id == target
+            default: false
+            }
+        }
     }
 
     /// What a release by session id said, kept for that session's row; a failure that points at the
@@ -914,6 +957,49 @@ final class CUABarViewModel: ObservableObject {
             await cleanup?.value
             await reading?.value
             for task in tasks { await task.value }
+        }
+    }
+
+    // MARK: Telling the answer
+
+    /// Tells the answer to `action` where its button is: on its line, under the head of 손볼 것, or at the
+    /// bottom of 기록. Where that place is not on screen (the line is gone, or nothing was read), it is
+    /// the banner under the card, which is where the card's own buttons answer too.
+    private func tell(_ outcome: ActionOutcome, about action: CUAAction) {
+        guard !outcome.message.isEmpty else { return }
+        guard let place = action.resultPlace, isOnScreen(place) else {
+            show(outcome)
+            return
+        }
+        placedResults[place] = outcome
+        placedTimers[place]?.cancel()
+        placedTimers[place] = Task { [weak self, sleep, duration = bannerDuration] in
+            do { try await sleep(duration) } catch { return }
+            self?.forgetPlaced(place)
+        }
+    }
+
+    private func isOnScreen(_ place: ResultPlace) -> Bool {
+        switch place {
+        case .connection(let id): Confirmations.targetExists(id, in: content)
+        case .session(let id): content?.connections.tidy?.rows.contains { $0.leaseRow?.sessionID == id } == true
+        case .tidyAll: content?.connections.tidy != nil
+        case .diagnosis: true
+        }
+    }
+
+    private func forgetPlaced(_ place: ResultPlace) {
+        placedTimers[place]?.cancel()
+        placedTimers[place] = nil
+        placedResults[place] = nil
+    }
+
+    /// A line that left the list takes its answer with it, so the answer is said under the card instead:
+    /// a 정리 that worked is the common way for its line to go.
+    private func moveGonePlacesToTheBanner() {
+        for (place, outcome) in placedResults where !isOnScreen(place) {
+            forgetPlaced(place)
+            show(outcome)
         }
     }
 

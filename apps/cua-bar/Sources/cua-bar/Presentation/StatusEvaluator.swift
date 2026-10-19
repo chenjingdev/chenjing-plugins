@@ -58,8 +58,10 @@ struct StatusSummary: Equatable, Sendable {
 enum StatusEvaluator {
     // MARK: Entry points
 
-    static func evaluate(_ status: EngineStatus, appVersion: String?) -> StatusSummary {
-        if let problem = problem(in: status, appVersion: appVersion) { return summary(for: problem) }
+    /// `tabsReleased`: the ended connections the app may only release, whose tabs it released in this run
+    /// (see `problem`).
+    static func evaluate(_ status: EngineStatus, appVersion: String?, tabsReleased: Set<String> = []) -> StatusSummary {
+        if let problem = problem(in: status, appVersion: appVersion, tabsReleased: tabsReleased) { return summary(for: problem) }
         // Not a problem (nothing is broken and the icon stays ready), but nothing else would say why
         // the connections of a Codex from before the update cannot be released. Said while working
         // too, or the card would drop it each time an AI uses the screen.
@@ -86,13 +88,15 @@ enum StatusEvaluator {
 
     /// For a Codex that a launcher older than this setup started (S8).
     static let restartAppliesStep = "Codex를 다시 켜면 새 설정이 적용돼요"
-    static let restartAppliesWarning = "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 놓아줄 수 없을 수 있어요"
+    static let restartAppliesWarning = "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 탭을 풀 수 없을 수 있어요"
 
     /// The card's next steps for a problem that belongs to a line of the list.
     static let tidyStep = "목록 맨 위의 정리를 눌러 주세요"
     static let codexLeasesStep = "목록 맨 위에서 줄마다 탭 풀기를 눌러 주세요"
     static let noWayToReleaseStep = "하나씩 풀 방법이 없어요 — 목록 맨 아래 안내를 따라 주세요"
     static let cannotTidyStep = "앱이 정리할 수 없는 연결이에요 — 목록에서 까닭을 보세요"
+    /// Only ended connections the app may release but not stop are left, and it released their tabs.
+    static let tabsReleasedStep = "앱이 끌 수 없는 끝난 연결이에요 — 탭은 풀었어요"
 
     /// The summary when the engine gave no usable status.
     ///
@@ -154,7 +158,11 @@ enum StatusEvaluator {
     ///
     /// The card has a fix button only for a problem of the whole app. An ended connection or a leftover
     /// lease is one line's problem: the card says what to do and the button is on that line (F2).
-    static func problem(in status: EngineStatus, appVersion: String?) -> Problem? {
+    ///
+    /// `tabsReleased` holds the ended connections the app may only release (it may not stop them) whose
+    /// tabs it released in this run. Once that is all that is left, the card says so instead of sending
+    /// the person to 정리 again; it never says the tabs are released when it does not know.
+    static func problem(in status: EngineStatus, appVersion: String?, tabsReleased: Set<String> = []) -> Problem? {
         if status.codex.installed == false {
             return Problem(
                 kind: .codexMissing, title: "Codex 앱이 없어요", nextStep: "Codex 앱을 받아 설치해 주세요",
@@ -179,10 +187,15 @@ enum StatusEvaluator {
         }
         let ended = status.connections.filter { $0.state == .ended }
         if !ended.isEmpty {
-            // Still a problem for the icon, but with no button: the line itself has 정리.
+            // Still a problem for the icon, but with no button: the line itself has 정리. 정리 has
+            // something to do while one of them can be stopped, or released and not yet released.
+            let worthTidying = ended.contains { connection in
+                TidyPlan.way(for: connection) != nil && !TidyPlan.isSettled(connection, tabsReleased: tabsReleased)
+            }
+            let settled = ended.contains { TidyPlan.isSettled($0, tabsReleased: tabsReleased) }
             return Problem(
                 kind: .endedConnections, title: "끝난 연결이 \(ended.count)개 남아 있어요",
-                nextStep: ended.contains { TidyPlan.way(for: $0) != nil } ? tidyStep : cannotTidyStep,
+                nextStep: worthTidying ? tidyStep : settled ? tabsReleasedStep : cannotTidyStep,
                 warning: nil, fix: nil, fixLabel: nil)
         }
         if !status.leases.maybeLeft.isEmpty {

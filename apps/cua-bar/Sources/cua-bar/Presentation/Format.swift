@@ -105,7 +105,7 @@ enum Format {
         switch name {
         case nil: unknown
         case "js"?: "화면 조작"
-        case "turn_ended"?: "차례 끝 · 점유 놓기"
+        case "turn_ended"?: "차례 끝 · 탭 풀기"
         case "js_reset"?: "런타임 초기화"
         case let name?: name
         }
