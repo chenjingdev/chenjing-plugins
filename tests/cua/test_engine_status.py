@@ -442,10 +442,10 @@ class AttributionTests(StatusCase):
 class OwnerNameTests(StatusCase):
     """A relay that a bridge started carries the bridge's name (`owner`); that decides whose runtime it is."""
 
-    def named_runtime(self, owner, start=NOW-600, cwd='/work/other', scopes=()):
+    def named_runtime(self, owner, start=NOW-600, cwd='/work/other', scopes=(), **fields):
         self.add_runtime(2000, start)
         return self.state.relay('r1', 2001, start, root_pid=2000, runtime_pid=2002, cwd=cwd, owner=owner,
-                                scopes=list(scopes))
+                                scopes=list(scopes), **fields)
 
     def test_a_runtime_that_names_its_bridge_belongs_to_it_without_a_shared_session_folder_or_start(self):
         self.start_world()
@@ -460,7 +460,7 @@ class OwnerNameTests(StatusCase):
 
     def test_a_runtime_that_names_a_bridge_that_is_gone_is_an_ended_claude_connection(self):
         self.start_world()
-        directory = self.named_runtime('bridge-7001-%d' % (NOW-5000))
+        directory = self.named_runtime('bridge-7001-%d' % (NOW-5000), last_call_at=iso(at(500)))      # it was called once
         self.serve(directory, 2001, NOW-600, lambda request: {'released': True})
         [connection] = self.status()['connections']
         self.assertEqual((connection['id'], connection['agent'], connection['state'], connection['owner_alive'],
@@ -508,6 +508,96 @@ class OwnerNameTests(StatusCase):
         self.update(self.state.root/'relays/relay-r1', 'relay', owner='bridge-4242-%d' % (NOW-1900))
         [connection] = [item for item in self.status()['connections'] if item['pid'] == 2001]
         self.assertEqual((connection['agent'], connection['state']), ('claude', 'ended'))     # a reused pid
+
+
+class RevivedRuntimeTests(StatusCase):
+    """A runtime Codex started again for the thread of a bridge that is long gone, and that nobody used, is no connection
+    (S17, S18): it is in no list and only counted in the diagnosis. Any use of it, even one call, keeps it an ended one."""
+    BRIDGE = 'bridge-7001-%d' % (NOW-5000)
+
+    def runtime(self, owner=BRIDGE, start=NOW-600, rss=(1000, 400, 2000), **fields):
+        self.add_runtime(2000, start, rss=rss)
+        return self.state.relay('r1', 2001, start, root_pid=2000, runtime_pid=2002, cwd='/work/c22', owner=owner, **fields)
+
+    def listed(self):
+        return [(item['agent'], item['state'], item['pid']) for item in self.status()['connections']]
+
+    def test_it_is_in_no_list_and_not_even_as_a_runtime_nobody_has_a_record_of(self):
+        self.start_world()
+        self.runtime()
+        status = self.status()
+        self.assertEqual(status['connections'], [])
+        self.assertEqual(status['leases']['maybe_left'], [])
+        view = engine_status.build_view(self.context())
+        [item] = view.revived
+        self.assertEqual((item.pid, item.memory_bytes), (2001, (1000+400+2000)*1024))
+
+    def test_it_is_counted_with_the_memory_of_the_whole_runtime(self):
+        self.start_world()
+        self.runtime(rss=(100_000, 60_000, 50_000))
+        self.add_runtime(3000, NOW-500, rss=(100_000, 5_000, 5_000))
+        self.state.relay('r2', 3001, NOW-500, root_pid=3000, runtime_pid=3002, cwd='/work/c19', owner='bridge-7002-%d' % (NOW-9000))
+        self.assertEqual([item.memory_bytes for item in engine_status.build_view(self.context()).revived],
+                         [210_000*1024, 110_000*1024])
+
+    def test_two_minutes_after_the_bridge_are_not_enough(self):
+        self.start_world()
+        self.runtime(start=NOW-5000+120)
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+
+    def test_more_than_two_minutes_after_the_bridge_are(self):
+        self.start_world()
+        self.runtime(start=NOW-5000+121)
+        self.assertEqual(self.listed(), [])
+
+    def test_a_runtime_that_was_called_stays_an_ended_connection(self):
+        self.start_world()
+        self.runtime(last_call_at=iso(at(500)))
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+
+    def test_a_runtime_with_an_open_scope_stays_an_ended_connection(self):
+        self.start_world()
+        self.runtime(scopes=[State.scope(SESSION_A)], cleanup='open')
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+
+    def test_a_runtime_with_a_call_in_flight_stays_an_ended_connection(self):
+        self.start_world()
+        self.runtime(busy=True)
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+
+    def test_a_runtime_the_activity_log_knows_stays_an_ended_connection(self):
+        self.start_world()
+        self.runtime()
+        self.state.activity([State.line('relay-2001-%d' % (NOW-600), 300, None)])      # a call that named no session
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+        self.state.activity([State.line('relay-2001-%d' % (NOW-600), 300, SESSION_A)])
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+        self.state.activity([State.line('relay-9999-%d' % (NOW-600), 300, SESSION_A)])      # another writer's line
+        self.assertEqual(self.listed(), [])
+
+    def test_a_runtime_whose_bridge_still_has_a_record_stays_an_ended_connection(self):
+        self.start_world()
+        self.runtime()
+        self.state.bridge('d1', 7001, NOW-5000, owner_pid=501)
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+
+    def test_a_runtime_whose_bridge_runs_is_never_one(self):
+        self.start_world()
+        self.add_claude(500)
+        self.add_bridge(7001, 500, NOW-5000)
+        self.runtime()
+        self.assertEqual(self.listed(), [('claude', 'active', 7001)])
+
+    def test_a_runtime_that_names_no_bridge_is_a_codex_connection_as_before(self):
+        self.start_world()
+        self.runtime(owner=None)
+        self.assertEqual(self.listed(), [('codex', 'active', 2001)])
+
+    def test_the_runtime_of_a_conversation_that_ended_a_moment_after_it_began_is_still_found(self):
+        """The runtime a killed bridge left behind came up with its bridge: that is a leak, and an ended connection."""
+        self.start_world()
+        self.runtime(start=NOW-5000+8)
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
 
 
 class OldHostScopeTests(StatusCase):

@@ -8,6 +8,8 @@ A connection is one AI conversation that uses CUA (R8):
   codex   a live relay record that serves no bridge, or a runtime without any record.
 cmux-cua is none of these; it is listed under other_tools. Each of its `cmux-cua mcp` processes (one per AI
 conversation) is a CmuxConnection that can be stopped on its own.
+A runtime that Codex itself started again for the thread of a bridge that was long gone, and that nobody has used,
+is none of these either: it is a RevivedRuntime, left out of the connections and only counted in the diagnosis.
 """
 import re
 
@@ -21,6 +23,9 @@ PRUNE_MIN_AGE = 60
 HOST_START_GRACE = 30
 # A quitting Codex closes its host a few seconds before it ends; until then it is not one without a host (S2).
 HOST_STOP_GRACE = 30
+# A bridge starts its thread, and so the runtime of it, within seconds. A runtime that came up this much later than the
+# bridge it names, with the bridge gone, was started again by Codex (S17, S18), not by that conversation.
+REVIVED_AFTER = 120
 
 
 def _later(*values):
@@ -96,6 +101,22 @@ class CmuxConnection:
                 'started_at': iso(self.started), 'can_stop': self.can_stop}
 
 
+class RevivedRuntime:
+    """A runtime that Codex started again by itself for the thread of a bridge that is long gone (S17, S18).
+
+    Codex keeps the thread of a bridge for about half an hour after it was last used and, now and then, starts the
+    servers of all its threads again; nothing of ours asks for that. The relay of the new runtime still carries the
+    old bridge's name. It belongs to no conversation and holds nothing: nobody ever called it and it has no open scope.
+    It is therefore no connection (not listed, not ended, not released or stopped by the app); the diagnosis counts it,
+    and Codex takes it down with the thread. One that was used even once stays an ended connection."""
+
+    def __init__(self, relay, pids):
+        self.pid = relay.pid
+        self.started = relay.started_at
+        self.pids = pids
+        self.memory_bytes = None
+
+
 def _owner_alive(inv, owner_pid, child_started):
     """The owner is alive when that pid is a process that started before its child (a reused pid did not)."""
     proc = inv.mine.get(owner_pid) if owner_pid and owner_pid > 1 else None
@@ -165,6 +186,7 @@ class View:
         self.now = ctx.clock()
         self.connections = []
         self.cmux = []                 # CmuxConnection, one per `cmux-cua mcp` process; not in `connections`
+        self.revived = []              # RevivedRuntime: counted in the diagnosis, in no list
         self.maybe_left = []
         self.prunable = []
         self.activity = []
@@ -177,6 +199,7 @@ class View:
         self.dead_bridges = [record for record in self.dead if record.kind == 'bridge']
         self.served = {}               # relay writer -> sessions that the activity log shows it serving
         self.served_last = {}          # relay writer -> the session of its newest activity line that names one
+        self.operated = {line['writer'] for line in activity}       # writers with any line in the activity log
         for line in activity:          # oldest first, so the last line seen wins
             if line['session_id']:
                 self.served.setdefault(line['writer'], set()).add(line['session_id'])
@@ -263,6 +286,9 @@ class View:
                 former = next((record for record in self.dead_bridges if record.writer == named), None)
             else:
                 former = next((record for record in self.dead_bridges if sessions & record.sessions()), None)
+            if self._brought_back(relay, named, running, former):
+                self.revived.append(RevivedRuntime(relay, tree))
+                continue
             claude = named is not None or former is not None
             conn = Connection('claude' if claude else 'codex', relay.pid, relay.started_at)
             conn.record = relay
@@ -294,6 +320,20 @@ class View:
             conn.can_release = control_socket(relay, self.ctx.uid) is not None
             self.by_writer[relay.writer] = conn
             self.connections.append(conn)
+
+    def _brought_back(self, relay, named, running, former):
+        """Whether the relay is a runtime Codex started again for the thread of a bridge that was long gone.
+
+        It names a bridge that no longer runs and has no record, it came up more than REVIVED_AFTER seconds after that
+        bridge, and nothing was ever done with it: no call, no call in flight, no open scope, no line in the activity
+        log. A runtime with any of those stays an ended connection, whatever its age."""
+        if named is None or running is not None or former is not None:
+            return False
+        if relay.data.get('last_call_at') or relay.data.get('busy') is True or relay.data.get('scopes'):
+            return False
+        if relay.writer in self.operated:
+            return False
+        return relay.started_at-int(WRITER.match(named).group(3)) > REVIVED_AFTER
 
     def _runtime_connections(self):
         """Runtimes that no relay record covers: all that is known is the process."""
@@ -344,6 +384,8 @@ class View:
             conn.memory_bytes = inv.rss_bytes(conn.memory_pids)
             conn.last_call = _later(conn.last_call, self.newest.get(conn.id))
             conn.finish(self.now)
+        for item in self.revived:
+            item.memory_bytes = inv.rss_bytes(item.pids)
         self.connections.sort(key=lambda conn: (conn.agent != 'claude', conn.started, conn.pid))
         protected = self.protected_pids()
         for conn in self.connections:

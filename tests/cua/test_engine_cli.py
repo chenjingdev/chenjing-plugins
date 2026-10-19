@@ -214,6 +214,47 @@ class DiagnoseTests(CliCase):
         self.assertTrue(all(re.match(r'^  \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ claude js (ok|failed) \d+ ms$', line) for line in operations))
         self.assertTrue(operations[0].endswith('ok 129 ms'))
 
+    def revived(self, repl, relay, bridge_started, rss):
+        """A runtime Codex started again by itself for the thread of a bridge that is long gone."""
+        self.add_runtime(repl, NOW-600, rss=rss)
+        self.state.relay('r%d' % relay, relay, NOW-600, root_pid=repl, runtime_pid=relay+1, cwd='/work/c22',
+                         owner='bridge-%d-%d' % (relay+5000, bridge_started))
+
+    def test_runtimes_codex_started_again_are_counted_in_plain_words_and_are_no_connection(self):
+        self.start_world()
+        self.revived(2000, 2001, NOW-5000, (70_000, 20_000, 17_520))
+        self.revived(3000, 3001, NOW-9000, (70_000, 20_000, 17_520))
+        lines = self.text().splitlines()
+        self.assertIn('Codex가 다시 켠 빈 런타임 2개 · 210 MB — 대화가 끝난 것이라 Codex가 곧 내려요', lines)
+        self.assertIn('connections: 0 (claude 0, codex 0); active 0, idle 0, ended 0', lines)
+        self.assertEqual(lines[lines.index('connections: 0 (claude 0, codex 0); active 0, idle 0, ended 0')+1].split(' ')[0],
+                         'Codex가')
+
+    def test_one_such_runtime_is_said_just_as_plainly_and_says_nothing_of_where_it_works(self):
+        self.start_world()
+        self.revived(2000, 2001, NOW-5000, (100_000, 30_000, 10_000))
+        text = self.text()
+        self.assertIn('Codex가 다시 켠 빈 런타임 1개 · 137 MB — 대화가 끝난 것이라 Codex가 곧 내려요', text.splitlines())
+        self.assertNotIn('/work/c22', text)
+
+    def test_without_one_the_report_has_no_such_line(self):
+        self.world()
+        self.assertFalse([line for line in self.text().splitlines() if '빈 런타임' in line])
+
+    def test_a_runtime_that_was_used_is_an_ended_connection_in_the_counts_and_not_in_that_line(self):
+        self.start_world()
+        self.add_runtime(2000, NOW-600)
+        self.state.relay('r1', 2001, NOW-600, root_pid=2000, runtime_pid=2002, owner='bridge-7001-%d' % (NOW-5000),
+                         last_call_at=iso(at(100)))
+        lines = self.text().splitlines()
+        self.assertIn('connections: 1 (claude 1, codex 0); active 0, idle 0, ended 1', lines)
+        self.assertFalse([line for line in lines if '빈 런타임' in line])
+
+    def test_memory_is_said_in_binary_megabytes_like_the_apps_rows(self):
+        self.assertEqual([engine_diagnose._memory(size) for size in (0, 1_048_575, 1_048_576, 215_040*1024, 1023*1_048_576+400_000,
+                                                                       1024*1_048_576, 1_700_000*1024)],
+                         ['1 MB 미만', '1 MB 미만', '1 MB', '210 MB', '1023 MB', '1.0 GB', '1.6 GB'])
+
     def test_no_home_folder_url_environment_value_or_private_name_appears(self):
         self.world()
         secrets = {'SECRET_SENTINEL_TOKEN': 'sk-live-12345', 'CODEX_HOST_CUA_NATIVE_CLI': 'ENV_VALUE_SENTINEL'}

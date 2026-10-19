@@ -1,7 +1,9 @@
 """A plain-text report that is safe to paste into a chat: versions, states, counts and the latest operations.
 
 It contains no environment value, token, URL, page title, tool argument or result, and the home folder is
-written as ~ (R2). Everything in it comes from the status the app shows, so it never says more than the app does.
+written as ~ (R2). Everything in it comes from the status the app shows, so it never says more than the app does,
+except one line: the runtimes Codex started again for conversations that are long gone are in no list, and only
+counted here.
 """
 from pathlib import Path
 import platform
@@ -34,6 +36,16 @@ def _plural(count, word):
     return '%d %s%s' % (count, word, '' if count == 1 else 'es' if word.endswith('s') else 's')
 
 
+def _memory(size):
+    """Binary megabytes like Activity Monitor and the rows of the app; gigabytes from 1 GB up."""
+    mebibytes = size/1_048_576
+    if mebibytes < 1:
+        return '1 MB 미만'
+    if int(mebibytes+0.5) < 1024:
+        return '%d MB' % int(mebibytes+0.5)
+    return '%.1f GB' % (mebibytes/1024)
+
+
 def diagnose_text(ctx, view=None):
     view = view or build_view(ctx)
     status = view.status_json()
@@ -61,6 +73,10 @@ def diagnose_text(ctx, view=None):
     lines.append('connections: %d (claude %d, codex %d); active %d, idle %d, ended %d' % (
         len(connections), by_agent.get('claude', 0), by_agent.get('codex', 0), by_state.get('active', 0),
         by_state.get('idle', 0), by_state.get('ended', 0)))
+    if view.revived:
+        # In no list: nobody uses these and they hold nothing. Said in plain words, for the person who pastes this.
+        lines.append('Codex가 다시 켠 빈 런타임 %d개 · %s — 대화가 끝난 것이라 Codex가 곧 내려요' % (
+            len(view.revived), _memory(sum(item.memory_bytes or 0 for item in view.revived))))
     left = status['leases']['maybe_left']
     lines.append('leases: the list cannot be read; may be left behind: %d (releasable now: %d)' % (
         len(left), sum(1 for item in left if item['releasable'])))

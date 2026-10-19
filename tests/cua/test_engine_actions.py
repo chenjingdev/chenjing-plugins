@@ -297,6 +297,35 @@ class ReleaseBookingTests(ActionCase):
         self.assertFalse((self.state.root/'engine-released.json').exists())
 
 
+class RevivedRuntimeActionTests(ActionCase):
+    """A runtime Codex started again for a conversation that is long gone is no connection (S17, S18): neither the
+    automatic cleanup nor a stop reaches it, and it cannot be asked for by an id."""
+    ID = 'claude-2001-%d' % (NOW-600)
+
+    def revived(self):
+        self.add_runtime(2000, NOW-600)
+        directory = self.state.relay('r1', 2001, NOW-600, root_pid=2000, runtime_pid=2002, cwd='/work/c22',
+                                     owner='bridge-7001-%d' % (NOW-5000))
+        return self.writer(directory, 2001, NOW-600, DONE)
+
+    def test_the_automatic_cleanup_does_not_ask_it_to_release_anything(self):
+        server = self.revived()
+        self.assertEqual(engine_actions.release_ended(self.ctx()), {'ok': True, 'results': []})
+        self.assertEqual(server.requests, [])
+
+    def test_no_group_stop_signals_it(self):
+        self.revived()
+        for group in ('all', 'claude', 'codex'):
+            self.assertEqual(engine_actions.stop_group(self.ctx(), group)['results'], [])
+        self.assertEqual(self.machine.signals, [])
+
+    def test_it_is_not_found_by_its_id(self):
+        server = self.revived()
+        self.assertEqual(engine_actions.release_connection(self.ctx(), self.ID)['reason'], 'not_found')
+        self.assertEqual(engine_actions.stop_connection(self.ctx(), self.ID)['reason'], 'not_found')
+        self.assertEqual((self.machine.signals, server.requests), ([], []))
+
+
 class SessionReleaseInEndedTests(ActionCase):
     """release --ended also frees the sessions of dead bridges, through the host."""
 
