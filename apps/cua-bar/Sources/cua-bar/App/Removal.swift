@@ -1,7 +1,10 @@
 import Foundation
 
-/// The fixed lines of the remove action. None carries text a command printed.
+/// The fixed lines of the remove action, called 앱 지우기. None carries text a command printed.
 enum RemovalMessages {
+    /// The button at the bottom of 기록, and the answer that does it.
+    static let buttonTitle = "앱 지우기…"
+    static let confirmTitle = "앱 지우기"
     /// Asked once, inline, before anything is touched (R3).
     static let question = "연결 설정과 중계기를 되돌려요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜져요."
     static let working = "되돌리는 중…"
@@ -10,13 +13,13 @@ enum RemovalMessages {
     static let nothingToUndo = "되돌릴 연결 설정이 없었어요. " + trashHint
     /// The remover refuses while a Codex host runs. Codex is never quit from here.
     static let hostRunning = "Codex를 정상 종료한 뒤 다시 해 주세요"
-    static let failed = "제거하지 못했어요 — 연결 설정은 그대로 남아 있을 수 있어요"
+    static let failed = "앱을 지우지 못했어요 — 연결 설정은 그대로 남아 있을 수 있어요"
     /// A setup (or an install or update) writes the same files; they do not run at the same time.
     static let setupRunning = "연결을 설정하는 중이라 지금은 못 해요. 끝난 뒤에 다시 해 주세요"
     static let loginItemStays = " 로그인 항목은 시스템 설정 > 일반 > 로그인 항목에서 직접 꺼 주세요."
 }
 
-/// The footer's 제거 (R3): asks once, runs `codex-cua uninstall` (the plugin's `setup.sh uninstall`
+/// 앱 지우기 at the bottom of 기록 (R3, once called 제거): asks once, runs `codex-cua uninstall` (the plugin's `setup.sh uninstall`
 /// when the command is missing or not ours), takes the login item away, shows the result and
 /// quits. If the remover refuses because a Codex host is running, it says so and changes nothing
 /// else; it never quits Codex. The Claude plugin and the app file stay.
@@ -64,7 +67,7 @@ final class RemovalFlow: ObservableObject {
         self.onRemoved = onRemoved
     }
 
-    /// 제거 was pressed: ask.
+    /// 앱 지우기 was pressed: ask.
     func ask() {
         switch phase {
         case .idle, .refused: phase = .confirming
@@ -80,7 +83,7 @@ final class RemovalFlow: ObservableObject {
         }
     }
 
-    /// 제거 was confirmed.
+    /// 앱 지우기 was confirmed.
     func confirm() async {
         guard phase == .confirming else { return }
         if isSetupRunning() {

@@ -3,7 +3,7 @@ import SwiftUI
 /// The popover (structure B): a status card on top, two tabs below, one button on every row.
 struct PopoverView: View {
     @ObservedObject var model: CUABarViewModel
-    /// What the footer and the 기록 tab add: new version, remove, login item. nil leaves them out.
+    /// What the bottom line and the 기록 tab add: new version, 앱 지우기, login item. nil leaves them out.
     var maintenance: Maintenance?
     var quit: () -> Void
 
@@ -36,9 +36,7 @@ struct PopoverView: View {
             tabContent
                 .frame(height: Theme.listHeight)
 
-            FooterView(
-                updatedText: model.updatedText, maintenance: maintenance, notifications: model.notificationPermission,
-                turnOnNotifications: { await model.turnOnNotifications() }, quit: quit)
+            FooterView(updatedText: model.updatedText, maintenance: maintenance, quit: quit)
         }
         .padding(Theme.padding)
         .frame(width: Theme.popoverWidth)
@@ -51,7 +49,8 @@ struct PopoverView: View {
             // Also without a status: 진단 복사 is most needed exactly then.
             ActivityTabView(
                 content: model.activityContent, copying: model.inFlight.contains(.copyDiagnosis),
-                note: maintenance?.loginItem.line
+                note: maintenance?.loginItem.line, maintenance: maintenance, notifications: model.notificationPermission,
+                turnOnNotifications: { await model.turnOnNotifications() }
             ) {
                 model.send(.copyDiagnosis)
             }

@@ -3,8 +3,8 @@ import SwiftUI
 import Testing
 @testable import cua_bar
 
-/// The footer's pieces together: the new-version button, the remove question, the login item
-/// line, and the diagnosis the person copies.
+/// The bottom line (time, new version, 끝내기) and the bottom of 기록 (진단 복사, 알림 켜기, 앱 지우기
+/// with its question, the login item line) together, and the diagnosis the person copies.
 @MainActor
 struct FooterTests {
     private struct Kit {
@@ -82,53 +82,84 @@ struct FooterTests {
         #expect(width(newer) > width(same) + 60, "newer \(width(newer)) vs same \(width(same))")
     }
 
-    // MARK: Notifications off
-
-    @Test func theNotificationsButtonShowsOnlyWhileTheyCannotBeShownAndTheRowStillFits() async {
+    @Test func theBottomLineIsOneLineOfTheTimeTheNewVersionAndQuitAndNothingElse() async {
         let kit = kit()
         defer { kit.suite.remove() }
-        await kit.releases.checkIfDue() // the new-version button too: the fullest row
-        func footer(_ permission: NotificationPermission) -> FooterView {
-            FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, notifications: permission, quit: {})
-        }
-        let allowed = fittingSize(footer(.allowed)).width
-        #expect(fittingSize(footer(.off)).width > allowed + 40)
-        #expect(fittingSize(footer(.notDecided)).width == fittingSize(footer(.off)).width)
-        #expect(fittingSize(footer(.unavailable)).width == allowed)
+        await kit.releases.checkIfDue() // the new-version button too: the fullest line
         let row = Theme.popoverWidth - 2 * Theme.padding
-        #expect(fittingSize(footer(.off)).width <= row, "everything fits the row side by side")
-        #expect(fittingSize(footer(.off).frame(width: row)).height < 40, "one line")
+        let full = fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}))
+        #expect(full.width <= row, "everything fits the line side by side")
+        #expect(fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}).frame(width: row)).height < 30, "one line")
+        // Asking to remove the app puts nothing on this line: its question is at the bottom of 기록.
+        kit.removal.ask()
+        let asking = fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}).frame(width: row))
+        #expect(asking.height < 30)
+        kit.removal.dismiss()
+    }
+
+    // MARK: The bottom of 기록
+
+    @Test func theRareButtonsAreNamedAsTheUserChoseThem() {
+        #expect(ActivityContent.diagnosisButton.title == "진단 복사")
+        #expect(NotificationsButton.title == "알림 켜기")
+        #expect(RemovalMessages.buttonTitle == "앱 지우기…")
+        #expect(RemovalMessages.confirmTitle == "앱 지우기")
+    }
+
+    private func bottom(
+        _ kit: Kit, _ permission: NotificationPermission = .unavailable, maintenance: Bool = true, note: String? = nil
+    ) -> ActivityBottomView {
+        ActivityBottomView(
+            copyButton: ActivityContent.diagnosisButton, copying: false, note: note, maintenance: maintenance ? kit.maintenance : nil,
+            notifications: permission, copy: {})
+    }
+
+    @Test func theNotificationsButtonIsAtTheBottomOfActivityOnlyWhileTheyCannotBeShownAndTheRowStillFits() {
+        let kit = kit()
+        defer { kit.suite.remove() }
+        let allowed = fittingSize(bottom(kit, .allowed)).width
+        #expect(fittingSize(bottom(kit, .off)).width > allowed + 40)
+        #expect(fittingSize(bottom(kit, .notDecided)).width == fittingSize(bottom(kit, .off)).width)
+        #expect(fittingSize(bottom(kit, .unavailable)).width == allowed)
+        let row = Theme.popoverWidth - 2 * Theme.padding
+        #expect(fittingSize(bottom(kit, .off)).width <= row, "everything fits the row side by side")
+        #expect(fittingSize(bottom(kit, .off).frame(width: row)).height < 40, "one line")
+    }
+
+    @Test func withoutMaintenanceOnlyTheDiagnosisButtonIsThereAndWithItTheRemoveButtonToo() {
+        let kit = kit()
+        defer { kit.suite.remove() }
+        let plain = fittingSize(bottom(kit, .off, maintenance: false)).width
+        let full = fittingSize(bottom(kit, .allowed)).width
+        #expect(full > plain + 40, "앱 지우기… joins 진단 복사: \(plain) vs \(full)")
+        // 알림 켜기 needs the opener that maintenance carries, so it is not there without it.
+        #expect(fittingSize(bottom(kit, .off, maintenance: false)).width == plain)
+    }
+
+    @Test func theRemoveQuestionIsAtTheBottomOfActivityAndAddsOnlyItsOwnCard() {
+        let kit = kit()
+        defer { kit.suite.remove() }
+        let width = Theme.popoverWidth - 2 * Theme.padding
+        func size() -> CGSize { fittingSize(bottom(kit, .off, note: "로그인 때 자동 실행: 켜짐").frame(width: width)) }
+        let idle = size()
+        #expect(idle.height > 20 && idle.height < 70, "buttons and the login line: \(idle)")
+
+        kit.removal.ask()
+        let asking = size()
+        #expect(asking.height > idle.height + 40, "the question and its two buttons are on screen")
+        #expect(asking.height < 200)
+        kit.removal.dismiss()
+        #expect(abs(size().height - idle.height) < 1, "and gone again when cancelled")
     }
 
     // MARK: Layout
 
-    @Test func theFooterFitsTheRowInEveryStateAndTheRemoveQuestionAddsOnlyItsOwnCard() async throws {
-        let kit = kit()
-        defer { kit.suite.remove() }
-        await kit.releases.checkIfDue()
-        let width = Theme.popoverWidth - 2 * Theme.padding
-        func footer() -> CGSize {
-            fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}).frame(width: width))
-        }
-        let idle = footer()
-        #expect(idle.height > 10 && idle.height < 40, "one line: \(idle)")
-
-        kit.removal.ask()
-        let asking = footer()
-        #expect(asking.height > idle.height + 40, "the question and its two buttons are on screen")
-        #expect(asking.height < 200)
-        kit.removal.dismiss()
-        #expect(abs(footer().height - idle.height) < 1, "and gone again when cancelled")
-
-        let plain = fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: nil, quit: {}).frame(width: width))
-        #expect(abs(plain.height - idle.height) < 6, "the row is the same height with or without the extras: \(plain) vs \(idle)")
-    }
-
-    @Test func thePopoverKeepsItsWidthAndStaysShortInEveryRemovalState() async throws {
+    @Test func thePopoverKeepsItsSizeWhenTheRemoveQuestionOpensInActivity() async throws {
         let kit = kit()
         defer { kit.suite.remove() }
         await kit.releases.checkIfDue()
         let model = try await model()
+        model.selectedTab = .activity
         func popover(_ maintenance: Maintenance?) -> CGSize { fittingSize(PopoverView(model: model, maintenance: maintenance, quit: {})) }
         let without = popover(nil)
         let idle = popover(kit.maintenance)
@@ -137,7 +168,11 @@ struct FooterTests {
         kit.removal.ask()
         let asking = popover(kit.maintenance)
         #expect(asking.width == Theme.popoverWidth)
+        #expect(abs(asking.height - idle.height) < 6, "the question sits inside the tab's own room: \(idle) vs \(asking)")
         #expect(asking.height < 760, "still fits a laptop screen: \(asking)")
+        // The list tab never shows it: it has no such buttons to ask from.
+        model.selectedTab = .connections
+        #expect(abs(popover(kit.maintenance).height - idle.height) < 6)
     }
 
     @Test func everyRemovalStateDrawsSomething() async throws {
@@ -199,7 +234,7 @@ struct FooterTests {
         #expect(board.copied == ["no newline at the end\n앱: x\n", "with newline\n앱: x\n", "앱: x\n"])
     }
 
-    @Test func theActivityTabShowsTheLoginLineWhenGiven() async throws {
+    @Test func theActivityTabShowsTheLoginLineWhenGivenWithoutMakingThePopoverTaller() async throws {
         let kit = kit(loginItem: .notRegistered)
         defer { kit.suite.remove() }
         let model = try await model()
@@ -213,7 +248,7 @@ struct FooterTests {
 
     // MARK: Pictures
 
-    /// The popover with the footer in three states renders to a real PNG. With `CUABAR_SNAPSHOT_DIR`
+    /// The popover with the bottom of 기록 in its states renders to a real PNG. With `CUABAR_SNAPSHOT_DIR`
     /// set the files are kept there for a look by eye; otherwise they are only checked and dropped.
     @Test func thePopoverWithTheFooterRendersToPictures() async throws {
         let kit = kit()
@@ -248,11 +283,11 @@ struct FooterTests {
             }
         }
         try picture("A3-footer-idle")
-        kit.removal.ask()
-        try picture("A3-footer-confirm")
-        kit.removal.dismiss()
         model.selectedTab = .activity
         try picture("A3-footer-activity")
         try picture("A3-footer-activity-dark", dark: true)
+        kit.removal.ask()
+        try picture("A3-footer-confirm")
+        kit.removal.dismiss()
     }
 }

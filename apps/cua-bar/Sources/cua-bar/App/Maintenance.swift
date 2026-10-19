@@ -1,7 +1,7 @@
 import Foundation
 
-/// What the popover's footer and the 기록 tab need besides the status: the new-version button,
-/// the remove action and the login item line.
+/// What the popover's bottom line and the 기록 tab need besides the status: the new-version button
+/// (bottom line), 앱 지우기 and the login item line (기록).
 @MainActor
 struct Maintenance {
     var releases: ReleaseChecker

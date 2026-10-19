@@ -38,7 +38,7 @@ enum TidyPlan {
         status.connections.filter { $0.state == .ended }.sorted(by: newestFirst)
     }
 
-    /// Needs attention first by being newest; a stable order so rows do not jump.
+    /// Newest first, the ones without a start time last; a stable order so rows do not jump.
     static func newestFirst(_ left: Connection, _ right: Connection) -> Bool {
         switch (left.startedAt, right.startedAt) {
         case let (a?, b?) where a != b: return a > b

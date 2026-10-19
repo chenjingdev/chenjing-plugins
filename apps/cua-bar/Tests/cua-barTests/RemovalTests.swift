@@ -337,7 +337,7 @@ struct RemovalTests {
             defer { rig.suite.remove() }
             rig.flow.ask()
             await rig.flow.confirm()
-            #expect(rig.flow.phase == .refused("제거하지 못했어요 — 연결 설정은 그대로 남아 있을 수 있어요"))
+            #expect(rig.flow.phase == .refused("앱을 지우지 못했어요 — 연결 설정은 그대로 남아 있을 수 있어요"))
             #expect(rig.log.events == ["uninstall"])
         }
     }
