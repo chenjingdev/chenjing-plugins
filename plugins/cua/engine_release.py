@@ -265,7 +265,7 @@ def release_sessions(ctx, sessions, user=False, view=None, options=None):
     try:
         folder = tempfile.mkdtemp(prefix='codex-cua-release-')
     except OSError:
-        folder = None      # the thread works where the engine does, and its runtime stays until Codex quits
+        folder = None      # the thread works where the engine does, and Codex keeps its runtime for about half an hour
     since = ctx.clock()
     try:
         outcome = asyncio.run(_release_batch(ctx, view, allowed, script, options, user, folder))

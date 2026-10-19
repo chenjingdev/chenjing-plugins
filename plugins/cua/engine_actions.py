@@ -31,7 +31,8 @@ POLL = 0.2
 # What a writer may answer that the contract does not know becomes the closest contract reason.
 REASON_MAP = {'cleanup_tool_unavailable': 'cleanup_not_confirmed'}
 
-Release = namedtuple('Release', 'released reason count nothing')
+# second: the release was confirmed only when it was asked again (see release_one).
+Release = namedtuple('Release', 'released reason count nothing second', defaults=(False,))
 Runtime = namedtuple('Runtime', 'pid started')       # the cua-repl of a stopped Claude connection's thread
 NO_RELEASE = Release(False, None, 0, False)      # a connection without a release step: nothing was asked, nothing failed
 
@@ -72,14 +73,17 @@ def release_one(ctx, conn, timeout=None):
     A writer that answers `cleanup_not_confirmed` waited for the runtime to end a turn and gave up (a limit of a few
     seconds), though the runtime may well have ended it a little later: the tab is closed and the scope stays open (S16).
     It is asked once more, and the second answer is the result. Nothing else is asked twice: a timeout, an endpoint
-    that is gone, a call still running or nothing to release are not made better by asking again."""
+    that is gone, a call still running or nothing to release are not made better by asking again.
+    A second answer may only say that the runtime already has that turn's end, not that the browser let go, so a
+    release confirmed by it is marked `second` and not booked (book_connection)."""
     if conn.record is None or not conn.can_release:
         return Release(False, 'no_trusted_scope', 0, False)
     timeout = release_timeout(conn.record) if timeout is None else timeout
-    result, unconfirmed = _ask_release(ctx, conn, timeout)
-    if unconfirmed:
-        result, _ = _ask_release(ctx, conn, timeout)
-    return result
+    first, unconfirmed = _ask_release(ctx, conn, timeout)
+    if not unconfirmed:
+        return first
+    result, _ = _ask_release(ctx, conn, timeout)
+    return result._replace(count=first.count+result.count, second=True)
 
 
 def book_connection(ctx, records, conn, result):
@@ -89,8 +93,10 @@ def book_connection(ctx, records, conn, result):
     own scopes, and the runtime it leaves behind lets go of them without telling it; without this the session would
     stay listed for good as one that may have been left behind, though its connection has just let go of it.
     Live records are left alone: the bridge and the relay of one thread both book their own scopes as the release
-    goes through them, and a pair the engine remembered for them could hide a later scope of the same session."""
-    if result.released and conn.record is not None:
+    goes through them, and a pair the engine remembered for them could hide a later scope of the same session.
+    A release confirmed only when asked again is not booked: the session may still hold a tab. Its scope has left
+    the writer, so the session can now be released by id, through the browser (`release --ended` does it next)."""
+    if result.released and not result.second and conn.record is not None:
         book_release(ctx, [record for record in records if not record.live], sorted(conn.record.live_sessions()))
 
 

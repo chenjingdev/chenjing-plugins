@@ -69,7 +69,8 @@ class ReleaseTests(ActionCase):
     def test_a_refused_release_passes_its_reason_and_count_through(self):
         for reply, expected in (
                 ({'released': False, 'reason': 'request_in_flight', 'scope_count': 0}, ('request_in_flight', 0)),
-                ({'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 1}, ('cleanup_not_confirmed', 1)),
+                # asked twice (SecondAskTests), and each answer let go of one scope
+                ({'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 1}, ('cleanup_not_confirmed', 2)),
                 ({'released': False, 'reason': 'cleanup_tool_unavailable', 'scope_count': 0}, ('cleanup_not_confirmed', 0)),
                 ({'released': False, 'scopeCount': 2}, ('cleanup_not_confirmed', 2)),
                 ({'released': False, 'reason': 'Some Text! with spaces', 'scope_count': 'x'}, ('cleanup_not_confirmed', 0)),
@@ -324,13 +325,37 @@ class SecondAskTests(KilledBridgeCase):
     def asked(self):
         return len(self.servers[-1].requests)
 
-    def test_a_confirmed_second_answer_is_a_release_and_the_dead_bridge_is_booked(self):
+    def test_a_confirmed_second_answer_is_a_release_and_the_same_cleanup_releases_the_session_by_id(self):
+        """A second answer may only say that the runtime already has that turn's end: the dead bridge is not booked from
+        it. The scope has left the relay, so the session is released by id through the browser, which books it."""
         bridge, _ = self.killed_bridge_and_its_runtime([self.UNCONFIRMED, DONE])
-        self.assertEqual(engine_actions.release_ended(self.ctx()),
-                         {'ok': True, 'results': [{'connection_id': self.ENDED, 'released': True, 'reason': None}]})
+        by_id = []
+
+        def release_by_id(ctx, sessions, user=False, view=None, options=None):
+            by_id.append(list(sessions))
+            return {session: {'released': True, 'reason': None, 'tab_count': 0} for session in sessions}
+        with patch.object(engine_actions, 'release_sessions', side_effect=release_by_id):
+            result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result['results'][0], {'connection_id': self.ENDED, 'released': True, 'reason': None})
+        self.assertTrue(result['ok'])
         self.assertEqual(self.asked(), 2)
+        self.assertTrue(bridge.exists(), 'not booked from the second answer')
+        self.assertEqual(by_id, [[SESSION_A]])     # so the session is let go of, or listed again, in this one cleanup
+
+    def test_a_release_confirmed_at_once_is_still_booked(self):
+        bridge, _ = self.killed_bridge_and_its_runtime(DONE)
+        with patch.object(engine_actions, 'release_sessions', side_effect=AssertionError('nothing is left to release by id')):
+            self.assertEqual(engine_actions.release_ended(self.ctx()),
+                             {'ok': True, 'results': [{'connection_id': self.ENDED, 'released': True, 'reason': None}]})
         self.assertFalse(bridge.exists())
-        self.assertEqual(self.left(), [])          # so there is no line for the session, and nothing to be notified about
+        self.assertEqual(self.left(), [])
+
+    def test_what_both_answers_let_go_of_is_counted(self):
+        directory, _ = self.bridge_with_runtime()
+        replies = [{'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 1},
+                   {'released': True, 'reason': None, 'scope_count': 1}]
+        self.writer(directory, 4242, NOW-900, lambda request: replies.pop(0) if len(replies) > 1 else replies[0])
+        self.assertEqual(engine_actions.release_connection(self.ctx(), BRIDGE_ID)['scope_count'], 2)
 
     def test_two_unconfirmed_answers_are_two_asks_and_it_stays_unconfirmed(self):
         bridge, _ = self.killed_bridge_and_its_runtime([self.UNCONFIRMED])
