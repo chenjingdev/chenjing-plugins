@@ -1,17 +1,24 @@
 """Autostart and login-environment tests use fake apps and fake launchd; no GUI opens."""
+import contextlib
+import ctypes
 import json
 import os
 from pathlib import Path
 import plistlib
 import stat
+import sys
 import tempfile
 import threading
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, MagicMock, patch
 import host_autostart
 import setup
 from test_runtime_paths import fake_app
+
+CODEX = 'com.openai.codex'
+TERMINAL = 'com.cmuxterm.app'
+BROWSER = 'com.google.Chrome'
 
 
 class Clock:
@@ -23,6 +30,40 @@ class Clock:
 
     def sleep(self, seconds):
         self.now += seconds
+        if self.now > 600:
+            # A wait that never ends fails here instead of hanging the whole run.
+            raise AssertionError('Something keeps waiting far beyond every limit it has.')
+
+
+class Desktop:
+    """The front app and the mouse as the fake seconds go by.
+
+    Apps come forward at set seconds, by themselves or by a person's choice; `open -b` brings one forward at once.
+    """
+    def __init__(self, clock, front):
+        self.clock = clock
+        self.front = front
+        self.later = []                    # (second, bundle) of the apps that are going to come forward
+        self.presses = []                  # the seconds at which a person pressed the mouse
+        self.readable = True               # False: macOS will not say when the mouse was pressed
+
+    def comes_forward(self, second, bundle):
+        self.later = sorted(self.later+[(second, bundle)])
+
+    def front_bundle(self):
+        while self.later and self.later[0][0] <= self.clock.now:
+            self.front = self.later.pop(0)[1]
+        return self.front
+
+    def seconds_since_press(self):
+        if not self.readable:
+            return None
+        past = [second for second in self.presses if second <= self.clock.now]
+        return self.clock.now-max(past) if past else 86400.0
+
+
+def run_inline(work):
+    work()
 
 
 class AutostartTests(unittest.TestCase):
@@ -33,26 +74,61 @@ class AutostartTests(unittest.TestCase):
         self.app, self.native, _ = fake_app(self.home/'Applications')
         self.environment = {'CODEX_CUA_APP_PATH': str(self.app)}
         self.clock = Clock()
+        self.desktop = Desktop(self.clock, TERMINAL)
         self.commands = []
+        self.moments = []                  # the second at which each command ran
+        self.opened_at = None
+        self.ready_at = None
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def run_host(self, registry, front=('com.cmuxterm.app',), processes=()):
-        fronts = list(front)
-        def run(command, **kwargs):
-            self.commands.append(command)
-            return types.SimpleNamespace(returncode=0, stdout='')
-        def current_front():
-            return fronts.pop(0) if len(fronts) > 1 else fronts[0]
-        with patch.object(host_autostart.subprocess, 'run', side_effect=run), \
+    def run_command(self, command, **kwargs):
+        self.commands.append(command)
+        self.moments.append(self.clock.now)
+        if command[:2] == ['/usr/bin/open', '-g']:
+            self.opened_at = self.clock.now
+        elif command[:2] == ['/usr/bin/open', '-b']:
+            self.desktop.front = command[2]
+        return types.SimpleNamespace(returncode=0, stdout='')
+
+    @contextlib.contextmanager
+    def faked(self, processes=(), front=None):
+        """Commands are recorded instead of run; the desktop answers for the front app and for the mouse."""
+        with patch.object(host_autostart.subprocess, 'run', side_effect=self.run_command), \
              patch.object(host_autostart, 'app_processes', return_value=list(processes)), \
-             patch.object(host_autostart, 'front_bundle', side_effect=current_front):
-            return host_autostart.ensure_host(self.state, registry, self.environment, self.home,
-                                              sleep=self.clock.sleep, clock=self.clock)
+             patch.object(host_autostart, 'front_bundle', side_effect=front or self.desktop.front_bundle), \
+             patch.object(host_autostart, 'seconds_since_mouse_press', side_effect=self.desktop.seconds_since_press):
+            yield
+
+    def ensure(self, registry, **options):
+        return host_autostart.ensure_host(self.state, registry, self.environment, self.home,
+                                          sleep=self.clock.sleep, clock=self.clock, **options)
+
+    def run_host(self, registry, processes=(), start=run_inline):
+        """Open the app (if closed) and run the watch that follows inline; start=None leaves it to ensure_host."""
+        with self.faked(processes):
+            return self.ensure(registry, **({} if start is None else {'start': start}))
+
+    def host_after_open(self, seconds=0):
+        """A registry that is there `seconds` after the app was opened."""
+        def registry(state):
+            if self.opened_at is None or self.clock.now < self.opened_at+seconds:
+                raise FileNotFoundError
+            self.ready_at = self.clock.now
+            return {'socket_path': '/ready'}
+        return registry
 
     def opened(self):
         return [command for command in self.commands if command[:2] == ['/usr/bin/open', '-g']]
+
+    def sent_back(self):
+        """The apps brought forward again with `open -b`."""
+        return [command[2] for command in self.commands if command[:2] == ['/usr/bin/open', '-b']]
+
+    def sent_back_at(self):
+        return [moment for command, moment in zip(self.commands, self.moments)
+                if command[:2] == ['/usr/bin/open', '-b']]
 
     def test_ready_host_is_returned_without_opening_anything(self):
         self.assertEqual(self.run_host(lambda state: {'socket_path': '/ready'}), {'socket_path': '/ready'})
@@ -60,31 +136,120 @@ class AutostartTests(unittest.TestCase):
         self.assertFalse(self.state.exists())
 
     def test_closed_app_opens_hidden_with_launcher_env_and_focus_returns(self):
-        calls = []
-        def registry(state):
-            calls.append(state)
-            if len(calls) < 4:
-                raise FileNotFoundError
-            return {'socket_path': '/ready'}
-        result = self.run_host(registry, front=('com.cmuxterm.app', 'com.cmuxterm.app', 'com.openai.codex'))
+        # As in the real run: Codex comes forward by itself the moment the connection is ready.
+        self.desktop.comes_forward(0.1, CODEX)
+        result = self.run_host(self.host_after_open())
         self.assertEqual(result, {'socket_path': '/ready'})
         [command] = self.opened()
         self.assertEqual(command[:5], ['/usr/bin/open', '-g', '-j', '-a', str(self.app)])
         self.assertIn('CODEX_CLI_PATH='+str(self.home/'.local/share/codex-cua/start-desktop-cli.sh'), command)
         self.assertIn('CODEX_HOST_CUA_STATE_DIR='+str(self.state), command)
         self.assertIn('CODEX_HOST_CUA_NATIVE_CLI='+str(self.native), command)
-        self.assertEqual(self.commands[-1], ['/usr/bin/open', '-b', 'com.cmuxterm.app'])
+        self.assertEqual(self.commands[-1], ['/usr/bin/open', '-b', TERMINAL])
         self.assertEqual(self.state.stat().st_mode & 0o777, 0o700)
 
     def test_focus_is_left_alone_when_codex_never_takes_front(self):
-        calls = []
-        def registry(state):
-            calls.append(state)
-            if len(calls) < 3:
-                raise FileNotFoundError
-            return {}
-        self.run_host(registry)
-        self.assertNotIn(['/usr/bin/open', '-b', 'com.cmuxterm.app'], self.commands)
+        self.run_host(self.host_after_open(seconds=0.4))
+        self.assertEqual(self.sent_back(), [])
+        # The watch looked for its whole time.
+        self.assertGreaterEqual(self.clock.now, host_autostart.WATCH_SECONDS)
+
+    def test_codex_coming_forward_twice_within_thirty_seconds_is_sent_back_twice(self):
+        self.desktop.comes_forward(2.0, CODEX)
+        self.desktop.comes_forward(12.0, CODEX)
+        self.run_host(self.host_after_open())
+        self.assertEqual(self.sent_back(), [TERMINAL, TERMINAL])
+        for moment, expected in zip(self.sent_back_at(), (2.0, 12.0)):
+            self.assertAlmostEqual(moment, expected, delta=host_autostart.WATCH_INTERVAL)
+        self.assertEqual(self.desktop.front, TERMINAL)
+
+    def test_a_person_who_moved_on_meanwhile_gets_that_app_back(self):
+        self.desktop.comes_forward(3.0, BROWSER)
+        self.desktop.comes_forward(8.0, CODEX)
+        self.run_host(self.host_after_open())
+        self.assertEqual(self.sent_back(), [BROWSER])
+        self.assertEqual(self.desktop.front, BROWSER)
+
+    def test_codex_chosen_with_the_mouse_stays_and_the_watch_is_over(self):
+        # The person clicks Codex in the Dock, goes back to the terminal; much later Codex comes forward by itself.
+        self.desktop.presses = [2.0]
+        self.desktop.comes_forward(2.1, CODEX)
+        self.desktop.comes_forward(4.0, TERMINAL)
+        self.desktop.comes_forward(9.0, CODEX)
+        self.run_host(self.host_after_open())
+        self.assertEqual(self.sent_back(), [])
+        self.assertEqual(self.desktop.front, CODEX)
+        self.assertLess(self.clock.now, 5)
+
+    def test_a_mouse_press_longer_ago_than_a_second_is_no_choice(self):
+        self.desktop.presses = [1.0]
+        self.desktop.comes_forward(2.5, CODEX)
+        self.run_host(self.host_after_open())
+        self.assertEqual(self.sent_back(), [TERMINAL])
+
+    def test_a_mouse_press_macos_will_not_report_is_no_choice(self):
+        self.desktop.readable = False
+        self.desktop.comes_forward(2.0, CODEX)
+        self.run_host(self.host_after_open())
+        self.assertEqual(self.sent_back(), [TERMINAL])
+
+    def test_the_watch_ends_thirty_seconds_after_the_connection_was_ready(self):
+        # The host is ready 5 seconds after the app was opened, so the watch lasts until about second 35.
+        self.desktop.comes_forward(33.0, CODEX)
+        self.desktop.comes_forward(36.5, CODEX)
+        self.run_host(self.host_after_open(seconds=5))
+        self.assertEqual(self.sent_back(), [TERMINAL])
+        self.assertAlmostEqual(self.sent_back_at()[0], 33.0, delta=0.5)
+        self.assertAlmostEqual(self.clock.now, self.ready_at+host_autostart.WATCH_SECONDS, delta=0.5)
+
+    def test_ensure_host_only_hands_the_watch_over(self):
+        self.desktop.comes_forward(2.0, CODEX)
+        handed = []
+        result = self.run_host(self.host_after_open(), start=handed.append)
+        self.assertEqual(result, {'socket_path': '/ready'})
+        [watch] = handed
+        self.assertEqual(self.sent_back(), [])
+        self.assertEqual(self.clock.now, 0.0)
+        with self.faked():
+            watch()
+        self.assertEqual(self.sent_back(), [TERMINAL])
+
+    def test_ensure_host_returns_while_the_watch_is_still_going(self):
+        test_thread = threading.current_thread()
+        looking, gate, watchers = threading.Event(), threading.Event(), []
+
+        def front():
+            # The watch is a thread of its own; its first look is held until the test lets it go.
+            if threading.current_thread() is not test_thread and not looking.is_set():
+                watchers.append(threading.current_thread())
+                looking.set()
+                gate.wait(10)
+            return self.desktop.front_bundle()
+        with self.faked(front=front):
+            try:
+                result = self.ensure(self.host_after_open())
+                self.assertTrue(looking.wait(10))
+                [watcher] = watchers
+                self.assertEqual(result, {'socket_path': '/ready'})
+                self.assertTrue(watcher.is_alive())
+                self.assertTrue(watcher.daemon)
+            finally:
+                gate.set()
+                for watcher in watchers:
+                    watcher.join(10)
+        self.assertFalse(any(watcher.is_alive() for watcher in watchers))
+
+    def handed_over_when_front_is(self, front):
+        self.desktop.front = front
+        handed = []
+        self.run_host(self.host_after_open(), start=handed.append)
+        return handed
+
+    def test_no_watch_starts_without_a_front_app_to_return_to(self):
+        self.assertEqual(self.handed_over_when_front_is(None), [])
+
+    def test_no_watch_starts_when_the_front_app_was_codex_itself(self):
+        self.assertEqual(self.handed_over_when_front_is(CODEX), [])
 
     def test_running_app_without_host_is_never_quit_or_reopened(self):
         with self.assertRaises(host_autostart.AutostartFailure) as raised:
@@ -147,6 +312,37 @@ class FrontAppTests(unittest.TestCase):
     def test_no_bundle_id_is_none(self):
         for printed in ('', '[ NULL ] ASN:0x0-0x1001: (in front) \n    bundleID=[ NULL ]\n', 'bundle path="x"'):
             self.assertIsNone(self.front(printed))
+
+
+class MousePressTests(unittest.TestCase):
+    """How long ago a person pressed the mouse, as CoreGraphics tells it."""
+
+    def library(self, ages):
+        library = MagicMock()
+        library.CGEventSourceSecondsSinceLastEventType.side_effect = lambda state, event: ages[event]
+        return library
+
+    def test_the_more_recent_of_the_left_and_the_right_press_is_the_answer(self):
+        library = self.library({1: 30.0, 3: 0.4})
+        with patch.object(host_autostart.ctypes, 'CDLL', return_value=library):
+            self.assertEqual(host_autostart.seconds_since_mouse_press(), 0.4)
+        reader = library.CGEventSourceSecondsSinceLastEventType
+        # The hardware state (1), asked for the left button (1) and for the right one (3).
+        self.assertEqual(reader.call_args_list, [call(1, 1), call(1, 3)])
+        self.assertIs(reader.restype, ctypes.c_double)
+        self.assertEqual(reader.argtypes, [ctypes.c_int32, ctypes.c_uint32])
+
+    def test_what_macos_will_not_say_is_none(self):
+        with patch.object(host_autostart.ctypes, 'CDLL', side_effect=OSError('no CoreGraphics')):
+            self.assertIsNone(host_autostart.seconds_since_mouse_press())
+        with patch.object(host_autostart.ctypes, 'CDLL', return_value=MagicMock(spec=[])):
+            self.assertIsNone(host_autostart.seconds_since_mouse_press())
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'CoreGraphics is macOS only')
+    def test_this_mac_answers_in_seconds(self):
+        seconds = host_autostart.seconds_since_mouse_press()
+        self.assertIsInstance(seconds, float)
+        self.assertGreaterEqual(seconds, 0)
 
 
 class LoginEnvironmentTests(unittest.TestCase):

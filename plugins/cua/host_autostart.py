@@ -1,15 +1,25 @@
 """Open the original app as a host when it is closed; never quit a running app."""
+import ctypes
 import fcntl
 import os
 from pathlib import Path
 import re
 import stat
 import subprocess
+import threading
 import time
 
 from runtime_paths import discover_installation, runtime_home
 
 TIMEOUT_ENV = 'CODEX_HOST_CUA_AUTOSTART_TIMEOUT'
+WATCH_SECONDS = 30       # an app opened in the background is kept behind this long once its host is ready
+WATCH_INTERVAL = 0.25    # how often the front app is looked at meanwhile
+CLICK_SECONDS = 1        # a mouse press this recent means a person chose the app that came forward
+_CORE_GRAPHICS = '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
+# CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateHIDSystemState,
+#                                        kCGEventLeftMouseDown or kCGEventRightMouseDown)
+_HID_SYSTEM_STATE = 1
+_MOUSE_PRESSES = (1, 3)
 # `lsappinfo info -only bundleid` prints `"CFBundleIdentifier"="…"` on older macOS and several lines with
 # `bundleID="…"` on macOS 27.
 _BUNDLE_ID = re.compile(r'(?:"CFBundleIdentifier"|\bbundleID)\s*=\s*"([^"\s]+)"')
@@ -53,6 +63,45 @@ def front_bundle():
     return match.group(1) if match else None
 
 
+def seconds_since_mouse_press():
+    """Seconds since the left or the right mouse button was last pressed, or None when macOS will not say."""
+    try:
+        reader = ctypes.CDLL(_CORE_GRAPHICS).CGEventSourceSecondsSinceLastEventType
+        reader.restype = ctypes.c_double
+        reader.argtypes = [ctypes.c_int32, ctypes.c_uint32]
+        return min(reader(_HID_SYSTEM_STATE, event) for event in _MOUSE_PRESSES)
+    except (OSError, AttributeError):
+        return None
+
+
+def start_in_background(work):
+    """Run `work` in a thread of its own. A daemon: this process serves MCP for as long as the conversation lasts
+    and must not wait for the watch when it ends."""
+    threading.Thread(target=work, name='codex-front-watch', daemon=True).start()
+
+
+def keep_behind(back, codex, until, sleep=time.sleep, clock=time.monotonic):
+    """Until `until`, bring `back` to the front again whenever Codex comes forward by itself.
+
+    `back` follows the front app while it is not Codex, so a person who moved on meanwhile gets that app back.
+    Codex coming forward right after a mouse press was a person's choice: it stays and the watch is over.
+    """
+    while clock() < until:
+        front = front_bundle()
+        if front == codex:
+            pressed = seconds_since_mouse_press()
+            if pressed is not None and pressed <= CLICK_SECONDS:
+                return
+            try:
+                subprocess.run(['/usr/bin/open', '-b', back],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+            except (OSError, subprocess.TimeoutExpired):
+                pass    # the next look tries again
+        elif front:
+            back = front
+        sleep(WATCH_INTERVAL)
+
+
 def _timeout(environment):
     try:
         value = float(environment.get(TIMEOUT_ENV, 25))
@@ -70,11 +119,13 @@ def _lock(state):
     return os.open(state/'autostart.lock', flags, 0o600)
 
 
-def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sleep, clock=time.monotonic):
+def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sleep, clock=time.monotonic,
+                start=start_in_background):
     """Return the ready registry, opening the closed app in the background first.
 
     Concurrent MCP sessions serialize on one lock, so the app is opened once.
-    The previous frontmost app gets focus back when Codex activates itself.
+    An app opened here is then kept behind for WATCH_SECONDS: whenever it activates itself, the previous frontmost
+    app gets focus back. `start` runs that watch (a thread of its own by default); the return does not wait for it.
     """
     environment = os.environ if environment is None else environment
     try:
@@ -121,12 +172,8 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
                                            'then reconnect this MCP.') from None
                 sleep(0.2)
         if previous and previous != installation.bundle_id:
-            settle = clock()+3
-            while front_bundle() != installation.bundle_id and clock() < settle:
-                sleep(0.1)
-            if front_bundle() == installation.bundle_id:
-                subprocess.run(['/usr/bin/open', '-b', previous],
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+            until = clock()+WATCH_SECONDS
+            start(lambda: keep_behind(previous, installation.bundle_id, until, sleep, clock))
         return registry
     finally:
         os.close(descriptor)
