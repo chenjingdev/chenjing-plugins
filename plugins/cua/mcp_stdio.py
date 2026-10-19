@@ -7,7 +7,7 @@ from pathlib import Path
 import stat
 import sys
 from bridge_control import BridgeControl
-from host_autostart import AutostartFailure, ensure_host, watch_first_call
+from host_autostart import AutostartFailure, ensure_host, give_back_first_call, watch_first_call
 from host_mcp import HostMcp, serve, BridgeFailure
 from runtime_paths import default_state, installation_from_native_cli, InstallationError
 
@@ -56,7 +56,7 @@ def build_adapter(state, **options):
         async def boot(self):
             try:
                 try:
-                    registry = await asyncio.to_thread(ensure_host, state, read_host_registry)
+                    registry = await asyncio.to_thread(ensure_host, state, read_host_registry, log=self.log)
                 except AutostartFailure as error:
                     raise BridgeFailure(str(error)) from None
                 except InstallationError:
@@ -78,14 +78,22 @@ def build_adapter(state, **options):
             await super().boot()
 
         async def call_tool(self, name, arguments):
-            # A Codex this process opened in the background is watched again when the first tool call starts: the
-            # first screen call of a fresh Codex brings it forward (S4). The watch has a thread of its own, so the
-            # call does not wait for it, and a watch that cannot start must not fail the call.
+            # A Codex this process opened in the background is watched again at the first tool call: the first screen
+            # call of a fresh Codex brings it forward (S4). The front app is read before the call goes out, off the
+            # event loop, so a Codex that comes forward within milliseconds is not taken for one in front already;
+            # the watch itself has a thread. A watch that cannot start must not fail the call, and a call that fails
+            # leaves the chance to the next one.
+            first = False
             try:
-                watch_first_call()
+                first = await asyncio.to_thread(watch_first_call)
             except Exception:
                 self.log('first_call_watch_unavailable')
-            return await super().call_tool(name, arguments)
+            try:
+                return await super().call_tool(name, arguments)
+            except BaseException:
+                if first:
+                    give_back_first_call()
+                raise
 
         async def thread_config(self, request):
             # The desktop app takes the launcher's relay override out of the host's configuration, so the relay

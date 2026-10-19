@@ -619,20 +619,20 @@ class RegisteredCase(BridgeCase):
 
 
 class FirstCallWatchTests(RegisteredCase):
-    """A Codex this process opened in the background is watched again when the first tool call starts."""
+    """A Codex this process opened in the background is watched again at the first tool call."""
 
     async def opened_in_the_background(self):
         host = self.add_host(thread_id='thread-A')
         path = self.socket()
         self.reopen = lambda: write_registry(self.host_state, path)
         adapter = self.registered_adapter()
-        await self.start_control(adapter)
+        control = await self.start_control(adapter)
         await self.initialize(adapter)
         self.assertEqual(len(self.opened()), 1)
-        return host, adapter
+        return host, adapter, control
 
     async def test_only_the_first_tool_call_after_the_opening_asks_for_a_watch_and_before_it_leaves(self):
-        host, adapter = await self.opened_in_the_background()
+        host, adapter, control = await self.opened_in_the_background()
         asked = []
         with patch.object(host_autostart, 'start_in_background', lambda work: asked.append(len(host.calls))):
             await adapter.handle(self.call())
@@ -641,7 +641,7 @@ class FirstCallWatchTests(RegisteredCase):
         self.assertEqual(len(host.calls), 2)
 
     async def test_ending_a_turn_is_no_tool_call_for_the_watch(self):
-        host, adapter = await self.opened_in_the_background()
+        host, adapter, control = await self.opened_in_the_background()
         await adapter.handle(self.call('turn_ended'))
         self.assertEqual(self.watches, [])
         await adapter.handle(self.call())
@@ -666,23 +666,27 @@ class FirstCallWatchTests(RegisteredCase):
         self.assertEqual(len(self.watches), 1)
         self.assertEqual(len(host2.calls), 1)
 
-    async def test_the_call_does_not_wait_for_the_watch_nor_for_the_front_app_to_be_read(self):
-        host, adapter = await self.opened_in_the_background()
-        reading, gate = threading.Event(), threading.Event()
+    async def test_the_front_app_is_read_before_the_call_goes_out_and_the_call_does_not_wait_for_the_watch(self):
+        host, adapter, control = await self.opened_in_the_background()
+        reading, gate, reads = threading.Event(), threading.Event(), []
 
         def front():
-            # The watch's thread is held where it reads the front app, until the test lets it go.
-            reading.set()
+            if threading.current_thread().name != 'codex-front-watch':
+                reads.append(len(host.calls))       # the call's own read: nothing has reached the host yet
+                return 'com.cmuxterm.app'
+            reading.set()                           # the watch's thread is held at its first look...
             gate.wait(10)
-            return None
+            return host_autostart.WATCH.codex       # ...and then finds Codex in front
         with patch.object(host_autostart, 'start_in_background', REAL_START_IN_BACKGROUND), \
-             patch.object(host_autostart, 'front_bundle', front):
+             patch.object(host_autostart, 'front_bundle', front), \
+             patch.object(host_autostart, 'seconds_since_mouse_press', lambda: 0.1):    # a click ends the watch
             watchers = []
             try:
                 reply = await self.run_call(adapter)
                 await self.settle(reading.is_set)
                 watchers = [thread for thread in threading.enumerate() if thread.name == 'codex-front-watch']
                 self.assertEqual(reply['result']['content'][0]['text'], 'PRIVATE_RESULT')
+                self.assertEqual(reads, [0])
                 self.assertEqual(len(watchers), 1)
                 self.assertTrue(watchers[0].daemon)
             finally:
@@ -692,11 +696,37 @@ class FirstCallWatchTests(RegisteredCase):
         self.assertFalse(any(thread.is_alive() for thread in watchers))
 
     async def test_a_watch_that_cannot_start_does_not_fail_the_call(self):
-        host, adapter = await self.opened_in_the_background()
+        host, adapter, control = await self.opened_in_the_background()
         with patch.object(host_autostart, 'start_in_background', side_effect=RuntimeError("can't start new thread")):
             reply = await self.run_call(adapter)
         self.assertEqual(reply['result']['content'][0]['text'], 'PRIVATE_RESULT')
         self.assertIn('first_call_watch_unavailable', self.logs)
+
+    async def test_a_watch_that_cannot_start_at_the_opening_does_not_fail_the_conversation_start(self):
+        host = self.add_host(thread_id='thread-A')
+        path = self.socket()
+        self.reopen = lambda: write_registry(self.host_state, path)
+        adapter = self.registered_adapter()
+        await self.start_control(adapter)
+        with patch.object(host_autostart, 'front_bundle', lambda: 'com.cmuxterm.app'), \
+             patch.object(host_autostart, 'start_in_background', side_effect=RuntimeError("can't start new thread")):
+            await self.initialize(adapter)
+        self.assertEqual(len(self.opened()), 1)
+        self.assertIn('open_watch_unavailable', self.logs)
+        self.assertEqual((await self.run_call(adapter))['result']['content'][0]['text'], 'PRIVATE_RESULT')
+
+    async def test_a_first_call_that_never_reached_codex_leaves_the_chance_to_the_next_call(self):
+        host, adapter, control = await self.opened_in_the_background()
+        adapter.stopping = True
+        with self.assertRaises(host_mcp.BridgeFailure):
+            await adapter.call_tool('js', {'code': 'PRIVATE_SCRIPT'})
+        adapter.stopping = False
+        self.assertEqual(host.calls, [])
+        self.assertEqual(len(self.watches), 1)           # it asked for the watch before it found out
+        await adapter.handle(self.call())
+        self.assertEqual(len(self.watches), 2)           # so the next call is the first one again
+        await adapter.handle(self.call())
+        self.assertEqual(len(self.watches), 2)
 
 
 class ActivityTests(RegisteredCase):

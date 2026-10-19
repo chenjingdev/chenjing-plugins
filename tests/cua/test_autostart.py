@@ -20,7 +20,7 @@ from test_runtime_paths import fake_app
 CODEX = 'com.openai.codex'
 TERMINAL = 'com.cmuxterm.app'
 BROWSER = 'com.google.Chrome'
-LEFT_DOWN, RIGHT_DOWN, FLAGS_CHANGED = 1, 3, 12     # the CoreGraphics event types a person's pick is read from
+LEFT_DOWN, RIGHT_DOWN, FLAGS_CHANGED = 1, 3, 12     # CoreGraphics event types: the mouse, and a modifier key
 
 
 class Clock:
@@ -79,10 +79,10 @@ class Desktop:
         past = [second for second in self.inputs.get(event, []) if second <= self.clock.now]
         return self.clock.now-max(past) if past else 86400.0
 
-    def seconds_since_pick(self):
+    def seconds_since_mouse_press(self):
         if not self.readable:
             return None
-        return min(self.seconds_since(event) for event in (LEFT_DOWN, RIGHT_DOWN, FLAGS_CHANGED))
+        return min(self.seconds_since(event) for event in (LEFT_DOWN, RIGHT_DOWN))
 
 
 def run_inline(work):
@@ -122,11 +122,12 @@ class AutostartTests(unittest.TestCase):
 
     def person(self, graphics):
         if not graphics:
-            return patch.object(host_autostart, 'seconds_since_pick', side_effect=self.desktop.seconds_since_pick)
-        library = MagicMock()
-        library.CGEventSourceSecondsSinceLastEventType.side_effect = (
+            return patch.object(host_autostart, 'seconds_since_mouse_press',
+                                side_effect=self.desktop.seconds_since_mouse_press)
+        self.library = MagicMock()
+        self.library.CGEventSourceSecondsSinceLastEventType.side_effect = (
             lambda state, event: self.desktop.seconds_since(event))
-        return patch.object(host_autostart.ctypes, 'CDLL', return_value=library)
+        return patch.object(host_autostart.ctypes, 'CDLL', return_value=self.library)
 
     @contextlib.contextmanager
     def faked(self, processes=(), front=None, graphics=False):
@@ -143,15 +144,16 @@ class AutostartTests(unittest.TestCase):
         return host_autostart.ensure_host(self.state, registry, self.environment, self.home,
                                           sleep=self.clock.sleep, clock=self.clock, **options)
 
-    def run_host(self, registry, processes=(), start=run_inline, **fakes):
+    def run_host(self, registry, processes=(), start=run_inline, log=None, **fakes):
         """Open the app (if closed) and run the watch that follows inline; start=None leaves it to ensure_host."""
+        options = {} if start is None else {'start': start}
         with self.faked(processes, **fakes):
-            return self.ensure(registry, **({} if start is None else {'start': start}))
+            return self.ensure(registry, log=log, **options)
 
     def first_call(self, **fakes):
-        """A tool call starts; the watch it asks for, if any, runs inline."""
+        """A tool call is about to go out; the watch it asks for, if any, runs inline. Whether it was the first."""
         with self.faked(**fakes):
-            host_autostart.watch_first_call(start=run_inline, sleep=self.clock.sleep, clock=self.clock)
+            return host_autostart.watch_first_call(start=run_inline, sleep=self.clock.sleep, clock=self.clock)
 
     def host_after_open(self, seconds=0):
         """A registry that is there `seconds` after the app was opened."""
@@ -224,22 +226,16 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(self.desktop.front, CODEX)
         self.assertLess(self.clock.now, 5)
 
-    def test_codex_picked_with_cmd_tab_stays_and_the_watch_is_over(self):
-        # No mouse: the last input before Codex comes forward is the modifier key changing, read through CoreGraphics.
+    def test_codex_picked_with_cmd_tab_is_sent_back_the_keyboard_is_no_choice(self):
+        # A modifier key also changes while a person types the first prompt, when Codex tends to come forward by
+        # itself: only the mouse is a choice. The fake CoreGraphics is asked for nothing else.
         self.desktop.person_does(2.0, FLAGS_CHANGED)
         self.desktop.comes_forward(2.1, CODEX)
-        self.desktop.comes_forward(4.0, TERMINAL)
-        self.desktop.comes_forward(9.0, CODEX)
-        self.run_host(self.host_after_open(), graphics=True)
-        self.assertEqual(self.sent_back(), [])
-        self.assertEqual(self.desktop.front, CODEX)
-        self.assertLess(self.clock.now, 5)
-
-    def test_a_modifier_key_changed_longer_ago_than_a_second_is_no_choice(self):
-        self.desktop.person_does(1.0, FLAGS_CHANGED)
-        self.desktop.comes_forward(2.5, CODEX)
         self.run_host(self.host_after_open(), graphics=True)
         self.assertEqual(self.sent_back(), [TERMINAL])
+        asked = self.library.CGEventSourceSecondsSinceLastEventType.call_args_list
+        self.assertTrue(asked)
+        self.assertEqual({event.args[1] for event in asked}, {LEFT_DOWN, RIGHT_DOWN})
 
     def test_a_mouse_press_longer_ago_than_a_second_is_no_choice(self):
         self.desktop.person_does(1.0, LEFT_DOWN)
@@ -261,6 +257,38 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(self.sent_back(), [TERMINAL])
         self.assertAlmostEqual(self.sent_back_at()[0], 33.0, delta=0.5)
         self.assertAlmostEqual(self.clock.now, self.ready_at+host_autostart.WATCH_SECONDS, delta=0.5)
+
+    def test_a_mouse_choice_while_the_host_starts_is_kept_when_the_host_is_ready(self):
+        self.desktop.person_does(2.0, LEFT_DOWN)
+        self.desktop.comes_forward(2.05, CODEX)            # the person clicks Codex in the Dock
+        handed = []
+        self.run_host(self.host_after_open(seconds=5), start=handed.append)
+        self.assertEqual(handed, [])                       # no watch: Codex stays in front
+        self.assertEqual(self.sent_back(), [])
+
+    def test_a_choice_made_while_the_host_starts_is_forgotten_when_another_app_comes_forward(self):
+        self.desktop.person_does(2.0, LEFT_DOWN)
+        self.desktop.comes_forward(2.05, CODEX)            # chosen...
+        self.desktop.comes_forward(3.0, TERMINAL)          # ...the person goes back to the terminal...
+        self.desktop.comes_forward(5.1, CODEX)             # ...and Codex comes forward by itself when it is ready
+        self.run_host(self.host_after_open(seconds=5))
+        self.assertEqual(self.sent_back(), [TERMINAL])
+
+    def test_codex_that_comes_forward_again_before_the_next_look_is_sent_back_again(self):
+        self.desktop.comes_forward(2.0, CODEX)
+        self.desktop.comes_forward(2.1, CODEX)             # in front again before the look that would see it leave
+        self.run_host(self.host_after_open())
+        self.assertEqual(self.sent_back(), [TERMINAL, TERMINAL])
+        self.assertAlmostEqual(self.sent_back_at()[1], 2.0+host_autostart.SETTLE_SECONDS,
+                               delta=host_autostart.WATCH_INTERVAL)
+
+    def test_a_person_who_clicks_codex_after_it_was_sent_back_makes_it_stay(self):
+        self.desktop.comes_forward(2.0, CODEX)
+        self.desktop.comes_forward(2.1, CODEX)
+        self.desktop.person_does(2.5, LEFT_DOWN)           # while it is in front for the second time
+        self.run_host(self.host_after_open())
+        self.assertEqual(self.sent_back(), [TERMINAL])
+        self.assertLess(self.clock.now, 5)
 
     def test_codex_is_sent_back_three_times_per_opening_and_the_fourth_time_it_stays(self):
         for second in (2.0, 5.0, 8.0, 11.0):
@@ -330,6 +358,23 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(self.clock.now, 0.0)
         self.assertEqual(self.sent_back(), [])
 
+    def test_a_first_call_that_failed_leaves_the_chance_to_the_next_call(self):
+        self.run_host(self.host_after_open())
+        self.clock.now = 600.0
+        self.assertTrue(self.first_call())
+        self.watch.give_back()
+        self.assertTrue(self.first_call())
+        self.assertFalse(self.first_call())
+
+    def test_a_ready_host_this_process_did_not_open_is_not_watched_at_the_first_call(self):
+        self.run_host(self.host_after_open())                        # opened here: a first call would watch
+        self.run_host(lambda state: {'socket_path': '/ready'})       # a reconnect finds a host a person started
+        self.clock.now = 600.0
+        self.desktop.comes_forward(601.0, CODEX)
+        self.assertFalse(self.first_call())
+        self.assertEqual(self.clock.now, 600.0)
+        self.assertEqual(self.sent_back(), [])
+
     def test_a_first_call_while_a_watch_runs_only_gives_it_more_time(self):
         self.run_host(self.host_after_open(), start=lambda work: None)      # opened, nothing watched yet
         self.watch.until = 30.0                                              # a watch runs until second 30
@@ -386,6 +431,15 @@ class AutostartTests(unittest.TestCase):
         with self.faked():
             watch()
         self.assertEqual(self.sent_back(), [TERMINAL])
+
+    def test_a_watch_that_cannot_start_does_not_fail_ensure_host(self):
+        logged = []
+
+        def cannot_start(work):
+            raise RuntimeError("can't start new thread")
+        result = self.run_host(self.host_after_open(), start=cannot_start, log=logged.append)
+        self.assertEqual(result, {'socket_path': '/ready'})
+        self.assertEqual(logged, ['open_watch_unavailable'])
 
     def test_ensure_host_returns_while_the_watch_is_still_going(self):
         test_thread = threading.current_thread()
@@ -515,36 +569,35 @@ class AppRunningTests(unittest.TestCase):
             self.assertTrue(self.running(failure=failure)[0])
 
 
-class PickTests(unittest.TestCase):
-    """How long ago a person pressed a mouse button or changed a modifier key, as CoreGraphics tells it."""
+class MousePressTests(unittest.TestCase):
+    """How long ago a person pressed a mouse button, as CoreGraphics tells it."""
 
     def library(self, ages):
         library = MagicMock()
         library.CGEventSourceSecondsSinceLastEventType.side_effect = lambda state, event: ages[event]
         return library
 
-    def test_the_most_recent_of_a_left_press_a_right_press_and_a_modifier_change_is_the_answer(self):
-        for ages, expected in (({1: 0.4, 3: 30.0, 12: 20.0}, 0.4), ({1: 30.0, 3: 0.6, 12: 20.0}, 0.6),
-                               ({1: 30.0, 3: 20.0, 12: 0.2}, 0.2)):
+    def test_the_more_recent_of_the_left_and_the_right_press_is_the_answer(self):
+        for ages, expected in (({1: 0.4, 3: 30.0}, 0.4), ({1: 30.0, 3: 0.6}, 0.6)):
             with self.subTest(ages=ages):
                 library = self.library(ages)
                 with patch.object(host_autostart.ctypes, 'CDLL', return_value=library):
-                    self.assertEqual(host_autostart.seconds_since_pick(), expected)
+                    self.assertEqual(host_autostart.seconds_since_mouse_press(), expected)
         reader = library.CGEventSourceSecondsSinceLastEventType
-        # The hardware state (1), asked for the left button (1), the right button (3) and a modifier change (12).
-        self.assertEqual(reader.call_args_list, [call(1, 1), call(1, 3), call(1, 12)])
+        # The hardware state (1), asked for the left button (1) and the right button (3), and for no modifier key.
+        self.assertEqual(reader.call_args_list, [call(1, 1), call(1, 3)])
         self.assertIs(reader.restype, ctypes.c_double)
         self.assertEqual(reader.argtypes, [ctypes.c_int32, ctypes.c_uint32])
 
     def test_what_macos_will_not_say_is_none(self):
         with patch.object(host_autostart.ctypes, 'CDLL', side_effect=OSError('no CoreGraphics')):
-            self.assertIsNone(host_autostart.seconds_since_pick())
+            self.assertIsNone(host_autostart.seconds_since_mouse_press())
         with patch.object(host_autostart.ctypes, 'CDLL', return_value=MagicMock(spec=[])):
-            self.assertIsNone(host_autostart.seconds_since_pick())
+            self.assertIsNone(host_autostart.seconds_since_mouse_press())
 
     @unittest.skipUnless(sys.platform == 'darwin', 'CoreGraphics is macOS only')
     def test_this_mac_answers_in_seconds(self):
-        seconds = host_autostart.seconds_since_pick()
+        seconds = host_autostart.seconds_since_mouse_press()
         self.assertIsInstance(seconds, float)
         self.assertGreaterEqual(seconds, 0)
 

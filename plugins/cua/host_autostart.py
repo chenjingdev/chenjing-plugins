@@ -16,12 +16,14 @@ WATCH_SECONDS = 30       # how long an app opened in the background is kept behi
 FIRST_CALL_WATCH = 15    # and again from the first tool call after that, however late the call comes
 MAX_SENT_BACK = 3        # how often it is sent back per opening, all watches together
 WATCH_INTERVAL = 0.25    # how often the front app is looked at meanwhile
-PICK_SECONDS = 1         # a mouse press or a modifier key change this recent means a person chose the app
+CLICK_SECONDS = 1        # a mouse press this recent means a person chose the app that came forward
+SETTLE_SECONDS = 1       # Codex still in front this long after it was sent back has come forward again
 _CORE_GRAPHICS = '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
-# CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateHIDSystemState, event type) for the event types
-# kCGEventLeftMouseDown, kCGEventRightMouseDown and kCGEventFlagsChanged (Command, Shift, ...: Cmd-Tab changes them)
+# CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateHIDSystemState,
+#                                        kCGEventLeftMouseDown or kCGEventRightMouseDown)
+# Only the mouse: a modifier key is also down while a person types the first prompt, when Codex tends to come forward.
 _HID_SYSTEM_STATE = 1
-_PICKS = (1, 3, 12)
+_MOUSE_PRESSES = (1, 3)
 # `lsappinfo info -only bundleid` prints `"CFBundleIdentifier"="…"` on older macOS and several lines with
 # `bundleID="…"` on macOS 27.
 _BUNDLE_ID = re.compile(r'(?:"CFBundleIdentifier"|\bbundleID)\s*=\s*"([^"\s]+)"')
@@ -65,13 +67,13 @@ def front_bundle():
     return match.group(1) if match else None
 
 
-def seconds_since_pick():
-    """Seconds since a person last pressed a mouse button or changed a modifier key, None when macOS will not say."""
+def seconds_since_mouse_press():
+    """Seconds since the left or the right mouse button was last pressed, or None when macOS will not say."""
     try:
         reader = ctypes.CDLL(_CORE_GRAPHICS).CGEventSourceSecondsSinceLastEventType
         reader.restype = ctypes.c_double
         reader.argtypes = [ctypes.c_int32, ctypes.c_uint32]
-        return min(reader(_HID_SYSTEM_STATE, event) for event in _PICKS)
+        return min(reader(_HID_SYSTEM_STATE, event) for event in _MOUSE_PRESSES)
     except (OSError, AttributeError):
         return None
 
@@ -97,7 +99,7 @@ class Watch:
 
     Whenever Codex comes to the front by itself, the app that was in front before is brought back, at most
     MAX_SENT_BACK times per opening however many watches there are. A watch ends at its deadline, or at once when a
-    person picked Codex (a mouse press or a modifier key change just before it came forward).
+    person picked Codex (a mouse press just before it came forward).
     """
     def __init__(self):
         self.lock = threading.Lock()
@@ -110,18 +112,33 @@ class Watch:
         with self.lock:
             self.codex, self.first_call_due, self.sent_back = codex, True, 0
 
+    def forget(self):
+        """A ready host was found that this process did not open: that Codex is a person's, not watched at a first
+        call."""
+        with self.lock:
+            self.first_call_due = False
+
     def first_call(self, start=None, sleep=time.sleep, clock=time.monotonic):
         """The first tool call after the opening, however late: watch again, from the app in front at that moment.
 
-        Returns at once; the front app is read in the thread that `start` runs. If it is Codex, a person may be
-        using it and nothing is watched.
+        Whether this was the first call is the answer. The front app is read here, before the call goes out: read
+        later, a Codex that comes forward within milliseconds would look like one that was in front already. If it
+        is Codex, a person may be using it and nothing is watched. The watch itself has a thread of its own.
         """
         with self.lock:
             due, self.first_call_due = self.first_call_due, False
             codex = self.codex
-        if due:
-            until = clock()+FIRST_CALL_WATCH
-            (start or start_in_background)(lambda: self.watch(codex, front_bundle(), until, sleep, clock))
+        if not due:
+            return False
+        until = clock()+FIRST_CALL_WATCH
+        back = front_bundle()
+        (start or start_in_background)(lambda: self.watch(codex, back, until, sleep, clock))
+        return True
+
+    def give_back(self):
+        """The call that was the first one never got to Codex: the next call is the first."""
+        with self.lock:
+            self.first_call_due = self.codex is not None
 
     def watch(self, codex, back, until, sleep=time.sleep, clock=time.monotonic):
         """Watch in this thread until `until`, bringing `back` forward when Codex comes forward by itself.
@@ -153,17 +170,20 @@ class Watch:
     def keep_behind(self, codex, back, sleep, clock):
         """`back` follows the front app while it is not Codex, so a person who moved on gets that app back."""
         forward = False            # Codex was in front at the last look
+        sent_at = None             # when it was last sent back
         try:
             while self.going(clock):
                 front = front_bundle()
                 if front == codex:
-                    if not forward:    # it has just come forward
+                    # It has just come forward, or it came again before the next look and stays in front.
+                    if not forward or (sent_at is not None and clock()-sent_at >= SETTLE_SECONDS):
                         forward = True
-                        pick = seconds_since_pick()
-                        if pick is not None and pick <= PICK_SECONDS:
+                        pressed = seconds_since_mouse_press()
+                        if pressed is not None and pressed <= CLICK_SECONDS:
                             self.end()     # a person chose it: it stays
                             return
                         back = self.send_back(back)
+                        sent_at = clock() if back else None
                 elif front:
                     forward = False
                     back = front
@@ -190,8 +210,14 @@ WATCH = Watch()
 
 
 def watch_first_call(start=None, sleep=time.sleep, clock=time.monotonic):
-    """For the MCP server, when a tool call starts: the first one after this process opened Codex asks for a watch."""
-    WATCH.first_call(start, sleep, clock)
+    """For the MCP server, before a tool call goes out: the first one after this process opened Codex asks for a
+    watch. It reads the front app, which takes a moment, and says whether this call was the first."""
+    return WATCH.first_call(start, sleep, clock)
+
+
+def give_back_first_call():
+    """For the MCP server: the call that was the first one failed, so the chance is the next call's."""
+    WATCH.give_back()
 
 
 def _timeout(environment):
@@ -212,18 +238,23 @@ def _lock(state):
 
 
 def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sleep, clock=time.monotonic,
-                start=None):
+                start=None, log=None):
     """Return the ready registry, opening the closed app in the background first.
 
     Concurrent MCP sessions serialize on one lock, so the app is opened once.
     An app opened here is then kept behind (see Watch): for WATCH_SECONDS from the moment its host is ready, and
-    again at the first tool call. `start` runs a watch, in a thread of its own by default; the return does not wait.
+    again at the first tool call. `start` runs a watch, in a thread of its own by default; the return does not wait,
+    and a watch that cannot start is only logged (`log` gets an event name).
     """
     environment = os.environ if environment is None else environment
+    watcher = WATCH
     try:
-        return read_registry(state)
+        registry = read_registry(state)
     except Exception:
         pass
+    else:
+        watcher.forget()
+        return registry
     timeout = _timeout(environment)
     descriptor = _lock(state)
     try:
@@ -237,9 +268,12 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
                     raise AutostartFailure('Another session is still opening Codex; reconnect this MCP shortly.') from None
                 sleep(0.1)
         try:
-            return read_registry(state)
+            registry = read_registry(state)
         except Exception:
             pass
+        else:
+            watcher.forget()
+            return registry
         installation = discover_installation(environment, home)
         if app_processes(installation.executable):
             raise AutostartFailure('Codex is open without the host listener. Quit Codex normally (Cmd+Q), '
@@ -251,6 +285,7 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
         if subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).returncode != 0:
             raise AutostartFailure('Codex could not be opened in the background.')
         registry = None
+        forward = chosen = False    # Codex was in front at the last look; a person's mouse press brought it there
         while registry is None:
             try:
                 registry = read_registry(state)
@@ -262,18 +297,29 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
                     raise AutostartFailure('Codex opened but its host did not become ready in time. '
                                            'Check the Codex window for a login or permission prompt, '
                                            'then reconnect this MCP.') from None
-                # A person may move on while the host starts: that app is the one to bring back. Nothing is
-                # brought back before the host is ready.
+                # A person may move on while the host starts: that app is the one to bring back. Or the person
+                # chooses Codex: it stays until another app comes forward. Nothing is brought back before the host
+                # is ready.
                 front = front_bundle()
-                if front and front != installation.bundle_id:
+                if front == installation.bundle_id:
+                    if not forward:
+                        pressed = seconds_since_mouse_press()
+                        chosen = pressed is not None and pressed <= CLICK_SECONDS
+                    forward = True
+                elif front:
+                    forward = chosen = False
                     previous = front
                 sleep(0.2)
-        watcher = WATCH
         watcher.opened(installation.bundle_id)
-        if previous and previous != installation.bundle_id:
+        if previous and previous != installation.bundle_id and not chosen:
             until = clock()+WATCH_SECONDS
             codex = installation.bundle_id
-            (start or start_in_background)(lambda: watcher.watch(codex, previous, until, sleep, clock))
+            try:
+                (start or start_in_background)(lambda: watcher.watch(codex, previous, until, sleep, clock))
+            except Exception:
+                # A watch is a nicety: a thread that cannot start must not fail the connection.
+                if log is not None:
+                    log('open_watch_unavailable')
         return registry
     finally:
         os.close(descriptor)
