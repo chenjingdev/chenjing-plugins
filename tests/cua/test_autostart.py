@@ -266,6 +266,14 @@ class AutostartTests(unittest.TestCase):
         self.assertEqual(handed, [])                       # no watch: Codex stays in front
         self.assertEqual(self.sent_back(), [])
 
+    def test_a_mouse_press_while_codex_waits_in_front_is_a_choice(self):
+        self.desktop.comes_forward(3.0, CODEX)             # Codex comes forward by itself while its host starts
+        self.desktop.person_does(3.5, LEFT_DOWN)           # and the person clicks into it
+        handed = []
+        self.run_host(self.host_after_open(seconds=5), start=handed.append)
+        self.assertEqual(handed, [])                       # no watch: Codex stays in front
+        self.assertEqual(self.sent_back(), [])
+
     def test_a_choice_made_while_the_host_starts_is_forgotten_when_another_app_comes_forward(self):
         self.desktop.person_does(2.0, LEFT_DOWN)
         self.desktop.comes_forward(2.05, CODEX)            # chosen...
@@ -366,14 +374,13 @@ class AutostartTests(unittest.TestCase):
         self.assertTrue(self.first_call())
         self.assertFalse(self.first_call())
 
-    def test_a_ready_host_this_process_did_not_open_is_not_watched_at_the_first_call(self):
+    def test_a_reconnect_before_the_first_call_keeps_the_first_call_watch(self):
         self.run_host(self.host_after_open())                        # opened here: a first call would watch
-        self.run_host(lambda state: {'socket_path': '/ready'})       # a reconnect finds a host a person started
+        self.run_host(lambda state: {'socket_path': '/ready'})       # a reconnect finds a host ready (a replacement)
         self.clock.now = 600.0
-        self.desktop.comes_forward(601.0, CODEX)
-        self.assertFalse(self.first_call())
-        self.assertEqual(self.clock.now, 600.0)
-        self.assertEqual(self.sent_back(), [])
+        self.desktop.comes_forward(601.0, CODEX)                     # as freshly started, it comes forward
+        self.assertTrue(self.first_call())
+        self.assertEqual(self.sent_back(), [TERMINAL])
 
     def test_a_first_call_while_a_watch_runs_only_gives_it_more_time(self):
         self.run_host(self.host_after_open(), start=lambda work: None)      # opened, nothing watched yet

@@ -97,6 +97,9 @@ def start_in_background(work):
 class Watch:
     """Keeps a Codex that this process opened in the background behind, one watch at a time.
 
+    The first-call watch also covers a Codex that replaced that one before the first call (a reconnect found its host
+    ready): it is as freshly started, and a person using it has it in front, where nothing is watched.
+
     Whenever Codex comes to the front by itself, the app that was in front before is brought back, at most
     MAX_SENT_BACK times per opening however many watches there are. A watch ends at its deadline, or at once when a
     person picked Codex (a mouse press just before it came forward).
@@ -111,12 +114,6 @@ class Watch:
     def opened(self, codex):
         with self.lock:
             self.codex, self.first_call_due, self.sent_back = codex, True, 0
-
-    def forget(self):
-        """A ready host was found that this process did not open: that Codex is a person's, not watched at a first
-        call."""
-        with self.lock:
-            self.first_call_due = False
 
     def first_call(self, start=None, sleep=time.sleep, clock=time.monotonic):
         """The first tool call after the opening, however late: watch again, from the app in front at that moment.
@@ -253,7 +250,6 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
     except Exception:
         pass
     else:
-        watcher.forget()
         return registry
     timeout = _timeout(environment)
     descriptor = _lock(state)
@@ -272,7 +268,6 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
         except Exception:
             pass
         else:
-            watcher.forget()
             return registry
         installation = discover_installation(environment, home)
         if app_processes(installation.executable):
@@ -285,7 +280,7 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
         if subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).returncode != 0:
             raise AutostartFailure('Codex could not be opened in the background.')
         registry = None
-        forward = chosen = False    # Codex was in front at the last look; a person's mouse press brought it there
+        chosen = False    # a person pressed the mouse just before Codex came forward or while it was in front
         while registry is None:
             try:
                 registry = read_registry(state)
@@ -298,16 +293,15 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
                                            'Check the Codex window for a login or permission prompt, '
                                            'then reconnect this MCP.') from None
                 # A person may move on while the host starts: that app is the one to bring back. Or the person
-                # chooses Codex: it stays until another app comes forward. Nothing is brought back before the host
-                # is ready.
+                # chooses Codex, with a mouse press just before it comes forward or while it is in front: it stays
+                # until another app comes forward. Nothing is brought back before the host is ready.
                 front = front_bundle()
                 if front == installation.bundle_id:
-                    if not forward:
+                    if not chosen:
                         pressed = seconds_since_mouse_press()
                         chosen = pressed is not None and pressed <= CLICK_SECONDS
-                    forward = True
                 elif front:
-                    forward = chosen = False
+                    chosen = False
                     previous = front
                 sleep(0.2)
         watcher.opened(installation.bundle_id)
@@ -316,8 +310,9 @@ def ensure_host(state, read_registry, environment=None, home=None, sleep=time.sl
             codex = installation.bundle_id
             try:
                 (start or start_in_background)(lambda: watcher.watch(codex, previous, until, sleep, clock))
-            except Exception:
-                # A watch is a nicety: a thread that cannot start must not fail the connection.
+            except RuntimeError:
+                # A watch is a nicety: a thread that cannot start must not fail the connection. Only that is caught,
+                # so an error inside a watch run in place (the tests do) still shows.
                 if log is not None:
                     log('open_watch_unavailable')
         return registry

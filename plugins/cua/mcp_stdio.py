@@ -81,8 +81,9 @@ def build_adapter(state, **options):
             # A Codex this process opened in the background is watched again at the first tool call: the first screen
             # call of a fresh Codex brings it forward (S4). The front app is read before the call goes out, off the
             # event loop, so a Codex that comes forward within milliseconds is not taken for one in front already;
-            # the watch itself has a thread. A watch that cannot start must not fail the call, and a call that fails
-            # leaves the chance to the next one.
+            # the watch itself has a thread. A watch that cannot start must not fail the call, and a call that failed
+            # on this side (BridgeFailure: never sent, or the connection was lost) leaves the chance to the next one;
+            # a call Codex answered with an error did reach it.
             first = False
             try:
                 first = await asyncio.to_thread(watch_first_call)
@@ -90,7 +91,7 @@ def build_adapter(state, **options):
                 self.log('first_call_watch_unavailable')
             try:
                 return await super().call_tool(name, arguments)
-            except BaseException:
+            except BridgeFailure:
                 if first:
                     give_back_first_call()
                 raise

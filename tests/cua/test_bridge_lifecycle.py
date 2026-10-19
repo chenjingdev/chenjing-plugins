@@ -715,6 +715,16 @@ class FirstCallWatchTests(RegisteredCase):
         self.assertIn('open_watch_unavailable', self.logs)
         self.assertEqual((await self.run_call(adapter))['result']['content'][0]['text'], 'PRIVATE_RESULT')
 
+    async def test_a_first_call_codex_answered_with_an_error_used_the_chance(self):
+        host, adapter, control = await self.opened_in_the_background()
+        failure = host_mcp.RpcFailure({'code': -32000, 'message': 'tool failed'})
+        with patch.object(host_mcp.HostMcp, 'call_tool', AsyncMock(side_effect=failure)):
+            with self.assertRaises(host_mcp.RpcFailure):
+                await adapter.call_tool('js', {'code': 'PRIVATE_SCRIPT'})
+        self.assertEqual(len(self.watches), 1)
+        await adapter.handle(self.call())
+        self.assertEqual(len(self.watches), 1)           # Codex got that call, so the chance was used
+
     async def test_a_first_call_that_never_reached_codex_leaves_the_chance_to_the_next_call(self):
         host, adapter, control = await self.opened_in_the_background()
         adapter.stopping = True
