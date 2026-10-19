@@ -5,6 +5,8 @@ import Foundation
 /// - Codex runs without the host (`codex_without_host`): once per Codex app process (its pids).
 /// - A lease the owner left behind: once per session, when the owner has been gone for more than a
 ///   minute (`ended_at`, or when the app first saw it if that is null) and it is still listed (R16).
+///   One the automatic cleanup is about to let go of, by itself or with the ended connection that still
+///   serves its session, waits until the cleanup has tried and is done.
 struct NotificationPlanner: Sendable {
     static let lingeringAfter: TimeInterval = 60
     /// After a post that did not go out (notifications off), try again no sooner than this.
@@ -45,6 +47,9 @@ struct NotificationPlanner: Sendable {
             guard now.timeIntervalSince(goneSince) > Self.lingeringAfter else { continue }
             if CleanupPlanner.isCandidate(entry) {
                 guard let cleanupKey = CleanupPlanner.key(for: entry), cleanupTried.contains(cleanupKey), !cleanupRunning else { continue }
+            } else if let covering = TidyPlan.endedConnection(serving: entry, in: status), CleanupPlanner.isCandidate(covering) {
+                // An ended connection still serves the session: the same cleanup lets go of both (S21).
+                guard cleanupTried.contains(CleanupPlanner.key(for: covering)), !cleanupRunning else { continue }
             }
             // `ended_at` null on an entry of a bridge that still runs: a session from before Codex
             // restarted (contract, P4), not a connection that ended.

@@ -18,7 +18,7 @@ from engine_core import CONNECTION_ID, REASON
 from engine_inventory import (app_pids, cmux_mode, find_installation, is_cua_repl, lookup, read_host, same_process,
                               snapshot)
 from engine_records import ControlError, control_request, release_timeout
-from engine_release import release_sessions
+from engine_release import book_release, release_sessions
 from engine_status import CmuxConnection, build_view
 
 STOP_GRACE = 8.0
@@ -65,6 +65,18 @@ def release_one(ctx, conn, timeout=None):
     return Release(False, reason, count, reason == 'no_trusted_scope' and count == 0)
 
 
+def book_connection(ctx, records, conn, result):
+    """A confirmed release of a connection is also one of every session its writer was serving.
+
+    The dead records that list those sessions are booked as released. A bridge that was killed can never close its
+    own scopes, and the runtime it leaves behind lets go of them without telling it; without this the session would
+    stay listed for good as one that may have been left behind, though its connection has just let go of it.
+    Live records are left alone: the bridge and the relay of one thread both book their own scopes as the release
+    goes through them, and a pair the engine remembered for them could hide a later scope of the same session."""
+    if result.released and conn.record is not None:
+        book_release(ctx, [record for record in records if not record.live], sorted(conn.record.live_sessions()))
+
+
 def find_connection(ctx, wanted):
     """(view, connection) for a connection id (also a cmux-cua one), or (None, None) when there is no such live one."""
     if not CONNECTION_ID.match(wanted):
@@ -75,12 +87,13 @@ def find_connection(ctx, wanted):
 
 
 def release_connection(ctx, wanted):
-    _, conn = find_connection(ctx, wanted)
+    view, conn = find_connection(ctx, wanted)
     if conn is None:
         return {'ok': False, 'released': False, 'reason': 'not_found', 'scope_count': 0}
     if isinstance(conn, CmuxConnection):       # cmux-cua holds no browser lease of ours: there is nothing to release
         return {'ok': False, 'released': False, 'reason': 'unsupported', 'scope_count': 0}
     result = release_one(ctx, conn)
+    book_connection(ctx, view.records, conn, result)
     return {'ok': result.released or result.nothing, 'released': result.released, 'reason': result.reason,
             'scope_count': result.count}
 
@@ -95,6 +108,7 @@ def release_ended(ctx):
     for conn in view.connections:
         if conn.state == 'ended':
             result = release_one(ctx, conn)
+            book_connection(ctx, view.records, conn, result)
             results.append({'connection_id': conn.id, 'released': result.released, 'reason': result.reason})
             fine.append(result.released or result.nothing)
     if results:
@@ -162,16 +176,19 @@ def _wait_gone(ctx, waiting, seconds):
     return waiting
 
 
-def stop_connections(ctx, conns, force, protected):
+def stop_connections(ctx, conns, force, protected, records=()):
     """Release, then stop the given connections together. One result per connection, in the same order.
 
-    A cmux-cua connection has no release step: its result says `released: false` and has no reason when it stopped."""
+    A cmux-cua connection has no release step: its result says `released: false` and has no reason when it stopped.
+    `records` are those of the look at the machine the connections come from: what a release let go of is booked in them."""
     release = {conn.id: NO_RELEASE for conn in conns}
     asked = [conn for conn in conns if not isinstance(conn, CmuxConnection)]
     if asked:
         with ThreadPoolExecutor(max_workers=min(8, len(asked))) as pool:
             futures = [(conn, pool.submit(release_one, ctx, conn)) for conn in asked]
             release.update({conn.id: future.result() for conn, future in futures})
+        for conn in asked:
+            book_connection(ctx, records, conn, release[conn.id])
     outcome = {}
     waiting = []
     for conn in conns:
@@ -227,7 +244,7 @@ def stop_connection(ctx, wanted, force=False):
     if conn is None:
         return {'ok': False, 'stopped': False, 'released': False, 'reason': 'not_found'}
     protected = view.protected_pids(cmux_connections=isinstance(conn, CmuxConnection))
-    result = stop_connections(ctx, [conn], force, protected)[0]
+    result = stop_connections(ctx, [conn], force, protected, view.records)[0]
     return {'ok': result['stopped'], 'stopped': result['stopped'], 'released': result['released'],
             'reason': result['reason']}
 
@@ -243,7 +260,7 @@ def stop_group(ctx, group, force=False):
     conns = [conn for conn in view.connections if group == 'all' or conn.agent == group]
     skipped = [conn for conn in conns if group == 'codex' and conn.session_id is None]
     done = {item['connection_id']: item for item in stop_connections(
-        ctx, [conn for conn in conns if conn not in skipped], force, view.protected_pids())}
+        ctx, [conn for conn in conns if conn not in skipped], force, view.protected_pids(), view.records)}
     results = [{'connection_id': conn.id, 'stopped': False, 'released': False, 'reason': 'unattributed'}
                if conn in skipped else done[conn.id] for conn in conns]
     stopped = sum(1 for item in done.values() if item['stopped'])

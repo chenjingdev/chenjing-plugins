@@ -219,6 +219,28 @@ def end_thread_runtimes(ctx, folder, host_pid, since):
     return len(ended)
 
 
+def book_release(ctx, records, sessions):
+    """Write down, in the records that list them, that `sessions` were released for sure.
+
+    A dead record can no longer write for itself: the scopes of those sessions are taken out of it (and it goes when
+    none is left). A live writer's record is not ours to rewrite, so the release is remembered in the engine's own
+    file instead.
+
+    Without this a session stays listed by the dead bridge that opened it, as one that may have been left behind,
+    though a runtime or a targeted release has let go of it."""
+    for session in sessions:
+        for record in records:
+            if session not in record.open_sessions:
+                continue
+            try:
+                if not record.live:
+                    remove_sessions(ctx.state_dir, ctx.uid, record, {session})
+                else:
+                    remember_released(ctx.state_dir, ctx.uid, record.writer, session, iso(ctx.clock()))
+            except OSError:
+                pass
+
+
 def release_sessions(ctx, sessions, user=False, view=None, options=None):
     """session id -> {'released', 'reason', 'tab_count'} for each session asked about."""
     options = dict(DEFAULT_OPTIONS, **(options or {}))
@@ -256,16 +278,7 @@ def release_sessions(ctx, sessions, user=False, view=None, options=None):
         result = outcome.get(session) or _failure('cleanup_not_confirmed')
         results[session] = result
         if result['released']:
-            for record in view.records:
-                if session not in record.open_sessions:
-                    continue
-                try:
-                    if not record.live:
-                        remove_sessions(ctx.state_dir, ctx.uid, record, {session})
-                    else:       # a live writer's record is not ours to rewrite: remember the release instead
-                        remember_released(ctx.state_dir, ctx.uid, record.writer, session, iso(ctx.clock()))
-                except OSError:
-                    pass
+            book_release(ctx, view.records, [session])
     return results
 
 

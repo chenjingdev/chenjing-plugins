@@ -208,6 +208,95 @@ class ReleaseEndedTests(ActionCase):
         self.assertEqual(self.events, [])
 
 
+class ReleaseBookingTests(ActionCase):
+    """A connection that let go of a session also takes it out of the dead bridge that opened it (S16, S21).
+
+    A bridge that was killed can never close its scopes, and the runtime it named lists the same ones. When that
+    runtime has released them, nothing may have been left behind any more; the dead bridge's record kept saying so."""
+    ENDED = 'claude-2001-%d' % (NOW-4990)
+
+    def killed_bridge_and_its_runtime(self, reply=DONE, extra=()):
+        """The bridge d1 was killed with an open scope (and maybe more); the runtime it named lists the first one."""
+        scopes = [State.scope(SESSION_A, last=at(100))] + [State.scope(session, last=at(2000)) for session in extra]
+        bridge = self.state.bridge('d1', 7001, NOW-5000, owner_pid=501, cwd='/work/c21', session_id=SESSION_A,
+                                   scopes=scopes, cleanup='open')
+        self.add_runtime(2000, NOW-4990)
+        relay = self.state.relay('r1', 2001, NOW-4990, root_pid=2000, runtime_pid=2002, cwd='/work/c21',
+                                 owner='bridge-7001-%d' % (NOW-5000), scopes=[State.scope(SESSION_A, last=at(100))],
+                                 cleanup='open')
+
+        def answer(request):
+            # What the real relay does when its release is confirmed: the scopes leave its own record.
+            if reply.get('released') is True:
+                self.update(relay, 'relay', scopes=[], cleanup='none')
+            return reply
+        self.writer(relay, 2001, NOW-4990, answer)
+        return bridge, relay
+
+    def left(self):
+        return [item['session_id'] for item in engine_status.status(self.ctx())['leases']['maybe_left']]
+
+    def test_the_session_is_listed_with_no_way_to_release_it_while_the_runtime_still_lists_it(self):
+        self.killed_bridge_and_its_runtime()
+        [entry] = engine_status.status(self.ctx())['leases']['maybe_left']
+        self.assertEqual((entry['session_id'], entry['connection_id'], entry['releasable']),
+                         (SESSION_A, 'claude-7001-%d' % (NOW-5000), False))
+
+    def test_ending_the_runtimes_release_takes_the_session_out_of_the_dead_bridge_at_once(self):
+        bridge, _ = self.killed_bridge_and_its_runtime()
+        self.assertEqual(engine_actions.release_ended(self.ctx()),
+                         {'ok': True, 'results': [{'connection_id': self.ENDED, 'released': True, 'reason': None}]})
+        self.assertFalse(bridge.exists())
+        self.assertEqual(self.left(), [])
+
+    def test_only_the_sessions_the_connection_let_go_of_leave_the_dead_bridge(self):
+        bridge, _ = self.killed_bridge_and_its_runtime(extra=[SESSION_B])
+        engine_actions.release_ended(self.ctx())
+        self.assertEqual([item['session_id'] for item in json.loads((bridge/'bridge.json').read_text())['scopes']], [SESSION_B])
+        self.assertEqual(self.left(), [SESSION_B])
+
+    def test_a_release_that_is_not_confirmed_leaves_the_dead_bridge_alone(self):
+        bridge, _ = self.killed_bridge_and_its_runtime({'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0})
+        before = (bridge/'bridge.json').read_bytes()
+        result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result['results'][0], {'connection_id': self.ENDED, 'released': False, 'reason': 'cleanup_not_confirmed'})
+        self.assertEqual((bridge/'bridge.json').read_bytes(), before)
+        self.assertEqual(self.left(), [SESSION_A])
+
+    def test_a_connection_with_nothing_to_release_books_nothing(self):
+        bridge, _ = self.killed_bridge_and_its_runtime({'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
+        engine_actions.release_ended(self.ctx())
+        self.assertTrue(bridge.exists())
+
+    def test_stopping_the_runtime_books_what_its_release_let_go_of(self):
+        bridge, _ = self.killed_bridge_and_its_runtime()
+        self.assertEqual(engine_actions.stop_connection(self.ctx(), self.ENDED),
+                         {'ok': True, 'stopped': True, 'released': True, 'reason': None})
+        self.assertFalse(bridge.exists())
+        self.assertEqual(self.left(), [])
+
+    def test_a_group_stop_books_it_too(self):
+        bridge, _ = self.killed_bridge_and_its_runtime()
+        self.assertEqual(engine_actions.stop_group(self.ctx(), 'claude')['stopped'], 1)
+        self.assertFalse(bridge.exists())
+
+    def test_releasing_just_the_tabs_of_the_runtime_books_it_too(self):
+        bridge, _ = self.killed_bridge_and_its_runtime()
+        self.assertEqual(engine_actions.release_connection(self.ctx(), self.ENDED),
+                         {'ok': True, 'released': True, 'reason': None, 'scope_count': 1})
+        self.assertFalse(bridge.exists())
+
+    def test_a_live_writers_record_is_neither_rewritten_nor_remembered_for(self):
+        """The bridge and the relay of a live thread both book their own scopes; a pair the engine remembered for them
+        could hide a later scope of the same session."""
+        directory, relay_directory = self.bridge_with_runtime()
+        self.writer(directory, 4242, NOW-900, DONE)
+        before = [(item/name).read_bytes() for item, name in ((directory, 'bridge.json'), (relay_directory, 'relay.json'))]
+        self.assertTrue(engine_actions.release_connection(self.ctx(), BRIDGE_ID)['released'])
+        self.assertEqual([(item/name).read_bytes() for item, name in ((directory, 'bridge.json'), (relay_directory, 'relay.json'))], before)
+        self.assertFalse((self.state.root/'engine-released.json').exists())
+
+
 class SessionReleaseInEndedTests(ActionCase):
     """release --ended also frees the sessions of dead bridges, through the host."""
 

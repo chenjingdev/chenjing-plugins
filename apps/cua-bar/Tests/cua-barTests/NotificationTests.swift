@@ -140,6 +140,27 @@ struct NotificationPlannerTests {
         #expect(planner.due(status: try leaseStatus([entry]), appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).count == 1)
     }
 
+    @Test func aLeaseAnEndedConnectionStillServesWaitsForThatConnectionsCleanup() throws {
+        var planner = NotificationPlanner()
+        let entry = LeftoverLease(sessionID: "019a-claude", agent: .claude, connectionID: "claude-31569-1", cwd: nil, endedAt: t0.addingTimeInterval(-600), releasable: false)
+        var status = try leaseStatus([entry])
+        status.connections = [Connection(id: "claude-31806-1", agent: .claude, state: .ended, sessionID: "019a-claude", canRelease: true, canStop: true)]
+        let key = "connection:claude-31806-1"
+        // The cleanup that lets go of the connection lets go of the lease too: not tried yet, or being tried now, wait.
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).isEmpty)
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [key], cleanupRunning: true).isEmpty)
+        // Tried, finished, and the lease is still listed: now it is worth a notification.
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [key], cleanupRunning: false).map(\.key) == ["lease:019a-claude"])
+    }
+
+    @Test func aLeaseOfAnEndedConnectionTheCleanupCannotReachIsNotWaitedFor() throws {
+        var planner = NotificationPlanner()
+        let entry = LeftoverLease(sessionID: "019a-claude", agent: .claude, connectionID: "claude-31569-1", cwd: nil, endedAt: t0.addingTimeInterval(-600), releasable: false)
+        var status = try leaseStatus([entry])
+        status.connections = [Connection(id: "claude-31806-1", agent: .claude, state: .ended, sessionID: "019a-claude", canRelease: false, canStop: true)]
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).count == 1)
+    }
+
     @Test func anEntryWithNoSessionIsKeyedByItsConnection() throws {
         var planner = NotificationPlanner()
         let entry = LeftoverLease(sessionID: nil, agent: .codex, connectionID: "codex-5-5", cwd: nil, endedAt: t0.addingTimeInterval(-600), releasable: false)

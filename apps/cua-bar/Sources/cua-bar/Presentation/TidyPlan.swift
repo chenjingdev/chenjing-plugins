@@ -54,6 +54,15 @@ enum TidyPlan {
         }
     }
 
+    /// The ended connection whose 정리 is the way to let go of this leftover lease, if there is one: it still
+    /// serves the session, so the lease cannot be aimed at by its id (not `releasable`) until that connection
+    /// has let go of it. The lease is then no thing of its own: the connection's line is where to press, and a
+    /// second line for the same session would count it twice and send the person to the extension reset (S16).
+    static func endedConnection(serving lease: LeftoverLease, in status: EngineStatus) -> Connection? {
+        guard !lease.releasable, let session = lease.sessionID else { return nil }
+        return endedConnections(in: status).first { $0.sessionID == session }
+    }
+
     /// The leftover leases of Claude conversations the engine can aim at. A Codex chat's lease is
     /// not here: a Codex chat can be resumed after a restart, so only a click on its own row
     /// releases it.

@@ -383,7 +383,8 @@ struct ConnectionsContent: Equatable, Sendable {
     }
 
     /// The lease lines: what the engine could read (`items`) unless a connection of the list holds it,
-    /// then the sessions whose owner is gone (`maybe_left`).
+    /// then the sessions whose owner is gone (`maybe_left`) unless an ended connection's line is the way to
+    /// let go of them.
     private static func leaseRows(in status: EngineStatus, now: Date, calendar: Calendar) -> [LeaseRow] {
         let leases = status.leases
         let connectionSessions = Set(status.connections.compactMap(\.sessionID))
@@ -401,6 +402,8 @@ struct ConnectionsContent: Equatable, Sendable {
                 sessionID: item.sessionID, canReleaseSession: item.sessionID != nil && item.releasable, hint: nil))
         }
         for (index, item) in leases.maybeLeft.enumerated() {
+            // The line of an ended connection that still serves the session is where to press (S16).
+            if TidyPlan.endedConnection(serving: item, in: status) != nil { continue }
             var parts: [String] = []
             if let ended = item.endedAt { parts.append("\(Format.when(ended, now: now, calendar: calendar))에 끝남") }
             let releasable = item.sessionID != nil && item.releasable

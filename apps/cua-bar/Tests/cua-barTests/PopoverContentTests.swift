@@ -270,6 +270,49 @@ struct PopoverContentTests {
         #expect(second.hint == "풀 방법이 없어요 — 아래 안내를 따라 주세요")
     }
 
+    // MARK: One session, one line (S16)
+
+    /// The runtime of a conversation that ended (an ended connection), and the dead bridge that opened its session,
+    /// which the engine still lists as a lease: the engine cannot aim at the session while the runtime serves it.
+    private func runtimeAndItsDeadBridge(leaseReleasable: Bool = false, leaseSession: String = "019a-c21") throws -> EngineStatus {
+        var status = try Fixtures.status("status-ready")
+        status.connections = [Connection(
+            id: "claude-31806-1792419210", agent: .claude, state: .ended, cwd: "/Users/chenjing/dev/c21",
+            startedAt: Fixtures.now.addingTimeInterval(-60), sessionID: "019a-c21", canRelease: true, canStop: true)]
+        status.leases.maybeLeft = [LeftoverLease(
+            sessionID: leaseSession, agent: .claude, connectionID: "claude-31569-1792419209", cwd: "/Users/chenjing/dev/c21",
+            endedAt: nil, releasable: leaseReleasable)]
+        return status
+    }
+
+    @Test func aLeaseTheEndedConnectionStillServesIsNotASecondLine() throws {
+        let connections = content(of: try runtimeAndItsDeadBridge()).connections
+        let tidy = try #require(connections.tidy)
+        #expect(tidy.rows.map(\.id) == ["ended-claude-31806-1792419210"], "one session, one line, and its 정리 is the way")
+        #expect(tidy.title == "손볼 것 1개")
+        #expect(tidy.notice == nil, "no lease line, so nothing to say about the unreadable list")
+        #expect(connections.guidance.needsAttention == false, "and no advice to reset the extension for what 정리 does")
+    }
+
+    @Test func aLeaseTheEngineCanAimAtKeepsItsOwnLineBesideTheEndedConnection() throws {
+        let tidy = try #require(content(of: try runtimeAndItsDeadBridge(leaseReleasable: true)).connections.tidy)
+        #expect(tidy.rows.map(\.id) == ["ended-claude-31806-1792419210", "lease-left-019a-c21"])
+    }
+
+    @Test func aLeaseOfAnotherSessionKeepsItsLineAndItsAdvice() throws {
+        let connections = content(of: try runtimeAndItsDeadBridge(leaseSession: "019a-other")).connections
+        let tidy = try #require(connections.tidy)
+        #expect(tidy.rows.map(\.id) == ["ended-claude-31806-1792419210", "lease-left-019a-other"])
+        #expect(connections.guidance.needsAttention)
+    }
+
+    @Test func onlyAnEndedConnectionTakesTheLeaseLineAway() throws {
+        var status = try runtimeAndItsDeadBridge()
+        status.connections[0].state = .active
+        let tidy = try #require(content(of: status).connections.tidy)
+        #expect(tidy.rows.map(\.id) == ["lease-left-019a-c21"], "a live connection's session is not the 정리 of anything")
+    }
+
     @Test func theLeaseNoticeIsSaidOnlyWhereThereIsALeaseLine() throws {
         // An unreadable list with nothing left: no lease line, so no notice and no head.
         var status = try Fixtures.status("status-ready")
