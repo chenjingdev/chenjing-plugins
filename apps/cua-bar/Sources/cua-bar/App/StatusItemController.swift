@@ -12,11 +12,15 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let host: NSHostingController<PopoverView>
+    private let otherViewIsOpen: @MainActor () -> Bool
     private var subscription: AnyCancellable?
 
-    init(model: CUABarViewModel, maintenance: Maintenance? = nil) {
+    /// `otherViewIsOpen`: another view of the same model (the verify panel) is shown, so closing the popover
+    /// does not close the model's view.
+    init(model: CUABarViewModel, maintenance: Maintenance? = nil, otherViewIsOpen: @escaping @MainActor () -> Bool = { false }) {
         self.model = model
         self.maintenance = maintenance
+        self.otherViewIsOpen = otherViewIsOpen
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         host = NSHostingController(rootView: PopoverView(model: model, maintenance: maintenance, quit: { NSApplication.shared.terminate(nil) }))
         super.init()
@@ -42,6 +46,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         // A click on a notification opens the popover (the person's own click, so R1 holds).
         model.openPopoverHandler = { [weak self] in self?.showPopover() }
     }
+
+    var isPopoverShown: Bool { popover.isShown }
 
     func remove() {
         popover.close()
@@ -82,6 +88,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
-        model.setPopoverOpen(false)
+        model.setPopoverOpen(otherViewIsOpen())
     }
 }

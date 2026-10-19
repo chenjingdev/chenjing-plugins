@@ -12,12 +12,22 @@ enum AppVersion {
 final class CUABarAppDelegate: NSObject, NSApplicationDelegate {
     private var live: LiveApp?
     private var controller: StatusItemController?
+    private var verifyPanel: VerifyPanelController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         let live = LiveApp.make(quit: { NSApplication.shared.terminate(nil) })
         self.live = live
-        controller = StatusItemController(model: live.model, maintenance: live.maintenance)
+        // The popover and the verify panel show one model: it counts as open while either is.
+        controller = StatusItemController(
+            model: live.model, maintenance: live.maintenance,
+            otherViewIsOpen: { [weak self] in self?.verifyPanel?.isShown ?? false })
+        let verifyPanel = VerifyPanelController(model: live.model, maintenance: live.maintenance) { [weak self] open in
+            if open { live.maintenance.loginItem.refresh() }
+            live.model.setPopoverOpen(open || (self?.controller?.isPopoverShown ?? false))
+        }
+        verifyPanel.listenForSignal()
+        self.verifyPanel = verifyPanel
         live.start()
     }
 
