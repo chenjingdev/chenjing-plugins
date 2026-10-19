@@ -30,8 +30,17 @@ struct VerifyPanelTests {
             #expect(!screen.frame.intersects(panel.frame), "out of sight: \(screen.frame) vs \(panel.frame)")
         }
 
+        // A picture of it, since a window out of sight cannot be captured from outside.
+        let picture = FileManager.default.temporaryDirectory.appendingPathComponent("verify-panel-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: picture) }
+        #expect(controller.writePicture(to: picture))
+        let image = try #require(NSBitmapImageRep(data: try Data(contentsOf: picture)))
+        #expect(image.pixelsWide == Int(Theme.popoverWidth) * 2)
+        #expect(Snapshot.meanDarkness(image) > 0.01, "something is drawn")
+
         controller.toggle()
         #expect(!controller.isShown)
         #expect(heard.opened == [true, false])
+        #expect(!controller.writePicture(to: picture), "only the shown panel")
     }
 }

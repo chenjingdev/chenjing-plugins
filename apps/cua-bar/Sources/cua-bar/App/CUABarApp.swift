@@ -26,7 +26,7 @@ final class CUABarAppDelegate: NSObject, NSApplicationDelegate {
             if open { live.maintenance.loginItem.refresh() }
             live.model.setPopoverOpen(open || (self?.controller?.isPopoverShown ?? false))
         }
-        verifyPanel.listenForSignal()
+        verifyPanel.listenForSignals()
         self.verifyPanel = verifyPanel
         live.start()
     }

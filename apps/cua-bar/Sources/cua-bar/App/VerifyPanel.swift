@@ -6,16 +6,21 @@ import SwiftUI
 /// model, in a panel out of sight that never activates the app or becomes key. Its buttons are pressed
 /// through accessibility, which needs neither the pointer nor the focus.
 ///
-/// SIGUSR1 shows it and hides it again (`kill -USR1 <pid>`); nothing else opens it.
+/// SIGUSR1 shows it and hides it again (`kill -USR1 <pid>`); nothing else opens it. A window out of sight cannot
+/// be captured from outside, so SIGUSR2 writes a picture of it to `pictureURL`.
 @MainActor
 final class VerifyPanelController {
     static let title = "CUA Bar 검수 창"
+    static var pictureURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CUABar", isDirectory: true).appendingPathComponent("verify-panel.png")
+    }
 
     let panel: NSPanel
     private let host: NSHostingController<PopoverView>
     private let opened: @MainActor (Bool) -> Void
     private var sizeObservation: NSKeyValueObservation?
-    private var signalSource: DispatchSourceSignal?
+    private var signalSources: [DispatchSourceSignal] = []
 
     /// `opened` hears when it is shown or hidden, as the popover's delegate does.
     init(model: CUABarViewModel, maintenance: Maintenance?, opened: @escaping @MainActor (Bool) -> Void) {
@@ -40,14 +45,19 @@ final class VerifyPanelController {
 
     var isShown: Bool { panel.isVisible }
 
-    func listenForSignal() {
-        signal(SIGUSR1, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+    func listenForSignals() {
+        listen(to: SIGUSR1) { $0.toggle() }
+        listen(to: SIGUSR2) { _ = $0.writePicture() }
+    }
+
+    private func listen(to number: Int32, _ handle: @escaping @MainActor (VerifyPanelController) -> Void) {
+        signal(number, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
         source.setEventHandler { [weak self] in
-            Task { @MainActor in self?.toggle() }
+            Task { @MainActor in if let self { handle(self) } }
         }
         source.resume()
-        signalSource = source
+        signalSources.append(source)
     }
 
     func toggle() {
@@ -59,6 +69,28 @@ final class VerifyPanelController {
             // Ordered in without activating the app or taking the key window: the person's app keeps both.
             panel.orderFrontRegardless()
             opened(true)
+        }
+    }
+
+    /// A picture of the shown panel at twice its size, as a Retina screen shows it. False when it is hidden or the
+    /// file cannot be written.
+    func writePicture(to url: URL = VerifyPanelController.pictureURL) -> Bool {
+        guard panel.isVisible, let view = panel.contentView else { return false }
+        view.layoutSubtreeIfNeeded()
+        let size = view.bounds.size
+        guard size.width >= 1, size.height >= 1, let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width) * 2, pixelsHigh: Int(size.height) * 2, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return false }
+        bitmap.size = size
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { return false }
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try png.write(to: url, options: .atomic)
+            return true
+        } catch {
+            return false
         }
     }
 
