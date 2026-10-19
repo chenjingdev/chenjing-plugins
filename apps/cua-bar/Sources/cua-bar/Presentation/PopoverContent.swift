@@ -1,15 +1,13 @@
 import Foundation
 
 enum PopoverTab: String, CaseIterable, Identifiable, Sendable {
-    case connections, leases, otherTools, activity
+    case connections, activity
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .connections: "연결"
-        case .leases: "브라우저 점유"
-        case .otherTools: "다른 도구"
         case .activity: "기록"
         }
     }
@@ -18,8 +16,6 @@ enum PopoverTab: String, CaseIterable, Identifiable, Sendable {
     var emptyText: String {
         switch self {
         case .connections: "연결 없음"
-        case .leases: "점유 없음"
-        case .otherTools: "다른 도구 없음"
         case .activity: "기록 없음"
         }
     }
@@ -39,23 +35,48 @@ struct ButtonSpec: Equatable, Identifiable, Sendable {
     var id: String { title }
 }
 
-/// What the four tabs show, already turned into text. The views only lay this out, so the
+extension ButtonSpec {
+    /// 탭 풀기 on a connection whose AI is alive: only the tabs it holds, the connection stays.
+    static func releaseTabs(of id: String, isEnabled: Bool) -> ButtonSpec {
+        ButtonSpec(
+            title: "탭 풀기", action: .releaseConnection(id), isEnabled: isEnabled,
+            // A button that is off says why when the pointer rests on it.
+            help: isEnabled
+                ? "이 AI가 잡고 있는 브라우저 탭만 풀어요. AI는 화면 도구를 계속 써요"
+                : "탭을 풀 길이 확인되지 않은 연결이에요. 중계기가 없거나 기록이 없을 때 그래요")
+    }
+
+    /// 정리 of an ended connection or of a cmux-cua connection nobody owns; off when the app can do neither
+    /// of the two things it would do.
+    static func tidy(_ id: String, way: TidyPlan.Way?, isCmux: Bool = false) -> ButtonSpec {
+        let help: String
+        switch way {
+        case .stop?:
+            help = isCmux
+                ? "남은 연결을 꺼요. 띄운 AI가 이미 없어서 끊길 대화도 없어요. 제때 안 꺼지면 강제로 꺼요"
+                : "탭을 풀고 남은 연결을 꺼요. AI가 이미 없어서 끊길 것이 없어요. 제때 안 꺼지면 강제로 꺼요"
+        case .releaseOnly?:
+            help = "탭만 풀어요. 이 연결은 앱이 끌 수 없어요"
+        case nil:
+            help = isCmux ? "신원을 확인하지 못한 프로세스라 앱이 끌 수 없어요" : "탭을 풀 길이 없고, 신원을 확인하지 못한 프로세스라 앱이 끌 수도 없어요"
+        }
+        return ButtonSpec(title: "정리", action: .tidy(id), isEnabled: way != nil, help: help)
+    }
+}
+
+/// What the two tabs show, already turned into text. The views only lay this out, so the
 /// decisions (which button is on, what a row says) are testable without a window.
 struct PopoverContent: Equatable, Sendable {
     var connections: ConnectionsContent
-    var leases: LeasesContent
-    var otherTools: OtherToolsContent
     var activity: ActivityContent
 
     init(status: EngineStatus, now: Date, calendar: Calendar = .current) {
         connections = ConnectionsContent(status: status, now: now, calendar: calendar)
-        leases = LeasesContent(status: status, now: now, calendar: calendar)
-        otherTools = OtherToolsContent(status: status, now: now)
         activity = ActivityContent(status: status, calendar: calendar)
     }
 }
 
-// MARK: - 연결
+// MARK: - 연결: the rows
 
 struct ConnectionRow: Equatable, Identifiable, Sendable {
     var id: String
@@ -75,14 +96,14 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
     var isBusy: Bool
     var canRelease: Bool
     var canStop: Bool
-    /// 놓아주기 · 끄기 · 강제 종료
-    var buttons: [ButtonSpec]
-    /// After the engine refused a release twice (R15): 다시 하기 · 끄기 · 강제 종료. A normal
-    /// stop is not blocked by a refused release, so 끄기 stays.
-    var refusedButtons: [ButtonSpec]
+    /// The row's one button: 탭 풀기 when its AI is alive, 정리 when it ended.
+    var button: ButtonSpec
+    /// After the engine refused a release twice (R15): the same 탭 풀기, which does not ask again. A
+    /// live AI is never stopped from here.
+    var retryButton: ButtonSpec
 
     /// The line a row shows after a refused release.
-    static let refusedNote = "작업이 끝나지 않아 못 놓음"
+    static let refusedNote = "작업이 끝나지 않아 못 풀었어요"
 
     init(_ connection: Connection, now: Date, calendar: Calendar) {
         id = connection.id
@@ -97,28 +118,12 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         isBusy = connection.busy
         canRelease = connection.canRelease
         canStop = connection.canStop
-        // A button that is off says why when the pointer rests on it.
-        let releaseOffHelp = "놓아줄 길이 확인되지 않은 연결이에요. 중계기가 없거나 기록이 없을 때 그래요"
-        let stopOffHelp = "신원을 확인하지 못한 프로세스라 앱이 끌 수 없어요"
-        let stop = ButtonSpec(
-            title: "끄기", action: .stopConnection(connection.id, force: false), isEnabled: connection.canStop,
-            help: connection.canStop ? "탭을 놓아준 뒤 정상 종료해요" : stopOffHelp)
-        let forceStop = ButtonSpec(
-            title: "강제 종료", action: .stopConnection(connection.id, force: true), isDestructive: true,
-            isEnabled: connection.canStop,
-            help: connection.canStop ? "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요. 하던 작업이 끊겨요" : stopOffHelp)
-        buttons = [
-            ButtonSpec(
-                title: "놓아주기", action: .releaseConnection(connection.id), isEnabled: connection.canRelease,
-                help: connection.canRelease ? "이 연결이 잡고 있는 브라우저 탭만 놓아줘요. 연결은 그대로예요" : releaseOffHelp),
-            stop, forceStop,
-        ]
-        refusedButtons = [
-            ButtonSpec(
-                title: "다시 하기", action: .retryRelease(connection.id), isEnabled: connection.canRelease,
-                help: "한 번 더 놓아 봐요. AI가 하던 조작이 끝나야 놓을 수 있어요"),
-            stop, forceStop,
-        ]
+        button = connection.state == .ended
+            ? .tidy(connection.id, way: TidyPlan.way(for: connection))
+            : .releaseTabs(of: connection.id, isEnabled: connection.canRelease)
+        retryButton = ButtonSpec(
+            title: "탭 풀기", action: .retryRelease(connection.id), isEnabled: connection.canRelease,
+            help: "한 번 더 풀어 봐요. AI가 하던 조작이 끝나야 풀 수 있어요")
     }
 }
 
@@ -130,99 +135,11 @@ struct ConnectionGroup: Equatable, Identifiable, Sendable {
     var id: String { agent.label }
 }
 
-/// How many connections each group button would stop. Only what the engine says it may signal
-/// (`can_stop`) counts, and cmux-cua is never in a group (R17). `stop --group codex` skips a Codex
-/// connection that has no session (`unattributed`: it may serve a Claude conversation), so the
-/// Codex count leaves those out; `--group all` still stops them, so "all" has them.
-struct GroupStopCounts: Equatable, Sendable {
-    var all: Int
-    var claude: Int
-    var codex: Int
-    /// Codex connections `--group codex` skips.
-    var unattributedCodex = 0
-
-    func count(for group: StopGroup) -> Int {
-        switch group {
-        case .all: all
-        case .claude: claude
-        case .codex: codex
-        }
-    }
-}
-
-extension GroupStopCounts {
-    init(connections: [Connection]) {
-        let stoppable = connections.filter(\.canStop)
-        let claude = stoppable.filter { $0.agent == .claude }.count
-        let codex = stoppable.filter { $0.agent == .codex }
-        self.init(
-            all: claude + codex.count, claude: claude, codex: codex.filter { $0.sessionID != nil }.count,
-            unattributedCodex: codex.filter { $0.sessionID == nil }.count)
-    }
-}
-
-struct ConnectionsContent: Equatable, Sendable {
-    var groups: [ConnectionGroup]
-    var stopCounts: GroupStopCounts
-    var endedCount: Int
-    /// Ended connections the engine may stop: what 끝난 연결 끄기 would stop.
-    var endedStoppableCount: Int
-    var emptyText: String?
-    /// The group rows (묶음 끄기, 끝난 연결 놓아주기) only make sense when there are connections.
-    var showsGroupButtons: Bool { !groups.isEmpty }
-    /// 전체 끄기 · Claude만 · Codex만, each with how many it would stop.
-    var stopButtons: [ButtonSpec]
-    /// 끝난 연결 놓아주기, with how many ended connections there are.
-    var releaseEndedButton: ButtonSpec
-
-    init(status: EngineStatus, now: Date, calendar: Calendar) {
-        // Needs attention first (ended), then the newest; a stable order so rows do not jump.
-        let ordered = status.connections.sorted { left, right in
-            if (left.state == .ended) != (right.state == .ended) { return left.state == .ended }
-            switch (left.startedAt, right.startedAt) {
-            case let (a?, b?) where a != b: return a > b
-            case (_?, nil): return true
-            case (nil, _?): return false
-            default: return left.id < right.id
-            }
-        }
-        var agents: [AgentKind] = []
-        for connection in ordered where !agents.contains(connection.agent) { agents.append(connection.agent) }
-        let rank: (AgentKind) -> Int = { $0 == .claude ? 0 : ($0 == .codex ? 1 : 2) }
-        agents = agents.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
-
-        groups = agents.map { agent in
-            let rows = ordered.filter { $0.agent == agent }.map { ConnectionRow($0, now: now, calendar: calendar) }
-            return ConnectionGroup(agent: agent, title: "\(agent.label) · \(rows.count)", rows: rows)
-        }
-        stopCounts = GroupStopCounts(connections: status.connections)
-        endedCount = status.connections.filter { $0.state == .ended }.count
-        endedStoppableCount = status.connections.filter { $0.state == .ended && $0.canStop }.count
-        emptyText = status.connections.isEmpty ? PopoverTab.connections.emptyText : nil
-
-        let counts = stopCounts
-        func stop(_ title: String, _ group: StopGroup, _ help: String) -> ButtonSpec {
-            ButtonSpec(title: "\(title) \(counts.count(for: group))", action: .stopGroup(group, force: false),
-                       isEnabled: counts.count(for: group) > 0, help: help)
-        }
-        let codexHelp = counts.unattributedCodex > 0
-            ? "세션을 아는 Codex 연결만 정상 종료해요. 주인을 모르는 \(counts.unattributedCodex)개는 빠져요 — 하나씩 끄거나 전체로 끌 수 있어요"
-            : "Codex 연결만 정상 종료해요"
-        stopButtons = [
-            stop("전체 끄기", .all, "Claude와 Codex 연결을 모두 정상 종료해요"),
-            stop("Claude만", .claude, "Claude 연결만 정상 종료해요"),
-            stop("Codex만", .codex, codexHelp),
-        ]
-        releaseEndedButton = ButtonSpec(
-            title: "끝난 연결 놓아주기 \(endedCount)", action: .releaseEnded, isEnabled: endedCount > 0,
-            help: "끝난 연결이 잡고 있는 브라우저 탭만 한꺼번에 놓아줘요")
-    }
-}
-
-// MARK: - 브라우저 점유
-
 struct LeaseRow: Equatable, Identifiable, Sendable {
     enum Kind: Equatable, Sendable { case held, maybeLeft }
+
+    /// Said instead of a button when this one cannot be released by itself.
+    static let noWayHint = "풀 방법이 없어요 — 아래 안내를 따라 주세요"
 
     var id: String
     var kind: Kind
@@ -232,16 +149,130 @@ struct LeaseRow: Equatable, Identifiable, Sendable {
     var statusText: String
     var detail: String?
     var sessionID: String?
-    /// The 콕 집어 풀기 button is shown.
+    /// The 탭 풀기 button is shown.
     var canReleaseSession: Bool
     /// Shown instead of the button when there is no way to release this one by itself.
     var hint: String?
-    /// 콕 집어 풀기; nil when there is no session to aim at.
+    /// 탭 풀기; nil when there is no session to aim at.
     var releaseButton: ButtonSpec? {
         guard canReleaseSession, let sessionID else { return nil }
         // A button press is a person's click, so `--user` goes along (Codex thread sessions need it).
-        return ButtonSpec(title: "콕 집어 풀기", action: .releaseSession(sessionID, user: true), help: "이 세션이 남긴 점유만 세션 ID로 풀어요")
+        return ButtonSpec(title: "탭 풀기", action: .releaseSession(sessionID, user: true), help: "이 세션이 남긴 점유만 풀어요")
     }
+}
+
+/// One client of another tool, as its line in the list. For cmux-cua each is one connection (one
+/// `cmux-cua mcp` process): a live one is left alone (R17), one nobody owns is tidied.
+struct ToolClientRow: Equatable, Identifiable, Sendable {
+    /// What a client whose AI client is gone reads as.
+    static let orphanTitle = "주인 없는 연결"
+
+    /// The connection id. `pid` is no key: one AI client can hold several connections. An engine
+    /// that does not name its clients gets a stand-in by position.
+    var id: String
+    /// What `stop --connection` takes; nil from an engine that does not name its clients.
+    var connectionID: String?
+    /// `Claude · dev/z`, `Claude` when the folder is unknown, or 주인 없는 연결.
+    var title: String
+    /// The full path, for a hover hint.
+    var path: String?
+    /// `11시간 전 시작`
+    var startedText: String
+    /// Its AI client is gone, so tidying it cuts nobody off.
+    var isOrphan: Bool
+    /// 정리, only on a connection nobody owns that the engine named. A live one has no button.
+    var button: ButtonSpec?
+
+    init(_ client: ToolClient, index: Int, now: Date) {
+        id = client.id ?? "client-\(index)"
+        connectionID = client.id
+        isOrphan = client.isOrphan
+        title = client.isOrphan
+            ? Self.orphanTitle
+            : client.cwd.map { "\(client.agent.label) · \(Format.folder($0))" } ?? client.agent.label
+        path = client.cwd
+        startedText = Format.startedAgo(client.startedAt, now: now)
+        if client.isOrphan, let connection = client.id, ToolClient.isCmuxConnection(id: connection) {
+            button = .tidy(connection, way: TidyPlan.way(for: client), isCmux: true)
+        } else {
+            button = nil
+        }
+    }
+}
+
+// MARK: - 연결: the list
+
+struct ScreenLine: Equatable, Sendable {
+    var isActive: Bool
+    var text: String
+    var detail: String?
+
+    /// One line: `Claude(dev/x)가 화면을 쓰는 중 · 방금 호출`.
+    var line: String { detail.map { "\(text) · \($0)" } ?? text }
+
+    init(isActive: Bool, text: String, detail: String?) {
+        self.isActive = isActive
+        self.text = text
+        self.detail = detail
+    }
+
+    init(status: EngineStatus, now: Date) {
+        if let use = StatusEvaluator.screenUse(in: status) {
+            let lastCall = status.screen.lastCallAt ?? use.connection?.lastCallAt
+            self.init(
+                isActive: true, text: "\(use.subject)가 화면을 쓰는 중",
+                detail: lastCall.map { "\(Format.ago($0, now: now)) 호출" })
+        } else {
+            self.init(
+                isActive: false, text: "지금 화면을 쓰는 연결 없음",
+                detail: status.screen.lastCallAt.map { "마지막 호출 \(Format.ago($0, now: now))" })
+        }
+    }
+}
+
+/// One tool that is not Claude or Codex (cmux-cua) with the conversations that hold it open. Its
+/// daemon is text only and never stopped; a connection nobody owns is a line of 손볼 것 instead.
+struct OtherToolRow: Equatable, Identifiable, Sendable {
+    var name: String
+    var isRunning: Bool
+    var statusText: String
+    /// The tool's own processes (`프로세스 n개`).
+    var detail: String?
+    /// The clients that still have an AI client: no button, their conversation is using them.
+    var clients: [ToolClientRow]
+    var id: String { name }
+
+    /// `cmux-cua · 실행 중 · 프로세스 2개`, or `cmux-cua · 꺼져 있음`.
+    var title: String { ([name, statusText] + (detail.map { [$0] } ?? [])).joined(separator: " · ") }
+}
+
+/// One line of 손볼 것.
+enum TidyRow: Equatable, Identifiable, Sendable {
+    case ended(ConnectionRow)
+    case lease(LeaseRow)
+    case orphan(ToolClientRow)
+
+    var id: String {
+        switch self {
+        case .ended(let row): "ended-\(row.id)"
+        case .lease(let row): "lease-\(row.id)"
+        case .orphan(let row): "orphan-\(row.id)"
+        }
+    }
+
+    var endedRow: ConnectionRow? { if case .ended(let row) = self { row } else { nil } }
+    var leaseRow: LeaseRow? { if case .lease(let row) = self { row } else { nil } }
+    var orphanRow: ToolClientRow? { if case .orphan(let row) = self { row } else { nil } }
+}
+
+/// 손볼 것: what the app can clean up, at the top of the list with 모두 정리 above it.
+struct TidyContent: Equatable, Sendable {
+    /// `손볼 것 3개`
+    var title: String
+    var rows: [TidyRow]
+    /// R14: said once, here, when a lease line is shown and the lease list cannot be read.
+    var notice: String?
+    var tidyAllButton: ButtonSpec
 }
 
 struct ExtensionResetGuidance: Equatable, Sendable {
@@ -255,52 +286,69 @@ struct ExtensionResetGuidance: Equatable, Sendable {
     var needsAttention: Bool
 }
 
-struct LeasesContent: Equatable, Sendable {
-    var rows: [LeaseRow]
-    var notice: String?
+/// The one list: who uses the screen, what needs tidying, the live connections, the other tools,
+/// and the folded guidance for tabs that stay blocked.
+struct ConnectionsContent: Equatable, Sendable {
+    var screen: ScreenLine
+    /// nil when there is nothing to tidy.
+    var tidy: TidyContent?
+    /// The connections whose AI is alive, Claude then Codex: a 탭 풀기 on each line.
+    var groups: [ConnectionGroup]
+    var tools: [OtherToolRow]
+    /// R21: no connection of any kind.
     var emptyText: String?
     var guidance: ExtensionResetGuidance
 
     init(status: EngineStatus, now: Date, calendar: Calendar) {
-        let leases = status.leases
-        var rows: [LeaseRow] = []
-        for (index, item) in leases.items.enumerated() {
-            var parts: [String] = []
-            if let since = item.since { parts.append("\(Format.when(since, now: now, calendar: calendar))부터") }
-            if let session = item.sessionID { parts.append("세션 \(Self.shortSession(session))") }
-            rows.append(LeaseRow(
-                id: "held-\(item.sessionID ?? item.connectionID ?? String(index))", kind: .held, agent: item.agent,
-                folder: Format.folder(item.cwd), statusText: "점유 중", detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
-                sessionID: item.sessionID, canReleaseSession: item.sessionID != nil && item.releasable, hint: nil))
-        }
-        for (index, item) in leases.maybeLeft.enumerated() {
-            var parts: [String] = []
-            if let ended = item.endedAt { parts.append("\(Format.when(ended, now: now, calendar: calendar))에 끝남") }
-            if let session = item.sessionID { parts.append("세션 \(Self.shortSession(session))") }
-            let releasable = item.sessionID != nil && item.releasable
-            rows.append(LeaseRow(
-                id: "left-\(item.sessionID ?? item.connectionID ?? String(index))", kind: .maybeLeft, agent: item.agent,
-                folder: Format.folder(item.cwd), statusText: "점유가 남았을 수 있음", detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
-                sessionID: item.sessionID, canReleaseSession: releasable, hint: releasable ? nil : "콕 집어 풀 방법이 없어요"))
-        }
-        self.rows = rows
-        // With no readable list "no leases" would be a claim: all the app knows is that the
-        // recorded sessions left nothing behind.
-        emptyText = rows.isEmpty ? (leases.readable ? PopoverTab.leases.emptyText : "기록상 남은 점유 없음") : nil
-        // R14: with no readable list the app says what it knows and never invents a count.
-        if leases.readable {
-            notice = nil
-        } else {
-            notice = rows.isEmpty
-                ? "점유 목록을 읽지 못해요. 끝난 연결 기록으로만 알 수 있어요"
-                : "점유 목록을 읽지 못해서, 끝난 연결 기록으로 보여요"
+        screen = ScreenLine(status: status, now: now)
+
+        let live = status.connections.filter { $0.state != .ended }.sorted(by: TidyPlan.newestFirst)
+        var agents: [AgentKind] = []
+        for connection in live where !agents.contains(connection.agent) { agents.append(connection.agent) }
+        let rank: (AgentKind) -> Int = { $0 == .claude ? 0 : ($0 == .codex ? 1 : 2) }
+        agents = agents.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+        groups = agents.map { agent in
+            let rows = live.filter { $0.agent == agent }.map { ConnectionRow($0, now: now, calendar: calendar) }
+            return ConnectionGroup(agent: agent, title: "\(agent.label) · \(rows.count)", rows: rows)
         }
 
-        let live = ConnectionsContent(status: status, now: now, calendar: calendar).groups
-            .flatMap(\.rows)
-            .filter { $0.state.kind != .ended }
+        tools = status.otherTools.map { tool in
+            let clients = tool.clients.enumerated().filter { !$0.element.isOrphan }
+                .map { ToolClientRow($0.element, index: $0.offset, now: now) }
+            return OtherToolRow(
+                name: tool.name, isRunning: tool.running, statusText: tool.running ? "실행 중" : "꺼져 있음",
+                detail: tool.running && !tool.pids.isEmpty ? "프로세스 \(tool.pids.count)개" : nil,
+                clients: tool.running ? clients : [])
+        }
+
+        // 손볼 것: the ended connections (newest first), the leases, the connections nobody owns.
+        let ended = TidyPlan.endedConnections(in: status).map { TidyRow.ended(ConnectionRow($0, now: now, calendar: calendar)) }
+        let leases = Self.leaseRows(in: status, live: live, now: now, calendar: calendar)
+        let orphans = status.otherTools.flatMap { tool in
+            tool.clients.enumerated().filter { $0.element.isOrphan }.map { TidyRow.orphan(ToolClientRow($0.element, index: $0.offset, now: now)) }
+        }
+        let rows = ended + leases.map(TidyRow.lease) + orphans
+        if rows.isEmpty {
+            tidy = nil
+        } else {
+            let hasTargets = !TidyPlan.items(in: status).isEmpty
+            let codexChatLeft = leases.contains { $0.agent == .codex && $0.releaseButton != nil }
+            tidy = TidyContent(
+                title: "손볼 것 \(rows.count)개", rows: rows,
+                // R14: with no readable list the app says what it knows and never invents a count.
+                notice: !leases.isEmpty && !status.leases.readable ? "점유 목록을 읽지 못해서, 끝난 연결 기록으로 보여요" : nil,
+                tidyAllButton: ButtonSpec(
+                    title: "모두 정리", action: .tidyAll, isEnabled: hasTargets,
+                    help: hasTargets
+                        ? "끝난 연결과 남은 점유를 한 번에 정리해요"
+                        : (codexChatLeft ? "Codex 대화가 남긴 점유는 그 줄에서 풀어 주세요" : "앱이 정리할 수 있는 것이 없어요")))
+        }
+
+        let hasClients = tools.contains { !$0.clients.isEmpty }
+        emptyText = rows.isEmpty && groups.isEmpty && !hasClients ? PopoverTab.connections.emptyText : nil
+
         guidance = ExtensionResetGuidance(
-            title: "그래도 안 풀리면 — 막힌 탭 닫기 · 확장 초기화",
+            title: "브라우저 탭이 계속 막히면",
             // Smallest first (spec ruling): closing the blocked tab frees only that tab's lease and
             // cuts nobody off; the extension reset comes last.
             steps: [
@@ -309,106 +357,52 @@ struct LeasesContent: Equatable, Sendable {
             ],
             warning: "확장을 껐다 켜면 이 Chrome을 쓰는 모든 CUA 연결의 점유가 한꺼번에 풀려요. 다른 작업 중에는 하지 마세요.",
             liveConnectionsTitle: "확장을 껐다 켜면 끊길 살아 있는 연결",
-            liveConnections: live.map { row in row.path == nil ? row.agent.label : "\(row.agent.label) · \(row.folder)" },
+            liveConnections: groups.flatMap(\.rows).map { row in row.path == nil ? row.agent.label : "\(row.agent.label) · \(row.folder)" },
             liveConnectionsEmptyText: "없음",
-            needsAttention: rows.contains { $0.kind == .maybeLeft && !$0.canReleaseSession })
+            needsAttention: leases.contains { $0.kind == .maybeLeft && !$0.canReleaseSession })
+    }
+
+    /// The lease lines: what the engine could read (`items`) unless a live connection's own session
+    /// holds it, then the sessions whose owner is gone (`maybe_left`).
+    private static func leaseRows(in status: EngineStatus, live: [Connection], now: Date, calendar: Calendar) -> [LeaseRow] {
+        let leases = status.leases
+        let liveSessions = Set(live.compactMap(\.sessionID))
+        let leftSessions = Set(leases.maybeLeft.compactMap(\.sessionID))
+        var rows: [LeaseRow] = []
+        for (index, item) in leases.items.enumerated() {
+            // A live connection's own tabs are not for tidying; neither is a session already listed as left.
+            if let session = item.sessionID, liveSessions.contains(session) || leftSessions.contains(session) { continue }
+            var parts: [String] = []
+            if let since = item.since { parts.append("\(Format.when(since, now: now, calendar: calendar))부터") }
+            if let session = item.sessionID { parts.append("세션 \(shortSession(session))") }
+            rows.append(LeaseRow(
+                id: "held-\(item.sessionID ?? item.connectionID ?? String(index))", kind: .held, agent: item.agent,
+                folder: Format.folder(item.cwd), statusText: "점유 중", detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
+                sessionID: item.sessionID, canReleaseSession: item.sessionID != nil && item.releasable, hint: nil))
+        }
+        for (index, item) in leases.maybeLeft.enumerated() {
+            var parts: [String] = []
+            if let ended = item.endedAt { parts.append("\(Format.when(ended, now: now, calendar: calendar))에 끝남") }
+            if let session = item.sessionID { parts.append("세션 \(shortSession(session))") }
+            let releasable = item.sessionID != nil && item.releasable
+            rows.append(LeaseRow(
+                id: "left-\(item.sessionID ?? item.connectionID ?? String(index))", kind: .maybeLeft, agent: item.agent,
+                folder: Format.folder(item.cwd), statusText: "점유가 남았을 수 있음", detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
+                sessionID: item.sessionID, canReleaseSession: releasable, hint: releasable ? nil : LeaseRow.noWayHint))
+        }
+        return rows
     }
 
     private static func shortSession(_ id: String) -> String { String(id.prefix(8)) }
-}
 
-// MARK: - 다른 도구
-
-struct ScreenLine: Equatable, Sendable {
-    var isActive: Bool
-    var text: String
-    var detail: String?
-}
-
-/// One client of another tool, as its line in the 다른 도구 tab. For cmux-cua each is one connection
-/// (one `cmux-cua mcp` process), stopped one at a time and never in a group (R17).
-struct ToolClientRow: Equatable, Identifiable, Sendable {
-    /// What a client whose AI client is gone reads as.
-    static let orphanTitle = "주인 없는 연결"
-    /// The line a row shows after its normal stop ran out of time.
-    static let timedOutNote = "정상 종료가 시간 안에 안 끝남"
-
-    /// The connection id. `pid` is no key: one AI client can hold several connections. An engine
-    /// that does not name its clients gets a stand-in by position.
-    var id: String
-    /// What `stop --connection` takes; nil from an engine that does not name its clients.
-    var connectionID: String?
-    /// `Claude · dev/z`, `Claude` when the folder is unknown, or 주인 없는 연결.
-    var title: String
-    /// The full path, for a hover hint.
-    var path: String?
-    /// `11시간 전 시작`
-    var startedText: String
-    /// Its AI client is gone, so stopping it cuts nobody off.
-    var isOrphan: Bool
-    /// 끄기, only when the engine may stop it and named it. A single normal stop asks nothing.
-    var buttons: [ButtonSpec]
-    /// After a normal stop ran out of time: 끄기 · 강제 종료 (the force stop asks once).
-    var timedOutButtons: [ButtonSpec]
-
-    init(_ client: ToolClient, tool: String, index: Int, now: Date) {
-        id = client.id ?? "client-\(index)"
-        connectionID = client.id
-        isOrphan = client.isOrphan
-        title = client.isOrphan
-            ? Self.orphanTitle
-            : client.cwd.map { "\(client.agent.label) · \(Format.folder($0))" } ?? client.agent.label
-        path = client.cwd
-        startedText = Format.startedAgo(client.startedAt, now: now)
-        guard client.canStop, let connection = client.id, ToolClient.isCmuxConnection(id: connection) else {
-            buttons = []
-            timedOutButtons = []
-            return
-        }
-        let cutOff = client.isOrphan ? "띄운 AI가 없어서 끊길 대화도 없어요" : "그 대화의 \(tool) 도구는 다시 붙을 때까지 끊겨요"
-        let stop = ButtonSpec(
-            title: "끄기", action: .stopConnection(connection, force: false), help: "이 \(tool) 연결만 정상 종료해요. \(cutOff)")
-        let forceStop = ButtonSpec(
-            title: "강제 종료", action: .stopConnection(connection, force: true), isDestructive: true,
-            help: "정상 종료가 시간 안에 안 끝났어요. 이 연결만 강제로 끝내요")
-        buttons = [stop]
-        timedOutButtons = [stop, forceStop]
+    /// The connection with this id on any line of the list: a live one, or an ended one in 손볼 것.
+    func row(withID id: String) -> ConnectionRow? {
+        groups.flatMap(\.rows).first { $0.id == id } ?? tidy?.rows.compactMap(\.endedRow).first { $0.id == id }
     }
-}
 
-struct OtherToolRow: Equatable, Identifiable, Sendable {
-    var name: String
-    var isRunning: Bool
-    var statusText: String
-    /// The tool's own processes (`프로세스 n개`). Text only: the daemon is never stopped.
-    var detail: String?
-    var clients: [ToolClientRow]
-    var id: String { name }
-}
-
-struct OtherToolsContent: Equatable, Sendable {
-    var screen: ScreenLine
-    var tools: [OtherToolRow]
-    var emptyText: String?
-
-    init(status: EngineStatus, now: Date) {
-        if let use = StatusEvaluator.screenUse(in: status) {
-            let lastCall = status.screen.lastCallAt ?? use.connection?.lastCallAt
-            screen = ScreenLine(
-                isActive: true, text: "\(use.subject)가 화면을 쓰는 중",
-                detail: lastCall.map { "\(Format.ago($0, now: now)) 호출" })
-        } else {
-            screen = ScreenLine(
-                isActive: false, text: "지금 화면을 쓰는 연결 없음",
-                detail: status.screen.lastCallAt.map { "마지막 호출 \(Format.ago($0, now: now))" })
-        }
-        tools = status.otherTools.map { tool in
-            OtherToolRow(
-                name: tool.name, isRunning: tool.running, statusText: tool.running ? "실행 중" : "꺼져 있음",
-                detail: tool.running && !tool.pids.isEmpty ? "프로세스 \(tool.pids.count)개" : nil,
-                clients: tool.clients.enumerated().map { ToolClientRow($1, tool: tool.name, index: $0, now: now) })
-        }
-        emptyText = tools.isEmpty ? PopoverTab.otherTools.emptyText : nil
+    /// The cmux-cua connection nobody owns with this id, in 손볼 것.
+    func orphanRow(withID id: String) -> ToolClientRow? {
+        tidy?.rows.compactMap(\.orphanRow).first { $0.connectionID == id }
     }
 }
 
@@ -427,7 +421,7 @@ struct ActivityRow: Equatable, Identifiable, Sendable {
 struct ActivityContent: Equatable, Sendable {
     var rows: [ActivityRow]
     var emptyText: String?
-    /// 진단 복사: runs `diagnose` and puts its text on the pasteboard.
+    /// 진단 복사: runs `diagnose` and puts its text on the pasteboard. It sits at the bottom of the tab.
     var copyButton = ActivityContent.diagnosisButton
 
     static let diagnosisButton = ButtonSpec(

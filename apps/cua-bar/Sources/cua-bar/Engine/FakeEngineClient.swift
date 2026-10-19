@@ -55,6 +55,10 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var stopConnection = StopResult(ok: true, stopped: true, released: true, reason: nil)
         /// Per-connection answers for `stopConnection`, before falling back to `stopConnection`.
         var stopConnectionByID: [String: StopResult] = [:]
+        /// Answers to successive `stopConnection` calls, whichever connection and force, first one
+        /// first (an error is thrown); before the per-connection answers. A normal stop that times
+        /// out, then the forced one that works, is two entries.
+        var stopConnectionQueue: [Result<StopResult, EngineError>] = []
         var stopGroup = GroupStopResult(ok: true, stopped: 0, failed: 0, results: [])
         var restartCodex = RestartResult(ok: true, reason: nil)
         var diagnosis = "CUA diagnosis (fake)\n"
@@ -125,6 +129,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
 
     func stopConnection(id: String, force: Bool) async throws -> StopResult {
         let script = try await begin(.stopConnection(id, force: force), isAction: true)
+        let queued = lock.withLock { self.script.stopConnectionQueue.isEmpty ? nil : self.script.stopConnectionQueue.removeFirst() }
+        if let queued { return try queued.get() }
         return script.stopConnectionByID[id] ?? script.stopConnection
     }
 

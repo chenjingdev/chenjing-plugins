@@ -64,7 +64,7 @@ struct ViewModelTests {
         await model.refresh()
         #expect(model.summary.icon == .ready)
         #expect(model.summary.tooltip == "CUA 준비됨 · Claude 1 · Codex 1")
-        #expect(model.content?.connections.stopCounts == GroupStopCounts(all: 2, claude: 1, codex: 1))
+        #expect(model.content?.connections.groups.map(\.title) == ["Claude · 1", "Codex · 1"])
         #expect(model.updatedAt == Fixtures.now)
         #expect(engine.calls == [.status])
     }
@@ -279,14 +279,9 @@ struct ViewModelTests {
 
     @Test(arguments: [
         (CUAAction.releaseConnection("claude-1-1"), FakeEngineClient.Call.releaseConnection("claude-1-1")),
-        (.releaseEnded, .releaseEnded),
+        (.retryRelease("claude-1-1"), .releaseConnection("claude-1-1")),
         (.releaseSession("019a-1", user: true), .releaseSession("019a-1", user: true)),
         (.releaseSession("019a-1", user: false), .releaseSession("019a-1", user: false)),
-        (.stopConnection("codex-2-2", force: false), .stopConnection("codex-2-2", force: false)),
-        (.stopConnection("codex-2-2", force: true), .stopConnection("codex-2-2", force: true)),
-        (.stopGroup(.all, force: false), .stopGroup(.all, force: false)),
-        (.stopGroup(.claude, force: false), .stopGroup(.claude, force: false)),
-        (.stopGroup(.codex, force: true), .stopGroup(.codex, force: true)),
         (.restartCodex, .restartCodex),
         (.copyDiagnosis, .diagnose),
         (.runSetup, .runSetup),
@@ -308,8 +303,8 @@ struct ViewModelTests {
         let model = makeModel(engine)
         let early = Task { await model.refresh() }
         #expect(await waitUntil { engine.statusCallCount == 1 }) // read #1 is stuck in the engine
-        let acting = Task { await model.perform(.releaseEnded) }
-        #expect(await waitUntil { engine.calls.contains(.releaseEnded) })
+        let acting = Task { await model.perform(.releaseConnection("claude-1-1")) }
+        #expect(await waitUntil { engine.calls.contains(.releaseConnection("claude-1-1")) })
         await settle()
         #expect(engine.statusCallCount == 1, "the read after the action does not start beside read #1")
         gate.open()
@@ -338,22 +333,26 @@ struct ViewModelTests {
         #expect(model.inFlight.isEmpty)
     }
 
-    @Test func groupAndRestartActionsMakeEveryRowWait() async throws {
+    @Test func restartAndSetupMakeEveryRowWait() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
         let gate = AsyncGate()
         engine.configure { $0.actionGate = gate }
         defer { gate.open() }
         let model = makeModel(engine)
-        let running = Task { await model.perform(.stopGroup(.all, force: false)) }
-        #expect(await waitUntil { engine.calls.contains(.stopGroup(.all, force: false)) })
+        let running = Task { await model.perform(.restartCodex) }
+        #expect(await waitUntil { engine.calls.contains(.restartCodex) })
         #expect(model.isWaiting(onConnection: "anything"))
+        #expect(model.isWaiting(onSession: "any-session"), "a lease line waits for a restart too")
+        #expect(model.tidyAllIsWaiting)
         gate.open()
         _ = await running.value
         #expect(model.isWaiting(onConnection: "anything") == false)
+        #expect(model.isWaiting(onSession: "any-session") == false)
+        #expect(model.tidyAllIsWaiting == false)
     }
 
-    @Test func whatEndsTheEndedOnesOrStopsOneGroupMakesOnlyThoseRowsWait() async throws {
-        // S18: 끝난 연결 끄기 once spun the release of a live connection it never touches.
+    @Test func tidyingOneLineOrAllOfThemMakesOnlyTheLinesItTouchesWait() async throws {
+        // S18: an action once spun the release of a live connection it never touches (Ruling 180).
         var status = try Fixtures.status("status-ready")
         status.connections[0].state = .ended
         let claude = status.connections[0].id, codex = status.connections[1].id
@@ -365,23 +364,35 @@ struct ViewModelTests {
         let first = AsyncGate()
         engine.configure { $0.actionGate = first }
         defer { first.open() }
-        let ending = Task { await model.perform(.stopEnded) }
+        let all = Task { await model.perform(.tidyAll) }
         #expect(await waitUntil { engine.calls.contains(.stopConnection(claude, force: false)) })
         #expect(model.isWaiting(onConnection: claude))
         #expect(model.isWaiting(onConnection: codex) == false, "a live connection is not one of the ended ones")
+        #expect(model.tidyAllIsWaiting)
         first.open()
-        _ = await ending.value
+        _ = await all.value
 
         let second = AsyncGate()
         engine.configure { $0.actionGate = second }
         defer { second.open() }
-        let group = Task { await model.perform(.stopGroup(.codex, force: false)) }
-        #expect(await waitUntil { engine.calls.contains(.stopGroup(.codex, force: false)) })
+        let one = Task { await model.perform(.releaseConnection(codex)) }
+        #expect(await waitUntil { engine.calls.contains(.releaseConnection(codex)) })
         #expect(model.isWaiting(onConnection: codex))
-        #expect(model.isWaiting(onConnection: claude) == false, "Codex만 leaves the Claude rows alone")
+        #expect(model.isWaiting(onConnection: claude) == false, "the other line is left alone")
+        #expect(model.tidyAllIsWaiting == false, "and so is 모두 정리")
         second.open()
-        _ = await group.value
+        _ = await one.value
         #expect(model.isWaiting(onConnection: codex) == false)
+
+        let third = AsyncGate()
+        engine.configure { $0.actionGate = third }
+        defer { third.open() }
+        let tidying = Task { await model.perform(.tidy(claude)) }
+        #expect(await waitUntil { engine.calls.filter { $0 == .stopConnection(claude, force: false) }.count == 2 })
+        #expect(model.isWaiting(onConnection: claude))
+        #expect(model.isWaiting(onConnection: codex) == false)
+        third.open()
+        _ = await tidying.value
     }
 
     // MARK: Results
@@ -392,7 +403,7 @@ struct ViewModelTests {
         engine.configure { $0.releaseConnection = ReleaseResult(ok: false, released: false, reason: "relay_unavailable", scopeCount: 0) }
         let model = makeModel(engine)
         let outcome = await model.perform(.releaseConnection("claude-1-1"))
-        #expect(outcome == ActionOutcome(kind: .failure, message: "놓지 못했어요 — 중계기를 쓸 수 없어요"))
+        #expect(outcome == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 중계기를 쓸 수 없어요"))
         #expect(model.banner?.outcome == outcome)
         model.dismissBanner()
         #expect(model.banner == nil)
@@ -402,8 +413,8 @@ struct ViewModelTests {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
         engine.configure { $0.actionError = .timeout }
         let model = makeModel(engine)
-        let outcome = await model.perform(.stopConnection("codex-1-1", force: true))
-        #expect(outcome == ActionOutcome(kind: .failure, message: "끄지 못했어요 — 응답이 없어 기다리다 멈췄어요"))
+        let outcome = await model.perform(.releaseConnection("codex-1-1"))
+        #expect(outcome == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 응답이 없어 기다리다 멈췄어요"))
         #expect(model.inFlight.isEmpty)
     }
 
@@ -411,7 +422,7 @@ struct ViewModelTests {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
         let sleeper = ManualSleeper()
         let model = makeModel(engine, sleeper: sleeper, bannerDuration: .seconds(7))
-        await model.perform(.releaseEnded)
+        await model.perform(.releaseConnection("claude-1-1"))
         #expect(model.banner != nil)
         #expect(sleeper.pendingDurations == [.seconds(7)])
         sleeper.releaseAll() // seven seconds pass
@@ -422,7 +433,7 @@ struct ViewModelTests {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
         let sleeper = ManualSleeper()
         let model = makeModel(engine, sleeper: sleeper, bannerDuration: .seconds(7))
-        await model.perform(.releaseEnded)
+        await model.perform(.releaseConnection("claude-1-1"))
         let first = model.banner
         await model.perform(.restartCodex)
         let second = model.banner
@@ -454,43 +465,6 @@ struct ViewModelTests {
         let outcome = await model.perform(.copyDiagnosis)
         #expect(pasteboard.copied.isEmpty)
         #expect(outcome.kind == .failure)
-    }
-
-    @Test func theCardsLeftoverReleaseTouchesOnlyClaudeSessionsWithoutUserAndGivesEachItsOwnResult() async throws {
-        var status = try Fixtures.status("status-problem")
-        status.leases.maybeLeft.append(LeftoverLease(sessionID: "019a-extra", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true))
-        status.leases.maybeLeft.append(LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true))
-        let engine = FakeEngineClient(status: status)
-        engine.configure {
-            $0.releaseSessionByID["019a-extra"] = SessionReleaseResult(ok: true, released: false, reason: "cleanup_not_confirmed")
-            $0.releaseSessionByID["019a1b2c-0009"] = SessionReleaseResult(ok: true, released: true, reason: nil, tabCount: 2)
-        }
-        let model = makeModel(engine)
-        await model.refresh()
-        await model.waitForBackgroundWork()
-        let outcome = await model.perform(.releaseLeftover)
-        // One after another, Claude sessions only, never `--user`. The Codex chat's session is left
-        // for its own row's 콕 집어 풀기, and so is the Codex leftover without a session.
-        #expect(engine.calls.filter { if case .releaseSession = $0 { true } else { false } }
-                == [.releaseSession("019a1b2c-0009", user: false), .releaseSession("019a-extra", user: false)])
-        #expect(outcome == ActionOutcome(kind: .warning, message: "남은 세션 2개 중 1개의 점유를 놓았어요 (탭 2개) — 나머지는 정리가 확인되지 않았어요"))
-        // Each session keeps its own result for its own row.
-        #expect(model.sessionResults["019a1b2c-0009"] == ActionOutcome(kind: .success, message: "탭 2개를 놓았어요"))
-        #expect(model.sessionResults["019a-extra"] == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 정리가 확인되지 않았어요"))
-        #expect(model.sessionResults["019a-codex"] == nil)
-        #expect(model.failedSessionIDs == ["019a-extra"])
-        // The guidance is what the person needs next, so it is on screen.
-        #expect(model.selectedTab == .leases)
-        #expect(model.guidanceOpenByUser == true)
-    }
-
-    @Test func releasingLeftoversWithNothingToAimAtSaysSo() async throws {
-        let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        let model = makeModel(engine)
-        await model.refresh()
-        let outcome = await model.perform(.releaseLeftover)
-        #expect(outcome == ActionOutcome(kind: .info, message: "Claude 대화의 점유 중 놓을 수 있는 것이 없어요"))
-        #expect(engine.calls.filter { if case .releaseSession = $0 { true } else { false } }.isEmpty)
     }
 
     @Test func aFailedTargetedReleaseOpensTheExtensionGuidanceAndASuccessClosesItAgain() async throws {
@@ -558,10 +532,22 @@ struct ViewModelTests {
         #expect(engine.calls.contains(.restartCodex))
     }
 
-    @Test func tabsKeepTheirSelection() {
+    @Test func tabsKeepTheirSelectionWhileThePopoverIsOpen() {
         let model = makeModel(FakeEngineClient())
         #expect(model.selectedTab == .connections)
         model.selectedTab = .activity
         #expect(model.selectedTab == .activity)
+    }
+
+    @Test func thePopoverOpensOnTheListWhereverItWasLeft() {
+        // The card sends the person to the top of the list, so every opening starts there.
+        let model = makeModel(FakeEngineClient())
+        model.setPopoverOpen(true)
+        model.selectedTab = .activity
+        model.setPopoverOpen(false)
+        #expect(model.selectedTab == .activity, "closing changes nothing")
+        model.setPopoverOpen(true)
+        #expect(model.selectedTab == .connections)
+        model.stop()
     }
 }

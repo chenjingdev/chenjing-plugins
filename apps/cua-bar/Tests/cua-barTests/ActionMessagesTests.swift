@@ -8,10 +8,10 @@ struct ActionMessagesTests {
     static let reasons: [(String, String)] = [
         ("request_in_flight", "도구 호출이 아직 끝나지 않았어요"),
         ("not_found", "대상을 찾지 못했어요"),
-        ("no_trusted_scope", "놓을 점유가 없어요"),
+        ("no_trusted_scope", "풀 점유가 없어요"),
         ("cleanup_not_confirmed", "정리가 확인되지 않았어요"),
         ("relay_unavailable", "중계기를 쓸 수 없어요"),
-        ("unsupported", "하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"),
+        ("unsupported", "하나만 골라 풀 방법이 없어요. 목록 맨 아래 안내를 보세요"),
         ("quit_cancelled", "Codex가 종료를 취소했어요"),
         ("quit_pending", "Codex가 아직 꺼지는 중이에요"),
         ("not_running", "Codex가 켜져 있지 않아요"),
@@ -49,269 +49,143 @@ struct ActionMessagesTests {
         #expect(ActionMessages.why(["a", "b"]) == "확인되지 않음", "unknown reasons collapse into one")
     }
 
-    // MARK: Release one connection
+    // MARK: 탭 풀기 on one connection
 
     @Test func releasedConnection() {
         #expect(ActionMessages.releaseConnection(ReleaseResult(ok: true, released: true, reason: nil, scopeCount: 2))
-                == ActionOutcome(kind: .success, message: "놓았어요"))
+                == ActionOutcome(kind: .success, message: "탭을 풀었어요"))
     }
 
     @Test func nothingToReleaseIsASuccess() {
         #expect(ActionMessages.releaseConnection(ReleaseResult(ok: true, released: false, reason: "no_trusted_scope", scopeCount: 0))
-                == ActionOutcome(kind: .success, message: "놓을 점유가 없어요"))
+                == ActionOutcome(kind: .success, message: "풀 점유가 없어요"))
     }
 
     @Test func nobodyToAskIsNotNothingToRelease() {
         // `ok: false` with the same reason: there was no endpoint to ask, so the runtime may still hold tabs (P4).
         #expect(ActionMessages.releaseConnection(ReleaseResult(ok: false, released: false, reason: "no_trusted_scope", scopeCount: 0))
-                == ActionOutcome(kind: .warning, message: "놓아줄 길을 확인하지 못했어요"))
+                == ActionOutcome(kind: .warning, message: "탭을 풀 길을 확인하지 못했어요"))
     }
 
     @Test func releaseRefusedBecauseACallIsStillRunning() {
         #expect(ActionMessages.releaseConnection(ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0))
-                == ActionOutcome(kind: .failure, message: "놓지 못했어요 — 도구 호출이 아직 끝나지 않았어요"))
+                == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 도구 호출이 아직 끝나지 않았어요"))
     }
 
     @Test func releaseWithoutAReasonIsNotConfirmed() {
         #expect(ActionMessages.releaseConnection(ReleaseResult())
-                == ActionOutcome(kind: .failure, message: "놓지 못했어요 — 확인되지 않음"))
+                == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 확인되지 않음"))
     }
 
-    // MARK: Release the ended ones (reads ok and every item)
-
-    @Test func releasingTheEndedOnesReadsOkAndEachItem() {
-        func ended(_ released: Bool, _ reason: String? = nil) -> EndedRelease { EndedRelease(connectionID: "x", released: released, reason: reason) }
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: []))
-                == ActionOutcome(kind: .info, message: "끝난 연결이 없어요"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [ended(true), ended(true)]))
-                == ActionOutcome(kind: .success, message: "끝난 연결 2개를 놓았어요"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(true), ended(true)]))
-                == ActionOutcome(kind: .warning, message: "끝난 연결 2개를 놓았어요 · 마무리는 확인되지 않았어요"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(true), ended(false, "request_in_flight")]))
-                == ActionOutcome(kind: .warning, message: "끝난 연결 2개 중 1개를 놓았어요 — 나머지는 도구 호출이 아직 끝나지 않았어요"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(false, "relay_unavailable")]))
-                == ActionOutcome(kind: .failure, message: "끝난 연결 1개를 놓지 못했어요 — 중계기를 쓸 수 없어요"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(false, "request_in_flight"), ended(false, "relay_unavailable")]))
-                == ActionOutcome(kind: .failure, message: "끝난 연결 2개를 놓지 못했어요 — 도구 호출이 아직 끝나지 않았어요, 중계기를 쓸 수 없어요"))
-    }
-
-    @Test func anEndedConnectionWithNothingToReleaseIsNotAFailure() {
-        func ended(_ released: Bool, _ reason: String? = nil) -> EndedRelease { EndedRelease(connectionID: "x", released: released, reason: reason) }
-        let nothing = ended(false, "no_trusted_scope")
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [nothing, nothing]))
-                == ActionOutcome(kind: .success, message: "끝난 연결 2개 — 놓을 점유 없음"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [ended(true), nothing]))
-                == ActionOutcome(kind: .success, message: "끝난 연결 2개를 놓았어요 (1개는 놓을 점유 없음)"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(true), nothing, ended(false, "relay_unavailable")]))
-                == ActionOutcome(kind: .warning, message: "끝난 연결 3개 중 2개를 놓았어요 (1개는 놓을 점유 없음) — 나머지는 중계기를 쓸 수 없어요"))
-    }
-
-    @Test func withNobodyToAskTheEmptyItemsAreNotNothingToRelease() {
-        // `ok: false` and nothing failed: some item had no endpoint, and the items cannot say which (P4).
-        func ended(_ released: Bool, _ reason: String? = nil) -> EndedRelease { EndedRelease(connectionID: "x", released: released, reason: reason) }
-        let empty = ended(false, "no_trusted_scope")
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [empty]))
-                == ActionOutcome(kind: .warning, message: "끝난 연결 1개 — 놓아줄 길을 확인하지 못했어요"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [ended(true), empty]))
-                == ActionOutcome(kind: .warning, message: "끝난 연결 2개를 놓았어요 (1개는 놓아줄 길을 확인하지 못했어요)"))
-    }
-
-    @Test func sessionsFromBeforeTheRestartAreNotCountedBecauseTheEngineGroupsThemPerBridge() throws {
-        let status = try Fixtures.status("status-problem") // claude-12345 is live
-        let result = ReleaseEndedResult(ok: true, results: [EndedRelease(connectionID: "claude-12345-1792320000", released: false, reason: "no_trusted_scope")])
-        #expect(ActionMessages.releaseEnded(result, in: status)
-                == ActionOutcome(kind: .success, message: "다시 연결되기 전 세션 — 놓을 점유 없음"))
-    }
-
-    @Test func aLiveBridgesSessionsFromBeforeTheRestartAreNotEndedConnections() throws {
-        // P4: `release --ended` lists a live bridge whose old-host sessions it released under that bridge's own id.
-        let status = try Fixtures.status("status-problem") // claude-4001 ended, claude-12345 active
-        let result = ReleaseEndedResult(ok: true, results: [
-            EndedRelease(connectionID: "claude-4001-1792300000", released: true),
-            EndedRelease(connectionID: "claude-12345-1792320000", released: true),
-        ])
-        #expect(ActionMessages.releaseEnded(result, in: status)
-                == ActionOutcome(kind: .success, message: "끝난 연결 1개를 놓았어요 · 다시 연결되기 전 세션의 점유를 놓았어요"))
-        let onlyBeforeRestart = ReleaseEndedResult(ok: false, results: [
-            EndedRelease(connectionID: "claude-12345-1792320000", released: false, reason: "timeout"),
-        ])
-        #expect(ActionMessages.releaseEnded(onlyBeforeRestart, in: status)
-                == ActionOutcome(kind: .failure, message: "다시 연결되기 전 세션의 점유를 놓지 못했어요 — 시간이 너무 오래 걸렸어요"))
-        // A connection the status no longer lists is not live.
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: true, results: [EndedRelease(connectionID: "claude-1-1", released: true)]), in: status)
-                == ActionOutcome(kind: .success, message: "끝난 연결 1개를 놓았어요"))
-    }
-
-    @Test func anOkFalseAnswerWithNothingInItIsAFailureNeverNoEndedConnections() {
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: []))
-                == ActionOutcome(kind: .failure, message: "놓지 못했어요 — 확인되지 않음"))
-        #expect(ActionMessages.releaseEnded(ReleaseEndedResult(ok: false, results: [], reason: "timeout"))
-                == ActionOutcome(kind: .failure, message: "놓지 못했어요 — 시간이 너무 오래 걸렸어요"))
-    }
-
-    // MARK: Release by session id
+    // MARK: 탭 풀기 by session id
 
     @Test func aReleasedSessionSaysHowManyTabsWhenTheEngineGaveANumber() {
         #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: true, tabCount: 3))
-                == ActionOutcome(kind: .success, message: "탭 3개를 놓았어요"))
+                == ActionOutcome(kind: .success, message: "탭 3개를 풀었어요"))
         #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: true, tabCount: 0))
-                == ActionOutcome(kind: .success, message: "탭 0개를 놓았어요"))
+                == ActionOutcome(kind: .success, message: "탭 0개를 풀었어요"))
         #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: true, tabCount: nil))
-                == ActionOutcome(kind: .success, message: "놓았어요"))
+                == ActionOutcome(kind: .success, message: "탭을 풀었어요"))
     }
 
     @Test func aSessionThatCouldNotBeReleasedGivesItsReason() {
         #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: true, released: false, reason: "unsupported"))
-                == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"))
+                == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 하나만 골라 풀 방법이 없어요. 목록 맨 아래 안내를 보세요"))
         #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: false, released: false, reason: "needs_user"))
-                == ActionOutcome(kind: .failure, message: "풀지 못했어요 — Codex 대화의 점유는 직접 눌러야 풀 수 있어요"))
+                == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — Codex 대화의 점유는 직접 눌러야 풀 수 있어요"))
         #expect(ActionMessages.releaseSession(SessionReleaseResult(ok: false, released: false, reason: "session_live"))
-                == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 살아 있는 연결이 아직 이 세션을 쓰고 있어요"))
+                == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 살아 있는 연결이 아직 이 세션을 쓰고 있어요"))
         #expect(ActionMessages.releaseSession(SessionReleaseResult())
-                == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 확인되지 않음"))
+                == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — 확인되지 않음"))
     }
 
-    @Test func leftoverSessionsCountSessionsNeverLeases() {
-        func done(_ tabs: Int? = nil) -> SessionReleaseResult { SessionReleaseResult(ok: true, released: true, tabCount: tabs) }
-        func failed(_ reason: String) -> SessionReleaseResult { SessionReleaseResult(ok: true, released: false, reason: reason) }
-        #expect(ActionMessages.releaseLeftovers([])
-                == ActionOutcome(kind: .info, message: "Claude 대화의 점유 중 놓을 수 있는 것이 없어요"))
-        #expect(ActionMessages.releaseLeftovers([done(), done()])
-                == ActionOutcome(kind: .success, message: "남은 세션 2개의 점유를 놓았어요"))
-        #expect(ActionMessages.releaseLeftovers([done(2), done(1)])
-                == ActionOutcome(kind: .success, message: "남은 세션 2개의 점유를 놓았어요 (탭 3개)"))
-        #expect(ActionMessages.releaseLeftovers([done(2), failed("cleanup_not_confirmed")])
-                == ActionOutcome(kind: .warning, message: "남은 세션 2개 중 1개의 점유를 놓았어요 (탭 2개) — 나머지는 정리가 확인되지 않았어요"))
-        #expect(ActionMessages.releaseLeftovers([failed("unsupported")])
-                == ActionOutcome(kind: .failure, message: "남은 세션 1개의 점유를 놓지 못했어요 — 하나만 골라 풀 방법이 없어요. 브라우저 점유 탭의 안내를 보세요"))
+    // MARK: 정리 (one connection)
+
+    private func stopped(
+        ok: Bool = true, released: Bool = true, reason: String? = nil, forced: Bool = false, releasesTabs: Bool = true
+    ) -> TidyStep {
+        TidyStep(stop: StopResult(ok: ok, stopped: true, released: released, reason: reason), forced: forced, releasesTabs: releasesTabs)
     }
 
-    // MARK: Stop one connection
-
-    @Test func stopped() {
-        #expect(ActionMessages.stopConnection(StopResult(ok: true, stopped: true, released: true), force: false)
-                == ActionOutcome(kind: .success, message: "껐어요"))
-        #expect(ActionMessages.stopConnection(StopResult(ok: true, stopped: true, released: true), force: true)
-                == ActionOutcome(kind: .success, message: "강제로 껐어요"))
+    @Test func aCleanTidyIsOneShortLine() {
+        #expect(ActionMessages.tidy(stopped()) == ActionOutcome(kind: .success, message: "정리했어요"))
     }
 
-    @Test func stoppedWithoutConfirmedCleanupPointsToTheLeases() {
-        let result = StopResult(ok: true, stopped: true, released: false, reason: "cleanup_not_confirmed")
-        #expect(ActionMessages.stopConnection(result, force: true)
-                == ActionOutcome(kind: .warning, message: "강제로 껐지만 점유를 놓았는지는 확인되지 않았어요 — 브라우저 점유 탭을 보세요"))
+    @Test func aTidyThatHadToBeForcedSaysSo() {
+        #expect(ActionMessages.tidy(stopped(forced: true))
+                == ActionOutcome(kind: .success, message: "정리했어요 — 제때 안 꺼져서 강제로 껐어요"))
     }
 
-    @Test func aNormalStopIsNotBlockedByARefusedReleaseAndSaysWhatHappensNext() {
-        let result = StopResult(ok: true, stopped: true, released: false, reason: "request_in_flight")
-        #expect(ActionMessages.stopConnection(result, force: false)
-                == ActionOutcome(kind: .warning, message: "껐어요. 도구 호출이 끝나지 않아 점유는 못 놓았어요 — 플러그인이 끝날 때 한 번 더 놓고, 남으면 브라우저 점유 탭에 보여요"))
-    }
-
-    @Test func aStopWithNothingToReleaseIsAPlainSuccess() {
+    @Test func aTidyWithNothingToReleaseIsAPlainSuccess() {
         // P4: `released` stays literal, with `no_trusted_scope` when there was nothing to release.
-        let result = StopResult(ok: true, stopped: true, released: false, reason: "no_trusted_scope")
-        #expect(ActionMessages.stopConnection(result, force: false) == ActionOutcome(kind: .success, message: "껐어요"))
-        #expect(ActionMessages.stopConnection(result, force: true) == ActionOutcome(kind: .success, message: "강제로 껐어요"))
+        #expect(ActionMessages.tidy(stopped(released: false, reason: "no_trusted_scope"))
+                == ActionOutcome(kind: .success, message: "정리했어요"))
     }
 
-    @Test func stoppedButNotOkIsStillReportedAsStopped() {
-        #expect(ActionMessages.stopConnection(StopResult(ok: false, stopped: true, released: true), force: false)
-                == ActionOutcome(kind: .warning, message: "껐어요. 마무리는 확인되지 않았어요"))
+    @Test func aTidyWhoseTabsWereNotConfirmedReleasedPointsAtTheListNotAtAGoneTab() {
+        let outcome = ActionMessages.tidy(stopped(released: false))
+        #expect(outcome.kind == .warning)
+        #expect(outcome.message == "정리했어요 — 탭을 풀었는지는 확인되지 않았어요. 남았으면 목록에 점유로 보여요")
+        #expect(!outcome.message.contains("브라우저 점유 탭"))
+        let inFlight = ActionMessages.tidy(stopped(released: false, reason: "request_in_flight"))
+        #expect(inFlight.kind == .warning)
+        #expect(inFlight.message == "정리했어요 — 도구 호출이 끝나지 않아 탭은 못 풀었어요. 플러그인이 끝날 때 한 번 더 풀고, 남으면 목록에 점유로 보여요")
+        #expect(ActionMessages.tidy(stopped(ok: false))
+                == ActionOutcome(kind: .warning, message: "정리했어요 — 마무리는 확인되지 않았어요"))
+        // Forced and unconfirmed: both are said.
+        #expect(ActionMessages.tidy(stopped(released: false, forced: true)).message
+                == "정리했어요 — 제때 안 꺼져서 강제로 껐어요. 탭을 풀었는지는 확인되지 않았어요. 남았으면 목록에 점유로 보여요")
     }
 
-    @Test(arguments: ["request_in_flight", "protected", "unverified", "permission_denied", "unattributed", "not_found", nil])
-    func notStoppedGivesTheReason(reason: String?) {
-        let outcome = ActionMessages.stopConnection(StopResult(ok: false, stopped: false, released: false, reason: reason), force: false)
-        #expect(outcome == ActionOutcome(kind: .failure, message: "끄지 못했어요 — \(ActionMessages.reason(reason))"))
+    @Test func aCmuxConnectionHasNoReleaseStepSoItsStopIsAPlainOne() {
+        // No release step exists for cmux-cua: `released: false` with no reason is a plain stop.
+        #expect(ActionMessages.tidy(stopped(released: false, releasesTabs: false))
+                == ActionOutcome(kind: .success, message: "정리했어요"))
+        #expect(ActionMessages.tidy(stopped(ok: false, released: false, releasesTabs: false))
+                == ActionOutcome(kind: .warning, message: "정리했어요 — 마무리는 확인되지 않았어요"))
     }
 
-    // MARK: Group stop (reads ok and every item)
-
-    private func entry(_ stopped: Bool, released: Bool = true, _ reason: String? = nil) -> GroupStopEntry {
-        GroupStopEntry(connectionID: "x", stopped: stopped, released: released, reason: reason)
+    @Test(arguments: ["request_in_flight", "protected", "unverified", "permission_denied", "unattributed", "not_found", "timeout", nil])
+    func aTidyThatStoppedNothingGivesTheReason(reason: String?) {
+        let step = TidyStep(stop: StopResult(ok: false, stopped: false, released: false, reason: reason), forced: false, releasesTabs: true)
+        #expect(ActionMessages.tidy(step) == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — \(ActionMessages.reason(reason))"))
     }
 
-    @Test func aCleanGroupStop() {
-        let three = GroupStopResult(ok: true, stopped: 3, failed: 0, results: [entry(true), entry(true), entry(true)])
-        #expect(ActionMessages.stopGroup(three, group: .all, force: false) == ActionOutcome(kind: .success, message: "연결 3개를 껐어요"))
-        let claude = GroupStopResult(ok: true, stopped: 2, failed: 0, results: [entry(true), entry(true)])
-        #expect(ActionMessages.stopGroup(claude, group: .claude, force: true)
-                == ActionOutcome(kind: .success, message: "Claude 연결 2개를 강제로 껐어요"))
+    @Test func whenTheAppMayOnlyReleaseItSaysItReleasedOnlyTheTabs() {
+        let released = TidyStep(release: ReleaseResult(ok: true, released: true, reason: nil, scopeCount: 1))
+        #expect(ActionMessages.tidy(released)
+                == ActionOutcome(kind: .success, message: "탭만 풀었어요 — 이 연결은 앱이 끌 수 없어요"))
+        let nothing = TidyStep(release: ReleaseResult(ok: true, released: false, reason: "no_trusted_scope", scopeCount: 0))
+        #expect(nothing.kind == .tabsOnly, "nothing to release is not a failure")
+        let refused = TidyStep(release: ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0))
+        #expect(ActionMessages.tidy(refused)
+                == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — 도구 호출이 아직 끝나지 않았어요"))
     }
 
-    @Test func failuresAreCountedWithTheirReasons() {
-        let result = GroupStopResult(ok: false, stopped: 2, failed: 2, results: [
-            entry(true), entry(true), entry(false, released: false, "protected"), entry(false, released: false, "permission_denied"),
-        ])
-        #expect(ActionMessages.stopGroup(result, group: .all, force: false)
-                == ActionOutcome(kind: .warning, message: "연결 2개를 껐어요 · 2개는 못 껐어요 — 앱이 건드리지 않는 프로세스예요, 종료할 권한이 없어요"))
+    // MARK: 모두 정리 (reads every step)
+
+    @Test func tidyAllCountsWhatWentAndSaysWhyTheRestDidNot() {
+        let done = TidyStep(kind: .cleaned)
+        let tabsOnly = TidyStep(kind: .tabsOnly)
+        let failed = TidyStep.failed("protected")
+        #expect(ActionMessages.tidyAll([done, done, done]) == ActionOutcome(kind: .success, message: "3개 정리했어요"))
+        #expect(ActionMessages.tidyAll([done, tabsOnly]) == ActionOutcome(kind: .success, message: "2개 정리했어요"))
+        #expect(ActionMessages.tidyAll([done, done, failed])
+                == ActionOutcome(kind: .warning, message: "2개 정리, 1개는 못 했어요 — 앱이 건드리지 않는 프로세스예요"))
+        #expect(ActionMessages.tidyAll([failed])
+                == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — 앱이 건드리지 않는 프로세스예요"))
+        #expect(ActionMessages.tidyAll([failed, .failed("permission_denied"), .failed("protected")])
+                == ActionOutcome(kind: .failure, message: "3개를 정리하지 못했어요 — 앱이 건드리지 않는 프로세스예요, 종료할 권한이 없어요"))
+        #expect(ActionMessages.tidyAll([done, failed, .failed(nil)]).message
+                == "1개 정리, 2개는 못 했어요 — 앱이 건드리지 않는 프로세스예요, 확인되지 않음")
+        #expect(ActionMessages.tidyAll([]) == ActionOutcome(kind: .info, message: "정리할 것이 없어요"))
     }
 
-    @Test func unattributedConnectionsAreListedOnTheirOwn() {
-        let result = GroupStopResult(ok: true, stopped: 1, failed: 0, results: [
-            entry(true), entry(false, released: false, "unattributed"), entry(false, released: false, "unattributed"),
-        ])
-        #expect(ActionMessages.stopGroup(result, group: .codex, force: false)
-                == ActionOutcome(kind: .warning, message: "Codex 연결 1개를 껐어요 · 주인을 몰라 끄지 않음 2개 — 하나씩 끄거나 전체로 끌 수 있어요"))
-        let only = GroupStopResult(ok: true, stopped: 0, failed: 0, results: [entry(false, released: false, "unattributed")])
-        #expect(ActionMessages.stopGroup(only, group: .codex, force: false)
-                == ActionOutcome(kind: .warning, message: "주인을 몰라 끄지 않음 1개 — 하나씩 끄거나 전체로 끌 수 있어요"))
-    }
-
-    @Test func aStoppedConnectionWhoseTabsWereNotConfirmedReleasedIsMentioned() {
-        let result = GroupStopResult(ok: true, stopped: 1, failed: 0, results: [entry(true, released: false, "cleanup_not_confirmed")])
-        #expect(ActionMessages.stopGroup(result, group: .all, force: false)
-                == ActionOutcome(kind: .warning, message: "연결 1개를 껐어요 · 점유를 놓았는지 확인되지 않은 연결 1개 — 브라우저 점유 탭을 보세요"))
-    }
-
-    @Test func aStoppedConnectionWithNothingToReleaseIsNotCountedAsNotReleased() {
-        let result = GroupStopResult(ok: true, stopped: 2, failed: 0, results: [entry(true), entry(true, released: false, "no_trusted_scope")])
-        #expect(ActionMessages.stopGroup(result, group: .all, force: false) == ActionOutcome(kind: .success, message: "연결 2개를 껐어요"))
-        let ended = StopResult(ok: true, stopped: true, released: false, reason: "no_trusted_scope")
-        #expect(ActionMessages.stopEnded([ended]) == ActionOutcome(kind: .success, message: "끝난 연결 1개를 껐어요"))
-    }
-
-    @Test func aGroupStopThatStoppedNothingIsAFailureWithItsReason() {
-        let result = GroupStopResult(ok: false, stopped: 0, failed: 2, results: [
-            entry(false, released: false, "unverified"), entry(false, released: false, "unverified"),
-        ])
-        #expect(ActionMessages.stopGroup(result, group: .all, force: false)
-                == ActionOutcome(kind: .failure, message: "연결 2개를 끄지 못했어요 — 프로세스가 바뀌었거나 확인되지 않아 건드리지 않았어요"))
-    }
-
-    @Test func anOkFalseAnswerWithNothingInItIsAFailureNeverNoConnectionsToStop() {
-        #expect(ActionMessages.stopGroup(GroupStopResult(ok: false), group: .all, force: false)
-                == ActionOutcome(kind: .failure, message: "끄지 못했어요 — 확인되지 않음"))
-        #expect(ActionMessages.stopGroup(GroupStopResult(ok: false, reason: "not_running"), group: .all, force: false)
-                == ActionOutcome(kind: .failure, message: "끄지 못했어요 — Codex가 켜져 있지 않아요"))
-        #expect(ActionMessages.stopGroup(GroupStopResult(ok: true), group: .all, force: false)
-                == ActionOutcome(kind: .info, message: "끌 연결이 없어요"))
-    }
-
-    @Test func anEngineThatOnlySendsCountsStillGetsHonestWords() {
-        #expect(ActionMessages.stopGroup(GroupStopResult(ok: true, stopped: 3, failed: 0), group: .all, force: false)
-                == ActionOutcome(kind: .success, message: "연결 3개를 껐어요"))
-        #expect(ActionMessages.stopGroup(GroupStopResult(ok: false, stopped: 1, failed: 2), group: .codex, force: false)
-                == ActionOutcome(kind: .warning, message: "Codex 연결 1개를 껐어요 · 2개는 못 껐어요 — 확인되지 않음"))
-        #expect(ActionMessages.stopGroup(GroupStopResult(ok: false, stopped: 0, failed: 2), group: .all, force: false)
-                == ActionOutcome(kind: .failure, message: "연결 2개를 끄지 못했어요 — 확인되지 않음"))
-    }
-
-    @Test func aCleanLookingResultThatIsNotOkSaysSo() {
-        let result = GroupStopResult(ok: false, stopped: 1, failed: 0, results: [entry(true)])
-        #expect(ActionMessages.stopGroup(result, group: .all, force: false)
-                == ActionOutcome(kind: .warning, message: "연결 1개를 껐어요 · 마무리는 확인되지 않았어요"))
-    }
-
-    // MARK: Stop the ended ones
-
-    @Test func stoppingTheEndedOnesOneByOne() {
-        let ok = StopResult(ok: true, stopped: true, released: true)
-        #expect(ActionMessages.stopEnded([ok, ok]) == ActionOutcome(kind: .success, message: "끝난 연결 2개를 껐어요"))
-        let refused = StopResult(ok: false, stopped: false, released: false, reason: "protected")
-        #expect(ActionMessages.stopEnded([ok, refused])
-                == ActionOutcome(kind: .warning, message: "끝난 연결 1개를 껐어요 · 1개는 못 껐어요 — 앱이 건드리지 않는 프로세스예요"))
-        #expect(ActionMessages.stopEnded([]) == ActionOutcome(kind: .info, message: "끌 연결이 없어요"))
+    @Test func aLeftoverSessionStepIsCleanedOnlyWhenTheEngineReleasedIt() {
+        #expect(TidyStep(session: SessionReleaseResult(ok: true, released: true, tabCount: 2)).kind == .cleaned)
+        let notConfirmed = TidyStep(session: SessionReleaseResult(ok: true, released: false, reason: "cleanup_not_confirmed"))
+        #expect(notConfirmed == TidyStep.failed("cleanup_not_confirmed"))
+        #expect(TidyStep(session: SessionReleaseResult()) == TidyStep.failed(nil))
     }
 
     // MARK: Restart Codex
@@ -365,7 +239,7 @@ struct ActionMessagesTests {
             .setupNeeded(installPath: "/Users/someone/secret"),
         ]
         for error in errors {
-            for lead in ["놓지 못했어요", "끄지 못했어요"] {
+            for lead in ["탭을 풀지 못했어요", "정리하지 못했어요"] {
                 let outcome = ActionMessages.failure(of: lead, error: error)
                 #expect(outcome.kind == .failure)
                 #expect(!outcome.message.contains("Traceback"))
@@ -373,8 +247,8 @@ struct ActionMessagesTests {
                 #expect(!outcome.message.contains("70"))
             }
         }
-        #expect(ActionMessages.failure(of: "놓지 못했어요", error: .timeout)
-                == ActionOutcome(kind: .failure, message: "놓지 못했어요 — 응답이 없어 기다리다 멈췄어요"))
+        #expect(ActionMessages.failure(of: "정리하지 못했어요", error: .timeout)
+                == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — 응답이 없어 기다리다 멈췄어요"))
     }
 
     @Test func onlyATimeoutCountsAsTheEnginesTimeoutReason() {

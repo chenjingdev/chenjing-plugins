@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The popover (structure B): a status card on top, tabs below, buttons on every row.
+/// The popover (structure B): a status card on top, two tabs below, one button on every row.
 struct PopoverView: View {
     @ObservedObject var model: CUABarViewModel
     /// What the footer and the 기록 tab add: new version, remove, login item. nil leaves them out.
@@ -56,16 +56,7 @@ struct PopoverView: View {
                 model.send(.copyDiagnosis)
             }
         } else if let content = model.content {
-            switch model.selectedTab {
-            case .connections:
-                ConnectionsTabView(content: content.connections, model: model)
-            case .leases:
-                LeasesTabView(content: content.leases, failedSessionIDs: model.failedSessionIDs, model: model)
-            case .otherTools:
-                OtherToolsTabView(content: content.otherTools, model: model)
-            case .activity:
-                EmptyView()
-            }
+            ConnectionsTabView(content: content.connections, failedSessionIDs: model.failedSessionIDs, model: model)
         } else {
             // One view only: a modifier applied to two views in a builder would apply to each.
             TabPlaceholder(reason: model.summary.isPlaceholder ? .loading : .unreadable)

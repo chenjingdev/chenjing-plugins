@@ -37,17 +37,15 @@ struct ReviewRound2Tests {
 
     // MARK: 1. The automatic cleanup's time limit follows what it has to do
 
-    @Test func theCleanupAndThePersonsReleaseTellTheEngineHowMuchThereIsToDo() async throws {
+    @Test func theCleanupTellsTheEngineHowMuchThereIsToDo() async throws {
         let status = try somethingToCleanUp()
         let rig = await Rig(status)
         #expect(rig.engine.releaseEndedLoads == [ReleaseEndedLoad(endedConnections: 1, claudeSessions: 1)])
-        await rig.model.perform(.releaseEnded)
-        #expect(rig.engine.releaseEndedLoads.last == ReleaseEndedLoad(endedConnections: 1, claudeSessions: 1))
     }
 
-    // MARK: 3. Released but still ended: the card stops them next
+    // MARK: 3. Released but still ended: the line's 정리 is next
 
-    @Test func afterTheAutomaticRunTheCardStopsTheEndedOnesInsteadOfReleasingThemAgain() async throws {
+    @Test func afterTheAutomaticRunTheCardPointsAtTheListAndTheLineStopsItWithoutAQuestion() async throws {
         let status = try somethingToCleanUp()
         let gate = AsyncGate()
         let engine = FakeEngineClient(status: status)
@@ -55,56 +53,20 @@ struct ReviewRound2Tests {
         defer { gate.open() }
         let rig = await Rig(status, engine: engine, refresh: false)
         await rig.model.refresh()
-        #expect(rig.model.summary.fix == .releaseEnded, "until the run is done, the release stays")
         gate.open()
         await rig.model.waitForBackgroundWork()
-        // The engine keeps a released connection `ended` while its runtime lives.
+        // The engine keeps a released connection `ended` while its runtime lives; the card does not
+        // change its words and has no button: the line has 정리.
         #expect(rig.model.summary.headline == "끝난 연결이 1개 남아 있어요")
-        #expect(rig.model.summary.fix == .stopEnded)
-        #expect(rig.model.summary.fixLabel == "끝난 연결 끄기 1")
-        // It asks once, then stops it normally.
-        rig.model.send(.stopEnded)
-        #expect(rig.model.confirmationPrompt?.title == "끝난 연결 1개를 끌까요?")
-        await rig.model.confirmPending()
+        #expect(rig.model.summary.nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        #expect(rig.model.summary.fix == nil)
+        let ended = try #require(rig.model.content?.connections.tidy?.rows.compactMap(\.endedRow).first)
+        #expect(ended.button.action == .tidy(status.connections[0].id))
+        // It stops it at once, normally.
+        let task = rig.model.send(ended.button.action)
+        #expect(rig.model.confirmationPrompt == nil)
+        await task?.value
         #expect(rig.engine.calls.filter { $0 != .status }.last == .stopConnection(status.connections[0].id, force: false))
-    }
-
-    @Test func aPersonsReleaseThatWentThroughCountsAsTriedToo() async throws {
-        var status = try Fixtures.status("status-ready")
-        status.connections[0].state = .ended
-        let gate = AsyncGate()
-        let engine = FakeEngineClient(status: status)
-        engine.configure { $0.actionGate = gate }
-        defer { gate.open() }
-        let rig = await Rig(status, engine: engine, refresh: false)
-        // The person's 끝난 연결 놓아주기 is under way before the app got to clean up by itself.
-        let release = Task { await rig.model.perform(.releaseEnded) }
-        #expect(await yieldUntil { engine.calls.contains(.releaseEnded) })
-        await rig.model.refresh()
-        #expect(!rig.model.isCleaningUp, "never beside the person's own action")
-        #expect(rig.model.summary.fix == .releaseEnded)
-        gate.open()
-        _ = await release.value
-        #expect(rig.model.summary.fix == .stopEnded)
-    }
-
-    @Test func aReleaseThatFailedIsNotCountedAsTried() async throws {
-        var status = try Fixtures.status("status-ready")
-        status.connections[0].state = .ended
-        let id = status.connections[0].id
-        let gate = AsyncGate()
-        let engine = FakeEngineClient(status: status)
-        engine.configure {
-            $0.actionGate = gate
-            $0.releaseEnded = ReleaseEndedResult(ok: false, results: [EndedRelease(connectionID: id, released: false, reason: "relay_unavailable")])
-        }
-        defer { gate.open() }
-        let rig = await Rig(status, engine: engine, refresh: false)
-        let release = Task { await rig.model.perform(.releaseEnded) }
-        #expect(await yieldUntil { engine.calls.contains(.releaseEnded) })
-        gate.open()
-        _ = await release.value
-        #expect(rig.model.summary.fix == .releaseEnded)
     }
 
     // MARK: 4. The automatic cleanup is visible, and what would collide with it waits
@@ -120,92 +82,83 @@ struct ReviewRound2Tests {
         #expect(await yieldUntil { engine.calls.contains(.releaseEnded) })
         #expect(rig.model.isCleaningUp)
 
-        // The card's fix, 끝난 연결 놓아주기 and the Claude session rows show busy, with why.
-        #expect(rig.model.summary.fix == .releaseEnded)
-        #expect(rig.model.fixIsBusy)
+        // The card has no button for it. 모두 정리 and the Claude session line show busy, with why.
+        #expect(rig.model.summary.fix == nil)
+        #expect(!rig.model.fixIsBusy)
         let content = try #require(rig.model.content)
-        #expect(rig.model.cleanupHelp(for: content.connections.releaseEndedButton.action) == "자동 정리 중이에요")
-        let claudeRow = try #require(content.leases.rows.first { $0.sessionID == "019a-claude" }?.releaseButton)
-        let codexRow = try #require(content.leases.rows.first { $0.sessionID == "019a-codex" }?.releaseButton)
+        let tidy = try #require(content.connections.tidy)
+        #expect(rig.model.tidyAllIsWaiting)
+        #expect(rig.model.cleanupHelp(for: tidy.tidyAllButton.action) == "자동 정리 중이에요")
+        let leases = tidy.rows.compactMap(\.leaseRow)
+        let claudeRow = try #require(leases.first { $0.sessionID == "019a-claude" }?.releaseButton)
+        let codexRow = try #require(leases.first { $0.sessionID == "019a-codex" }?.releaseButton)
         #expect(rig.model.waitsForAutomaticCleanup(claudeRow.action))
+        #expect(rig.model.isWaiting(onSession: "019a-claude"))
         #expect(rig.model.cleanupHelp(for: claudeRow.action) == "자동 정리 중이에요")
         #expect(!rig.model.waitsForAutomaticCleanup(codexRow.action), "a Codex chat is not the cleanup's")
-        for action: CUAAction in [.releaseLeftover, .stopEnded] { #expect(rig.model.waitsForAutomaticCleanup(action), "\(action)") }
-        for action: CUAAction in [.restartCodex, .runSetup, .stopGroup(.all, force: false), .releaseConnection(status.connections[1].id)] {
+        #expect(!rig.model.isWaiting(onSession: "019a-codex"))
+        #expect(rig.model.waitsForAutomaticCleanup(.tidyAll))
+        for action: CUAAction in [.restartCodex, .runSetup, .releaseConnection(status.connections[1].id)] {
             #expect(!rig.model.waitsForAutomaticCleanup(action), "\(action)")
         }
         // S18: the row of the ended connection it releases waits too, and says why; the live one does not.
         let ended = status.connections[0].id, live = status.connections[1].id
         #expect(rig.model.isWaiting(onConnection: ended))
         #expect(rig.model.cleanupHelp(onConnection: ended) == "자동 정리 중이에요")
-        for action: CUAAction in [.releaseConnection(ended), .stopConnection(ended, force: true), .retryRelease(ended)] {
+        for action: CUAAction in [.releaseConnection(ended), .tidy(ended), .retryRelease(ended)] {
             #expect(rig.model.waitsForAutomaticCleanup(action), "\(action)")
         }
         #expect(!rig.model.isWaiting(onConnection: live))
         #expect(rig.model.cleanupHelp(onConnection: live) == nil)
 
         // A press that still arrives does not run and is not queued.
-        #expect(rig.model.send(.releaseEnded) == nil)
+        #expect(rig.model.send(.tidyAll) == nil)
         #expect(rig.model.banner?.outcome == Self.busy)
         rig.model.dismissBanner()
         #expect(rig.model.send(claudeRow.action) == nil)
         #expect(rig.model.banner?.outcome == Self.busy)
-        #expect(rig.model.send(.stopEnded) == nil)
+        #expect(rig.model.send(.tidy(ended)) == nil)
         #expect(rig.model.pending == nil, "no question either")
-        #expect(await rig.model.perform(.releaseLeftover) == Self.busy)
+        #expect(await rig.model.perform(.tidyAll) == Self.busy)
 
         gate.open()
         await rig.model.waitForBackgroundWork()
         #expect(!rig.model.isCleaningUp)
-        #expect(!rig.model.fixIsBusy)
-        #expect(rig.model.cleanupHelp(for: .releaseEnded) == nil)
+        #expect(!rig.model.tidyAllIsWaiting)
+        #expect(rig.model.cleanupHelp(for: .tidyAll) == nil)
         #expect(!rig.model.isWaiting(onConnection: ended))
         #expect(rig.model.cleanupHelp(onConnection: ended) == nil)
         #expect(rig.engine.calls.filter { $0 != .status } == [.releaseEnded], "only the cleanup's own call, and nothing after it")
     }
 
-    // MARK: 5. The card's leftover release goes on after an error
-
-    @Test func theCardsLeftoverReleaseTriesTheRestAfterAnErrorAndCountsIt() async throws {
-        var status = try Fixtures.status("status-ready")
-        status.leases.maybeLeft = [claudeLeftover("019a-a"), claudeLeftover("019a-b")]
-        let rig = await Rig(status) // the automatic run is over
-        #expect(rig.model.summary.fix == .releaseLeftover)
-        rig.engine.configure {
-            $0.releaseSessionErrorByID["019a-a"] = .timeout
-            $0.releaseSession = SessionReleaseResult(ok: true, released: true, reason: nil, tabCount: 2)
-        }
-        rig.model.guidanceOpenByUser = false
-        let outcome = await rig.model.perform(.releaseLeftover)
-        #expect(rig.actionCalls == [.releaseSession("019a-a", user: false), .releaseSession("019a-b", user: false)])
-        #expect(rig.model.sessionResults["019a-a"] == ActionOutcome(kind: .failure, message: "풀지 못했어요 — 응답이 없어 기다리다 멈췄어요"))
-        #expect(rig.model.sessionResults["019a-b"] == ActionOutcome(kind: .success, message: "탭 2개를 놓았어요"))
-        #expect(outcome == ActionOutcome(kind: .warning, message: "남은 세션 2개 중 1개의 점유를 놓았어요 (탭 2개) — 나머지는 시간이 너무 오래 걸렸어요"))
-        // A timeout points at the extension reset: the guidance opens for that row.
-        #expect(rig.model.failedSessionIDs == ["019a-a"])
-        #expect(rig.model.selectedTab == .leases)
-        #expect(rig.model.guidanceOpenByUser == true)
-    }
+    // MARK: 5. 모두 정리 goes on after an error (see TidyTests)
 
     // MARK: 6. Stale questions are withdrawn
 
-    private func refusing() async throws -> Rig {
-        let refused = ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0)
-        let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
-        engine.configure { $0.releaseConnectionQueue = [refused, refused] }
-        return await Rig(try Fixtures.status("status-problem"), engine: engine)
+    /// The idle Claude connection whose tabs the engine refuses to release (twice).
+    private static let target = "claude-12345-1792320000"
+
+    private func idleStatus() throws -> EngineStatus {
+        var status = try Fixtures.status("status-problem")
+        status.connections[1].state = .idle
+        status.connections[1].idleSeconds = 2000
+        return status
     }
 
-    private static let ended = "claude-4001-1792300000"
-    private static let active = "claude-12345-1792320000"
+    private func refusing() async throws -> Rig {
+        let refused = ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0)
+        let engine = FakeEngineClient(status: try idleStatus())
+        engine.configure { $0.releaseConnectionQueue = [refused, refused] }
+        return await Rig(try idleStatus(), engine: engine)
+    }
 
     @Test func theRetryQuestionGoesWhenItsConnectionLeavesTheList() async throws {
         let rig = try await refusing()
         rig.model.setPopoverOpen(true)
-        await rig.model.send(.releaseConnection(Self.ended))?.value
+        await rig.model.send(.releaseConnection(Self.target))?.value
         #expect(rig.model.pending?.kind == .retryRelease)
-        var later = try Fixtures.status("status-problem")
-        later.connections.removeAll { $0.id == Self.ended }
+        var later = try idleStatus()
+        later.connections.removeAll { $0.id == Self.target }
         rig.engine.setStatus(later)
         await rig.model.refresh()
         #expect(rig.model.pending == nil)
@@ -215,7 +168,7 @@ struct ReviewRound2Tests {
     @Test func theRetryQuestionGoesWhenTheStatusCannotBeRead() async throws {
         let rig = try await refusing()
         rig.model.setPopoverOpen(true)
-        await rig.model.send(.releaseConnection(Self.ended))?.value
+        await rig.model.send(.releaseConnection(Self.target))?.value
         #expect(rig.model.pending?.kind == .retryRelease)
         rig.engine.setStatusError(.pluginMissing)
         await rig.model.refresh()
@@ -224,26 +177,26 @@ struct ReviewRound2Tests {
 
     @Test func aRefusalWhileThePopoverIsClosedShowsTheRowStateInsteadOfAQuestion() async throws {
         let rig = try await refusing()
-        await rig.model.send(.releaseConnection(Self.ended))?.value
+        await rig.model.send(.releaseConnection(Self.target))?.value
         #expect(rig.model.pending == nil, "a question in a closed popover would be stale when it opens")
-        #expect(rig.model.refusedReleaseIDs == [Self.ended])
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .failure, message: "작업이 끝나지 않아 못 놓음"))
-        let row = try #require(rig.model.content?.connections.groups.flatMap(\.rows).first { $0.id == Self.ended })
-        #expect(row.refusedButtons.map(\.title) == ["다시 하기", "끄기", "강제 종료"])
+        #expect(rig.model.refusedReleaseIDs == [Self.target])
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .failure, message: "작업이 끝나지 않아 못 풀었어요"))
+        let row = try #require(rig.model.content?.connections.groups.flatMap(\.rows).first { $0.id == Self.target })
+        #expect(row.retryButton.title == "탭 풀기")
     }
 
-    @Test func theForceStopQuestionGoesWhenItsConnectionLeavesOrTheStatusCannotBeRead() async throws {
+    @Test func theWorkingReleaseQuestionGoesWhenItsConnectionLeavesOrTheStatusCannotBeRead() async throws {
         let rig = await Rig(try Fixtures.status("status-problem"))
-        rig.model.send(.stopConnection(Self.active, force: true))
+        rig.model.send(.releaseConnection(Self.target)) // active: it may be working, so it asks
         #expect(rig.model.pending != nil)
         var later = try Fixtures.status("status-problem")
-        later.connections.removeAll { $0.id == Self.active }
+        later.connections.removeAll { $0.id == Self.target }
         rig.engine.setStatus(later)
         await rig.model.refresh()
         #expect(rig.model.pending == nil)
 
         let second = await Rig(try Fixtures.status("status-problem"))
-        second.model.send(.stopConnection(Self.active, force: true))
+        second.model.send(.releaseConnection(Self.target))
         #expect(second.model.pending != nil)
         second.engine.setStatusError(.pluginMissing)
         await second.model.refresh()
@@ -251,11 +204,14 @@ struct ReviewRound2Tests {
         #expect(second.actionCalls.isEmpty)
     }
 
-    @Test func aForceStopOfAConnectionThatIsNoLongerListedNeitherAsksNorRuns() async throws {
+    @Test func aReleaseOrTidyOfAConnectionThatIsNoLongerListedNeitherAsksNorRuns() async throws {
         let rig = await Rig(try Fixtures.status("status-problem"))
-        #expect(rig.model.send(.stopConnection("claude-1-1", force: true)) == nil)
-        #expect(rig.model.pending == nil)
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "그 연결은 이제 목록에 없어요"))
+        for action: CUAAction in [.releaseConnection("claude-1-1"), .tidy("claude-1-1")] {
+            #expect(rig.model.send(action) == nil)
+            #expect(rig.model.pending == nil)
+            #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "그 연결은 이제 목록에 없어요"))
+            rig.model.dismissBanner()
+        }
         #expect(rig.actionCalls.isEmpty)
     }
 
@@ -281,8 +237,7 @@ struct ReviewRound2Tests {
     // MARK: 7. An action that has to ask does not run without a status to ask from
 
     @Test(arguments: [
-        CUAAction.stopGroup(.all, force: false), .stopGroup(.claude, force: true), .stopConnection("claude-12345-1792320000", force: true),
-        .stopEnded, .restartCodex, .releaseConnection("claude-12345-1792320000"),
+        CUAAction.restartCodex, .releaseConnection("claude-12345-1792320000"), .tidy("claude-4001-1792300000"), .tidyAll,
     ])
     func withoutAStatusAnActionThatMustAskDoesNotRun(action: CUAAction) async throws {
         let engine = FakeEngineClient()
@@ -321,22 +276,6 @@ struct ReviewRound2Tests {
         #expect(opened == 1)
         #expect(rig.actionCalls == [.restartCodex])
         #expect(rig.model.banner?.outcome == ActionOutcome(kind: .success, message: "Codex를 다시 켰어요"))
-    }
-
-    // MARK: 10. 점유 보기 only shows the tab
-
-    @Test func showLeasesOnlySelectsTheTab() async throws {
-        var status = try Fixtures.status("status-ready")
-        status.leases.maybeLeft = [codexLeftover("019a-codex")]
-        let rig = await Rig(status)
-        #expect(rig.model.summary.fix == .showLeases)
-        #expect(rig.model.summary.fixLabel == "점유 보기")
-        rig.model.selectedTab = .activity
-        await rig.model.send(.showLeases)?.value
-        #expect(rig.model.selectedTab == .leases)
-        #expect(rig.model.guidanceOpenByUser == nil, "the extension-reset guidance is left as it was")
-        #expect(rig.model.banner == nil)
-        #expect(rig.actionCalls.isEmpty)
     }
 
     // MARK: 12. Finished background work is dropped

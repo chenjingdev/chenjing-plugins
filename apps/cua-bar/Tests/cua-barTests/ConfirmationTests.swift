@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import cua_bar
 
-/// R17, F1 and the active-release question: which buttons ask first, what they say, and that
-/// nothing reaches the engine until the person answers yes.
+/// F1 and the working-connection question: which buttons ask first, what they say, and that
+/// nothing reaches the engine until the person answers yes. 정리 and 모두 정리 ask nothing (R17).
 @MainActor
 struct ConfirmationTests {
     private func problem() async throws -> Rig { await Rig(try Fixtures.status("status-problem")) }
@@ -17,128 +17,44 @@ struct ConfirmationTests {
         }
     }
 
-    // MARK: Group stop (R17): the count, then one question
+    // MARK: Tidying asks nothing (R17)
 
-    @Test(arguments: [
-        (StopGroup.all, "연결 3개를 끌까요?", "전체 끄기"),
-        (.claude, "Claude 연결 2개를 끌까요?", "Claude만 끄기"),
-        (.codex, "Codex 연결 1개를 끌까요?", "Codex만 끄기"),
-    ])
-    func aGroupStopSaysHowManyAndRunsOnlyAfterConfirming(group: StopGroup, title: String, confirmTitle: String) async throws {
+    @Test func tidyAndTidyAllRunAtOnceWithoutAQuestion() async throws {
         let rig = try await problem()
-        #expect(rig.model.send(.stopGroup(group, force: false)) == nil, "it asks instead of running")
-        let prompt = try #require(rig.model.confirmationPrompt)
-        #expect(prompt.title == title)
-        #expect(prompt.confirmTitle == confirmTitle)
-        #expect(prompt.cancelTitle == "취소")
-        #expect(prompt.isDestructive == false)
-        #expect(stopCalls(rig).isEmpty, "nothing runs before the answer")
-
-        let outcome = await rig.model.confirmPending()
-        #expect(outcome != nil)
-        #expect(rig.model.pending == nil)
-        #expect(stopCalls(rig) == [.stopGroup(group, force: false)])
-    }
-
-    @Test func cmuxCuaIsNeverCountedInAGroup() async throws {
-        var status = try Fixtures.status("status-problem")
-        // cmux-cua runs with clients and processes of its own, each client one the engine may stop
-        // (`can_stop`); none of that is a connection.
-        status.otherTools.append(OtherTool(name: "cmux-cua", running: true, pids: [1, 2, 3, 4, 5], clients: [
-            ToolClient(id: "cmux-5-1", pid: 9, mcpPID: 5, agent: .claude, cwd: "/a/b", canStop: true),
-            ToolClient(id: "cmux-6-1", pid: 10, mcpPID: 6, agent: .codex, cwd: "/a/c", canStop: true),
-        ]))
-        let rig = await Rig(status)
-        rig.model.send(.stopGroup(.all, force: false))
-        #expect(rig.model.confirmationPrompt?.title == "연결 3개를 끌까요?")
-        #expect(rig.model.confirmationPrompt?.detail?.contains("cmux-cua 같은 다른 도구는 그대로 둬요") == true)
-    }
-
-    @Test func cancelRunsNothing() async throws {
-        let rig = try await problem()
-        rig.model.send(.stopGroup(.all, force: false))
-        #expect(rig.model.pending != nil)
-        rig.model.cancelPending()
+        let ended = "claude-4001-1792300000"
+        #expect(rig.model.confirmation(for: .tidy(ended)) == nil)
+        #expect(rig.model.confirmation(for: .tidyAll) == nil)
+        let one = rig.model.send(.tidy(ended))
+        #expect(one != nil, "it ran at once")
         #expect(rig.model.pending == nil)
         #expect(rig.model.confirmationPrompt == nil)
-        #expect(await rig.model.confirmPending() == nil, "there is nothing left to confirm")
-        #expect(stopCalls(rig).isEmpty)
-    }
-
-    @Test func theCodexGroupLeavesOutConnectionsWithoutASessionAndSaysSo() async throws {
-        var status = try Fixtures.status("status-problem")
-        status.connections[2].sessionID = nil // the Codex one: the engine would skip it as unattributed
-        let rig = await Rig(status)
-        // Nothing for `--group codex` to stop: no question, and the button is off.
-        #expect(rig.model.confirmation(for: .stopGroup(.codex, force: false)) == nil)
-        rig.model.send(.stopGroup(.all, force: false))
-        #expect(rig.model.confirmationPrompt?.title == "연결 3개를 끌까요?", "--group all still stops it")
-        // With a session-bearing Codex connection next to it, the prompt names what is left out.
-        status.connections.append(Connection(
-            id: "codex-77-1", agent: .codex, state: .active, cwd: "/a/b", sessionID: "019a-77", canRelease: true, canStop: true))
-        let second = await Rig(status)
-        second.model.send(.stopGroup(.codex, force: false))
-        let prompt = try #require(second.model.confirmationPrompt)
-        #expect(prompt.title == "Codex 연결 1개를 끌까요?")
-        #expect(prompt.detail?.contains("주인을 모르는 1개는 빠져요") == true)
-    }
-
-    @Test func theCountInAWaitingQuestionFollowsTheLatestStatus() async throws {
-        let rig = try await problem()
-        rig.model.send(.stopGroup(.all, force: false))
-        #expect(rig.model.confirmationPrompt?.title == "연결 3개를 끌까요?")
-        var smaller = try Fixtures.status("status-problem")
-        smaller.connections.removeLast()
-        rig.engine.setStatus(smaller)
-        await rig.model.refresh()
-        await rig.model.waitForBackgroundWork()
-        #expect(rig.model.confirmationPrompt?.title == "연결 2개를 끌까요?")
-    }
-
-    // MARK: Force stop (R17)
-
-    @Test func aForceStopSaysHowManyAndWhatItCostsAndAsksOnce() async throws {
-        let rig = try await problem()
-        rig.model.send(.stopConnection("claude-12345-1792320000", force: true))
-        let prompt = try #require(rig.model.confirmationPrompt)
-        #expect(prompt.title == "Claude · dev/computer-use 연결 1개를 강제로 끌까요?")
-        #expect(prompt.detail == "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요.")
-        #expect(prompt.warning == "하던 작업이 끊겨요")
-        #expect(prompt.confirmTitle == "강제 종료")
-        #expect(prompt.isDestructive)
-        #expect(stopCalls(rig).isEmpty)
-        await rig.model.confirmPending()
-        #expect(stopCalls(rig) == [.stopConnection("claude-12345-1792320000", force: true)])
+        await one?.value
+        #expect(stopCalls(rig) == [.stopConnection(ended, force: false)], "a normal stop; nothing is forced unasked")
+        let all = rig.model.send(.tidyAll)
+        #expect(all != nil)
         #expect(rig.model.pending == nil)
+        await all?.value
     }
 
-    @Test func aForceGroupStopAsksWithTheGroupsCount() async throws {
+    @Test func anEndedConnectionStopWhoseRowIsGoneNeverRunsUnasked() async throws {
         let rig = try await problem()
-        rig.model.send(.stopGroup(.claude, force: true))
-        let prompt = try #require(rig.model.confirmationPrompt)
-        #expect(prompt.title == "Claude 연결 2개를 강제로 끌까요?")
-        #expect(prompt.warning == "하던 작업이 끊겨요")
-        #expect(prompt.isDestructive)
-    }
-
-    @Test func aSingleNormalStopRunsAtOnce() async throws {
-        let rig = try await problem()
-        let task = rig.model.send(.stopConnection("claude-12345-1792320000", force: false))
+        #expect(rig.model.send(.tidy("claude-1-1")) == nil)
         #expect(rig.model.pending == nil)
-        await task?.value
-        #expect(stopCalls(rig) == [.stopConnection("claude-12345-1792320000", force: false)])
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "그 연결은 이제 목록에 없어요"))
+        #expect(rig.actionCalls.isEmpty)
     }
 
-    // MARK: Releasing a connection that may be working
+    // MARK: Releasing the tabs of a connection that may be working
 
     @Test(arguments: ["claude-12345-1792320000", "codex-15888-1792319000"])
     func releasingAnActiveConnectionAsksOnceForBothAgents(id: String) async throws {
         let rig = await Rig(try Fixtures.status("status-ready")) // both are active
         #expect(rig.model.send(.releaseConnection(id)) == nil)
         let prompt = try #require(rig.model.confirmationPrompt)
-        #expect(prompt.title.hasSuffix("의 점유를 놓을까요?"))
+        #expect(prompt.title.hasSuffix("의 탭을 풀까요?"))
+        #expect(prompt.detail == "이 연결이 잡고 있는 브라우저 탭만 풀어요. 연결은 그대로예요.")
         #expect(prompt.warning == "이 대화가 아직 일하는 중이면 하던 브라우저 작업이 끊겨요")
-        #expect(prompt.confirmTitle == "놓아주기")
+        #expect(prompt.confirmTitle == "탭 풀기")
         #expect(rig.actionCalls.isEmpty)
         await rig.model.confirmPending()
         #expect(rig.actionCalls == [.releaseConnection(id)])
@@ -148,19 +64,16 @@ struct ConfirmationTests {
     @Test func theQuestionNamesTheConnection() async throws {
         let rig = await Rig(try Fixtures.status("status-ready"))
         rig.model.send(.releaseConnection("codex-15888-1792319000"))
-        #expect(rig.model.confirmationPrompt?.title == "Codex · dev/new-chat의 점유를 놓을까요?")
+        #expect(rig.model.confirmationPrompt?.title == "Codex · dev/new-chat의 탭을 풀까요?")
     }
 
-    @Test func releasingAnIdleOrEndedConnectionRunsAtOnce() async throws {
+    @Test func releasingAnIdleConnectionRunsAtOnce() async throws {
         let rig = try await problem()
         let idle = rig.model.send(.releaseConnection("codex-15888-1792319000")) // idle: asleep for 42 minutes
         #expect(rig.model.pending == nil)
         await idle?.value
-        let ended = rig.model.send(.releaseConnection("claude-4001-1792300000"))
-        #expect(rig.model.pending == nil)
-        await ended?.value
         #expect(rig.actionCalls.filter { if case .releaseConnection = $0 { true } else { false } }
-                == [.releaseConnection("codex-15888-1792319000"), .releaseConnection("claude-4001-1792300000")])
+                == [.releaseConnection("codex-15888-1792319000")])
     }
 
     @Test func anActiveConnectionWhoseIdleTimeIsUnknownStillAsks() async throws {
@@ -195,10 +108,9 @@ struct ConfirmationTests {
     @Test func theseClicksNeverAsk() async throws {
         let rig = try await problem()
         let actions: [CUAAction] = [
-            .releaseEnded, .releaseSession("019a1b2c-0009", user: true), .releaseSession("019a1b2c-0009", user: false),
-            .releaseLeftover, .copyDiagnosis, .runSetup, .refresh, .showLeaseGuidance, .openCodex,
-            .retryRelease("claude-4001-1792300000"), .stopConnection("claude-12345-1792320000", force: false),
-            .releaseConnection("claude-4001-1792300000"),
+            .tidy("claude-4001-1792300000"), .tidyAll, .releaseSession("019a1b2c-0009", user: true),
+            .releaseSession("019a1b2c-0009", user: false), .copyDiagnosis, .runSetup, .refresh, .openCodex,
+            .retryRelease("claude-4001-1792300000"), .releaseConnection("claude-4001-1792300000"),
         ]
         for action in actions { #expect(rig.model.confirmation(for: action) == nil, "\(action)") }
     }
@@ -354,77 +266,16 @@ struct ConfirmationTests {
         #expect(rig.opener.openedPaths.count == 1)
     }
 
-    // MARK: Ending the ended ones (R17)
-
-    private func endedWithoutAControlEndpoint() throws -> EngineStatus {
-        var status = try Fixtures.status("status-ready")
-        for index in status.connections.indices {
-            status.connections[index].state = .ended
-            status.connections[index].canRelease = false
-            status.connections[index].ownerAlive = false
-        }
-        return status
-    }
-
-    @Test func whenNoEndedConnectionCanBeReleasedTheCardStopsThemAfterOneQuestionWithTheCount() async throws {
-        let rig = await Rig(try endedWithoutAControlEndpoint())
-        #expect(rig.model.summary.fix == .stopEnded)
-        #expect(rig.model.summary.fixLabel == "끝난 연결 끄기 2")
-        rig.model.send(.stopEnded)
-        let prompt = try #require(rig.model.confirmationPrompt)
-        #expect(prompt.title == "끝난 연결 2개를 끌까요?")
-        #expect(prompt.confirmTitle == "끝난 연결 끄기")
-        #expect(rig.actionCalls.isEmpty)
-
-        await rig.model.confirmPending()
-        // `stop --connection` once for each, normal (not forced); no release, no group stop.
-        #expect(rig.actionCalls == [
-            .stopConnection("claude-12345-1792320000", force: false),
-            .stopConnection("codex-15888-1792319000", force: false),
-        ])
-        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .success, message: "끝난 연결 2개를 껐어요"))
-    }
-
-    @Test func endedConnectionsThatCannotBeStoppedAreNotAskedAbout() async throws {
-        var status = try endedWithoutAControlEndpoint()
-        status.connections[1].canStop = false
-        let rig = await Rig(status)
-        #expect(rig.model.summary.fixLabel == "끝난 연결 끄기 1")
-        rig.model.send(.stopEnded)
-        #expect(rig.model.confirmationPrompt?.title == "끝난 연결 1개를 끌까요?")
-        await rig.model.confirmPending()
-        #expect(rig.actionCalls == [.stopConnection("claude-12345-1792320000", force: false)])
-    }
-
-    @Test func stoppingTheEndedOnesReportsEachOnesAnswer() async throws {
-        let rig = await Rig(try endedWithoutAControlEndpoint())
-        rig.engine.configure {
-            $0.stopConnectionByID["codex-15888-1792319000"] = StopResult(ok: false, stopped: false, released: false, reason: "protected")
-        }
-        rig.model.send(.stopEnded)
-        let outcome = await rig.model.confirmPending()
-        #expect(outcome == ActionOutcome(kind: .warning, message: "끝난 연결 1개를 껐어요 · 1개는 못 껐어요 — 앱이 건드리지 않는 프로세스예요"))
-    }
-
-    @Test func aStopThatTimesOutDoesNotStopTheRestOfTheEndedOnesFromBeingTried() async throws {
-        let rig = await Rig(try endedWithoutAControlEndpoint())
-        rig.engine.configure { $0.actionError = .timeout }
-        rig.model.send(.stopEnded)
-        let outcome = await rig.model.confirmPending()
-        #expect(rig.actionCalls.count == 2, "both were tried")
-        #expect(outcome == ActionOutcome(kind: .failure, message: "끝난 연결 2개를 끄지 못했어요 — 시간이 너무 오래 걸렸어요"))
-    }
-
     // MARK: One question at a time
 
     @Test func aNewPressReplacesAQuestionThatIsStillWaiting() async throws {
         let rig = try await problem()
-        rig.model.send(.stopGroup(.all, force: false))
+        rig.model.send(.restartCodex)
         let first = try #require(rig.model.pending)
-        rig.model.send(.stopGroup(.claude, force: false))
+        rig.model.send(.releaseConnection("claude-12345-1792320000")) // active: it asks too
         let second = try #require(rig.model.pending)
         #expect(first.id != second.id)
-        #expect(second.action == .stopGroup(.claude, force: false))
+        #expect(second.action == .releaseConnection("claude-12345-1792320000"))
         // A press that needs no question withdraws the waiting one and runs.
         let task = rig.model.send(.copyDiagnosis)
         #expect(rig.model.pending == nil)
@@ -435,7 +286,7 @@ struct ConfirmationTests {
     @Test func closingThePopoverWithdrawsTheQuestion() async throws {
         let rig = try await problem()
         rig.model.setPopoverOpen(true)
-        rig.model.send(.stopGroup(.all, force: false))
+        rig.model.send(.restartCodex)
         #expect(rig.model.pending != nil)
         rig.model.setPopoverOpen(false)
         #expect(rig.model.pending == nil)
@@ -444,9 +295,9 @@ struct ConfirmationTests {
 
     @Test func anUnreadableStatusWithdrawsTheQuestion() async throws {
         let rig = try await problem()
-        rig.model.send(.stopGroup(.all, force: false))
+        rig.model.send(.restartCodex)
         rig.engine.setStatusError(.pluginMissing)
         await rig.model.refresh()
-        #expect(rig.model.pending == nil, "its count would be a guess now")
+        #expect(rig.model.pending == nil, "restarting now would be a guess")
     }
 }

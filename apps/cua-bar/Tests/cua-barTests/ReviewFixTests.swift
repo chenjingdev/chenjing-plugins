@@ -17,8 +17,8 @@ struct ReviewFixTests {
     }
 
     @Test func aButtonThatCannotBePressedIsDrawnFarLighterThanOneThatCan() throws {
-        let on = ButtonSpec(title: "놓아주기", action: .releaseEnded, isEnabled: true, help: "")
-        let off = ButtonSpec(title: "놓아주기", action: .releaseEnded, isEnabled: false, help: "")
+        let on = ButtonSpec(title: "모두 정리", action: .tidyAll, isEnabled: true, help: "")
+        let off = ButtonSpec(title: "모두 정리", action: .tidyAll, isEnabled: false, help: "")
         let enabled = try darkness(of: on)
         #expect(enabled > 0.02, "the button is drawn at all")
         #expect(try darkness(of: off) < enabled * 0.75)
@@ -27,18 +27,18 @@ struct ReviewFixTests {
     }
 
     @Test func aDestructiveButtonIsRedOnlyWhileItCanBePressed() throws {
-        let on = ButtonSpec(title: "강제 종료", action: .stopConnection("x", force: true), isDestructive: true, isEnabled: true, help: "")
-        let off = ButtonSpec(title: "강제 종료", action: .stopConnection("x", force: true), isDestructive: true, isEnabled: false, help: "")
+        let on = ButtonSpec(title: "정리", action: .tidy("x"), isDestructive: true, isEnabled: true, help: "")
+        let off = ButtonSpec(title: "정리", action: .tidy("x"), isDestructive: true, isEnabled: false, help: "")
         #expect(try darkness(of: off) < (try darkness(of: on)) * 0.75)
     }
 
-    // MARK: The group rows belong to connections
+    // MARK: 모두 정리 belongs to the lines it tidies
 
-    @Test func noConnectionsNoGroupRows() async throws {
+    @Test func noConnectionsNoTidyHeadAndNoTidyAllButton() async throws {
         let rig = await Rig(EngineStatus())
         let connections = try #require(rig.model.content?.connections)
         #expect(connections.emptyText == "연결 없음")
-        #expect(connections.showsGroupButtons == false)
+        #expect(connections.tidy == nil)
     }
 
     // MARK: 진단 복사 is there when the status cannot be read
@@ -90,25 +90,6 @@ struct ReviewFixTests {
         #expect(withTab.pixelsHigh == withoutTab.pixelsHigh, "the popover does not change height between tabs")
     }
 
-    // MARK: 안내 보기
-
-    @Test func theCardsGuidanceButtonSelectsTheLeaseTabAndOpensTheGuidance() async throws {
-        var status = try Fixtures.status("status-ready")
-        status.leases.maybeLeft = [LeftoverLease(sessionID: nil, agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: false)]
-        let rig = await Rig(status)
-        let fix = try #require(rig.model.summary.fix)
-        #expect(fix == .showLeaseGuidance)
-        #expect(rig.model.summary.fixLabel == "안내 보기")
-        rig.model.selectedTab = .activity
-        rig.model.guidanceOpenByUser = false
-        await rig.model.send(fix)?.value
-        #expect(rig.model.selectedTab == .leases)
-        #expect(rig.model.guidanceOpenByUser == true)
-        #expect(rig.model.banner == nil)
-        #expect(rig.model.pending == nil)
-        #expect(rig.actionCalls.isEmpty, "it only moves the view")
-    }
-
     // MARK: A command that cannot run: one fixed line
 
     @Test(arguments: [
@@ -120,9 +101,9 @@ struct ReviewFixTests {
     func aBannerNeverShowsWhatTheCommandPrinted(error: EngineError) async throws {
         let rig = await Rig(try Fixtures.status("status-ready"))
         rig.engine.configure { $0.actionError = error }
-        await rig.model.perform(.releaseEnded)
+        await rig.model.perform(.releaseConnection("claude-12345-1792320000"))
         let message = try #require(rig.model.banner?.outcome.message)
-        #expect(message == "놓지 못했어요 — \(error.message)")
+        #expect(message == "탭을 풀지 못했어요 — \(error.message)")
         #expect(!message.contains("secret"))
         #expect(!message.contains("Traceback"))
         #expect(!message.contains("70"))
@@ -150,7 +131,7 @@ struct ReviewFixTests {
         #expect(rig.model.guidanceOpenByUser == nil, "the person's closing it is undone: it opens")
         #expect(rig.model.sessionResults["019a1b2c-0009"]?.kind == .failure)
         // Its row shows the guidance first the live connections a reset would cut.
-        let guidance = try #require(rig.model.content?.leases.guidance)
+        let guidance = try #require(rig.model.content?.connections.guidance)
         #expect(guidance.steps.first?.hasPrefix("막힌 탭이 있으면 그 탭을 닫아요") == true)
         #expect(guidance.steps.last?.contains("chrome://extensions") == true)
         #expect(guidance.liveConnections == ["Claude · dev/computer-use", "Codex · dev/new-chat"])
@@ -162,7 +143,7 @@ struct ReviewFixTests {
         rig.engine.configure { $0.releaseSession = SessionReleaseResult(ok: false, released: false, reason: reason) }
         await rig.model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(rig.model.failedSessionIDs.isEmpty)
-        #expect(rig.model.sessionResults["019a1b2c-0009"] == ActionOutcome(kind: .failure, message: "풀지 못했어요 — \(ActionMessages.reason(reason))"))
+        #expect(rig.model.sessionResults["019a1b2c-0009"] == ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — \(ActionMessages.reason(reason))"))
     }
 
     @Test func aCommandThatTimedOutCountsAsTheTimeoutReason() async throws {
@@ -170,7 +151,7 @@ struct ReviewFixTests {
         rig.engine.configure { $0.actionError = .timeout }
         await rig.model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(rig.model.failedSessionIDs == ["019a1b2c-0009"])
-        #expect(rig.model.sessionResults["019a1b2c-0009"]?.message == "풀지 못했어요 — 응답이 없어 기다리다 멈췄어요")
+        #expect(rig.model.sessionResults["019a1b2c-0009"]?.message == "탭을 풀지 못했어요 — 응답이 없어 기다리다 멈췄어요")
     }
 
     @Test func aReleaseThatWorkedClearsTheRowsResultAndTheGuidanceReason() async throws {
@@ -180,13 +161,13 @@ struct ReviewFixTests {
         rig.engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: true, reason: nil, tabCount: 2) }
         await rig.model.perform(.releaseSession("019a1b2c-0009", user: true))
         #expect(rig.model.failedSessionIDs.isEmpty)
-        #expect(rig.model.sessionResults["019a1b2c-0009"] == ActionOutcome(kind: .success, message: "탭 2개를 놓았어요"))
-        #expect(rig.model.banner?.outcome.message == "탭 2개를 놓았어요")
+        #expect(rig.model.sessionResults["019a1b2c-0009"] == ActionOutcome(kind: .success, message: "탭 2개를 풀었어요"))
+        #expect(rig.model.banner?.outcome.message == "탭 2개를 풀었어요")
     }
 
     @Test func aClickOnPinpointReleasePassesUserAndNeedsNoQuestion() async throws {
         let rig = await Rig(try Fixtures.status("status-problem"))
-        let button = try #require(rig.model.content?.leases.rows.first?.releaseButton)
+        let button = try #require(rig.model.content?.connections.tidy?.rows.compactMap(\.leaseRow).first?.releaseButton)
         #expect(button.action == .releaseSession("019a1b2c-0009", user: true))
         let started = rig.model.send(button.action)
         #expect(started != nil, "it runs at once")

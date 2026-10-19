@@ -1,38 +1,35 @@
 import Foundation
 
-/// The groups the engine can stop at once (`codex-cua stop --group <raw value>`).
+/// The groups the engine can stop at once (`codex-cua stop --group <raw value>`). The popover no
+/// longer offers a group stop, but the engine client still speaks the command.
 enum StopGroup: String, CaseIterable, Hashable, Sendable {
     case all, claude, codex
 }
 
-/// Everything a button in the popover can ask for. `CUABarViewModel.send(_:)` asks first when the
-/// action needs a confirmation, and `perform(_:)` runs it.
+/// Everything a button in the popover can ask for. A row has one button for its state: 탭 풀기 on a
+/// connection whose AI is alive and on a leftover lease, 정리 on an ended connection or a cmux-cua
+/// connection nobody owns any more. `CUABarViewModel.send(_:)` asks first when the action needs a
+/// confirmation, and `perform(_:)` runs it.
 enum CUAAction: Hashable, Sendable {
     // Engine actions (contract: "Actions").
+    /// 탭 풀기 on a live connection: `release --connection`. Only the browser tabs it holds are
+    /// released; the connection stays.
     case releaseConnection(String)
-    case releaseEnded
-    /// `user` is true for a button press; a Codex thread's session is released only then.
+    /// 탭 풀기 again after the engine refused (R15). Never asks again.
+    case retryRelease(String)
+    /// 탭 풀기 on a leftover lease, by session id. `user` is true for a button press; a Codex
+    /// thread's session is released only then.
     case releaseSession(String, user: Bool)
-    case stopConnection(String, force: Bool)
-    case stopGroup(StopGroup, force: Bool)
+    /// 정리 of one ended connection, or of one cmux-cua connection nobody owns: release the tabs and
+    /// stop what is left, by force when it does not stop in time. Asks nothing: no AI is cut off.
+    case tidy(String)
+    /// 모두 정리: every 정리 the list offers at once, with the leftover leases of Claude conversations.
+    case tidyAll
     case restartCodex
     case copyDiagnosis
 
     // Fix buttons that are more than one engine call, or not an engine call at all.
     case runSetup
-    /// The status card's 놓아주기 for leftover leases: `release-session` (without `--user`) for
-    /// every Claude session the engine can aim at. Codex chat sessions are released only by a click
-    /// on their own row.
-    case releaseLeftover
-    /// 끝난 연결 끄기: `stop --connection` for every ended connection the engine may stop. The fix
-    /// when no ended connection has a control endpoint to release through.
-    case stopEnded
-    /// 다시 하기: release one connection again after the engine refused (R15). Never asks again.
-    case retryRelease(String)
-    /// 안내 보기: select the 브라우저 점유 tab and open its guidance.
-    case showLeaseGuidance
-    /// 점유 보기: select the 브라우저 점유 tab only (Codex chats are released from their own rows).
-    case showLeases
     /// Codex 열기, after a restart whose relaunch failed. Opens the app the person just chose to open.
     case openCodex
     /// Open the page where Codex is downloaded.
@@ -47,28 +44,26 @@ enum CUAAction: Hashable, Sendable {
     /// The connection the action is aimed at, so its row's buttons can wait for it.
     var connectionID: String? {
         switch self {
-        case .releaseConnection(let id), .retryRelease(let id), .stopConnection(let id, _): id
+        case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): id
         default: nil
         }
     }
 
-    /// Actions that touch several connections or Codex itself; the group buttons wait for them.
+    /// Actions that touch several rows or Codex itself; a row the status does not list waits for them.
     var isWide: Bool {
         switch self {
-        case .releaseEnded, .stopGroup, .stopEnded, .restartCodex, .releaseLeftover, .runSetup: true
+        case .tidyAll, .restartCodex, .runSetup: true
         default: false
         }
     }
 
-    /// Whether running it touches `connection`, so that row's buttons wait for it. What ends the
-    /// ended ones touches only ended connections, and a group stop only its group.
+    /// Whether running it touches `connection`, so that row's button waits for it. 모두 정리 touches
+    /// only the ended ones, and a restart or a setup touches every row.
     func touches(_ connection: Connection) -> Bool {
         switch self {
-        case .releaseConnection(let id), .retryRelease(let id), .stopConnection(let id, _): id == connection.id
-        case .releaseEnded, .stopEnded, .releaseLeftover: connection.state == .ended
-        case .stopGroup(.claude, _): connection.agent == .claude
-        case .stopGroup(.codex, _): connection.agent == .codex
-        case .stopGroup(.all, _), .restartCodex, .runSetup: true
+        case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): id == connection.id
+        case .tidyAll: connection.state == .ended
+        case .restartCodex, .runSetup: true
         default: false
         }
     }

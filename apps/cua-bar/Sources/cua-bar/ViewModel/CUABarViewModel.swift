@@ -35,7 +35,7 @@ final class CUABarViewModel: ObservableObject {
     /// slow answer does not make the icon flicker. Without any good answer a failure shows at once.
     static let failuresBeforeProblem = 2
 
-    /// A targeted release that fails for one of these reasons points at the extension reset (F3 case).
+    /// A release by session id that fails for one of these reasons points at the extension reset (F3 case).
     static let reasonsPointingAtTheExtension: Set<String> = ["unsupported", "cleanup_not_confirmed", "timeout"]
 
     /// The outcome of an action that has nothing to say.
@@ -67,14 +67,14 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var failedSessionIDs: Set<String> = []
     /// What the last release by session id said, per session, shown on that session's own row.
     @Published private(set) var sessionResults: [String: ActionOutcome] = [:]
-    /// Whether the person opened or closed the extension-reset guidance; nil leaves it to the
-    /// popover (open when a leftover cannot be released one by one). Kept here because this
+    /// Whether the person opened or closed the guidance for tabs that stay blocked; nil leaves it to
+    /// the popover (open when a leftover cannot be released one by one). Kept here because this
     /// toolchain has no `@State` (SwiftUIMacros is not in the Command Line Tools).
     @Published var guidanceOpenByUser: Bool?
     /// The question waiting for an answer, if any. Only one at a time.
     @Published private(set) var pending: PendingConfirmation?
-    /// Connections whose release the engine refused twice (R15): their row says so and offers
-    /// 다시 하기 and 강제 종료.
+    /// Connections whose release the engine refused twice (R15): their row says so and its button,
+    /// still 탭 풀기, tries again without asking. A live AI is never stopped from here.
     @Published private(set) var refusedReleaseIDs: Set<String> = []
     /// The automatic cleanup (F5) is running: the buttons that would touch what it releases wait.
     @Published private(set) var isCleaningUp = false
@@ -83,8 +83,6 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var notificationPermission: NotificationPermission = .unavailable
     /// The ended connections the automatic cleanup is releasing, while it runs.
     private var cleaningIDs: Set<String> = []
-    /// cmux-cua connections whose normal stop ran out of time (R17): their row offers 강제 종료.
-    @Published private(set) var stopTimedOutIDs: Set<String> = []
 
     /// The raw answer of the last good read, for what needs more than `content` shows.
     private(set) var lastStatus: EngineStatus?
@@ -121,9 +119,6 @@ final class CUABarViewModel: ObservableObject {
     private var bannerTimer: Task<Void, Never>?
     private var releaseRefusals: [String: Int] = [:]
     private var cleanupPlanner = CleanupPlanner()
-    /// Ended connections this run has tried to release: a finished automatic run, or a person's
-    /// release that went through. The card stops them instead of releasing them again (R13).
-    private var releaseTriedIDs: Set<String> = []
     private var notificationPlanner = NotificationPlanner()
     /// Work the model started on its own; each removes itself when it is done.
     private var backgroundTasks: [UUID: Task<Void, Never>] = [:]
@@ -246,6 +241,8 @@ final class CUABarViewModel: ObservableObject {
         guard isPopoverOpen != open else { return }
         isPopoverOpen = open
         if open {
+            // The card sends the person to the top of the list, so the popover opens on it.
+            selectedTab = .connections
             wake()
             readNotificationPermission()
         } else {
@@ -294,7 +291,7 @@ final class CUABarViewModel: ObservableObject {
     private func accept(_ status: EngineStatus) {
         let now = clock()
         lastStatus = status
-        publish(StatusEvaluator.evaluate(status, appVersion: appVersion, releaseTried: releaseTriedIDs))
+        publish(StatusEvaluator.evaluate(status, appVersion: appVersion))
         content = PopoverContent(status: status, now: now, calendar: calendar)
         updatedAt = now
         forgetWhatIsGone(in: status)
@@ -354,7 +351,6 @@ final class CUABarViewModel: ObservableObject {
         sessionResults = [:]
         refusedReleaseIDs = []
         releaseRefusals = [:]
-        stopTimedOutIDs = []
         revalidatePending()
     }
 
@@ -366,7 +362,6 @@ final class CUABarViewModel: ObservableObject {
         let sessions = Set(status.leases.items.compactMap(\.sessionID) + status.leases.maybeLeft.compactMap(\.sessionID))
         failedSessionIDs.formIntersection(sessions)
         sessionResults = sessionResults.filter { sessions.contains($0.key) }
-        stopTimedOutIDs.formIntersection(status.otherTools.flatMap(\.clients).compactMap(\.id))
     }
 
     private func sleepUntilNextRefresh(generation: Int) async {
@@ -489,10 +484,6 @@ final class CUABarViewModel: ObservableObject {
         switch question.action {
         case .retryRelease(let id):
             return !Confirmations.targetExists(id, in: content)
-        case .stopConnection(let id, force: true) where ToolClient.isCmuxConnection(id: id):
-            // Asked from the line's 강제 종료, so it goes when that button does.
-            guard let row = Confirmations.cmuxRow(id, in: content) else { return true }
-            return row.timedOutButtons.isEmpty || !stopTimedOutIDs.contains(id)
         case .restartCodex:
             // The restart is the fix for Codex running without its host; with that over it would only cut work off.
             return !codexRunsWithoutHost(in: status)
@@ -507,15 +498,37 @@ final class CUABarViewModel: ObservableObject {
 
     // MARK: Actions
 
-    /// True while something that touches this connection is running: an action on it or on a group
-    /// it is in, or the automatic cleanup when it is one of the ended connections being released.
-    /// A row the last status does not have waits for anything wide.
+    /// True while something that touches this connection's line is running: an action on it, 모두 정리
+    /// when it is an ended one, a restart or a setup, or the automatic cleanup when it is one of the
+    /// ended connections being released. A line the last status does not have (a cmux-cua connection
+    /// nobody owns) waits for anything wide.
     func isWaiting(onConnection id: String) -> Bool {
         if isCleaningUp && cleaningIDs.contains(id) { return true }
         guard let connection = lastStatus?.connection(withID: id) else {
             return inFlight.contains { $0.connectionID == id || $0.isWide }
         }
         return inFlight.contains { $0.touches(connection) }
+    }
+
+    /// 모두 정리 waits for itself, for a restart or a setup, and for the automatic cleanup. A single
+    /// 정리 or 탭 풀기 on one line does not hold it back: only that line waits.
+    var tidyAllIsWaiting: Bool {
+        inFlight.contains { $0.isWide } || waitsForAutomaticCleanup(.tidyAll)
+    }
+
+    /// The same for a lease line: its own 탭 풀기, 모두 정리 when it is one of the sessions that
+    /// releases, a restart or a setup, or the automatic cleanup when it is a Claude session.
+    func isWaiting(onSession id: String) -> Bool {
+        let tidiedByAll = TidyPlan.items(in: lastStatus).contains(.session(id))
+        let running = inFlight.contains { action in
+            switch action {
+            case .releaseSession(let session, _): session == id
+            case .tidyAll: tidiedByAll
+            case .restartCodex, .runSetup: true
+            default: false
+            }
+        }
+        return running || waitsForAutomaticCleanup(.releaseSession(id, user: true))
     }
 
     /// What a row's buttons say on hover while the automatic cleanup releases its connection.
@@ -529,12 +542,6 @@ final class CUABarViewModel: ObservableObject {
         switch action {
         case .refresh:
             await refreshAfterInFlight()
-            return Self.quiet
-        case .showLeaseGuidance:
-            showGuidance()
-            return Self.quiet
-        case .showLeases:
-            selectedTab = .leases
             return Self.quiet
         default:
             break
@@ -558,14 +565,13 @@ final class CUABarViewModel: ObservableObject {
     }
 
     /// R15: a release the engine refuses because a tool call has not finished is asked about once
-    /// more; refused again, the row says so and offers 다시 하기 and 강제 종료.
+    /// more; refused again, the row says so and its 탭 풀기 stays (a live AI is not stopped).
     private func settle(_ action: CUAAction, _ result: ActionResult) -> (outcome: ActionOutcome, showsBanner: Bool) {
         switch action {
         case .releaseConnection(let id), .retryRelease(let id):
             guard result.reason == "request_in_flight", result.outcome.kind == .failure else {
                 releaseRefusals[id] = nil
                 refusedReleaseIDs.remove(id)
-                if result.outcome.kind == .success { noteReleaseTried([id]) }
                 return (result.outcome, true)
             }
             releaseRefusals[id, default: 0] += 1
@@ -578,15 +584,6 @@ final class CUABarViewModel: ObservableObject {
             }
             refusedReleaseIDs.insert(id)
             return (ActionOutcome(kind: .failure, message: ConnectionRow.refusedNote), true)
-        case .stopConnection(let id, _) where ToolClient.isCmuxConnection(id: id):
-            // R17: a cmux-cua row offers 강제 종료 only once a stop ran out of time; a stop that went
-            // through takes the offer away.
-            if result.reason == "timeout", result.outcome.kind == .failure {
-                stopTimedOutIDs.insert(id)
-            } else if result.outcome.kind != .failure {
-                stopTimedOutIDs.remove(id)
-            }
-            return (result.outcome, true)
         default:
             return (result.outcome, true)
         }
@@ -598,31 +595,15 @@ final class CUABarViewModel: ObservableObject {
             case .releaseConnection(let id), .retryRelease(let id):
                 let result = try await engine.releaseConnection(id: id)
                 return ActionResult(outcome: ActionMessages.releaseConnection(result), reason: result.reason)
-            case .releaseEnded:
-                // The status the release started from: a read during the release may already miss what it ended.
-                let before = lastStatus
-                let result = try await engine.releaseEnded(ReleaseEndedLoad(status: before))
-                noteReleaseTried(result)
-                return ActionResult(
-                    outcome: ActionMessages.releaseEnded(result, in: before),
-                    reason: result.results.first { !$0.released && $0.reason != "no_trusted_scope" }?.reason ?? result.reason)
             case .releaseSession(let id, let user):
                 let result = try await engine.releaseSession(id: id, user: user)
                 let outcome = ActionMessages.releaseSession(result)
                 recordSession(id, outcome: outcome, reason: result.reason, released: result.ok && result.released)
                 return ActionResult(outcome: outcome, reason: result.reason)
-            case .stopConnection(let id, let force):
-                let result = try await engine.stopConnection(id: id, force: force)
-                let outcome = ToolClient.isCmuxConnection(id: id)
-                    ? ActionMessages.stopCmuxConnection(result, force: force) : ActionMessages.stopConnection(result, force: force)
-                return ActionResult(outcome: outcome, reason: result.reason)
-            case .stopGroup(let group, let force):
-                let result = try await engine.stopGroup(group, force: force)
-                return ActionResult(
-                    outcome: ActionMessages.stopGroup(result, group: group, force: force),
-                    reason: result.results.first { !$0.stopped }?.reason ?? result.reason)
-            case .stopEnded:
-                return try await stopEndedConnections()
+            case .tidy(let id):
+                return try await tidyConnection(id)
+            case .tidyAll:
+                return try await tidyEverything()
             case .restartCodex:
                 let codex = lastStatus?.codex
                 let result = try await engine.restartCodex()
@@ -640,8 +621,6 @@ final class CUABarViewModel: ObservableObject {
             case .runSetup:
                 // Through the shared setup slot: one setup at a time, said on the card while it runs.
                 return ActionResult(outcome: await setupActivity.run { try await self.engine.runSetup() }, reason: nil)
-            case .releaseLeftover:
-                return try await releaseLeftovers()
             case .openCodex:
                 return ActionResult(outcome: await appOpener.openCodex(appPath: lastStatus?.codex.appPath), reason: nil)
             case .openCodexDownload:
@@ -650,7 +629,7 @@ final class CUABarViewModel: ObservableObject {
                 return ActionResult(outcome: await systemActions.installPlugin(), reason: nil)
             case .matchPluginVersion:
                 return ActionResult(outcome: await systemActions.matchPluginVersion(), reason: nil)
-            case .showLeaseGuidance, .showLeases, .refresh:
+            case .refresh:
                 return ActionResult(outcome: Self.quiet, reason: nil)
             }
         } catch let error as EngineError {
@@ -666,53 +645,83 @@ final class CUABarViewModel: ObservableObject {
         }
     }
 
-    /// The status card's 놓아주기 for leftover leases: `release-session` without `--user` for each
-    /// Claude session the engine can aim at, one after another, each with its own result. Codex
-    /// chat sessions are released only from their own row (that click passes `--user`).
-    private func releaseLeftovers() async throws -> ActionResult {
-        let targets = (lastStatus?.leases.maybeLeft ?? [])
-            .filter { $0.agent == .claude && $0.releasable }
-            .compactMap(\.sessionID)
-        var results: [SessionReleaseResult] = []
-        for id in targets {
-            // One that cannot be asked does not keep the rest from being tried (as `stopEndedConnections`).
+    /// 정리: one ended connection, or one cmux-cua connection nobody owns. It asks nothing, because no
+    /// live AI is cut off. A stop that ran out of time (the engine's `timeout`, or the app's own time
+    /// limit on the command) is repeated at once with `--force`. An ended connection the app may not
+    /// stop has its tabs released and nothing more.
+    private func tidyConnection(_ id: String) async throws -> ActionResult {
+        guard let way = tidyWay(for: id) else {
+            // Gone from the status, or neither released nor stopped by the app: nothing to run.
+            let listed = lastStatus?.connection(withID: id) != nil
+                || lastStatus?.otherTools.flatMap(\.clients).contains { $0.id == id } == true
+            let outcome = ActionOutcome(kind: .info, message: listed ? ActionMessages.cannotTidy : Confirmations.targetGone)
+            return ActionResult(outcome: outcome, reason: nil)
+        }
+        let step = try await tidy(id, way)
+        return ActionResult(outcome: ActionMessages.tidy(step), reason: step.reason)
+    }
+
+    private func tidyWay(for id: String) -> TidyPlan.Way? {
+        if let connection = lastStatus?.connection(withID: id) { return TidyPlan.way(for: connection) }
+        let client = lastStatus?.otherTools.flatMap(\.clients).first { $0.id == id }
+        return client.flatMap(TidyPlan.way(for:))
+    }
+
+    private func tidy(_ id: String, _ way: TidyPlan.Way) async throws -> TidyStep {
+        switch way {
+        case .releaseOnly:
+            return TidyStep(release: try await engine.releaseConnection(id: id))
+        case .stop:
+            var result: StopResult
             do {
-                let result = try await engine.releaseSession(id: id, user: false)
-                results.append(result)
-                recordSession(
-                    id, outcome: ActionMessages.releaseSession(result), reason: result.reason, released: result.ok && result.released)
+                result = try await engine.stopConnection(id: id, force: false)
+            } catch EngineError.timeout {
+                result = StopResult(ok: false, stopped: false, released: false, reason: "timeout")
+            }
+            let timedOut = !result.stopped && result.reason == "timeout"
+            if timedOut { result = try await engine.stopConnection(id: id, force: true) }
+            return TidyStep(stop: result, forced: timedOut, releasesTabs: !ToolClient.isCmuxConnection(id: id))
+        }
+    }
+
+    /// 모두 정리: what `TidyPlan.items` lists, one after another, each with its own result: the ended
+    /// connections as 정리 does them, the leftover sessions of Claude conversations by
+    /// `release-session` without `--user`, and the cmux-cua connections nobody owns. A Codex chat's
+    /// lease is not here: its own row releases it. One that fails does not keep the rest from being tried.
+    private func tidyEverything() async throws -> ActionResult {
+        var steps: [TidyStep] = []
+        var asksForTheExtension = false
+        for item in TidyPlan.items(in: lastStatus) {
+            do {
+                switch item {
+                case .connection(let id, let way):
+                    steps.append(try await tidy(id, way))
+                case .session(let id):
+                    let result = try await engine.releaseSession(id: id, user: false)
+                    steps.append(TidyStep(session: result))
+                    recordSession(
+                        id, outcome: ActionMessages.releaseSession(result), reason: result.reason, released: result.ok && result.released)
+                    if let reason = result.reason, !(result.ok && result.released), Self.reasonsPointingAtTheExtension.contains(reason) {
+                        asksForTheExtension = true
+                    }
+                }
             } catch let error as EngineError {
                 switch error {
                 case .pluginMissing, .setupNeeded, .unsupportedSchema: throw error
                 default:
-                    results.append(SessionReleaseResult(ok: false, released: false, reason: error.reasonCode))
-                    recordSession(
-                        id, outcome: ActionMessages.failure(of: Self.failureLead(for: .releaseSession(id, user: false)), error: error),
-                        reason: error.reasonCode, released: false)
+                    steps.append(.failed(error.reasonCode))
+                    if case .session(let id) = item {
+                        recordSession(
+                            id, outcome: ActionMessages.failure(of: Self.failureLead(for: .releaseSession(id, user: false)), error: error),
+                            reason: error.reasonCode, released: false)
+                        asksForTheExtension = asksForTheExtension || error.reasonCode.map(Self.reasonsPointingAtTheExtension.contains) == true
+                    }
                 }
             }
         }
-        let failed = results.filter { !($0.ok && $0.released) }
         // The guidance is what the person needs next, so it must be on screen.
-        if failed.contains(where: { $0.reason.map(Self.reasonsPointingAtTheExtension.contains) ?? false }) { showGuidance() }
-        return ActionResult(outcome: ActionMessages.releaseLeftovers(results), reason: failed.first?.reason)
-    }
-
-    /// 끝난 연결 끄기: one normal `stop --connection` per ended connection the engine may stop.
-    private func stopEndedConnections() async throws -> ActionResult {
-        let ids = (lastStatus?.connections ?? []).filter { $0.state == .ended && $0.canStop }.map(\.id)
-        var results: [StopResult] = []
-        for id in ids {
-            do {
-                results.append(try await engine.stopConnection(id: id, force: false))
-            } catch let error as EngineError {
-                switch error {
-                case .pluginMissing, .setupNeeded, .unsupportedSchema: throw error
-                default: results.append(StopResult(ok: false, stopped: false, released: false, reason: error.reasonCode))
-                }
-            }
-        }
-        return ActionResult(outcome: ActionMessages.stopEnded(results), reason: results.first { !$0.stopped }?.reason)
+        if asksForTheExtension { showGuidance() }
+        return ActionResult(outcome: ActionMessages.tidyAll(steps), reason: steps.first { !$0.isDone }?.reason)
     }
 
     /// What a release by session id said, kept for that session's row; a failure that points at the
@@ -728,22 +737,21 @@ final class CUABarViewModel: ObservableObject {
         }
     }
 
-    /// 안내 보기: the 브라우저 점유 tab with its guidance open.
+    /// The guidance at the bottom of the list, open.
     private func showGuidance() {
-        selectedTab = .leases
+        selectedTab = .connections
         guidanceOpenByUser = true
     }
 
     private static func failureLead(for action: CUAAction) -> String {
         switch action {
-        case .releaseConnection, .retryRelease, .releaseEnded, .releaseLeftover: "놓지 못했어요"
-        case .releaseSession: "풀지 못했어요"
-        case .stopConnection, .stopGroup, .stopEnded: "끄지 못했어요"
+        case .releaseConnection, .retryRelease, .releaseSession: "탭을 풀지 못했어요"
+        case .tidy, .tidyAll: "정리하지 못했어요"
         case .restartCodex: "Codex를 다시 켜지 못했어요"
         case .copyDiagnosis: "진단을 복사하지 못했어요"
         case .runSetup: "설정하지 못했어요"
         case .openCodex: "Codex를 열지 못했어요"
-        case .openCodexDownload, .installPlugin, .matchPluginVersion, .showLeaseGuidance, .showLeases, .refresh: "하지 못했어요"
+        case .openCodexDownload, .installPlugin, .matchPluginVersion, .refresh: "하지 못했어요"
         }
     }
 
@@ -766,8 +774,6 @@ final class CUABarViewModel: ObservableObject {
         automaticCleanupTask = Task { [weak self] in
             guard let self else { return }
             _ = try? await self.engine.releaseEnded(load)
-            // Tried, whatever came of it: the card now stops these instead of releasing them again.
-            self.releaseTriedIDs.formUnion(endedIDs)
             self.automaticCleanupTask = nil
             self.cleaningIDs = []
             self.isCleaningUp = false
@@ -776,31 +782,30 @@ final class CUABarViewModel: ObservableObject {
     }
 
     /// True while the automatic cleanup runs and this action would touch what it is releasing:
-    /// the release or stop of ended connections (the card's fix, 끝난 연결 놓아주기), a row's
-    /// release or stop of one connection the cleanup releases, the card's release of leftover
-    /// sessions, and a Claude session's 콕 집어 풀기. Restart, setup and the rest release nothing
-    /// the cleanup does and do not wait.
+    /// 모두 정리, a row's 정리 or 탭 풀기 of one connection the cleanup releases, and a Claude
+    /// session's 탭 풀기. Restart, setup and the rest release nothing the cleanup does and do not wait.
     func waitsForAutomaticCleanup(_ action: CUAAction) -> Bool {
         guard isCleaningUp else { return false }
         switch action {
-        case .releaseEnded, .stopEnded, .releaseLeftover: return true
-        case .releaseConnection(let id), .retryRelease(let id), .stopConnection(let id, _): return cleaningIDs.contains(id)
+        case .tidyAll: return true
+        case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): return cleaningIDs.contains(id)
         case .releaseSession(let id, _): return isClaudeSession(id)
         default: return false
         }
     }
 
-    /// The status card's fix waits: for its own run, for the automatic cleanup, or (다시 켜기) for
-    /// the Codex the last restart asked to quit.
+    /// The status card's fix waits: for its own run, or (다시 켜기) for the Codex the last restart
+    /// asked to quit. The card has a fix only for a problem of the whole app, which the automatic
+    /// cleanup never touches.
     var fixIsBusy: Bool {
         guard let fix = summary.fix else { return false }
-        return inFlight.contains(fix) || waitsForAutomaticCleanup(fix) || waitsForQuit(fix)
+        return inFlight.contains(fix) || waitsForQuit(fix)
     }
 
     /// What the status card's fix says on hover while it waits; nil otherwise.
     var fixHelp: String? {
-        guard let fix = summary.fix else { return nil }
-        return waitsForQuit(fix) ? Self.quitWaitHelp : cleanupHelp(for: fix)
+        guard let fix = summary.fix, waitsForQuit(fix) else { return nil }
+        return Self.quitWaitHelp
     }
 
     private func waitsForQuit(_ action: CUAAction) -> Bool { action == .restartCodex && pendingRelaunch != nil }
@@ -814,20 +819,6 @@ final class CUABarViewModel: ObservableObject {
         guard let leases = lastStatus?.leases else { return false }
         return leases.items.contains { $0.sessionID == id && $0.agent == .claude }
             || leases.maybeLeft.contains { $0.sessionID == id && $0.agent == .claude }
-    }
-
-    /// A person's release that went through counts as tried for the ended connections among `ids`.
-    private func noteReleaseTried(_ ids: [String]) {
-        releaseTriedIDs.formUnion(ids.filter { lastStatus?.connection(withID: $0)?.state == .ended })
-    }
-
-    /// 끝난 연결 놓아주기: every ended connection when the engine says all went (`ok`), else the
-    /// ones it released or found nothing to release on.
-    private func noteReleaseTried(_ result: ReleaseEndedResult) {
-        let ended = (lastStatus?.connections ?? []).filter { $0.state == .ended }.map(\.id)
-        noteReleaseTried(result.ok ? ended : result.results
-            .filter { $0.released || $0.reason == "no_trusted_scope" }
-            .compactMap(\.connectionID))
     }
 
     // MARK: Notifications (F1 case 2, R16)

@@ -50,7 +50,7 @@ extension AppNotification {
 
 /// What the person did with a notification, already turned into what the app should do.
 enum NotificationResponse: Equatable, Sendable {
-    /// Clicking the body opens the popover; a lingering lease opens it on 브라우저 점유.
+    /// Clicking the body opens the popover; a lingering lease opens it on 연결, where the lease line is.
     case openPopover(PopoverTab?)
     /// The 다시 켜기 button. `key` names the Codex process the notification was about.
     case restartCodex(key: String)
@@ -64,7 +64,7 @@ enum NotificationResponse: Equatable, Sendable {
     static func make(tap: Tap, kind: NotificationKind, key: String) -> NotificationResponse? {
         switch (tap, kind) {
         case (.body, .codexWithoutHost): .openPopover(nil)
-        case (.body, .lingeringLease): .openPopover(.leases)
+        case (.body, .lingeringLease): .openPopover(.connections)
         case (.body, .newVersion): .openPopover(nil)
         case (.button(.restartCodex), .codexWithoutHost): .restartCodex(key: key)
         default: nil

@@ -91,11 +91,11 @@ struct PopoverSnapshotTests {
         }
     }
 
-    /// A pending group-stop confirmation under the status card (A2-popover-confirm.png).
-    @Test func aPendingGroupStopConfirmationDraws() async throws {
+    /// A pending question under the status card (A2-popover-confirm.png): Codex without its host asks before a restart.
+    @Test func aPendingRestartConfirmationDraws() async throws {
         let model = try await loadedModel("status-problem")
-        model.send(.stopGroup(.all, force: false))
-        #expect(model.confirmationPrompt?.title == "연결 3개를 끌까요?")
+        model.send(.restartCodex)
+        #expect(model.confirmationPrompt?.title == "Codex를 다시 켤까요?")
         let withQuestion = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark))
         #expect(NSApplication.shared.windows.allSatisfy { !$0.isVisible })
         model.cancelPending()
@@ -114,21 +114,24 @@ struct PopoverSnapshotTests {
             if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] { try Snapshot.write(bitmap, named: name, to: directory) }
         }
         let refused = ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0)
-        let ended = "claude-4001-1792300000"
+        let live = "claude-12345-1792320000"
+        var idle = try Fixtures.status("status-problem")
+        idle.connections[1].state = .idle
+        idle.connections[1].idleSeconds = 2000
 
-        // A refused release, asked about once more, then refused again: the row says so.
-        var rig = await Rig(try Fixtures.status("status-problem"))
+        // A refused release, asked about once more, then refused again: the row says so and keeps 탭 풀기.
+        var rig = await Rig(idle)
         rig.engine.configure { $0.releaseConnectionQueue = [refused, refused] }
         rig.model.setPopoverOpen(true) // a question appears only in an open popover
-        await rig.model.send(.releaseConnection(ended))?.value
+        await rig.model.send(.releaseConnection(live))?.value
         try draw("state-retry-question", rig.model)
         await rig.model.confirmPending()
         try draw("state-refused-row", rig.model)
 
-        // Force stop and restart, each with its question.
+        // Releasing the tabs of a working connection and restarting Codex, each with its question.
         rig = await Rig(try Fixtures.status("status-problem"))
-        rig.model.send(.stopConnection("claude-12345-1792320000", force: true))
-        try draw("state-force-confirm", rig.model)
+        rig.model.send(.releaseConnection(live))
+        try draw("state-release-confirm", rig.model)
         rig.model.send(.restartCodex)
         try draw("state-restart-confirm", rig.model)
         rig.model.cancelPending()
@@ -139,43 +142,35 @@ struct PopoverSnapshotTests {
         await rig.model.confirmPending()
         try draw("state-relaunch-failed", rig.model)
 
-        // Ended connections nobody can release: the card stops them, after one question.
+        // Ended connections nobody can release: each line has 정리, and the head has 모두 정리.
         var status = try Fixtures.status("status-ready")
         for index in status.connections.indices {
             status.connections[index].state = .ended
             status.connections[index].canRelease = false
         }
         rig = await Rig(status)
-        try draw("state-stop-ended-card", rig.model)
-        rig.model.send(.stopEnded)
-        try draw("state-stop-ended-confirm", rig.model)
+        try draw("state-tidy-list", rig.model)
+        await rig.model.send(.tidyAll)?.value
+        try draw("state-tidy-all-banner", rig.model)
 
-        // A pinpoint release that failed: its row says why, the guidance is open.
+        // A release by session id that failed: its line says why, the guidance is open.
         rig = await Rig(try Fixtures.status("status-problem"))
         rig.engine.configure { $0.releaseSession = SessionReleaseResult(ok: true, released: false, reason: "cleanup_not_confirmed") }
-        rig.model.selectedTab = .leases
         await rig.model.perform(.releaseSession("019a1b2c-0009", user: true))
         try draw("state-lease-failed", rig.model)
 
-        // The card's own release of leftover sessions was a partial success.
+        // 모두 정리 with a Claude session and a Codex chat's session left: the chat's line has its own button.
         status = try Fixtures.status("status-ready")
         status.leases.maybeLeft = [
             LeftoverLease(sessionID: "019a-a", agent: .claude, connectionID: nil, cwd: "/Users/chenjing/dev/y", endedAt: Fixtures.now.addingTimeInterval(-300), releasable: true),
             LeftoverLease(sessionID: "019a-b", agent: .codex, connectionID: nil, cwd: "/Users/chenjing/dev/z/app", endedAt: nil, releasable: true),
         ]
         rig = await Rig(status)
-        try draw("state-card-leftover", rig.model)
-
-        // Ended connections already tried this run: the card stops them now.
-        status = try Fixtures.status("status-ready")
-        status.connections[0].state = .ended
-        rig = await Rig(status)
-        #expect(rig.model.summary.fix == .stopEnded)
-        try draw("state-tried-ended-card", rig.model)
+        try draw("state-leftover-leases", rig.model)
     }
 
-    /// The automatic cleanup is running: the card's fix, 끝난 연결 놓아주기 and the Claude session
-    /// rows wait for it (A2-popover-cleaning-up.png, with the 브라우저 점유 tab as an extra).
+    /// The automatic cleanup is running: 모두 정리 and the Claude session lines wait for it
+    /// (A2-popover-cleaning-up.png).
     @Test func aRunningCleanupDraws() async throws {
         var status = try Fixtures.status("status-ready")
         status.connections[0].state = .ended
@@ -189,16 +184,11 @@ struct PopoverSnapshotTests {
         let rig = await Rig(status, engine: engine, refresh: false)
         await rig.model.refresh()
         #expect(rig.model.isCleaningUp)
-        #expect(rig.model.fixIsBusy)
+        #expect(rig.model.tidyAllIsWaiting)
         let connections = try #require(Snapshot.bitmap(of: SnapshotScene(model: rig.model), dark: dark))
         #expect(Snapshot.inkRatio(connections) > 0.1)
-        rig.model.selectedTab = .leases
-        let leases = try #require(Snapshot.bitmap(of: SnapshotScene(model: rig.model), dark: dark))
         if let directory = environment["CUABAR_SNAPSHOT_DIR"] {
             try Snapshot.write(connections, named: "A2-popover-cleaning-up", to: directory)
-        }
-        if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] {
-            try Snapshot.write(leases, named: "state-cleaning-up-leases", to: directory)
         }
         gate.open()
         await rig.model.waitForBackgroundWork()
@@ -216,24 +206,15 @@ struct PopoverSnapshotTests {
         }
     }
 
-    /// The 다른 도구 tab with two cmux-cua clients, one of them an orphan (A4-other-tools.png), and the same
-    /// tab after a normal stop of the first one timed out: its row offers 강제 종료 too.
-    @Test func theOtherToolsTabDrawsTheCmuxClients() async throws {
-        let first = "cmux-12892-1792284408"
+    /// The list with two cmux-cua clients, one of them an orphan (A4-other-tools.png): the live one is a line
+    /// under the tool with no button, the orphan is a line of 손볼 것 with 정리.
+    @Test func theListDrawsTheCmuxClients() async throws {
         let rig = await Rig(try Fixtures.status("status-cmux"))
-        rig.model.selectedTab = .otherTools
         let plain = try #require(Snapshot.bitmap(of: SnapshotScene(model: rig.model), dark: dark))
         #expect(NSApplication.shared.windows.allSatisfy { !$0.isVisible })
         #expect(Snapshot.inkRatio(plain) > 0.15, "the render looks blank")
-
-        rig.engine.configure { $0.stopConnectionByID[first] = StopResult(ok: false, stopped: false, released: false, reason: "timeout") }
-        await rig.model.send(.stopConnection(first, force: false))?.value
-        #expect(rig.model.stopTimedOutIDs == [first])
-        let timedOut = try #require(Snapshot.bitmap(of: SnapshotScene(model: rig.model), dark: dark))
-        #expect(Snapshot.inkRatio(timedOut) > 0.15)
         if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] {
             try Snapshot.write(plain, named: "A4-other-tools", to: directory)
-            try Snapshot.write(timedOut, named: "A4-other-tools-timed-out", to: directory)
         }
     }
 
@@ -321,11 +302,12 @@ struct PopoverSnapshotTests {
     @Test func aBannerDraws() async throws {
         let model = try await loadedModel("status-problem")
         let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
-        engine.configure { $0.releaseEnded = ReleaseEndedResult(ok: false, results: [
-            EndedRelease(connectionID: "a", released: true), EndedRelease(connectionID: "b", released: false, reason: "request_in_flight")]) }
+        engine.configure { $0.stopConnectionByID["claude-4001-1792300000"] = StopResult(ok: false, stopped: false, released: false, reason: "protected") }
         let withBanner = CUABarViewModel(engine: engine, appVersion: "0.7.0", clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: .seconds(3600))
-        await withBanner.perform(.releaseEnded)
-        #expect(withBanner.banner != nil)
+        await withBanner.refresh()
+        await withBanner.waitForBackgroundWork()
+        await withBanner.perform(.tidyAll)
+        #expect(withBanner.banner?.outcome.message == "1개 정리, 1개는 못 했어요 — 앱이 건드리지 않는 프로세스예요")
         let bitmap = try #require(Snapshot.bitmap(of: SnapshotScene(model: withBanner), dark: dark))
         if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] {
             try Snapshot.write(bitmap, named: "state-banner", to: directory)
@@ -338,7 +320,7 @@ struct PopoverSnapshotTests {
 struct ButtonLineTests {
     /// S18: 강제 종료 once broke in two in a narrow row. A title keeps its one line however little room there is.
     @Test func aButtonTitleStaysOnOneLineInANarrowRow() throws {
-        let spec = ButtonSpec(title: "강제 종료", action: .stopConnection("x", force: true), isDestructive: true, help: "")
+        let spec = ButtonSpec(title: "모두 정리", action: .tidyAll, help: "")
         let free = try #require(Snapshot.bitmap(of: SpecButton(spec: spec) { _ in }))
         let narrow = try #require(Snapshot.bitmap(of: SpecButton(spec: spec) { _ in }.frame(width: 24)))
         #expect(narrow.size.height == free.size.height)

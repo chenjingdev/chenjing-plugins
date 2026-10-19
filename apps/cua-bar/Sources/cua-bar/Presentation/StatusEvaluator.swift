@@ -58,9 +58,8 @@ struct StatusSummary: Equatable, Sendable {
 enum StatusEvaluator {
     // MARK: Entry points
 
-    /// `releaseTried`: the ended connections this app run has already tried to release (see `problem`).
-    static func evaluate(_ status: EngineStatus, appVersion: String?, releaseTried: Set<String> = []) -> StatusSummary {
-        if let problem = problem(in: status, appVersion: appVersion, releaseTried: releaseTried) { return summary(for: problem) }
+    static func evaluate(_ status: EngineStatus, appVersion: String?) -> StatusSummary {
+        if let problem = problem(in: status, appVersion: appVersion) { return summary(for: problem) }
         // Not a problem (nothing is broken and the icon stays ready), but nothing else would say why
         // the connections of a Codex from before the update cannot be released. Said while working
         // too, or the card would drop it each time an AI uses the screen.
@@ -88,6 +87,12 @@ enum StatusEvaluator {
     /// For a Codex that a launcher older than this setup started (S8).
     static let restartAppliesStep = "Codex를 다시 켜면 새 설정이 적용돼요"
     static let restartAppliesWarning = "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 놓아줄 수 없을 수 있어요"
+
+    /// The card's next steps for a problem that belongs to a line of the list.
+    static let tidyStep = "목록 맨 위의 정리를 눌러 주세요"
+    static let codexLeasesStep = "목록 맨 위에서 줄마다 탭 풀기를 눌러 주세요"
+    static let noWayToReleaseStep = "하나씩 풀 방법이 없어요 — 목록 맨 아래 안내를 따라 주세요"
+    static let cannotTidyStep = "앱이 정리할 수 없는 연결이에요 — 목록에서 까닭을 보세요"
 
     /// The summary when the engine gave no usable status.
     ///
@@ -147,9 +152,9 @@ enum StatusEvaluator {
     /// Codex missing > version mismatch > setup incomplete > Codex without a host >
     /// ended connections > leftover leases.
     ///
-    /// `releaseTried` holds the ended connections this app run has tried to release (the automatic
-    /// cleanup's finished runs, a person's successful release).
-    static func problem(in status: EngineStatus, appVersion: String?, releaseTried: Set<String> = []) -> Problem? {
+    /// The card has a fix button only for a problem of the whole app. An ended connection or a leftover
+    /// lease is one line's problem: the card says what to do and the button is on that line (F2).
+    static func problem(in status: EngineStatus, appVersion: String?) -> Problem? {
         if status.codex.installed == false {
             return Problem(
                 kind: .codexMissing, title: "Codex 앱이 없어요", nextStep: "Codex 앱을 받아 설치해 주세요",
@@ -174,42 +179,27 @@ enum StatusEvaluator {
         }
         let ended = status.connections.filter { $0.state == .ended }
         if !ended.isEmpty {
-            let title = "끝난 연결이 \(ended.count)개 남아 있어요"
-            // The engine keeps a released connection `ended` while its runtime lives, so releasing
-            // never clears this card. Once every one was tried this run, or cannot be released at all
-            // (no control endpoint: 0.5.0 bridges), the way to clean up is to stop them (the plugin
-            // releases once more on exit). Until then the fix is the release (R13, changed by main).
-            let stoppable = ended.filter(\.canStop).count
-            let untried = ended.filter { $0.canRelease && !releaseTried.contains($0.id) }
-            if untried.isEmpty, stoppable > 0 {
-                let nextStep = ended.contains(where: \.canRelease)
-                    ? "놓아주기는 해 봤어요. 꺼서 정리해요" : "놓아줄 길이 없는 연결이라 꺼서 정리해요"
-                return Problem(
-                    kind: .endedConnections, title: title, nextStep: nextStep,
-                    warning: nil, fix: .stopEnded, fixLabel: "끝난 연결 끄기 \(stoppable)")
-            }
+            // Still a problem for the icon, but with no button: the line itself has 정리.
             return Problem(
-                kind: .endedConnections, title: title, nextStep: "놓아주면 다음 AI가 막히지 않아요",
-                warning: nil, fix: .releaseEnded, fixLabel: "놓아주기")
+                kind: .endedConnections, title: "끝난 연결이 \(ended.count)개 남아 있어요",
+                nextStep: ended.contains { TidyPlan.way(for: $0) != nil } ? tidyStep : cannotTidyStep,
+                warning: nil, fix: nil, fixLabel: nil)
         }
         if !status.leases.maybeLeft.isEmpty {
             // No count: when the lease list cannot be read, the number would be a guess (R14).
-            let title = "점유가 남았을 수 있어요"
             let aimable = status.leases.maybeLeft.filter { $0.releasable && $0.sessionID != nil }
+            let nextStep: String
             if aimable.contains(where: { $0.agent == .claude }) {
-                return Problem(
-                    kind: .leasesMaybeLeft, title: title, nextStep: "놓아주기를 눌러 풀어 주세요",
-                    warning: nil, fix: .releaseLeftover, fixLabel: "놓아주기")
-            }
-            // Only Codex chats' sessions can be aimed at, and those are released by a click on their own row.
-            if !aimable.isEmpty {
-                return Problem(
-                    kind: .leasesMaybeLeft, title: title, nextStep: "Codex 대화의 점유는 점유 탭에서 줄마다 직접 풀어 주세요",
-                    warning: nil, fix: .showLeases, fixLabel: "점유 보기")
+                nextStep = tidyStep
+            } else if !aimable.isEmpty {
+                // Only Codex chats' sessions can be aimed at, and those are released by a click on their own row.
+                nextStep = codexLeasesStep
+            } else {
+                nextStep = noWayToReleaseStep
             }
             return Problem(
-                kind: .leasesMaybeLeft, title: title, nextStep: "하나씩 풀 방법이 없어요 — 안내를 따라 주세요",
-                warning: nil, fix: .showLeaseGuidance, fixLabel: "안내 보기")
+                kind: .leasesMaybeLeft, title: "점유가 남았을 수 있어요", nextStep: nextStep,
+                warning: nil, fix: nil, fixLabel: nil)
         }
         return nil
     }

@@ -3,8 +3,8 @@ import Foundation
 /// A question the popover asks before it does something. The view model holds at most one.
 struct PendingConfirmation: Equatable, Identifiable, Sendable {
     enum Kind: Equatable, Sendable {
-        /// Asked because of what the action does: stopping several or by force (R17), restarting
-        /// Codex (F1), releasing a connection that may still be working.
+        /// Asked because of what the action does: restarting Codex (F1), releasing the tabs of a
+        /// connection that may still be working.
         case standard
         /// R15: the engine refused a release once; ask whether to try once more.
         case retryRelease
@@ -37,34 +37,29 @@ enum PressGate: Equatable, Sendable {
 }
 
 /// Which actions ask first, and what they ask. Everything else is a click that is its own consent:
-/// a single normal stop, releasing an idle or ended connection, 끝난 연결 놓아주기, 콕 집어 풀기.
+/// 정리 and 모두 정리 (no live AI is cut off), 탭 풀기 on an idle connection or a leftover lease.
 enum Confirmations {
-    static let forceWarning = "하던 작업이 끊겨요"
-    static let forceDetail = "탭을 놓아준 뒤에도 안 꺼지면 강제로 끝내요."
     static let restartWarning = "하던 Codex 작업이 끊겨요"
     static let activeReleaseWarning = "이 대화가 아직 일하는 중이면 하던 브라우저 작업이 끊겨요"
     /// An action that asks from the status (a count, the row's state) while there is no status.
     static let readStatusFirst = "상태를 읽은 뒤 다시 눌러 주세요"
     static let targetGone = "그 연결은 이제 목록에 없어요"
-    static let nothingToStop = "끌 연결이 없어요"
 
     /// Whether a press asks, runs, or does neither. An action whose question comes from the status
-    /// never runs without that question: with no status, or with its target or count gone, it
-    /// does not run at all.
+    /// never runs without that question: with no status, or with its target gone, it does not run
+    /// at all. 정리 does not ask, but it is aimed at one line of the status and so needs it too.
     static func gate(for action: CUAAction, content: PopoverContent?) -> PressGate {
         switch action {
-        case .restartCodex, .stopGroup, .stopConnection(_, force: true), .stopEnded, .releaseConnection:
+        case .restartCodex, .releaseConnection, .tidy, .tidyAll:
             guard content != nil else { return .refuse(readStatusFirst) }
         default:
             return .run
         }
         if let prompt = prompt(for: action, content: content) { return .ask(prompt) }
         switch action {
-        case .stopConnection(let id, _), .releaseConnection(let id):
+        case .releaseConnection(let id), .tidy(let id):
             guard targetExists(id, in: content) else { return .refuse(targetGone) }
-            return .run // releasing an idle or ended connection
-        case .stopGroup, .stopEnded:
-            return .refuse(nothingToStop)
+            return .run // releasing the tabs of an idle connection, or tidying
         default:
             return .run
         }
@@ -73,77 +68,30 @@ enum Confirmations {
     /// Whether the connection a question is about is still in the content. Every "is its target
     /// still there" check goes through here.
     static func targetExists(_ id: String, in content: PopoverContent?) -> Bool {
-        // A cmux-cua connection is a line of the 다른 도구 tab, not one of the connections (R17).
-        if ToolClient.isCmuxConnection(id: id) { return cmuxRow(id, in: content) != nil }
-        return row(id, in: content) != nil
-    }
-
-    /// The 다른 도구 line of a cmux-cua connection, by its connection id.
-    static func cmuxRow(_ id: String, in content: PopoverContent?) -> ToolClientRow? {
-        content?.otherTools.tools.flatMap(\.clients).first { $0.connectionID == id }
+        // A cmux-cua connection is a line of 손볼 것 only while nobody owns it (R17).
+        if ToolClient.isCmuxConnection(id: id) { return content?.connections.orphanRow(withID: id) != nil }
+        return content?.connections.row(withID: id) != nil
     }
 
     /// The question, or nil when the action asks none now (it needs none, or there is nothing for
     /// it to act on: see `gate` for which of the two).
     static func prompt(for action: CUAAction, content: PopoverContent?) -> ConfirmationPrompt? {
-        // A cmux-cua connection is a line of the 다른 도구 tab, not one of the connections (R17).
-        if case .stopConnection(let id, force: true) = action, ToolClient.isCmuxConnection(id: id) {
-            return cmuxForceStop(id, content: content)
-        }
         switch action {
         case .restartCodex:
             return ConfirmationPrompt(
                 title: "Codex를 다시 켤까요?", detail: "정상 종료한 뒤 다시 켜요. 강제로 끄지 않아요.",
                 warning: restartWarning, confirmTitle: "다시 켜기", isDestructive: false)
 
-        case .stopGroup(let group, let force):
-            guard let counts = content?.connections.stopCounts, counts.count(for: group) > 0 else { return nil }
-            let count = counts.count(for: group)
-            let label = group == .all ? "연결" : "\(group == .claude ? "Claude" : "Codex") 연결"
-            if force {
-                return ConfirmationPrompt(
-                    title: "\(label) \(count)개를 강제로 끌까요?", detail: forceDetail, warning: forceWarning,
-                    confirmTitle: "강제 종료", isDestructive: true)
-            }
-            let detail: String
-            switch group {
-            case .all: detail = "Claude와 Codex 연결만 꺼요. cmux-cua 같은 다른 도구는 그대로 둬요. 끄기 전에 탭을 놓아줘요."
-            case .claude: detail = "Claude 대화에 붙은 연결만 꺼요. 끄기 전에 탭을 놓아줘요."
-            case .codex:
-                detail = counts.unattributedCodex > 0
-                    ? "세션을 아는 Codex 연결만 꺼요. 주인을 모르는 \(counts.unattributedCodex)개는 빠져요. 끄기 전에 탭을 놓아줘요."
-                    : "Codex 연결만 꺼요. 끄기 전에 탭을 놓아줘요."
-            }
-            let confirmTitle = group == .all ? "전체 끄기" : "\(group == .claude ? "Claude" : "Codex")만 끄기"
-            return ConfirmationPrompt(
-                title: "\(label) \(count)개를 끌까요?", detail: detail, warning: nil,
-                confirmTitle: confirmTitle, isDestructive: false)
-
-        case .stopConnection(let id, force: true):
-            guard targetExists(id, in: content) else { return nil }
-            let who = row(id, in: content).map(describe) ?? "이 연결"
-            return ConfirmationPrompt(
-                title: "\(who) 연결 1개를 강제로 끌까요?", detail: forceDetail, warning: forceWarning,
-                confirmTitle: "강제 종료", isDestructive: true)
-
-        case .stopEnded:
-            let count = content?.connections.endedStoppableCount ?? 0
-            guard count > 0 else { return nil }
-            return ConfirmationPrompt(
-                title: "끝난 연결 \(count)개를 끌까요?",
-                detail: "하나씩 정상 종료해요. 끄기 전에 탭을 한 번 더 놓아줘요.", warning: nil,
-                confirmTitle: "끝난 연결 끄기", isDestructive: false)
-
         case .releaseConnection(let id):
             // Decided on the contract's state, not on how the row reads: an active connection whose
             // idle time is unknown reads 알 수 없음 and may still be working.
-            guard let row = row(id, in: content) else { return nil }
+            guard let row = content?.connections.row(withID: id) else { return nil }
             switch row.contractState {
             case .idle, .ended: return nil
             case .active, .unknown:
                 return ConfirmationPrompt(
-                    title: "\(describe(row))의 점유를 놓을까요?", detail: "이 연결이 잡고 있는 브라우저 탭을 놓아줘요.",
-                    warning: activeReleaseWarning, confirmTitle: "놓아주기", isDestructive: false)
+                    title: "\(describe(row))의 탭을 풀까요?", detail: "이 연결이 잡고 있는 브라우저 탭만 풀어요. 연결은 그대로예요.",
+                    warning: activeReleaseWarning, confirmTitle: "탭 풀기", isDestructive: false)
             }
 
         default:
@@ -153,28 +101,9 @@ enum Confirmations {
 
     /// R15: the engine refused the release because a tool call had not finished.
     static let retryPrompt = ConfirmationPrompt(
-        title: "AI가 하던 조작이 아직 안 끝났어요. 한 번 더 놓아 볼까요?",
-        detail: "한 번 더 안 되면 줄에서 다시 하기나 강제 종료를 고를 수 있어요.", warning: nil,
-        confirmTitle: "한 번 더 놓기", cancelTitle: "그만두기", isDestructive: false)
-
-    static let cmuxForceDetail = "먼저 정상 종료를 해 보고, 그래도 안 꺼지면 강제로 끝내요."
-    static let cmuxForceWarning = "이 대화의 cmux-cua 도구가 다시 붙을 때까지 끊겨요"
-
-    /// 강제 종료 of one cmux-cua connection, offered once its normal stop ran out of time. It has
-    /// nothing to release first; it cuts off the conversation it serves, if that is still there.
-    /// Nil when the line is gone: then `gate` refuses, as for any force stop whose target left.
-    private static func cmuxForceStop(_ id: String, content: PopoverContent?) -> ConfirmationPrompt? {
-        guard let row = cmuxRow(id, in: content) else { return nil }
-        let who = row.isOrphan ? row.title : "\(row.title) 연결"
-        return ConfirmationPrompt(
-            title: "cmux-cua · \(who) 1개를 강제로 끌까요?",
-            detail: cmuxForceDetail, warning: row.isOrphan ? nil : cmuxForceWarning,
-            confirmTitle: "강제 종료", isDestructive: true)
-    }
-
-    private static func row(_ id: String, in content: PopoverContent?) -> ConnectionRow? {
-        content?.connections.groups.flatMap(\.rows).first { $0.id == id }
-    }
+        title: "AI가 하던 조작이 아직 안 끝났어요. 한 번 더 풀어 볼까요?",
+        detail: "한 번 더 안 되면 줄에서 탭 풀기를 다시 누를 수 있어요.", warning: nil,
+        confirmTitle: "한 번 더 풀기", cancelTitle: "그만두기", isDestructive: false)
 
     /// `Claude · dev/x`, or just `Claude` when the folder is unknown.
     private static func describe(_ row: ConnectionRow) -> String {

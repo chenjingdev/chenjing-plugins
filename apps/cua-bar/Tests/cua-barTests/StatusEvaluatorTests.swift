@@ -175,10 +175,11 @@ struct StatusEvaluatorTests {
         ProblemCase(name: "codex_without_host", kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요",
              nextStep: "다시 켜면 Claude가 붙어요", fix: .restartCodex, fixLabel: "다시 켜기",
              warning: "하던 Codex 작업이 끊길 수 있어요"),
+        // One line's problem: the card says what to do, the button is on that line.
         ProblemCase(name: "ended_connections", kind: .endedConnections, title: "끝난 연결이 1개 남아 있어요",
-             nextStep: "놓아주면 다음 AI가 막히지 않아요", fix: .releaseEnded, fixLabel: "놓아주기"),
+             nextStep: "목록 맨 위의 정리를 눌러 주세요", fix: nil, fixLabel: nil),
         ProblemCase(name: "leases_maybe_left", kind: .leasesMaybeLeft, title: "점유가 남았을 수 있어요",
-             nextStep: "놓아주기를 눌러 풀어 주세요", fix: .releaseLeftover, fixLabel: "놓아주기"),
+             nextStep: "목록 맨 위의 정리를 눌러 주세요", fix: nil, fixLabel: nil),
     ]
 
     /// Builds a status in which exactly the problem of `kind` is present.
@@ -373,7 +374,7 @@ struct StatusEvaluatorTests {
         #expect(evaluate(status).problem == nil)
     }
 
-    // MARK: Ended and leftover
+    // MARK: Ended and leftover: the card talks, the line has the button
 
     @Test func endedConnectionsAreCounted() throws {
         var status = try Fixtures.status("status-problem")
@@ -385,6 +386,31 @@ struct StatusEvaluatorTests {
         #expect(evaluate(status).problem?.title == "끝난 연결이 2개 남아 있어요")
     }
 
+    @Test func anEndedConnectionOrALeftoverStaysAProblemForTheIconButTheCardHasNoButton() throws {
+        var ended = try healthy()
+        ended.connections[0].state = .ended
+        var left = try healthy()
+        left.leases.maybeLeft = [LeftoverLease(sessionID: "019a-1", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
+        for (status, kind) in [(ended, ProblemKind.endedConnections), (left, .leasesMaybeLeft)] {
+            let summary = evaluate(status)
+            #expect(summary.icon == .problem)
+            #expect(summary.stateLabel == "문제")
+            #expect(summary.problem?.kind == kind)
+            #expect(summary.fix == nil)
+            #expect(summary.fixLabel == nil)
+            #expect(summary.problem?.fix == nil)
+        }
+    }
+
+    @Test func onlyAProblemOfTheWholeAppHasAFixButton() throws {
+        for kind in ProblemKind.allCases where kind != .pluginMissing && kind != .engineUnreadable {
+            let problem = try #require(evaluate(try status(causing: kind)).problem)
+            let wholeApp: Set<ProblemKind> = [.codexMissing, .versionMismatch, .setupIncomplete, .codexWithoutHost]
+            #expect((problem.fix != nil) == wholeApp.contains(kind), "\(kind)")
+            #expect((problem.fixLabel != nil) == (problem.fix != nil), "\(kind)")
+        }
+    }
+
     @Test func leftoverLeasesGetNoCountBecauseTheListCannotBeRead() throws {
         var status = try Fixtures.status("status-problem")
         status.host.state = .ready
@@ -392,92 +418,49 @@ struct StatusEvaluatorTests {
         let problem = try #require(evaluate(status).problem)
         #expect(problem.kind == .leasesMaybeLeft)
         #expect(problem.title == "점유가 남았을 수 있어요")
-        #expect(problem.fix == .releaseLeftover)
+        #expect(problem.nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        #expect(problem.fix == nil)
     }
 
-    @Test func leftoverLeasesNobodyCanReleaseOneByOneStillHaveAFixButtonThatShowsTheGuidance() throws {
+    @Test func leftoverLeasesNobodyCanReleaseOneByOneSendThePersonToTheGuidanceAtTheBottom() throws {
         var status = try healthy()
         status.leases.maybeLeft = [LeftoverLease(sessionID: nil, agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: false)]
         let problem = try #require(evaluate(status).problem)
         #expect(problem.kind == .leasesMaybeLeft)
-        #expect(problem.fix == .showLeaseGuidance)
-        #expect(problem.fixLabel == "안내 보기")
-        #expect(problem.nextStep == "하나씩 풀 방법이 없어요 — 안내를 따라 주세요")
+        #expect(problem.fix == nil)
+        #expect(problem.fixLabel == nil)
+        #expect(problem.nextStep == "하나씩 풀 방법이 없어요 — 목록 맨 아래 안내를 따라 주세요")
     }
 
     @Test func onlyCodexSessionsToAimAtSendThePersonToTheirRows() throws {
         var status = try healthy()
         status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
         let problem = try #require(evaluate(status).problem)
-        // The card's 놓아주기 never releases a Codex chat; its own row's 콕 집어 풀기 does. The button
-        // only shows that tab: nothing failed, so the extension-reset guidance stays shut.
-        #expect(problem.fix == .showLeases)
-        #expect(problem.fixLabel == "점유 보기")
-        #expect(problem.nextStep == "Codex 대화의 점유는 점유 탭에서 줄마다 직접 풀어 주세요")
-        // With a Claude session to aim at the card's own release is back.
+        // 모두 정리 never releases a Codex chat; its own row's 탭 풀기 does.
+        #expect(problem.fix == nil)
+        #expect(problem.nextStep == "목록 맨 위에서 줄마다 탭 풀기를 눌러 주세요")
+        // With a Claude session to aim at, 모두 정리 is the way.
         status.leases.maybeLeft.append(LeftoverLease(sessionID: "019a-claude", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true))
-        #expect(evaluate(status).problem?.fix == .releaseLeftover)
+        #expect(evaluate(status).problem?.nextStep == "목록 맨 위의 정리를 눌러 주세요")
     }
 
-    @Test func endedConnectionsThatCannotBeReleasedAreStoppedInstead() throws {
+    @Test func endedConnectionsTheAppCannotTidyAreSaidSoOnTheCard() throws {
         var status = try healthy()
         status.connections[0].state = .ended
-        status.connections[0].canRelease = false // a 0.5.0 bridge has no control socket
+        status.connections[0].canRelease = false // a 0.5.0 bridge has no control socket: it can still be stopped
+        #expect(try #require(evaluate(status).problem).nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        status.connections[0].canStop = false
+        status.connections[0].canRelease = true // only its tabs can be released
+        #expect(try #require(evaluate(status).problem).nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        // Nothing the app can do with any of them.
+        status.connections[0].canRelease = false
         let problem = try #require(evaluate(status).problem)
         #expect(problem.kind == .endedConnections)
-        #expect(problem.fix == .stopEnded)
-        #expect(problem.fixLabel == "끝난 연결 끄기 1")
-        #expect(problem.nextStep == "놓아줄 길이 없는 연결이라 꺼서 정리해요")
-        // One that can be released keeps the plain release for all of them.
+        #expect(problem.nextStep == "앱이 정리할 수 없는 연결이에요 — 목록에서 까닭을 보세요")
+        #expect(problem.fix == nil)
+        // One that can be tidied among them is enough to point at the list.
         status.connections[1].state = .ended
-        status.connections[1].canRelease = true
-        let mixed = try #require(evaluate(status).problem)
-        #expect(mixed.fix == .releaseEnded)
-        #expect(mixed.fixLabel == "놓아주기")
-        // Nothing to release and nothing the engine may stop: the engine is left to say so.
-        status.connections[1].canRelease = false
-        status.connections[0].canStop = false
-        status.connections[1].canStop = false
-        #expect(evaluate(status).problem?.fix == .releaseEnded)
-    }
-
-    /// The engine keeps a released connection `ended` while its runtime lives (R13, changed by main):
-    /// once this run tried to release every ended connection, the card stops them instead.
-    @Test func endedConnectionsAlreadyTriedThisRunAreStoppedInstead() throws {
-        var status = try healthy()
-        status.connections[0].state = .ended
-        status.connections[1].state = .ended
-        let first = status.connections[0].id, second = status.connections[1].id
-        let untried = try #require(StatusEvaluator.problem(in: status, appVersion: "0.7.0"))
-        #expect(untried.fix == .releaseEnded)
-        #expect(untried.fixLabel == "놓아주기")
-        let half = try #require(StatusEvaluator.problem(in: status, appVersion: "0.7.0", releaseTried: [first]))
-        #expect(half.fix == .releaseEnded, "one is still untried")
-        let tried = try #require(StatusEvaluator.problem(in: status, appVersion: "0.7.0", releaseTried: [first, second]))
-        #expect(tried.fix == .stopEnded)
-        #expect(tried.fixLabel == "끝난 연결 끄기 2")
-        #expect(tried.nextStep == "놓아주기는 해 봤어요. 꺼서 정리해요")
-        #expect(tried.title == "끝난 연결이 2개 남아 있어요")
-        // One that cannot be released at all needs no try.
-        status.connections[1].canRelease = false
-        #expect(StatusEvaluator.problem(in: status, appVersion: "0.7.0", releaseTried: [first])?.fix == .stopEnded)
-        // Nothing the engine may stop: the release stays.
-        status.connections[0].canStop = false
-        status.connections[1].canStop = false
-        #expect(StatusEvaluator.problem(in: status, appVersion: "0.7.0", releaseTried: [first, second])?.fix == .releaseEnded)
-        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0", releaseTried: [first, second]).fix == .releaseEnded)
-    }
-
-    @Test func theCountOnTheStopButtonIsOnlyWhatTheEngineMayStop() throws {
-        var status = try healthy()
-        status.connections[0].state = .ended
-        status.connections[0].canRelease = false
-        status.connections[1].state = .ended
-        status.connections[1].canRelease = false
-        status.connections[1].canStop = false
-        let problem = try #require(evaluate(status).problem)
-        #expect(problem.title == "끝난 연결이 2개 남아 있어요")
-        #expect(problem.fixLabel == "끝난 연결 끄기 1")
+        #expect(try #require(evaluate(status).problem).nextStep == "목록 맨 위의 정리를 눌러 주세요")
     }
 
     @Test func noTooltipSaysCUATwice() throws {

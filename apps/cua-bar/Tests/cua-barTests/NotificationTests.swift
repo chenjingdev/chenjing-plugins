@@ -152,7 +152,8 @@ struct NotificationPlannerTests {
 
     @Test func whatEachClickMeans() {
         #expect(NotificationResponse.make(tap: .body, kind: .codexWithoutHost, key: "codex:1") == .openPopover(nil))
-        #expect(NotificationResponse.make(tap: .body, kind: .lingeringLease, key: "lease:a") == .openPopover(.leases))
+        // A lingering lease opens 연결: its line is at the top of that list.
+        #expect(NotificationResponse.make(tap: .body, kind: .lingeringLease, key: "lease:a") == .openPopover(.connections))
         #expect(NotificationResponse.make(tap: .body, kind: .newVersion, key: "new-version-0.7.1") == .openPopover(nil))
         #expect(NotificationResponse.make(tap: .dismissed, kind: .newVersion, key: "new-version-0.7.1") == nil)
         #expect(NotificationResponse.make(tap: .button(.restartCodex), kind: .codexWithoutHost, key: "codex:1") == .restartCodex(key: "codex:1"))
@@ -334,9 +335,9 @@ struct NotificationViewModelTests {
         rig.notifier.tap(.openPopover(nil))
         #expect(opened == 1)
         #expect(rig.model.selectedTab == .activity, "a Codex notification leaves the tab alone")
-        rig.notifier.tap(.openPopover(.leases))
+        rig.notifier.tap(.openPopover(.connections))
         #expect(opened == 2)
-        #expect(rig.model.selectedTab == .leases, "a lingering lease opens 브라우저 점유")
+        #expect(rig.model.selectedTab == .connections, "a lingering lease opens 연결, where its line is")
     }
 
     @Test func theRestartButtonRestartsAtOnceWithNoSecondQuestion() async throws {

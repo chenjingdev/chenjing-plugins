@@ -112,10 +112,15 @@ struct BusyMarker: View {
 
 /// The agent as a short badge: Claude and Codex differ by letter, not by color alone.
 struct AgentBadge: View {
-    var agent: AgentKind
+    var text: String
+
+    init(agent: AgentKind) { text = agent.label }
+
+    /// For what is not an agent, such as the other tool a connection belongs to.
+    init(text: String) { self.text = text }
 
     var body: some View {
-        Text(agent.label)
+        Text(text)
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6)

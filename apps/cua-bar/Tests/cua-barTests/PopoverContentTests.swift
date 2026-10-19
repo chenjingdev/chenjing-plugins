@@ -11,74 +11,73 @@ struct PopoverContentTests {
         PopoverContent(status: status, now: Fixtures.now, calendar: Fixtures.utc)
     }
 
-    // MARK: Empty states (R21: every tab says "없음" in one line)
+    private func rows(_ content: PopoverContent) -> [ConnectionRow] { content.connections.groups.flatMap(\.rows) }
 
-    @Test func everyTabHasAOneLineEmptyStateWhenThereIsNothing() {
+    private func tidyRows(_ content: PopoverContent) -> [TidyRow] { content.connections.tidy?.rows ?? [] }
+
+    // MARK: Empty states (R21: a tab with nothing says "없음" in one line)
+
+    @Test func theListSaysNoConnectionInOneLineWhenThereIsNothing() {
         let empty = content(of: EngineStatus())
         #expect(empty.connections.emptyText == "연결 없음")
         #expect(empty.connections.groups.isEmpty)
-        // The lease list cannot be read here, so "no leases" would be a claim.
-        #expect(empty.leases.emptyText == "기록상 남은 점유 없음")
-        #expect(empty.leases.rows.isEmpty)
-        #expect(empty.otherTools.emptyText == "다른 도구 없음")
-        #expect(empty.otherTools.tools.isEmpty)
+        #expect(empty.connections.tidy == nil, "no 손볼 것 head, no 모두 정리")
+        #expect(empty.connections.tools.isEmpty)
         #expect(empty.activity.emptyText == "기록 없음")
         #expect(empty.activity.rows.isEmpty)
+        // The screen line and the folded guidance are always there.
+        #expect(empty.connections.screen.line == "지금 화면을 쓰는 연결 없음")
+        #expect(empty.connections.guidance.title == "브라우저 탭이 계속 막히면")
     }
 
-    @Test func tabsKnowTheirEmptyLine() {
+    @Test func thereAreTwoTabsAndEachKnowsItsEmptyLine() {
+        #expect(PopoverTab.allCases == [.connections, .activity])
+        #expect(PopoverTab.allCases.map(\.title) == ["연결", "기록"])
         #expect(PopoverTab.connections.emptyText == "연결 없음")
-        #expect(PopoverTab.leases.emptyText == "점유 없음")
-        #expect(PopoverTab.otherTools.emptyText == "다른 도구 없음")
         #expect(PopoverTab.activity.emptyText == "기록 없음")
-        #expect(PopoverTab.allCases.map(\.title) == ["연결", "브라우저 점유", "다른 도구", "기록"])
     }
 
-    @Test func tabsWithContentHaveNoEmptyLine() throws {
+    @Test func aListWithContentHasNoEmptyLine() throws {
         let full = try content("status-problem")
         #expect(full.connections.emptyText == nil)
-        #expect(full.leases.emptyText == nil)
-        #expect(full.otherTools.emptyText == nil)
         #expect(full.activity.emptyText == nil)
+        #expect(try content("status-ready").connections.emptyText == nil)
     }
 
-    @Test func aNotRunningToolIsStillAToolSoTheTabIsNotEmpty() throws {
+    @Test func aToolThatIsNotRunningIsOneLineAndNoConnection() throws {
         var status = EngineStatus()
         status.otherTools = [OtherTool(name: "cmux-cua", running: false, pids: [], clients: [])]
-        let content = content(of: status)
-        #expect(content.otherTools.emptyText == nil)
-        #expect(content.otherTools.tools.first?.statusText == "꺼져 있음")
+        let connections = content(of: status).connections
+        #expect(connections.tools.map(\.title) == ["cmux-cua · 꺼져 있음"])
+        #expect(connections.tools.first?.clients.isEmpty == true)
+        #expect(connections.emptyText == "연결 없음", "a tool that is off is not a connection")
     }
 
-    // MARK: Connections
+    // MARK: Live connections: one 탭 풀기 each
 
-    @Test func connectionsAreGroupedByAgentWithEndedOnesFirst() throws {
+    @Test func liveConnectionsAreGroupedByAgentAndTheEndedOnesLeaveTheGroups() throws {
         let connections = try content("status-problem").connections
-        #expect(connections.groups.map(\.title) == ["Claude · 2", "Codex · 1"])
-        #expect(connections.groups[0].rows.map(\.id) == ["claude-4001-1792300000", "claude-12345-1792320000"])
+        #expect(connections.groups.map(\.title) == ["Claude · 1", "Codex · 1"])
+        #expect(connections.groups[0].rows.map(\.id) == ["claude-12345-1792320000"])
         #expect(connections.groups[1].rows.map(\.id) == ["codex-15888-1792319000"])
-        #expect(connections.endedCount == 1)
+        // The ended Claude connection is a line of 손볼 것, not of the Claude group.
+        #expect(tidyRows(try content("status-problem")).compactMap(\.endedRow).map(\.id) == ["claude-4001-1792300000"])
     }
 
-    @Test func aConnectionRowCarriesEverythingTheRowShows() throws {
-        let rows = try content("status-problem").connections.groups.flatMap(\.rows)
-
-        let ended = try #require(rows.first { $0.id == "claude-4001-1792300000" })
-        #expect(ended.agent == .claude)
-        #expect(ended.folder == "dev/unified-login")
-        #expect(ended.path == "/Users/chenjing/dev/unified-login")
-        #expect(ended.startedText == "07:11 시작")
-        #expect(ended.memoryText == "320 MB")
-        #expect(ended.state == StateDisplay(kind: .ended, text: "끝남"))
-        #expect(ended.isBusy == false)
-        #expect(ended.canRelease)
-        #expect(ended.canStop)
-
+    @Test func aLiveRowCarriesEverythingTheRowShowsAndOneButton() throws {
+        let rows = try rows(content("status-problem"))
         let active = try #require(rows.first { $0.id == "claude-12345-1792320000" })
+        #expect(active.agent == .claude)
         #expect(active.folder == "dev/computer-use")
+        #expect(active.path == "/Users/chenjing/dev/computer-use")
         #expect(active.startedText == "09:39 시작")
         #expect(active.memoryText == "210 MB")
         #expect(active.state == StateDisplay(kind: .inUse, text: "사용 중"))
+        #expect(active.isBusy == false)
+        #expect(active.canRelease)
+        #expect(active.button == ButtonSpec(
+            title: "탭 풀기", action: .releaseConnection("claude-12345-1792320000"),
+            help: "이 AI가 잡고 있는 브라우저 탭만 풀어요. AI는 화면 도구를 계속 써요"))
 
         let resting = try #require(rows.first { $0.id == "codex-15888-1792319000" })
         #expect(resting.agent == .codex)
@@ -86,19 +85,21 @@ struct PopoverContentTests {
         #expect(resting.startedText == "04:35 시작")
         #expect(resting.memoryText == "180 MB")
         #expect(resting.state == StateDisplay(kind: .resting, text: "쉼 42분"))
-        #expect(resting.canRelease == false) // can_release is false: the button must be off
-        #expect(resting.canStop)
+        #expect(resting.canRelease == false)
+        // can_release is false: the button is off and says why.
+        #expect(resting.button.title == "탭 풀기")
+        #expect(resting.button.isEnabled == false)
+        #expect(resting.button.help == "탭을 풀 길이 확인되지 않은 연결이에요. 중계기가 없거나 기록이 없을 때 그래요")
     }
 
     @Test func theBusyMarkerComesFromTheBusyFlag() throws {
-        let rows = try content("status-working").connections.groups.flatMap(\.rows)
+        let rows = try rows(content("status-working"))
         #expect(rows.first { $0.id == "claude-12345-1792320000" }?.isBusy == true)
         #expect(rows.first { $0.id == "codex-15888-1792319000" }?.isBusy == false)
     }
 
     @Test func unknownValuesInARowAreDashesNotGuesses() throws {
-        let rows = try content("status-nulls").connections.groups.flatMap(\.rows)
-        let row = try #require(rows.first)
+        let row = try #require(try rows(content("status-nulls")).first)
         #expect(row.folder == "—")
         #expect(row.path == nil)
         #expect(row.startedText == "시작 시각 알 수 없음")
@@ -106,6 +107,7 @@ struct PopoverContentTests {
         #expect(row.state == StateDisplay(kind: .unknown, text: "알 수 없음"))
         #expect(row.canRelease == false)
         #expect(row.canStop == false)
+        #expect(row.button.isEnabled == false, "nothing known: nothing may be offered")
     }
 
     @Test func otherAgentsGetTheirOwnGroupAfterClaudeAndCodex() throws {
@@ -113,113 +115,81 @@ struct PopoverContentTests {
         #expect(content.groups.map(\.title) == ["Claude · 1", "gemini · 1"])
     }
 
-    @Test func groupStopCountsPerGroup() throws {
-        let problem = try content("status-problem").connections.stopCounts
-        #expect(problem == GroupStopCounts(all: 3, claude: 2, codex: 1))
-        #expect(problem.count(for: .all) == 3)
-        #expect(problem.count(for: .claude) == 2)
-        #expect(problem.count(for: .codex) == 1)
-
-        let ready = try content("status-ready").connections.stopCounts
-        #expect(ready == GroupStopCounts(all: 2, claude: 1, codex: 1))
-
-        let none = content(of: EngineStatus()).connections.stopCounts
-        #expect(none == GroupStopCounts(all: 0, claude: 0, codex: 0))
-    }
-
-    @Test func codexOnlyCountsConnectionsWithASessionBecauseTheEngineSkipsTheRest() throws {
-        var status = try Fixtures.status("status-problem")
-        // The Codex connection loses its session: an unrecorded runtime that may serve a Claude conversation.
-        status.connections[2].sessionID = nil
-        let counts = content(of: status).connections.stopCounts
-        #expect(counts == GroupStopCounts(all: 3, claude: 2, codex: 0, unattributedCodex: 1))
-        #expect(counts.count(for: .all) == 3, "--group all still stops it")
-        #expect(counts.count(for: .codex) == 0, "--group codex skips it as unattributed")
-        let connections = content(of: status).connections
-        #expect(connections.stopButtons.map(\.title) == ["전체 끄기 3", "Claude만 2", "Codex만 0"])
-        #expect(connections.stopButtons[2].isEnabled == false)
-        #expect(connections.stopButtons[2].help.contains("주인을 모르는 1개는 빠져요"))
-    }
-
-    @Test func aCodexConnectionThatCannotBeStoppedIsNotCountedEvenWithASession() throws {
-        var status = try Fixtures.status("status-problem")
-        status.connections[2].canStop = false
-        #expect(content(of: status).connections.stopCounts == GroupStopCounts(all: 2, claude: 2, codex: 0))
-    }
-
-    @Test func groupRowsAreHiddenWhenThereAreNoConnections() throws {
-        #expect(content(of: EngineStatus()).connections.showsGroupButtons == false)
-        #expect(try content("status-ready").connections.showsGroupButtons)
-        #expect(try content("status-problem").connections.showsGroupButtons)
-    }
-
-    @Test func endedConnectionsTheEngineMayStopAreCounted() throws {
-        let connections = try content("status-problem").connections
-        #expect(connections.endedCount == 1)
-        #expect(connections.endedStoppableCount == 1)
-        var status = try Fixtures.status("status-problem")
-        status.connections[0].canStop = false
-        #expect(content(of: status).connections.endedStoppableCount == 0)
-    }
-
     @Test func aRowKeepsTheContractStateNotOnlyHowItReads() throws {
         var status = try Fixtures.status("status-ready")
         // Active, but no call was ever recorded: it reads 알 수 없음 yet the contract says active.
         status.connections[0].idleSeconds = nil
         status.connections[0].lastCallAt = nil
-        let rows = content(of: status).connections.groups.flatMap(\.rows)
-        let row = try #require(rows.first { $0.id == status.connections[0].id })
+        let row = try #require(rows(content(of: status)).first { $0.id == status.connections[0].id })
         #expect(row.state == StateDisplay(kind: .unknown, text: "알 수 없음"))
         #expect(row.contractState == .active)
         #expect(row.sessionID == status.connections[0].sessionID)
-        let ended = try content("status-problem").connections.groups.flatMap(\.rows).first { $0.contractState == .ended }
-        #expect(ended?.id == "claude-4001-1792300000")
-        let resting = try content("status-problem").connections.groups.flatMap(\.rows).first { $0.contractState == .idle }
+        let ended = try #require(tidyRows(content("status-problem")).compactMap(\.endedRow).first)
+        #expect(ended.contractState == .ended)
+        let resting = try rows(content("status-problem")).first { $0.contractState == .idle }
         #expect(resting?.state.kind == .resting)
     }
 
-    @Test func aRowAfterARefusedReleaseOffersRetryStopAndForceStop() throws {
-        let rows = try content("status-problem").connections.groups.flatMap(\.rows)
-        let row = try #require(rows.first { $0.id == "claude-12345-1792320000" })
-        #expect(ConnectionRow.refusedNote == "작업이 끝나지 않아 못 놓음")
-        #expect(row.refusedButtons.map(\.title) == ["다시 하기", "끄기", "강제 종료"])
-        #expect(row.refusedButtons.map(\.action) == [
-            .retryRelease("claude-12345-1792320000"),
-            .stopConnection("claude-12345-1792320000", force: false),
-            .stopConnection("claude-12345-1792320000", force: true),
-        ])
-        // A normal stop is not blocked by a refused release.
-        #expect(row.refusedButtons[1].isEnabled)
+    @Test func aRowAfterARefusedReleaseKeepsOnlyTabReleaseAndNeverStopsALiveAI() throws {
+        let row = try #require(rows(content("status-problem")).first { $0.id == "claude-12345-1792320000" })
+        #expect(ConnectionRow.refusedNote == "작업이 끝나지 않아 못 풀었어요")
+        #expect(row.retryButton.title == "탭 풀기")
+        #expect(row.retryButton.action == .retryRelease("claude-12345-1792320000"))
+        #expect(row.retryButton.isEnabled)
     }
 
-    @Test func theActivityTabKeepsItsDiagnosisButtonWithoutAStatus() {
-        for isLoading in [true, false] {
-            let placeholder = ActivityContent.placeholder(isLoading: isLoading)
-            #expect(placeholder.rows.isEmpty)
-            #expect(placeholder.copyButton.action == .copyDiagnosis)
-            #expect(placeholder.copyButton.isEnabled)
-            #expect(placeholder.copyButton.title == "진단 복사")
-        }
-        #expect(ActivityContent.placeholder(isLoading: true).emptyText == "불러오는 중…")
-        #expect(ActivityContent.placeholder(isLoading: false).emptyText == "상태를 읽지 못해서 기록을 보일 수 없어요")
-    }
+    // MARK: 손볼 것: ended connections, leases, connections nobody owns
 
-    @Test func groupStopCountsOnlyWhatTheEngineMayStopAndOnlyClaudeAndCodex() throws {
+    @Test func anEndedRowHasOneButtonTidyAndTheOnesTheAppCannotTidyHaveItOffWithAReason() throws {
+        let ended = try #require(tidyRows(content("status-problem")).compactMap(\.endedRow).first)
+        #expect(ended.state == StateDisplay(kind: .ended, text: "끝남"))
+        #expect(ended.folder == "dev/unified-login")
+        #expect(ended.startedText == "07:11 시작")
+        #expect(ended.button == ButtonSpec(
+            title: "정리", action: .tidy("claude-4001-1792300000"),
+            help: "탭을 풀고 남은 연결을 꺼요. AI가 이미 없어서 끊길 것이 없어요. 제때 안 꺼지면 강제로 꺼요"))
+
         var status = try Fixtures.status("status-problem")
-        status.connections[2].canStop = false // the Codex one
-        status.connections.append(Connection(id: "gemini-1-1", agent: .other("gemini"), state: .active, canStop: true))
-        let counts = content(of: status).connections.stopCounts
-        #expect(counts == GroupStopCounts(all: 2, claude: 2, codex: 0))
+        status.connections[0].canStop = false
+        let releaseOnly = try #require(tidyRows(content(of: status)).compactMap(\.endedRow).first)
+        #expect(releaseOnly.button.isEnabled)
+        #expect(releaseOnly.button.help == "탭만 풀어요. 이 연결은 앱이 끌 수 없어요")
+        status.connections[0].canRelease = false
+        let neither = try #require(tidyRows(content(of: status)).compactMap(\.endedRow).first)
+        #expect(neither.button.title == "정리")
+        #expect(neither.button.isEnabled == false)
+        #expect(neither.button.help == "탭을 풀 길이 없고, 신원을 확인하지 못한 프로세스라 앱이 끌 수도 없어요")
+    }
+
+    @Test func theTidyListIsEndedNewestFirstThenLeasesThenConnectionsNobodyOwns() throws {
+        var status = try Fixtures.status("status-cmux")
+        status.connections.append(Connection(
+            id: "claude-1-1", agent: .claude, state: .ended, startedAt: Fixtures.now.addingTimeInterval(-3600), canStop: true))
+        status.connections.append(Connection(
+            id: "codex-2-2", agent: .codex, state: .ended, startedAt: Fixtures.now.addingTimeInterval(-60), canStop: true))
+        status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-left", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
+        let tidy = try #require(content(of: status).connections.tidy)
+        #expect(tidy.title == "손볼 것 4개")
+        #expect(tidy.rows.map(\.id) == ["ended-codex-2-2", "ended-claude-1-1", "lease-left-019a-left", "orphan-cmux-13440-1792229400"])
+        #expect(tidy.tidyAllButton == ButtonSpec(
+            title: "모두 정리", action: .tidyAll, help: "끝난 연결과 남은 점유를 한 번에 정리해요"))
+    }
+
+    @Test func nothingToTidyMeansNoHeadAtAll() throws {
+        #expect(try content("status-ready").connections.tidy == nil)
+        #expect(try content("status-working").connections.tidy == nil)
+        #expect(try content("status-cmux").connections.tidy?.rows.map(\.id) == ["orphan-cmux-13440-1792229400"])
     }
 
     // MARK: Leases (R14: no counts, "점유가 남았을 수 있음")
 
-    @Test func unreadableLeasesShowTheLeftoverSessionsAsMaybeLeft() throws {
-        let leases = try content("status-problem").leases
-        #expect(leases.notice == "점유 목록을 읽지 못해서, 끝난 연결 기록으로 보여요")
-        #expect(leases.rows.count == 2)
+    @Test func unreadableLeasesShowTheLeftoverSessionsAsMaybeLeftWithOneNotice() throws {
+        let tidy = try #require(content("status-problem").connections.tidy)
+        #expect(tidy.notice == "점유 목록을 읽지 못해서, 끝난 연결 기록으로 보여요")
+        let leases = tidy.rows.compactMap(\.leaseRow)
+        #expect(leases.count == 2)
 
-        let first = leases.rows[0]
+        let first = leases[0]
         #expect(first.kind == .maybeLeft)
         #expect(first.agent == .claude)
         #expect(first.folder == "dev/y")
@@ -228,48 +198,97 @@ struct PopoverContentTests {
         #expect(first.sessionID == "019a1b2c-0009")
         #expect(first.canReleaseSession)
         #expect(first.hint == nil)
+        #expect(first.releaseButton == ButtonSpec(
+            title: "탭 풀기", action: .releaseSession("019a1b2c-0009", user: true), help: "이 세션이 남긴 점유만 풀어요"))
 
-        let second = leases.rows[1]
+        let second = leases[1]
         #expect(second.agent == .codex)
         #expect(second.folder == "z/app")
         #expect(second.sessionID == nil)
         #expect(second.canReleaseSession == false)
-        #expect(second.hint == "콕 집어 풀 방법이 없어요")
+        #expect(second.releaseButton == nil, "no button where there is no way")
+        #expect(second.hint == "풀 방법이 없어요 — 아래 안내를 따라 주세요")
     }
 
-    @Test func readableLeasesListTheItemsAndKeepTheLeftoversToo() throws {
-        var status = try Fixtures.status("status-problem")
-        status.leases.readable = true
-        status.leases.items = [LeaseItem(sessionID: "019a-live", agent: .claude, connectionID: "claude-12345-1792320000",
-                                         cwd: "/Users/chenjing/dev/computer-use", since: nil, releasable: true)]
-        let leases = content(of: status).leases
-        #expect(leases.notice == nil)
-        #expect(leases.rows.map(\.kind) == [.held, .maybeLeft, .maybeLeft])
-        #expect(leases.rows[0].statusText == "점유 중")
-        #expect(leases.rows[0].folder == "dev/computer-use")
-        #expect(leases.rows[0].canReleaseSession)
-    }
-
-    @Test func readableLeasesWithNothingHeldSayNone() throws {
-        let leases = try content("status-ready").leases
-        #expect(leases.rows.isEmpty)
-        #expect(leases.emptyText == "점유 없음")
-        #expect(leases.notice == nil)
-    }
-
-    @Test func unreadableLeasesWithNothingLeftStillSayNoneButExplainWhy() throws {
+    @Test func theLeaseNoticeIsSaidOnlyWhereThereIsALeaseLine() throws {
+        // An unreadable list with nothing left: no lease line, so no notice and no head.
         var status = try Fixtures.status("status-ready")
         status.leases.readable = false
-        let leases = content(of: status).leases
-        #expect(leases.emptyText == "기록상 남은 점유 없음")
-        #expect(leases.notice == "점유 목록을 읽지 못해요. 끝난 연결 기록으로만 알 수 있어요")
+        #expect(content(of: status).connections.tidy == nil)
+        // Readable: lease lines without the notice.
+        var readable = try Fixtures.status("status-problem")
+        readable.leases.readable = true
+        #expect(content(of: readable).connections.tidy?.notice == nil)
+        // An ended connection alone does not need the notice either.
+        var endedOnly = try Fixtures.status("status-problem")
+        endedOnly.leases.maybeLeft = []
+        #expect(content(of: endedOnly).connections.tidy?.notice == nil)
     }
 
-    // MARK: Extension reset guidance (F3 case)
+    @Test func readableLeasesListTheHeldOnesNobodyAliveOwnsAndKeepTheLeftoversToo() throws {
+        var status = try Fixtures.status("status-problem")
+        status.leases.readable = true
+        status.leases.items = [
+            // A live connection's own session is not for tidying.
+            LeaseItem(sessionID: "019a1b2c-0001", agent: .claude, connectionID: "claude-12345-1792320000",
+                      cwd: "/Users/chenjing/dev/computer-use", since: nil, releasable: true),
+            LeaseItem(sessionID: "019a-held", agent: .claude, connectionID: nil, cwd: "/Users/chenjing/dev/h", since: nil, releasable: true),
+            // The same session as a leftover is listed once.
+            LeaseItem(sessionID: "019a1b2c-0009", agent: .claude, connectionID: nil, cwd: nil, since: nil, releasable: true),
+        ]
+        let leases = try #require(content(of: status).connections.tidy).rows.compactMap(\.leaseRow)
+        #expect(leases.map(\.kind) == [.held, .maybeLeft, .maybeLeft])
+        #expect(leases[0].statusText == "점유 중")
+        #expect(leases[0].folder == "dev/h")
+        #expect(leases[0].canReleaseSession)
+        #expect(leases[0].releaseButton?.action == .releaseSession("019a-held", user: true))
+    }
+
+    // MARK: 모두 정리
+
+    @Test func tidyAllIsOffWhenTheAppHasNothingToTidyAndSaysWhy() throws {
+        // Only a Codex chat's lease is left: its own row releases it.
+        var status = try Fixtures.status("status-ready")
+        status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
+        let button = try #require(content(of: status).connections.tidy).tidyAllButton
+        #expect(button.title == "모두 정리")
+        #expect(button.isEnabled == false)
+        #expect(button.help == "Codex 대화가 남긴 점유는 그 줄에서 풀어 주세요")
+
+        // An ended connection nobody can tidy and no lease at all.
+        var stuck = try Fixtures.status("status-ready")
+        stuck.connections[0].state = .ended
+        stuck.connections[0].canStop = false
+        stuck.connections[0].canRelease = false
+        let stuckButton = try #require(content(of: stuck).connections.tidy).tidyAllButton
+        #expect(stuckButton.isEnabled == false)
+        #expect(stuckButton.help == "앱이 정리할 수 있는 것이 없어요")
+    }
+
+    @Test func tidyAllTargetsEndedConnectionsClaudeLeasesAndOrphansButNoCodexChatNorLiveCmux() throws {
+        var status = try Fixtures.status("status-cmux")
+        status.connections.append(Connection(id: "claude-1-1", agent: .claude, state: .ended, startedAt: Fixtures.now, canStop: true))
+        status.connections.append(Connection(id: "codex-2-2", agent: .codex, state: .ended, startedAt: Fixtures.now.addingTimeInterval(-5), canRelease: true))
+        status.connections.append(Connection(id: "claude-3-3", agent: .claude, state: .ended, startedAt: Fixtures.now.addingTimeInterval(-9)))
+        status.leases.maybeLeft = [
+            LeftoverLease(sessionID: "019a-claude", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true),
+            LeftoverLease(sessionID: "019a-claude-no-way", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: false),
+            LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true),
+        ]
+        #expect(TidyPlan.items(in: status) == [
+            .connection("claude-1-1", .stop),
+            .connection("codex-2-2", .releaseOnly),
+            .session("019a-claude"),
+            // The orphan goes in; the live cmux-cua connection (cmux-12892) is not here at all.
+            .connection("cmux-13440-1792229400", .stop),
+        ])
+    }
+
+    // MARK: Guidance (F3 case)
 
     @Test func guidanceListsTheLiveConnectionsAResetWouldCut() throws {
-        let guidance = try content("status-problem").leases.guidance
-        #expect(guidance.title == "그래도 안 풀리면 — 막힌 탭 닫기 · 확장 초기화")
+        let guidance = try content("status-problem").connections.guidance
+        #expect(guidance.title == "브라우저 탭이 계속 막히면")
         // Smallest remedy first (spec ruling): close the blocked tab, and only then reset the extension.
         #expect(guidance.steps == [
             "막힌 탭이 있으면 그 탭을 닫아요. 그 탭의 점유만 풀려서 다른 대화는 끊기지 않아요.",
@@ -285,59 +304,61 @@ struct PopoverContentTests {
     @Test func guidanceSaysNoneWhenNothingIsAlive() throws {
         var status = try Fixtures.status("status-problem")
         status.connections = []
-        let guidance = content(of: status).leases.guidance
+        let guidance = content(of: status).connections.guidance
         #expect(guidance.liveConnections.isEmpty)
         #expect(guidance.liveConnectionsEmptyText == "없음")
     }
 
     @Test func guidanceIsCalmWhenEveryLeftoverCanBeReleasedOneByOne() throws {
-        let guidance = try content("status-ready").leases.guidance
+        let guidance = try content("status-ready").connections.guidance
         #expect(guidance.needsAttention == false)
         #expect(guidance.liveConnections == ["Claude · dev/computer-use", "Codex · dev/new-chat"])
     }
 
-    // MARK: Other tools and the screen
+    // MARK: The screen line and the other tools
 
     @Test func whoUsesTheScreenNowComesFromTheActiveConnection() throws {
-        let screen = try content("status-working").otherTools.screen
+        let screen = try content("status-working").connections.screen
         #expect(screen.isActive)
         // The same words as the tooltip.
         #expect(screen.text == "Claude(dev/x)가 화면을 쓰는 중")
         #expect(screen.detail == "방금 호출")
+        #expect(screen.line == "Claude(dev/x)가 화면을 쓰는 중 · 방금 호출")
     }
 
     @Test func nobodyUsingTheScreenIsSaidPlainly() throws {
-        let screen = try content("status-problem").otherTools.screen
+        let screen = try content("status-problem").connections.screen
         #expect(screen.isActive == false)
         #expect(screen.text == "지금 화면을 쓰는 연결 없음")
         #expect(screen.detail == "마지막 호출 30초 전")
+        #expect(screen.line == "지금 화면을 쓰는 연결 없음 · 마지막 호출 30초 전")
     }
 
     @Test func noRecordAtAllHasNoDetail() {
-        let screen = content(of: EngineStatus()).otherTools.screen
+        let screen = content(of: EngineStatus()).connections.screen
         #expect(screen.isActive == false)
         #expect(screen.detail == nil)
     }
 
-    @Test func otherToolsShowTheirStateProcessesAndClients() throws {
-        let tools = try content("status-problem").otherTools.tools
+    @Test func aRunningToolIsOneHeadLineWithItsProcessesAndItsLiveClients() throws {
+        let tools = try content("status-problem").connections.tools
         #expect(tools.count == 1)
         let tool = tools[0]
         #expect(tool.name == "cmux-cua")
         #expect(tool.isRunning)
-        #expect(tool.statusText == "실행 중")
-        #expect(tool.detail == "프로세스 2개")
-        // This fixture is an engine that does not name its clients: the row reads as it always did.
+        #expect(tool.title == "cmux-cua · 실행 중 · 프로세스 2개")
+        // This fixture is an engine that does not name its clients: the row reads as it always did, with no button.
         let client = try #require(tool.clients.first)
         #expect(tool.clients.count == 1)
         #expect(client.title == "Claude · dev/z")
         #expect(client.connectionID == nil)
-        #expect(client.buttons.isEmpty)
+        #expect(client.button == nil)
     }
 
     @Test func aToolWithoutClientsHasNoClientLines() throws {
-        let tool = try #require(try content("status-working").otherTools.tools.first)
+        let tool = try #require(try content("status-working").connections.tools.first)
         #expect(tool.clients.isEmpty)
+        #expect(tool.title == "cmux-cua · 실행 중 · 프로세스 2개")
     }
 
     // MARK: Activity
