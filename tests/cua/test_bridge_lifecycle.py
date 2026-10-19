@@ -10,6 +10,7 @@ import os
 import stat
 import subprocess
 from types import SimpleNamespace
+import threading
 import time
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -24,6 +25,7 @@ from bridge_case import BridgeCase, ISO
 from fake_host import TOOLS, write_registry
 from test_runtime_paths import fake_app
 
+REAL_START_IN_BACKGROUND = host_autostart.start_in_background
 RECORD_KEYS = {'schema_version', 'kind', 'pid', 'started_at', 'owner_pid', 'cwd', 'control_path', 'host', 'session_id',
                'turn_id', 'connected_at', 'last_call_at', 'busy', 'scopes', 'cleanup', 'updated_at'}
 
@@ -569,11 +571,16 @@ class RegisteredCase(BridgeCase):
         environment.start()
         self.addCleanup(environment.stop)
         self.commands, self.processes, self.reopen = [], [], None
+        # What a Codex opened here asks to have watched is collected, and nothing runs it. The module's memory of
+        # having opened Codex is this test's own.
+        self.watches = []
         stub = SimpleNamespace(run=self.run_command, DEVNULL=subprocess.DEVNULL, PIPE=subprocess.PIPE,
                                TimeoutExpired=subprocess.TimeoutExpired)
         for target, replacement in ((host_autostart, {'subprocess': stub}),
                                     (host_autostart, {'app_processes': lambda executable: list(self.processes)}),
-                                    (host_autostart, {'front_bundle': lambda: None})):
+                                    (host_autostart, {'front_bundle': lambda: None}),
+                                    (host_autostart, {'WATCH': host_autostart.Watch(),
+                                                      'start_in_background': self.watches.append})):
             patcher = patch.multiple(target, **replacement)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -609,6 +616,87 @@ class RegisteredCase(BridgeCase):
             patcher = patch.object(relay_install, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+
+
+class FirstCallWatchTests(RegisteredCase):
+    """A Codex this process opened in the background is watched again when the first tool call starts."""
+
+    async def opened_in_the_background(self):
+        host = self.add_host(thread_id='thread-A')
+        path = self.socket()
+        self.reopen = lambda: write_registry(self.host_state, path)
+        adapter = self.registered_adapter()
+        await self.start_control(adapter)
+        await self.initialize(adapter)
+        self.assertEqual(len(self.opened()), 1)
+        return host, adapter
+
+    async def test_only_the_first_tool_call_after_the_opening_asks_for_a_watch_and_before_it_leaves(self):
+        host, adapter = await self.opened_in_the_background()
+        asked = []
+        with patch.object(host_autostart, 'start_in_background', lambda work: asked.append(len(host.calls))):
+            await adapter.handle(self.call())
+            await adapter.handle(self.call())
+        self.assertEqual(asked, [0])
+        self.assertEqual(len(host.calls), 2)
+
+    async def test_ending_a_turn_is_no_tool_call_for_the_watch(self):
+        host, adapter = await self.opened_in_the_background()
+        await adapter.handle(self.call('turn_ended'))
+        self.assertEqual(self.watches, [])
+        await adapter.handle(self.call())
+        self.assertEqual(len(self.watches), 1)
+
+    async def test_a_codex_that_was_already_open_is_not_watched(self):
+        host, adapter, control, _ = await self.registered()
+        await adapter.handle(self.call())
+        self.assertEqual(self.watches, [])
+
+    async def test_a_codex_the_next_call_opens_again_is_watched_again(self):
+        host1, adapter, control, _ = await self.registered(thread_id='thread-A')
+        host2 = self.add_host(thread_id='thread-B')
+        await adapter.handle(self.call())
+        host1.finish()
+        await self.settle(lambda: self.record(control)['host'] is None)
+        (self.host_state/'host.json').unlink()
+        second_socket = self.socket()
+        self.reopen = lambda: write_registry(self.host_state, second_socket)
+        await adapter.handle(self.call())
+        self.assertEqual(len(self.opened()), 1)
+        self.assertEqual(len(self.watches), 1)
+        self.assertEqual(len(host2.calls), 1)
+
+    async def test_the_call_does_not_wait_for_the_watch_nor_for_the_front_app_to_be_read(self):
+        host, adapter = await self.opened_in_the_background()
+        reading, gate = threading.Event(), threading.Event()
+
+        def front():
+            # The watch's thread is held where it reads the front app, until the test lets it go.
+            reading.set()
+            gate.wait(10)
+            return None
+        with patch.object(host_autostart, 'start_in_background', REAL_START_IN_BACKGROUND), \
+             patch.object(host_autostart, 'front_bundle', front):
+            watchers = []
+            try:
+                reply = await self.run_call(adapter)
+                await self.settle(reading.is_set)
+                watchers = [thread for thread in threading.enumerate() if thread.name == 'codex-front-watch']
+                self.assertEqual(reply['result']['content'][0]['text'], 'PRIVATE_RESULT')
+                self.assertEqual(len(watchers), 1)
+                self.assertTrue(watchers[0].daemon)
+            finally:
+                gate.set()
+                for thread in watchers:
+                    thread.join(10)
+        self.assertFalse(any(thread.is_alive() for thread in watchers))
+
+    async def test_a_watch_that_cannot_start_does_not_fail_the_call(self):
+        host, adapter = await self.opened_in_the_background()
+        with patch.object(host_autostart, 'start_in_background', side_effect=RuntimeError("can't start new thread")):
+            reply = await self.run_call(adapter)
+        self.assertEqual(reply['result']['content'][0]['text'], 'PRIVATE_RESULT')
+        self.assertIn('first_call_watch_unavailable', self.logs)
 
 
 class ActivityTests(RegisteredCase):

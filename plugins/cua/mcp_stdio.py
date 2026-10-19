@@ -7,7 +7,7 @@ from pathlib import Path
 import stat
 import sys
 from bridge_control import BridgeControl
-from host_autostart import AutostartFailure, ensure_host
+from host_autostart import AutostartFailure, ensure_host, watch_first_call
 from host_mcp import HostMcp, serve, BridgeFailure
 from runtime_paths import default_state, installation_from_native_cli, InstallationError
 
@@ -76,6 +76,16 @@ def build_adapter(state, **options):
             except (OSError, ValueError):
                 raise BridgeFailure('Start Codex with the prepared host launcher before using this MCP plugin. No runtime was started.') from None
             await super().boot()
+
+        async def call_tool(self, name, arguments):
+            # A Codex this process opened in the background is watched again when the first tool call starts: the
+            # first screen call of a fresh Codex brings it forward (S4). The watch has a thread of its own, so the
+            # call does not wait for it, and a watch that cannot start must not fail the call.
+            try:
+                watch_first_call()
+            except Exception:
+                self.log('first_call_watch_unavailable')
+            return await super().call_tool(name, arguments)
 
         async def thread_config(self, request):
             # The desktop app takes the launcher's relay override out of the host's configuration, so the relay
