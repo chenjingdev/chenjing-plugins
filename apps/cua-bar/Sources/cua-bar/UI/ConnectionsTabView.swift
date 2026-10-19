@@ -98,10 +98,12 @@ struct TidySectionView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                if model.tidyAllIsWaiting { ProgressView().controlSize(.small) }
-                SpecButton(
-                    spec: tidy.tidyAllButton, waiting: model.tidyAllIsWaiting,
-                    waitingHelp: model.cleanupHelp(for: tidy.tidyAllButton.action)) { model.send($0) }
+                if let button = tidy.tidyAllButton {
+                    if model.tidyAllIsWaiting { ProgressView().controlSize(.small) }
+                    SpecButton(
+                        spec: button, waiting: model.tidyAllIsWaiting,
+                        waitingHelp: model.cleanupHelp(for: button.action)) { model.send($0) }
+                }
             }
             .padding(.top, 2)
             // The answer to 모두 정리, right under the button it came from.

@@ -92,7 +92,8 @@ enum StatusEvaluator {
 
     /// The card's next steps for a problem that belongs to a line of the list.
     static let tidyStep = "목록 맨 위의 정리를 눌러 주세요"
-    static let codexLeasesStep = "목록 맨 위에서 줄마다 탭 풀기를 눌러 주세요"
+    /// A leftover lease's line has 탭 풀기, so the card names that button and not 정리.
+    static let releaseLeasesStep = "목록 맨 위의 탭 풀기를 눌러 주세요"
     static let noWayToReleaseStep = "하나씩 풀 방법이 없어요 — 목록 맨 아래 안내를 따라 주세요"
     static let cannotTidyStep = "앱이 정리할 수 없는 연결이에요 — 목록에서 까닭을 보세요"
     /// Only ended connections the app may release but not stop are left, and it released their tabs.
@@ -203,15 +204,7 @@ enum StatusEvaluator {
         if !status.leases.maybeLeft.isEmpty {
             // No count: when the lease list cannot be read, the number would be a guess (R14).
             let aimable = status.leases.maybeLeft.filter { $0.releasable && $0.sessionID != nil }
-            let nextStep: String
-            if aimable.contains(where: { $0.agent == .claude }) {
-                nextStep = tidyStep
-            } else if !aimable.isEmpty {
-                // Only Codex chats' sessions can be aimed at, and those are released by a click on their own row.
-                nextStep = codexLeasesStep
-            } else {
-                nextStep = noWayToReleaseStep
-            }
+            let nextStep = aimable.isEmpty ? noWayToReleaseStep : releaseLeasesStep
             return Problem(
                 kind: .leasesMaybeLeft, title: "점유가 남았을 수 있어요", nextStep: nextStep,
                 warning: nil, fix: nil, fixLabel: nil)

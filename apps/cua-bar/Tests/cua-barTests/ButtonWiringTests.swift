@@ -46,7 +46,7 @@ struct ButtonWiringTests {
             specs += tidyRows.compactMap(\.leaseRow).compactMap(\.releaseButton)
             specs += tidyRows.compactMap(\.orphanRow).compactMap(\.button)
             specs += content.connections.tools.flatMap(\.clients).compactMap(\.button)
-            specs += content.connections.tidy.map { [$0.tidyAllButton] } ?? []
+            specs += content.connections.tidy?.tidyAllButton.map { [$0] } ?? []
             #expect(Set(specs.map(\.title)).isSubset(of: ["탭 풀기", "정리", "모두 정리"]), "\(fixture): \(specs.map(\.title))")
             for spec in specs {
                 switch spec.action {
@@ -81,7 +81,7 @@ struct ButtonWiringTests {
     @Test func aLeftoverWithASessionOffersTabReleaseAndOneWithoutOffersAReasonInstead() throws {
         let rows = try #require(try content("status-problem").connections.tidy).rows.compactMap(\.leaseRow)
         #expect(rows[0].releaseButton == ButtonSpec(
-            title: "탭 풀기", action: .releaseSession("019a1b2c-0009", user: true), help: "이 세션이 남긴 점유만 풀어요"))
+            title: "탭 풀기", action: .releaseSession("019a1b2c-0009", user: true), help: "이 대화가 남긴 점유만 풀어요 (세션 019a1b2c)"))
         #expect(rows[1].releaseButton == nil)
         #expect(rows[1].hint == "풀 방법이 없어요 — 아래 안내를 따라 주세요")
     }
@@ -89,10 +89,11 @@ struct ButtonWiringTests {
     @Test func tidyAllIsOneButtonInTheHeadOfTheTidyListAndNowhereElse() throws {
         let tidy = try #require(try content("status-problem").connections.tidy)
         #expect(tidy.title == "손볼 것 3개")
-        #expect(tidy.tidyAllButton.title == "모두 정리")
-        #expect(tidy.tidyAllButton.action == .tidyAll)
-        #expect(tidy.tidyAllButton.isEnabled)
-        #expect(tidy.tidyAllButton.help == "끝난 연결과 남은 점유를 한 번에 정리해요")
+        let button = try #require(tidy.tidyAllButton)
+        #expect(button.title == "모두 정리")
+        #expect(button.action == .tidyAll)
+        #expect(button.isEnabled)
+        #expect(button.help == "끝난 연결과 남은 점유를 한 번에 정리해요")
     }
 
     @Test func theActivityTabOffersTheDiagnosisCopy() throws {
@@ -120,7 +121,7 @@ struct ButtonWiringTests {
         specs += tidyRows.compactMap(\.endedRow).map(\.button)
         specs += tidyRows.compactMap(\.leaseRow).compactMap(\.releaseButton)
         specs += tidyRows.compactMap(\.orphanRow).compactMap(\.button)
-        specs += connections.tidy.map { [$0.tidyAllButton] } ?? []
+        specs += connections.tidy?.tidyAllButton.map { [$0] } ?? []
         specs.append(content.activity.copyButton)
         let summary = StatusEvaluator.evaluate(status, appVersion: "0.7.0")
         if let fix = summary.fix, let label = summary.fixLabel {
@@ -166,7 +167,7 @@ struct ButtonWiringTests {
         await model.perform(ended.button.action)
         await model.perform(try #require(connections.groups.first?.rows.first).button.action)
         await model.perform(try #require(tidy.rows.compactMap(\.leaseRow).first?.releaseButton).action)
-        await model.perform(tidy.tidyAllButton.action)
+        await model.perform(try #require(tidy.tidyAllButton).action)
         await model.perform(model.activityContent.copyButton.action)
         await model.perform(try #require(model.summary.fix))
         let actionCalls = engine.calls.dropFirst(baseline).filter { $0 != .status }

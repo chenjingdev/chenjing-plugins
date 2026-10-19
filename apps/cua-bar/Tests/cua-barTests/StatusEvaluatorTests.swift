@@ -179,7 +179,7 @@ struct StatusEvaluatorTests {
         ProblemCase(name: "ended_connections", kind: .endedConnections, title: "끝난 연결이 1개 남아 있어요",
              nextStep: "목록 맨 위의 정리를 눌러 주세요", fix: nil, fixLabel: nil),
         ProblemCase(name: "leases_maybe_left", kind: .leasesMaybeLeft, title: "점유가 남았을 수 있어요",
-             nextStep: "목록 맨 위의 정리를 눌러 주세요", fix: nil, fixLabel: nil),
+             nextStep: "목록 맨 위의 탭 풀기를 눌러 주세요", fix: nil, fixLabel: nil),
     ]
 
     /// Builds a status in which exactly the problem of `kind` is present.
@@ -418,7 +418,7 @@ struct StatusEvaluatorTests {
         let problem = try #require(evaluate(status).problem)
         #expect(problem.kind == .leasesMaybeLeft)
         #expect(problem.title == "점유가 남았을 수 있어요")
-        #expect(problem.nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        #expect(problem.nextStep == "목록 맨 위의 탭 풀기를 눌러 주세요")
         #expect(problem.fix == nil)
     }
 
@@ -438,10 +438,10 @@ struct StatusEvaluatorTests {
         let problem = try #require(evaluate(status).problem)
         // 모두 정리 never releases a Codex chat; its own row's 탭 풀기 does.
         #expect(problem.fix == nil)
-        #expect(problem.nextStep == "목록 맨 위에서 줄마다 탭 풀기를 눌러 주세요")
-        // With a Claude session to aim at, 모두 정리 is the way.
+        #expect(problem.nextStep == "목록 맨 위의 탭 풀기를 눌러 주세요")
+        // A Claude session's line has 탭 풀기 too, and the card names the button the line has, not 정리.
         status.leases.maybeLeft.append(LeftoverLease(sessionID: "019a-claude", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true))
-        #expect(evaluate(status).problem?.nextStep == "목록 맨 위의 정리를 눌러 주세요")
+        #expect(evaluate(status).problem?.nextStep == "목록 맨 위의 탭 풀기를 눌러 주세요")
     }
 
     @Test func endedConnectionsTheAppCannotTidyAreSaidSoOnTheCard() throws {

@@ -254,12 +254,12 @@ struct PopoverContentTests {
         #expect(first.agent == .claude)
         #expect(first.folder == "dev/y")
         #expect(first.statusText == "점유가 남았을 수 있음")
-        #expect(first.detail == "11:40에 끝남 · 세션 019a1b2c")
+        #expect(first.detail == "11:40에 끝남", "the session reads like code: it is in the button's hint only")
         #expect(first.sessionID == "019a1b2c-0009")
         #expect(first.canReleaseSession)
         #expect(first.hint == nil)
         #expect(first.releaseButton == ButtonSpec(
-            title: "탭 풀기", action: .releaseSession("019a1b2c-0009", user: true), help: "이 세션이 남긴 점유만 풀어요"))
+            title: "탭 풀기", action: .releaseSession("019a1b2c-0009", user: true), help: "이 대화가 남긴 점유만 풀어요 (세션 019a1b2c)"))
 
         let second = leases[1]
         #expect(second.agent == .codex)
@@ -306,23 +306,31 @@ struct PopoverContentTests {
 
     // MARK: 모두 정리
 
-    @Test func tidyAllIsOffWhenTheAppHasNothingToTidyAndSaysWhy() throws {
-        // Only a Codex chat's lease is left: its own row releases it.
+    @Test func tidyAllIsShownOnlyWhenItHasTwoOrMoreLinesToDo() throws {
+        // Only a Codex chat's lease is left: its own row releases it, and nothing else would.
         var status = try Fixtures.status("status-ready")
         status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
-        let button = try #require(content(of: status).connections.tidy).tidyAllButton
-        #expect(button.title == "모두 정리")
-        #expect(button.isEnabled == false)
-        #expect(button.help == "Codex 대화가 남긴 점유는 그 줄에서 풀어 주세요")
+        #expect(try #require(content(of: status).connections.tidy).tidyAllButton == nil)
 
         // An ended connection nobody can tidy and no lease at all.
         var stuck = try Fixtures.status("status-ready")
         stuck.connections[0].state = .ended
         stuck.connections[0].canStop = false
         stuck.connections[0].canRelease = false
-        let stuckButton = try #require(content(of: stuck).connections.tidy).tidyAllButton
-        #expect(stuckButton.isEnabled == false)
-        #expect(stuckButton.help == "앱이 정리할 수 있는 것이 없어요")
+        #expect(try #require(content(of: stuck).connections.tidy).tidyAllButton == nil)
+
+        // One line to do: its own 정리 is the one place to press, so 모두 정리 would only press it twice.
+        var one = try Fixtures.status("status-ready")
+        one.connections[0].state = .ended
+        one.leases.maybeLeft = status.leases.maybeLeft // beside a Codex chat's lease, which 모두 정리 leaves alone
+        let tidy = try #require(content(of: one).connections.tidy)
+        #expect(tidy.rows.count == 2)
+        #expect(tidy.tidyAllButton == nil)
+
+        // Two: then it saves a press.
+        one.connections[1].state = .ended
+        #expect(try #require(content(of: one).connections.tidy).tidyAllButton == ButtonSpec(
+            title: "모두 정리", action: .tidyAll, help: "끝난 연결과 남은 점유를 한 번에 정리해요"))
     }
 
     @Test func tidyAllTargetsEndedConnectionsClaudeLeasesAndOrphansButNoCodexChatNorLiveCmux() throws {

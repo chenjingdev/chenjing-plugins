@@ -88,7 +88,7 @@ struct ReviewRound2Tests {
         let content = try #require(rig.model.content)
         let tidy = try #require(content.connections.tidy)
         #expect(rig.model.tidyAllIsWaiting)
-        #expect(rig.model.cleanupHelp(for: tidy.tidyAllButton.action) == "자동 정리 중이에요")
+        #expect(rig.model.cleanupHelp(for: .tidyAll) == "자동 정리 중이에요")
         let leases = tidy.rows.compactMap(\.leaseRow)
         let claudeRow = try #require(leases.first { $0.sessionID == "019a-claude" }?.releaseButton)
         let codexRow = try #require(leases.first { $0.sessionID == "019a-codex" }?.releaseButton)

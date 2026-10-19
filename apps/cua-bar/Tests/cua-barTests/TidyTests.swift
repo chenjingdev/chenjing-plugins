@@ -226,9 +226,8 @@ struct TidyTests {
         status.leases.maybeLeft = [lease("019a-codex", agent: .codex)]
         let rig = await Rig(status)
         let tidy = try #require(rig.model.content?.connections.tidy)
-        #expect(tidy.tidyAllButton.isEnabled == false)
-        #expect(tidy.tidyAllButton.help == "Codex 대화가 남긴 점유는 그 줄에서 풀어 주세요")
-        // 모두 정리 pressed anyway does nothing; its own line's button releases it, with --user.
+        #expect(tidy.tidyAllButton == nil, "nothing for it to do")
+        // 모두 정리 pressed anyway (a press already on its way) does nothing; its own line's button releases it, with --user.
         _ = await rig.model.perform(.tidyAll)
         #expect(rig.actionCalls.isEmpty)
         let button = try #require(tidy.rows.compactMap(\.leaseRow).first?.releaseButton)
@@ -328,7 +327,7 @@ struct TidyTests {
         let rig = await Rig(status)
         // Whether the automatic cleanup released its tabs is not known (its answer is not read): 정리 is still the way.
         #expect(rig.model.summary.nextStep == "목록 맨 위의 정리를 눌러 주세요")
-        #expect(try #require(rig.model.content?.connections.tidy).tidyAllButton.isEnabled)
+        #expect(try #require(rig.model.content?.connections.tidy).tidyAllButton == nil, "one line: its own 정리 is the place")
 
         await rig.model.send(.tidy("claude-9-9"))?.value
         #expect(rig.actionCalls == [.releaseConnection("claude-9-9")])
@@ -341,7 +340,7 @@ struct TidyTests {
         let row = try #require(tidy.rows.compactMap(\.endedRow).first)
         #expect(row.hint == "탭은 풀었어요 — 앱이 끌 수 없는 연결이에요")
         #expect(row.button.isEnabled == false, "nothing more for the button to do")
-        #expect(tidy.tidyAllButton.isEnabled == false)
+        #expect(tidy.tidyAllButton == nil)
         // 모두 정리 pressed anyway has nothing to do.
         _ = await rig.model.perform(.tidyAll)
         #expect(rig.actionCalls == [.releaseConnection("claude-9-9")])

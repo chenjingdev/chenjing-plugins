@@ -170,7 +170,9 @@ struct LeaseRow: Equatable, Identifiable, Sendable {
     var releaseButton: ButtonSpec? {
         guard canReleaseSession, let sessionID else { return nil }
         // A button press is a person's click, so `--user` goes along (Codex thread sessions need it).
-        return ButtonSpec(title: "탭 풀기", action: .releaseSession(sessionID, user: true), help: "이 세션이 남긴 점유만 풀어요")
+        return ButtonSpec(
+            title: "탭 풀기", action: .releaseSession(sessionID, user: true),
+            help: "이 대화가 남긴 점유만 풀어요 (세션 \(sessionID.prefix(8)))")
     }
 }
 
@@ -290,7 +292,8 @@ struct TidyContent: Equatable, Sendable {
     var rows: [TidyRow]
     /// R14: said once, here, when a lease line is shown and the lease list cannot be read.
     var notice: String?
-    var tidyAllButton: ButtonSpec
+    /// 모두 정리, only when it has two or more lines to do: with one, that line's own button is the one place.
+    var tidyAllButton: ButtonSpec?
 }
 
 struct ExtensionResetGuidance: Equatable, Sendable {
@@ -351,17 +354,14 @@ struct ConnectionsContent: Equatable, Sendable {
         if rows.isEmpty {
             tidy = nil
         } else {
-            let hasTargets = !TidyPlan.items(in: status, tabsReleased: tabsReleased).isEmpty
-            let codexChatLeft = leases.contains { $0.agent == .codex && $0.releaseButton != nil }
+            let targets = TidyPlan.items(in: status, tabsReleased: tabsReleased).count
             tidy = TidyContent(
                 title: "손볼 것 \(rows.count)개", rows: rows,
                 // R14: with no readable list the app says what it knows and never invents a count.
                 notice: !leases.isEmpty && !status.leases.readable ? "점유 목록을 읽지 못해서, 끝난 연결 기록으로 보여요" : nil,
-                tidyAllButton: ButtonSpec(
-                    title: "모두 정리", action: .tidyAll, isEnabled: hasTargets,
-                    help: hasTargets
-                        ? "끝난 연결과 남은 점유를 한 번에 정리해요"
-                        : (codexChatLeft ? "Codex 대화가 남긴 점유는 그 줄에서 풀어 주세요" : "앱이 정리할 수 있는 것이 없어요")))
+                tidyAllButton: targets >= 2
+                    ? ButtonSpec(title: "모두 정리", action: .tidyAll, help: "끝난 연결과 남은 점유를 한 번에 정리해요")
+                    : nil)
         }
 
         let hasClients = tools.contains { !$0.clients.isEmpty }
@@ -395,7 +395,6 @@ struct ConnectionsContent: Equatable, Sendable {
             if let session = item.sessionID, connectionSessions.contains(session) || leftSessions.contains(session) { continue }
             var parts: [String] = []
             if let since = item.since { parts.append("\(Format.when(since, now: now, calendar: calendar))부터") }
-            if let session = item.sessionID { parts.append("세션 \(shortSession(session))") }
             rows.append(LeaseRow(
                 id: "held-\(item.sessionID ?? item.connectionID ?? String(index))", kind: .held, agent: item.agent,
                 folder: Format.folder(item.cwd), statusText: "점유 중", detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
@@ -404,7 +403,6 @@ struct ConnectionsContent: Equatable, Sendable {
         for (index, item) in leases.maybeLeft.enumerated() {
             var parts: [String] = []
             if let ended = item.endedAt { parts.append("\(Format.when(ended, now: now, calendar: calendar))에 끝남") }
-            if let session = item.sessionID { parts.append("세션 \(shortSession(session))") }
             let releasable = item.sessionID != nil && item.releasable
             rows.append(LeaseRow(
                 id: "left-\(item.sessionID ?? item.connectionID ?? String(index))", kind: .maybeLeft, agent: item.agent,
@@ -413,8 +411,6 @@ struct ConnectionsContent: Equatable, Sendable {
         }
         return rows
     }
-
-    private static func shortSession(_ id: String) -> String { String(id.prefix(8)) }
 
     /// The connection with this id on any line of the list: a live one, or an ended one in 손볼 것.
     func row(withID id: String) -> ConnectionRow? {
