@@ -304,7 +304,7 @@ def restart_codex(ctx, quit_timeout=QUIT_TIMEOUT, host_timeout=HOST_CLOSE_TIMEOU
     if not app_pids(procs, installation, ctx.uid):
         return {'ok': False, 'reason': 'not_running'}
     host = read_host(ctx, procs)
-    running_host = host.registry if host.state in ('ready', 'starting') else None
+    running_host = host.registry if host.state in ('ready', 'starting', 'stopping') else None
     previous_host = [running_host.get(key) for key in ('owner_pid', 'backend_pid', 'desktop_proxy_pid')] if running_host else []
     try:
         quit_event = ctx.run(['/usr/bin/osascript', '-e', 'tell application id "%s" to quit' % installation.bundle_id], timeout=10)

@@ -13,7 +13,8 @@ is none of these either: it is a RevivedRuntime, left out of the connections and
 """
 import re
 
-from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, IDLE_SECONDS, SCHEMA_VERSION, connection_id, iso)
+from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, HOST_STOP_GRACE, IDLE_SECONDS, SCHEMA_VERSION, connection_id,
+                         iso)
 from engine_inventory import (collect, is_app_server, is_cua_repl, mark_live, working_folders)
 from engine_records import (WRITER, control_socket, forget_released, load_records, prune, read_activity,
                             read_released)
@@ -21,8 +22,6 @@ from engine_records import (WRITER, control_socket, forget_released, load_record
 PRUNE_MIN_AGE = 60
 # A Codex that has just opened starts its host a few seconds later; until then it is not one without a host (S9).
 HOST_START_GRACE = 30
-# A quitting Codex closes its host a few seconds before it ends; until then it is not one without a host (S2).
-HOST_STOP_GRACE = 30
 # A bridge starts its thread, and so the runtime of it, within seconds. A runtime that came up this much later than the
 # bridge it names, with the bridge gone, was started again by Codex (S17, S18), not by that conversation.
 REVIVED_AFTER = 120
@@ -515,7 +514,8 @@ class View:
             opened = min(inv.procs[pid].start for pid in inv.app_pids)
             if self.now-opened <= HOST_START_GRACE:
                 return 'starting'
-            # The wrapper writes `closed` as it ends; a Codex opened after that is caught above.
+            # The wrapper writes `closed` as it ends; a Codex opened after that is caught above. A host that is still
+            # being ended is `stopping` already (engine_inventory.read_host).
             if inv.host.state == 'closed' and inv.host.since is not None and self.now-inv.host.since <= HOST_STOP_GRACE:
                 return 'stopping'
         return inv.host.state

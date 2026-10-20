@@ -14,7 +14,7 @@ import stat
 import subprocess
 import time
 
-from engine_core import REASON
+from engine_core import HOST_STOP_GRACE, REASON, parse_iso
 
 PS_FIELDS = 'pid=,ppid=,uid=,stat=,lstart=,rss=,command='
 MONTHS = {name: number for number, name in enumerate(
@@ -123,7 +123,11 @@ def is_chrome_main(command):
 # --- the host registry ------------------------------------------------------------------------------------
 
 def read_host(ctx, procs):
-    """State of the Codex host registry (host.json in the host state directory)."""
+    """State of the Codex host registry (host.json in the host state directory).
+
+    `stopping` is a host whose wrapper is still running while it ends the app-server and the proxy (S2): the registry
+    says `stopping` with the time it began, or still says `ready` because a wrapper from before that record writes
+    nothing until it has ended them. `closed` is a host whose wrapper has ended or stopped doing so."""
     directory = ctx.host_state_dir
     if not directory.is_absolute():
         return Host('unknown', None, None, False, None, None)       # the bridge refuses such a path too
@@ -150,6 +154,10 @@ def read_host(ctx, procs):
     def alive(pid):
         proc = procs.get(pid) if isinstance(pid, int) and not isinstance(pid, bool) else None
         return proc is not None and proc.uid == ctx.uid
+
+    def wrapper_alive(pid):
+        # The wrapper was running when it last wrote the registry; a process that took its pid later is not it.
+        return alive(pid) and procs[pid].start <= since+1
     relay = data.get('relay') is True
     # relay_reason is a fixed code word (stable_copy, unknown_field, ...) that says why the wrapper left the relay out.
     code = data.get('relay_reason')
@@ -162,9 +170,23 @@ def read_host(ctx, procs):
         if (not isinstance(socket_path, str) or not os.path.isabs(socket_path)
                 or any(not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0 for pid in pids)):
             return Host('unknown', since, None, relay, code, launcher)
-        return Host('ready' if all(alive(pid) for pid in pids) else 'closed', since, data, relay, code, launcher)
+        if all(alive(pid) for pid in pids):
+            return Host('ready', since, data, relay, code, launcher)
+        # The file may be hours old, so a host being ended is told from its wrapper still running, not from the time.
+        # When it began is not known, so there is no time to show.
+        if wrapper_alive(pids[0]):
+            return Host('stopping', None, data, relay, code, launcher)
+        return Host('closed', since, data, relay, code, launcher)
     if status == 'starting':
         return Host('starting' if alive(pids[0]) else 'closed', since, data, relay, code, launcher)
+    if status == 'stopping':
+        # Written before the app-server and the proxy are ended, which may not have started yet (a start that failed).
+        # A wrapper that is still running after the grace has stopped doing it.
+        began = parse_iso(data.get('stopping_at'))
+        began = since if began is None else began
+        if wrapper_alive(pids[0]) and ctx.clock()-began <= HOST_STOP_GRACE:
+            return Host('stopping', began, data, relay, code, launcher)
+        return Host('closed', began, data, relay, code, launcher)
     if status in ('closed', 'cleanup_unconfirmed'):
         return Host('closed', since, data, relay, code, launcher)
     return Host('unknown', since, None, relay, code, launcher)

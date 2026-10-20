@@ -1199,6 +1199,24 @@ class RestartTests(ActionCase):
         [(when, backend_alive, proxy_alive)] = opened_at
         self.assertEqual((backend_alive, proxy_alive), (False, False))
 
+    def test_codex_is_opened_only_after_a_host_that_was_already_stopping_finished_closing(self):
+        # The proxy is gone but the wrapper (here also the app) and the app-server run: the host is stopping, and the
+        # wrapper still holds the lease a Codex opened now would need.
+        self.machine.remove(1200)
+        self.write_host()
+        self.machine.quit_delay = 1.0
+        opened_at = []
+        original = self.machine.run
+
+        def run(argv, timeout=None, environment=None):
+            if argv[0] == '/usr/bin/osascript':
+                self.machine.later(6.0, lambda: self.machine.remove(1100))
+            if argv[0] == '/usr/bin/open':
+                opened_at.append(1100 in self.machine.procs)
+            return original(argv, timeout=timeout, environment=environment)
+        self.assertEqual(engine_actions.restart_codex(self.context(run=run)), {'ok': True, 'reason': None})
+        self.assertEqual(opened_at, [False])
+
     def test_codex_that_cannot_be_opened_or_does_not_come_back_is_a_failed_relaunch(self):
         self.machine.open_status = 1
         self.assertEqual(self.restart(), {'ok': False, 'reason': 'relaunch_failed'})

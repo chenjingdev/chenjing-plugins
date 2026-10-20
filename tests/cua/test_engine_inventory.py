@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import engine_inventory as inventory
 import setup
+from engine_core import iso
 from engine_support import APP_VERSION, ENGINE_PID, NOW, UID, EngineCase, lstart
 
 
@@ -124,8 +125,68 @@ class HostRegistryTests(EngineCase):
         host = self.host()
         self.assertEqual((host.state, host.since, host.relay, host.relay_reason), ('ready', NOW-300, False, None))
         self.assertEqual(host.registry['backend_pid'], 1100)
-        self.machine.remove(1200)
+        self.machine.remove(1000)               # the wrapper is gone: nothing hosts the rest
         self.assertEqual(self.host().state, 'closed')
+
+    def test_a_ready_registry_whose_wrapper_runs_but_whose_backend_or_proxy_is_gone_is_stopping(self):
+        # The wrapper ends the app-server and the proxy first and writes `closed` only after them. A wrapper from before
+        # the `stopping` record has written nothing since `ready`, which can be hours ago (S2 of a Codex that had been
+        # connected for hours), so no grace can come from the file's time.
+        self.machine.add(1000, 1, '/bin/wrapper', start=NOW-6*3600)
+        self.write_host(age=5*3600, relay=True)
+        for survivors in ((1100,), (1200,), ()):
+            for pid in (1100, 1200):
+                self.machine.remove(pid)
+            self.alive(*survivors)
+            host = self.host()
+            self.assertEqual((host.state, host.since), ('stopping', None), survivors)
+            self.assertEqual((host.registry['backend_pid'], host.relay, host.relay_launcher),
+                             (1100, True, self.stable_launcher()))
+
+    def test_a_ready_registry_whose_wrapper_is_gone_is_closed_whatever_else_still_runs(self):
+        self.alive(1100, 1200)                  # an app-server and a proxy that nothing hosts any more
+        self.write_host(age=5*3600)
+        host = self.host()
+        self.assertEqual((host.state, host.since), ('closed', NOW-5*3600))
+        self.machine.add(1000, 1, '/bin/wrapper', uid=UID+1)       # that pid is someone else's process now
+        self.assertEqual(self.host().state, 'closed')
+
+    def test_a_process_that_took_the_wrappers_pid_after_the_registry_was_written_is_no_wrapper(self):
+        self.machine.add(1000, 1, '/bin/other', start=NOW-300+1)       # the registry is NOW-300; a second of tolerance
+        self.write_host()
+        self.assertEqual(self.host().state, 'stopping')
+        self.machine.procs[1000]['start'] = NOW-300+2
+        self.assertEqual(self.host().state, 'closed')
+
+    def test_a_stopping_registry_is_stopping_for_the_grace_counted_from_the_time_it_names(self):
+        self.alive(1000)                        # the wrapper; its backend and proxy may be gone already
+        self.write_host(status='stopping', stopping_at=iso(NOW-10), age=3600)
+        host = self.host()
+        self.assertEqual((host.state, host.since), ('stopping', NOW-10))
+        self.assertEqual(host.registry['status'], 'stopping')
+        for ago, state in ((0, 'stopping'), (30, 'stopping'), (31, 'closed'), (3600, 'closed')):
+            self.write_host(status='stopping', stopping_at=iso(NOW-ago), age=2)
+            self.assertEqual(self.host().state, state, ago)
+
+    def test_a_stopping_registry_whose_wrapper_is_gone_is_closed_from_the_time_it_names(self):
+        self.alive(1100, 1200)
+        self.write_host(status='stopping', stopping_at=iso(NOW-2))
+        host = self.host()
+        self.assertEqual((host.state, host.since), ('closed', NOW-2))
+
+    def test_a_stopping_registry_without_a_usable_time_is_timed_by_its_file(self):
+        self.alive(1000)
+        for broken in ({}, {'stopping_at': None}, {'stopping_at': 'soon'}, {'stopping_at': 12345}):
+            self.write_host(status='stopping', age=5, **broken)
+            host = self.host()
+            self.assertEqual((host.state, host.since), ('stopping', NOW-5), broken)
+            self.write_host(status='stopping', age=60, **broken)
+            self.assertEqual(self.host().state, 'closed', broken)
+
+    def test_a_wrapper_that_stops_before_it_started_the_backend_leaves_a_stopping_registry_too(self):
+        self.alive(1000)
+        self.write_host(status='stopping', backend=None, proxy=None, stopping_at=iso(NOW-1))
+        self.assertEqual(self.host().state, 'stopping')
 
     def test_starting_depends_on_the_wrapper_being_alive(self):
         self.alive(1000)
@@ -177,6 +238,8 @@ class HostRegistryTests(EngineCase):
         self.alive(1000, 1100)
         self.machine.add(1200, 1, '/bin/host-part', uid=UID+1)
         self.write_host()
+        self.assertEqual(self.host().state, 'stopping')        # no proxy of this user's: the wrapper is on its way out
+        self.machine.add(1000, 1, '/bin/host-part', uid=UID+1)       # and no wrapper of this user's
         self.assertEqual(self.host().state, 'closed')
 
     def test_relay_flag_and_reason_code_are_read_and_a_code_only_counts_when_the_relay_is_off(self):

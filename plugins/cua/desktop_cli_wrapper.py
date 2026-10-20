@@ -284,6 +284,14 @@ def _launch(native, arguments, environment, state_dir, progress):
         if caught_signal[0] is not None:
             exit_status = 128 + caught_signal[0]
     finally:
+        # Said before anything is ended: the app-server and the proxy die first and `closed` follows only after them,
+        # and until then the file would still say `ready` (from hours ago, for a Codex that was connected that long) over
+        # processes that are gone. The engine reads this as a host that is quitting, for a while from this time.
+        record.update(status="stopping", stopping_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        try:
+            _write_metadata(metadata_path, record)
+        except OSError:
+            pass  # A record that cannot be written must not keep the children from being ended.
         clean = _stop_owned((desktop_proxy, backend), shutdown_timeout)
         record.update(status="closed" if clean else "cleanup_unconfirmed",
                       backend_reaped=backend is None or backend.returncode is not None,

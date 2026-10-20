@@ -791,7 +791,7 @@ class AcceptRelayTests(MachineCase):
     def test_the_registry_has_to_name_this_relay_on_this_host(self):
         for changes in ({'relay': False}, {'relay': 'yes'}, {'relay_launcher': str(self.machine.data/'relay/other')},
                         {'relay_launcher': None}, {'socket_path': '/private/tmp/host/run-2/rpc.sock'}, {'status': 'closed'},
-                        {'schema_version': 2}):
+                        {'status': 'stopping', 'stopping_at': '2026-10-21T00:00:00Z'}, {'schema_version': 2}):
             with self.subTest(changes=changes):
                 self.registry(**changes)
                 self.assertFalse(self.accept(None)[0])

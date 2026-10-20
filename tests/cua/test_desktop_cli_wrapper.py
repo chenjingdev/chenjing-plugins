@@ -1,4 +1,5 @@
 """Launcher tests use an isolated fake CLI, never Codex, CUA, or a GUI."""
+import calendar
 import fcntl
 import hashlib
 import importlib.util
@@ -61,6 +62,14 @@ elif '--listen' in args:
     mode=os.environ.get('FIXTURE_MODE','normal')
     if mode=='hang':time.sleep(60)
     if mode=='stubborn':signal.signal(signal.SIGTERM,signal.SIG_IGN)
+    if mode=='witness':
+        def told_to_stop(signum,frame):
+            # What the host registry says at the moment the launcher tells this backend to stop.
+            seen=json.loads(pathlib.Path(os.environ['FIXTURE_HOST_FILE']).read_text())
+            with log.open('a') as output:
+                output.write(json.dumps({'role':'told-to-stop','pid':os.getpid(),'host':seen})+'\n')
+            os._exit(0)
+        signal.signal(signal.SIGTERM,told_to_stop)
     endpoint=args[args.index('--listen')+1].removeprefix('unix://') if hasattr(str,'removeprefix') else args[args.index('--listen')+1][7:]
     server=socket.socket(socket.AF_UNIX)
     if mode=='symlink':
@@ -330,6 +339,34 @@ class LifecycleTests(unittest.TestCase):
         self.assertLess(time.monotonic()-started,1.0)
         self.assertEqual(child.returncode,143)
         self.assert_reaped(metadata['backend_pid']);self.assert_reaped(metadata['desktop_proxy_pid'])
+
+    def test_the_launcher_says_it_is_stopping_and_since_when_before_it_stops_the_backend(self):
+        environment=dict(self.environment,FIXTURE_MODE='witness',FIXTURE_HOST_FILE=str(self.state/'host.json'))
+        child=self.start(environment=environment);ready=self.ready();asked=time.time()
+        child.stdin.close();child.wait(timeout=3)
+        self.assertEqual(child.returncode,0,child.stderr.read().decode())
+        [told]=[event for event in self.events() if event['role']=='told-to-stop']
+        seen=told['host']
+        self.assertEqual(seen['status'],'stopping')
+        named=calendar.timegm(time.strptime(seen['stopping_at'],'%Y-%m-%dT%H:%M:%SZ'))
+        self.assertTrue(asked-1<=named<=time.time()+1,(asked,named))
+        for key in ('owner_pid','backend_pid','desktop_proxy_pid','socket_path','relay','relay_config'):
+            self.assertEqual(seen[key],ready[key],key)
+        self.assertEqual(json.loads((self.state/'host.json').read_text())['status'],'closed')
+
+    def test_a_stopping_record_that_cannot_be_written_does_not_keep_the_backend_alive(self):
+        real=wrapper._write_metadata;calls=[]
+        def stopping_and_second_write_fail(path,data):
+            calls.append(dict(data))
+            if len(calls)==2 or data['status']=='stopping':raise OSError('PRIVATE_DISK_ERROR')
+            return real(path,data)
+        with patch.object(wrapper,'_write_metadata',side_effect=stopping_and_second_write_fail), \
+             patch.object(wrapper.os,'execve',side_effect=AssertionError('The backend had started')):
+            with self.assertRaises(OSError):
+                wrapper.main(list(PRIMARY),dict(self.environment))
+        self.assertEqual([call['status'] for call in calls],['starting','starting','stopping','closed'])
+        self.assert_reaped(calls[1]['backend_pid'])
+        self.assertEqual(json.loads((self.state/'host.json').read_text())['status'],'closed')
 
     def test_public_or_relative_state_paths_run_the_original_cli_without_backend_spawn(self):
         self.state.mkdir(mode=0o755)

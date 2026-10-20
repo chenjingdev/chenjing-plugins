@@ -16,6 +16,8 @@ SCHEMA_VERSION = 1
 IDLE_SECONDS = 30*60       # R16: an idle connection has had no CUA call for more than 30 minutes
 ACTIVE_SECONDS = 10        # R13: a CUA call in the last 10 seconds means the screen is in use
 ACTIVITY_LIMIT = 200       # R18: the newest 200 operations
+# A quitting Codex closes its host a few seconds before it ends; until then it is not one without a host (S2).
+HOST_STOP_GRACE = 30
 CONNECTION_ID = re.compile(r'^(claude|codex|cmux)-([0-9]{1,10})-([0-9]{1,12})$')
 SESSION_ID = re.compile(r'^[0-9A-Za-z][0-9A-Za-z._:-]{0,199}$')
 REASON = re.compile(r'^[a-z][a-z0-9_]{0,39}$')

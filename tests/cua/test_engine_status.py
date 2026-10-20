@@ -109,7 +109,7 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['host']['state'], 'missing')
         self.start_world(relay=False)
         self.assertEqual(self.status()['setup']['relay'], 'inactive')
-        self.machine.remove(1200)
+        self.machine.remove(1000)               # the host's wrapper (here also the app) is gone
         self.assertEqual(self.status()['host']['state'], 'closed')
 
 
@@ -147,6 +147,47 @@ class HostStopTests(StatusCase):
         (self.host_dir/'host.json').unlink()
         self.machine.add(1000, 1, self.commands.app_main, start=NOW-7200)
         self.assertEqual(self.status()['host']['state'], 'missing')
+
+    def long_connected_codex(self):
+        """Codex 1000 with its wrapper 1001, app-server 1100 and proxy 1200, all started 7 hours ago; the wrapper wrote
+        `ready` then and has written nothing since."""
+        self.machine.add(1000, 1, self.commands.app_main, start=NOW-7*3600)
+        self.machine.add(1001, 1000, '/usr/bin/python3 desktop_cli_wrapper.py', start=NOW-7*3600)
+        self.machine.add(1100, 1001, self.commands.app_server, start=NOW-7*3600)
+        self.machine.add(1200, 1001, self.commands.host_proxy, start=NOW-7*3600)
+        self.write_host(owner=1001, age=7*3600)
+
+    def test_a_codex_that_was_connected_for_hours_is_quitting_all_the_way_down(self):
+        # S2, the fourth round: the wrapper ends the app-server and the proxy before it writes `closed`, and the file
+        # of a host that has been ready for hours gives no grace.
+        self.long_connected_codex()
+        self.assertEqual(self.status()['host']['state'], 'ready')
+        self.machine.remove(1200)                       # the app let go of its proxy: Codex is quitting
+        self.assertEqual(self.status()['host'], {'state': 'stopping', 'since': None, 'started_before_setup': False})
+        self.machine.remove(1100)                       # the wrapper ended the app-server
+        self.assertEqual(self.status()['host']['state'], 'stopping')
+        self.machine.remove(1001)                       # the wrapper wrote `closed` and ended; Codex is still quitting
+        self.write_host(status='closed', owner=1001, age=2)
+        self.assertEqual(self.status()['host']['state'], 'stopping')
+        self.machine.now = NOW+40                       # and a Codex that is still here much later has no host
+        self.assertEqual(self.status()['host']['state'], 'closed')
+
+    def test_a_wrapper_that_wrote_stopping_keeps_the_host_quitting_until_the_grace_is_over(self):
+        self.long_connected_codex()
+        for pid in (1100, 1200):
+            self.machine.remove(pid)
+        self.write_host(status='stopping', owner=1001, stopping_at=iso(NOW-5), age=5)
+        self.assertEqual(self.status()['host'], {'state': 'stopping', 'since': iso(NOW-5), 'started_before_setup': False})
+        self.machine.now = NOW+30                       # 35 s after it began, and the wrapper is still there
+        self.assertEqual(self.status()['host']['state'], 'closed')
+
+    def test_a_codex_whose_wrapper_ended_without_a_word_has_no_host(self):
+        self.long_connected_codex()
+        self.machine.remove(1001)                       # `ready` is all the file says, and nothing will say more
+        self.assertEqual(self.status()['host']['state'], 'closed')
+        for pid in (1100, 1200):
+            self.machine.remove(pid)
+        self.assertEqual(self.status()['host']['state'], 'closed')
 
 
 class StartedBeforeSetupTests(StatusCase):
