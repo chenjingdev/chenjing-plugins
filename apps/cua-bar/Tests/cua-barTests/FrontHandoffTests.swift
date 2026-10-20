@@ -18,6 +18,8 @@ final class FakeFrontApps: FrontAppSwitching {
     private var observers: [@MainActor @Sendable (FrontApp) -> Void] = []
     /// The system does not allow the request: `bringToFront` answers false.
     var refusesToBringToFront = false
+    /// The system says yes and does not do it: `bringToFront` answers true and this app stays in front.
+    var keepsThisAppInFront = false
     /// Every `bringToFront`, the refused ones too.
     private(set) var asked: [FrontApp] = []
     private(set) var putDowns = 0
@@ -46,7 +48,7 @@ final class FakeFrontApps: FrontAppSwitching {
     func bringToFront(_ app: FrontApp) -> Bool {
         asked.append(app)
         guard !refusesToBringToFront, running.contains(app.pid) else { return false }
-        comesToFront(app)
+        if !keepsThisAppInFront { comesToFront(app) }
         return true
     }
 
@@ -142,6 +144,75 @@ struct FrontHandoffTests {
         #expect(handoff.popoverClosed(otherViewIsOpen: false) == .putDown)
         #expect(apps.asked == [terminal], "it was asked first")
         #expect(apps.putDowns == 1)
+    }
+
+    // MARK: The second look after a handover
+
+    /// Holds what `FrontHandoff` asks to run later, so a test runs it when it likes.
+    @MainActor private final class Later {
+        private(set) var delays: [TimeInterval] = []
+        private var works: [@MainActor @Sendable () -> Void] = []
+
+        func schedule(_ delay: TimeInterval, _ work: @escaping @MainActor @Sendable () -> Void) {
+            delays.append(delay)
+            works.append(work)
+        }
+
+        func runAll() {
+            let due = works
+            works = []
+            for work in due { work() }
+        }
+    }
+
+    @Test func aHandoverTheSystemSaysYesToButDoesNotCarryOutEndsWithThisAppLettingGoOfTheFront() {
+        let apps = FakeFrontApps(front: .other(terminal))
+        let later = Later()
+        let handoff = FrontHandoff(apps: apps, later: later.schedule)
+        apps.thisAppComesToFront()
+        apps.keepsThisAppInFront = true
+
+        #expect(handoff.popoverClosed(otherViewIsOpen: false) == .returned(terminal))
+        #expect(later.delays == [FrontHandoff.settleDelay], "it looks again a moment later")
+        #expect(apps.putDowns == 0, "not before the second look")
+        later.runAll()
+        #expect(apps.putDowns == 1, "still in front with nothing shown: this app lets go of the front place")
+    }
+
+    @Test func theSecondLookLeavesAHandoverThatWorkedAlone() {
+        let apps = FakeFrontApps(front: .other(terminal))
+        let later = Later()
+        let handoff = FrontHandoff(apps: apps, later: later.schedule)
+        apps.thisAppComesToFront()
+
+        #expect(handoff.popoverClosed(otherViewIsOpen: false) == .returned(terminal))
+        later.runAll()
+        #expect(apps.putDowns == 0)
+        #expect(apps.front == .other(terminal))
+    }
+
+    @Test func theSecondLookLeavesThisAppAloneWhenItShowsSomethingAgain() {
+        let apps = FakeFrontApps(front: .other(terminal))
+        let later = Later()
+        let handoff = FrontHandoff(apps: apps, later: later.schedule)
+        apps.thisAppComesToFront()
+        apps.keepsThisAppInFront = true
+
+        #expect(handoff.popoverClosed(otherViewIsOpen: false, stillClosed: { false }) == .returned(terminal))
+        later.runAll()
+        #expect(apps.putDowns == 0, "the person opened the popover again in the meantime")
+    }
+
+    @Test func noSecondLookIsNeededWhenThereWasNothingToHandOver() {
+        let apps = FakeFrontApps(front: .other(terminal))
+        let later = Later()
+        let handoff = FrontHandoff(apps: apps, later: later.schedule)
+
+        #expect(handoff.popoverClosed(otherViewIsOpen: false) == .notInFront)
+        apps.thisAppComesToFront()
+        apps.refusesToBringToFront = true
+        #expect(handoff.popoverClosed(otherViewIsOpen: false) == .putDown)
+        #expect(later.delays.isEmpty)
     }
 
     // MARK: Closing a popover that did not take the front

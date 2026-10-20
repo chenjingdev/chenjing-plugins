@@ -101,6 +101,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         // A click on a notification made this app the front app, and with the popover gone it has nothing to type
         // into: the front place goes back to the app the person was working in (S21). Opened from the icon, this
         // app is not in front and nothing happens.
-        frontHandoff.popoverClosed(otherViewIsOpen: anotherViewIsOpen)
+        frontHandoff.popoverClosed(otherViewIsOpen: anotherViewIsOpen, stillClosed: { [weak self] in
+            guard let self else { return false }
+            return !self.popover.isShown && !self.otherViewIsOpen()
+        })
     }
 }
