@@ -13,14 +13,20 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private let host: NSHostingController<PopoverView>
     private let otherViewIsOpen: @MainActor () -> Bool
+    private let frontHandoff: FrontHandoff
     private var subscription: AnyCancellable?
 
     /// `otherViewIsOpen`: another view of the same model (the verify panel) is shown, so closing the popover
-    /// does not close the model's view.
-    init(model: CUABarViewModel, maintenance: Maintenance? = nil, otherViewIsOpen: @escaping @MainActor () -> Bool = { false }) {
+    /// does not close the model's view, and the front place is not given back either.
+    /// `frontApps`: who is in front, and how this app gives the front place back (a fake in tests).
+    init(
+        model: CUABarViewModel, maintenance: Maintenance? = nil, otherViewIsOpen: @escaping @MainActor () -> Bool = { false },
+        frontApps: any FrontAppSwitching = WorkspaceFrontApps()
+    ) {
         self.model = model
         self.maintenance = maintenance
         self.otherViewIsOpen = otherViewIsOpen
+        frontHandoff = FrontHandoff(apps: frontApps)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         host = NSHostingController(rootView: PopoverView(model: model, maintenance: maintenance, quit: { NSApplication.shared.terminate(nil) }))
         super.init()
@@ -76,6 +82,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     private func showPopover() {
         guard let button = statusItem.button, !popover.isShown else { return }
+        // Giving the front place back can leave the app hidden, and a hidden app shows no popover.
+        frontHandoff.prepareToShowWindow()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
     }
@@ -88,6 +96,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
-        model.setPopoverOpen(otherViewIsOpen())
+        let anotherViewIsOpen = otherViewIsOpen()
+        model.setPopoverOpen(anotherViewIsOpen)
+        // A click on a notification made this app the front app, and with the popover gone it has nothing to type
+        // into: the front place goes back to the app the person was working in (S21). Opened from the icon, this
+        // app is not in front and nothing happens.
+        frontHandoff.popoverClosed(otherViewIsOpen: anotherViewIsOpen)
     }
 }

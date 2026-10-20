@@ -66,6 +66,8 @@ final class VerifyPanelController {
             opened(false)
         } else {
             fit()
+            // Giving the front place back can hide the app (FrontHandoff), and a hidden app shows no window.
+            NSApplication.shared.showAgainIfHidden()
             // Ordered in without activating the app or taking the key window: the person's app keeps both.
             panel.orderFrontRegardless()
             opened(true)
