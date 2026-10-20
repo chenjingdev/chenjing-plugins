@@ -3,10 +3,12 @@ import asyncio
 import copy
 from contextlib import ExitStack
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import stat
+import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -154,6 +156,47 @@ class QuietConfigTests(unittest.TestCase):
         for installed, config in ((None, None), ({}, {}), ({'marketplaces': 'x'}, {'config': {'mcp_servers': []}}),
                                   ([], 'x')):
             self.assertEqual(bridge.quiet_config(installed, config), {})
+
+
+def gone_stream():
+    """A stderr nobody reads any more: the other end of the pipe is closed, so every write fails with BrokenPipeError."""
+    reader, writer = os.pipe()
+    os.close(reader)
+    return os.fdopen(writer, 'w', buffering=1)
+
+
+def closed_stream():
+    stream = io.StringIO()
+    stream.close()
+    return stream
+
+
+def let_go(stream):
+    """Close a stream whose pending text can no longer be written."""
+    try:
+        stream.close()
+    except OSError:
+        pass
+
+
+class ClosedStderrTests(unittest.TestCase):
+    """Claude closes the bridge's stdio a few milliseconds after it stops the bridge (the MCP records of c43 and c45),
+    while the bridge is still cleaning up and logging what it does."""
+
+    def test_the_log_raises_nothing_when_stderr_is_gone_or_closed(self):
+        for label, make in (('the other end of the pipe is closed', gone_stream), ('the file is closed', closed_stream)):
+            with self.subTest(label):
+                stream = make()
+                self.addCleanup(let_go, stream)
+                with patch.object(sys, 'stderr', stream):
+                    bridge.HostMcp.log_stderr('owned_thread_unsubscribe_confirmed')
+                    bridge.HostMcp.log_stderr('owned_thread_cleanup_unconfirmed')       # again, with the first one unwritten
+
+    def test_the_log_still_writes_its_one_fixed_line_to_a_stderr_that_works(self):
+        stream = io.StringIO()
+        with patch.object(sys, 'stderr', stream):
+            bridge.HostMcp.log_stderr('owned_thread_unsubscribe_confirmed')
+        self.assertEqual(stream.getvalue(), 'cua: owned_thread_unsubscribe_confirmed\n')
 
 
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
@@ -504,6 +547,20 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         cleanup = [m for m in proxy.received if m.get('method') == 'thread/unsubscribe']
         self.assertEqual([m['params'] for m in cleanup], [{'threadId': HOST_THREAD}])
         self.assertFalse(any(m.get('method') in ('thread/archive', 'thread/delete', 'turn/interrupt') for m in proxy.received))
+
+    async def test_a_stderr_that_is_gone_does_not_cut_the_cleanup_short(self):
+        """What the bridge logs while it cleans up must not raise: the sequence would stop in the middle, with the thread
+        reported unconfirmed that the host confirmed and the connection never closed."""
+        for make in (gone_stream, closed_stream):
+            adapter, proxy, _, _, _ = self.fixture()
+            await self.initialize(adapter)
+            adapter.log = bridge.HostMcp.log_stderr          # the real log, not the list the fixture collects into
+            stream = make()
+            self.addCleanup(let_go, stream)
+            with patch.object(sys, 'stderr', stream):
+                report = await adapter.close()
+            self.assertEqual(report, {'owned_thread_unsubscribe': 'confirmed', 'connection_close': 'confirmed'})
+            self.assertTrue(proxy.was_closed)
 
     async def test_close_is_idempotent_and_unknown_creation_is_never_reported_as_unloaded(self):
         adapter, proxy, _, _, _ = self.fixture()

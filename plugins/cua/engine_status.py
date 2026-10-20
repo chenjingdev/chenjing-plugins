@@ -8,8 +8,8 @@ A connection is one AI conversation that uses CUA (R8):
   codex   a live relay record that serves no bridge, or a runtime without any record.
 cmux-cua is none of these; it is listed under other_tools. Each of its `cmux-cua mcp` processes (one per AI
 conversation) is a CmuxConnection that can be stopped on its own.
-A runtime that Codex itself started again for the thread of a bridge that was long gone, and that nobody has used,
-is none of these either: it is a RevivedRuntime, left out of the connections and only counted in the diagnosis.
+A runtime that Codex itself started again for the thread of a bridge that was gone, and that nobody has used, is none
+of these either: it is a RevivedRuntime, left out of the connections and only counted in the diagnosis.
 """
 import re
 
@@ -23,7 +23,10 @@ PRUNE_MIN_AGE = 60
 # A Codex that has just opened starts its host a few seconds later; until then it is not one without a host (S9).
 HOST_START_GRACE = 30
 # A bridge starts its thread, and so the runtime of it, within seconds. A runtime that came up this much later than the
-# bridge it names, with the bridge gone, was started again by Codex (S17, S18), not by that conversation.
+# bridge it names, with the bridge gone, was started again by Codex (S17, S18), not by that conversation. This tells the
+# runtimes whose relay did not say whether the bridge was there as it came up (`owner_running` missing, in a record from
+# before it was written, or null, the look failed). A relay that says it was not there needs no age (S4: a conversation
+# of 18 seconds, whose runtime Codex started again right after it ended).
 REVIVED_AFTER = 120
 
 
@@ -101,13 +104,14 @@ class CmuxConnection:
 
 
 class RevivedRuntime:
-    """A runtime that Codex started again by itself for the thread of a bridge that is long gone (S17, S18).
+    """A runtime that Codex started again by itself for the thread of a bridge that is gone (S17, S18, S4).
 
     Codex keeps the thread of a bridge for about half an hour after it was last used and, now and then, starts the
     servers of all its threads again; nothing of ours asks for that. The relay of the new runtime still carries the
-    old bridge's name. It belongs to no conversation and holds nothing: nobody ever called it and it has no open scope.
-    It is therefore no connection (not listed, not ended, not released or stopped by the app); the diagnosis counts it,
-    and Codex takes it down with the thread. One that was used even once stays an ended connection."""
+    old bridge's name, and saw that bridge gone as it came up (`owner_running`). It belongs to no conversation and
+    holds nothing: nobody ever called it and it has no open scope. It is therefore no connection (not listed, not ended,
+    not released or stopped by the app); the diagnosis counts it, and Codex takes it down with the thread. One that was
+    used even once stays an ended connection."""
 
     def __init__(self, relay, pids):
         self.pid = relay.pid
@@ -325,17 +329,21 @@ class View:
             self.connections.append(conn)
 
     def _brought_back(self, relay, named, running, former):
-        """Whether the relay is a runtime Codex started again for the thread of a bridge that was long gone.
+        """Whether the relay is a runtime Codex started again for the thread of a bridge that was gone.
 
-        It names a bridge that no longer runs and has no record, it came up more than REVIVED_AFTER seconds after that
-        bridge, and nothing was ever done with it: no call, no call in flight, no open scope, no line in the activity
-        log. A runtime with any of those stays an ended connection, whatever its age."""
+        It names a bridge that no longer runs and has no record, and nothing was ever done with it: no call, no call in
+        flight, no open scope, no line in the activity log. A runtime with any of those stays an ended connection,
+        whatever its age. Then it is a revival when its relay found that bridge gone as it came up (`owner_running`
+        false), at any age. A relay that did not say so (it found the bridge running, could not look, or wrote its
+        record before this was known) is told by its age: it came up more than REVIVED_AFTER seconds after the bridge."""
         if named is None or running is not None or former is not None:
             return False
         if relay.data.get('last_call_at') or relay.data.get('busy') is True or relay.data.get('scopes'):
             return False
         if relay.writer in self.operated:
             return False
+        if relay.data.get('owner_running') is False:
+            return True
         return relay.started_at-int(WRITER.match(named).group(3)) > REVIVED_AFTER
 
     def _runtime_connections(self):

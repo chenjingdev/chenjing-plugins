@@ -10,7 +10,8 @@
 //   - keeps a relay record, a control socket and activity lines in the codex-cua state directory. A Claude bridge
 //     that starts its thread with this relay names itself in CODEX_CUA_OWNER. The record carries that name, and so
 //     does every activity line: it still says whose call it was when the conversation, this relay and the bridge's
-//     own record are gone.
+//     own record are gone. The record also says whether that bridge was running when this relay came up
+//     (owner_running): a runtime that Codex starts again for a conversation that has ended finds it gone.
 // The format of those files is documented in the engine records description of the plugin.
 //
 // Nothing the user did is written down: no tool arguments or results, no code, titles, URLs, page text or
@@ -154,7 +155,7 @@ function relay(child) {
   const text = value => typeof value === 'string' && value.length > 0 && value.length <= 200;
 
   // ---------------------------------------------------------------- records (all optional)
-  let records = null;            // {dir, file, socketPath, activity, lock, startedAt, appServerPid, controlPath}
+  let records = null;            // {dir, file, socketPath, activity, lock, startedAt, appServerPid, controlPath, ownerRunning}
   let persistTimer = null;
 
   function processInfo(pids) {
@@ -170,6 +171,22 @@ function relay(child) {
       result.set(Number(m[1]), {ppid: Number(m[2]), startedAt: Math.floor(started.getTime() / 1000)});
     }
     return result;
+  }
+
+  // Whether the bridge called `name` (bridge-<pid>-<started_at>) runs, by the engine's own test: its pid is a process
+  // that started when the name says, a second either way. true or false when the look was made, null when it could not
+  // be. That pid is looked up on its own and in a try of its own, never in the call that reads this relay's identity:
+  // ps -p exits 1, and execFileSync throws, when no listed process exists, and a bridge that is gone must not cost
+  // the relay its records. Exit 1 with nothing printed is the answer "not running"; any other failure is no answer.
+  function bridgeRuns(name) {
+    try {
+      if (process.env.CODEX_CUA_RELAY_TEST_FAIL === 'owner-check') throw new Error('injected');   // test hook, as in prepare()
+      const [, pid, startedAt] = name.split('-');
+      const found = processInfo([Number(pid)]).get(Number(pid));
+      return found !== undefined && Math.abs(found.startedAt - Number(startedAt)) <= 1;
+    } catch (error) {
+      return error && error.status === 1 && !error.stdout ? false : null;
+    }
   }
 
   function privateDirectory(dir) {
@@ -209,6 +226,7 @@ function relay(child) {
     return {
       schema_version: 1, kind: 'relay', pid: me, started_at: records.startedAt,
       runtime_pid: child.pid ?? null, root_pid: rootPid, app_server_pid: records.appServerPid, cwd, owner,
+      ...(owner ? {owner_running: records.ownerRunning} : {}),
       control_path: records.controlPath, last_call_at: lastCallAt, busy: callsInFlight > 0,
       scopes: [...scopes.values()].map(s => ({session_id: s.session_id, turn_id: s.turn_id, first_at: s.first_at,
         last_at: s.last_at, subagent: s.subagent})),
@@ -269,6 +287,9 @@ function relay(child) {
   }
 
   try {openRecords();} catch {records = null;}
+  // The bridge is looked at once, here, as this relay comes up; the record keeps what was seen then. A runtime that
+  // Codex starts again after the conversation has ended finds no bridge, however soon after the bridge began (S4).
+  if (records && owner) records.ownerRunning = bridgeRuns(owner);
 
   // ---------------------------------------------------------------- scopes
   function scopeOf(message) {

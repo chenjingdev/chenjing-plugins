@@ -291,8 +291,14 @@ class HostMcp:
     @staticmethod
     def log_stderr(event):
         # All call sites use authored fixed strings, never exception/result text.
-        sys.stderr.write('cua: ' + event + '\n')
-        sys.stderr.flush()
+        try:
+            sys.stderr.write('cua: ' + event + '\n')
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            # Claude closes the bridge's stdio a few milliseconds after it stops it, while the bridge still cleans up and
+            # logs what it does (c43, c45). A log that raised there would cut the clean-up short. Like emit_stdout, it
+            # says nothing instead: the pipe, the descriptor or the file object can be the closed one.
+            pass
 
     def reply(self, ident, result=None, error=None):
         message = {'jsonrpc': '2.0', 'id': ident}

@@ -683,6 +683,65 @@ class RevivedRuntimeTests(StatusCase):
         self.runtime(last_call_at=iso(at(500)))
         self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
 
+    # --- what the relay saw as it came up: was the bridge it names running? (`owner_running`, build 9) -------------
+
+    def test_a_runtime_that_found_its_bridge_gone_as_it_came_up_is_one_however_soon_after_the_bridge(self):
+        """The conversation of the 4th round (S4) lived 18 seconds; Codex started its runtime again right after it ended."""
+        self.start_world()
+        self.runtime(start=NOW-5000+18, owner_running=False)
+        status = self.status()
+        self.assertEqual((status['connections'], status['leases']['maybe_left']), ([], []))
+        [item] = engine_status.build_view(self.context()).revived
+        self.assertEqual((item.pid, item.memory_bytes), (2001, (1000+400+2000)*1024))
+
+    def test_the_same_runtime_that_found_its_bridge_running_or_cannot_say_stays_an_ended_connection(self):
+        self.start_world()
+        # True: it came up under a bridge that ran. None: the look failed. Ellipsis: no such key, a record from before.
+        # The rest is no boolean, and is not taken for "gone" either.
+        for value in (True, None, Ellipsis, 0, 'false', []):
+            with self.subTest(owner_running=value):
+                self.runtime(start=NOW-5000+18, owner_running=value)
+                self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+
+    def test_a_value_that_says_nothing_leaves_it_to_the_age_of_the_runtime_as_before(self):
+        self.start_world()
+        for value in (True, None, Ellipsis):
+            with self.subTest(owner_running=value):
+                self.runtime(start=NOW-5000+120, owner_running=value)
+                self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+                self.runtime(start=NOW-5000+121, owner_running=value)
+                self.assertEqual(self.listed(), [])
+
+    def test_one_that_found_its_bridge_gone_is_an_ended_connection_when_anything_was_done_with_it(self):
+        self.start_world()
+        for label, fields in (('a call', {'last_call_at': iso(at(500))}), ('a call in flight', {'busy': True}),
+                              ('an open scope', {'scopes': [State.scope(SESSION_A)], 'cleanup': 'open'})):
+            with self.subTest(label):
+                self.runtime(start=NOW-5000+18, owner_running=False, **fields)
+                self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+        self.runtime(start=NOW-5000+18, owner_running=False)
+        self.assertEqual(self.listed(), [])
+        self.state.activity([State.line('relay-2001-%d' % (NOW-5000+18), 300, None)])      # the activity log knows it
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+
+    def test_one_that_found_its_bridge_gone_is_an_ended_connection_when_the_bridge_left_a_record(self):
+        self.start_world()
+        self.runtime(start=NOW-5000+18, owner_running=False)
+        self.state.bridge('d1', 7001, NOW-5000, owner_pid=501)
+        self.assertEqual(self.listed(), [('claude', 'ended', 2001)])
+
+    def test_one_that_found_its_bridge_gone_is_never_one_while_that_bridge_runs(self):
+        self.start_world()
+        self.add_claude(500)
+        self.add_bridge(7001, 500, NOW-5000)
+        self.runtime(start=NOW-5000+18, owner_running=False)
+        self.assertEqual(self.listed(), [('claude', 'active', 7001)])
+
+    def test_a_runtime_that_names_no_bridge_is_a_codex_connection_whatever_it_says_about_one(self):
+        self.start_world()
+        self.runtime(owner=None, start=NOW-5000+18, owner_running=False)
+        self.assertEqual(self.listed(), [('codex', 'active', 2001)])
+
     def test_a_runtime_with_an_open_scope_stays_an_ended_connection(self):
         self.start_world()
         self.runtime(scopes=[State.scope(SESSION_A)], cleanup='open')

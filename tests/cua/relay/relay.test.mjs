@@ -1,5 +1,6 @@
 // The relay between cua-repl and the original runtime: transparency, scopes, records, activity lines.
 import assert from 'node:assert/strict';
+import {spawn, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,6 +89,82 @@ test('an owner that is not a bridge name is not written down', async t => {
     const {fixture} = await boot(t, {env: {CODEX_CUA_OWNER: value}});
     assert.equal((await readRecord(fixture)).owner, null, value);
   }
+});
+
+// A bridge is running when its pid is a process that started when its name says (within a second), the engine's own test.
+const bridgeName = (pid, startedAt) => `bridge-${pid}-${startedAt}`;
+
+// A process that has run and is gone: nobody has its pid (a pid is not given out again within the moments of a test).
+function endedProcess() {
+  const started = Math.floor(Date.now() / 1000);
+  return {pid: spawnSync(process.execPath, ['-e', '']).pid, started};
+}
+
+test('a relay whose bridge is running says so in its record: that pid, started when its name says, a second either way', async t => {
+  const started = startedAtOf(process.pid);       // this test run stands in for the bridge
+  for (const shift of [0, -1, 1]) {
+    const {fixture} = await boot(t, {env: {CODEX_CUA_OWNER: bridgeName(process.pid, started + shift)}});
+    const record = await readRecord(fixture);
+    assert.equal(record.owner_running, true, 'shift ' + shift);
+  }
+});
+
+test('a relay whose bridge is gone says so: no such process, or another one that has its pid now', async t => {
+  const started = startedAtOf(process.pid);
+  const ended = endedProcess();
+  for (const [label, name] of [
+    ['a bridge that has ended', bridgeName(ended.pid, ended.started)],
+    ['the pid of a process that started 100 seconds after the name says', bridgeName(process.pid, started - 100)],
+    ['... 100 seconds before', bridgeName(process.pid, started + 100)],
+    ['... 2 seconds after', bridgeName(process.pid, started - 2)],
+    ['... 2 seconds before', bridgeName(process.pid, started + 2)],
+    ['a pid no process can have', bridgeName(9999999999, started)],
+  ]) {
+    const {fixture, client} = await boot(t, {env: {CODEX_CUA_OWNER: name}});
+    const record = await readRecord(fixture);
+    assert.equal(record.owner, name, label);
+    assert.equal(record.owner_running, false, label);
+    assert.equal((await client.call('still relayed', turn('s-gone', 't1'))).result.content[0].text, 'echo:still relayed', label);
+  }
+});
+
+test('a relay nobody named, or named by something that is not a bridge, has no owner_running at all', async t => {
+  for (const value of [undefined, '', 'relay-1-2', 'bridge-1-2; rm', 'bridge-' + '9'.repeat(11) + '-1']) {
+    const {fixture} = await boot(t, {env: {CODEX_CUA_OWNER: value}});
+    const record = await readRecord(fixture);
+    assert.equal('owner_running' in record, false, String(value));
+    assert.equal(record.owner, null, String(value));
+  }
+});
+
+test('a look at the bridge that fails costs neither the record nor the relaying, and the record says it could not look', async t => {
+  const owner = bridgeName(process.pid, startedAtOf(process.pid));
+  const {fixture, client} = await boot(t, {env: {CODEX_CUA_OWNER: owner, CODEX_CUA_RELAY_TEST_FAIL: 'owner-check'}});
+  const record = await readRecord(fixture);
+  assert.equal(record.owner, owner);
+  assert.equal(record.owner_running, null);
+  assert.equal(record.pid, client.child.pid);
+  assert.equal(record.root_pid, process.pid, 'the identity of the relay is read as ever');
+  assert.equal((await client.call('relayed', turn('s-look', 't1'))).result.content[0].text, 'echo:relayed');
+  const settled = await readRecord(fixture, r => r.scopes.length === 1);
+  assert.deepEqual(settled.scopes.map(s => s.session_id), ['s-look']);
+  assert.equal(activityLines(fixture)[0].owner, owner);
+  assert.equal(client.stderr, '');
+});
+
+test('the bridge is looked at once, as the relay comes up: a bridge that ends later changes nothing in the record', async t => {
+  // A stand-in bridge that ends when the test closes its input, without any signal.
+  const bridge = spawn(process.execPath, ['-e', "process.stdin.resume(); process.stdin.on('end', () => process.exit(0));"],
+    {stdio: ['pipe', 'ignore', 'ignore']});
+  const ended = new Promise(resolve => bridge.once('exit', resolve));
+  t.after(() => bridge.stdin.destroy());
+  const {fixture, client} = await boot(t, {env: {CODEX_CUA_OWNER: bridgeName(bridge.pid, startedAtOf(bridge.pid))}});
+  assert.equal((await readRecord(fixture)).owner_running, true);
+  bridge.stdin.end();
+  await ended;
+  await client.call('later', turn('s-later', 't1'));
+  const record = await readRecord(fixture, r => r.scopes.length === 1);
+  assert.equal(record.owner_running, true, 'what the relay saw when it came up, not what is so now');
 });
 
 test('scopes come from the host-supplied context and from nowhere else', async t => {
