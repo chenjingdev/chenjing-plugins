@@ -4,9 +4,9 @@ export type Book = { items: Ask[]; closed: Closed[]; seq: number }
 export type AsksStats = { judged: number; failed: number }
 export type SideStats = { checked: number; side: number; failed: number; totalMs: number }
 
-// 곁대화 한 번과, 다시 불러와도 남기는 곁대화
+// 곁대화 한 번과, 다시 불러와도 남기는 곁대화와 써 둔 답(drafts: 내 차례 항목 id별로 아직 보내지 않은 답. 0.7.2~0.7.3에는 없었다)
 export type SideTurn = { q: string; a?: string; err?: string }
-export type SideKeep = { chat: SideTurn[] }
+export type SideKeep = { chat: SideTurn[]; drafts?: Record<string, string> }
 
 export type Side = 'pro' | 'con'
 export type Turn = { side: Side; text: string }

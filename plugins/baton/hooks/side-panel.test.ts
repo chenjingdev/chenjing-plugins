@@ -5,7 +5,7 @@ import type { Engine, TestBody } from 'claude-code/testing'
 
 type On = Parameters<TestBody>[1]
 
-import { classifyPrompt, forkPrompt, isHuman, isSide, recentWork, ringAfterDrop, settingsFrom, withAnswerLine, withSideCommand, worthChecking } from './side-panel'
+import { answersText, classifyPrompt, focusAfter, forkPrompt, isHuman, isSide, recentWork, ringAfterDrop, settingsFrom, withAnswerLine, withSideCommand, worthChecking } from './side-panel'
 
 test('settings default to haiku with automatic routing off', () => {
   expect(settingsFrom({})).toEqual({ model: 'haiku', auto: false })
@@ -63,7 +63,20 @@ test('the panel fork carries the earlier side turns and the new question', () =>
   expect(forkPrompt([], '첫 질문')).not.toContain('[앞선 곁대화]')
 })
 
-test('[답하기] puts the item in the prompt box: alone, in front of what was typed, or on a new line after other answers', () => {
+test('collected answers go to the main conversation one line per item', () => {
+  expect(answersText([{ q: 'debate를 옮길까요?', a: ' ㅇㅇ ' }, { q: 'B?', a: '' }, { q: 'C?', a: '나중에' }])).toBe('↩ debate를 옮길까요? → ㅇㅇ\n↩ C? → 나중에')
+  expect(answersText([])).toBe('')
+})
+
+test('after saving, the ring goes to the next unanswered item, then to send', () => {
+  expect(focusAfter([1, 2, 3], 1, new Set([1]), true)).toBe('todo-btn-2')
+  expect(focusAfter([1, 2, 3], 3, new Set([3]), true)).toBe('todo-btn-1')
+  expect(focusAfter([1, 2, 3], 2, new Set([1, 2, 3]), true)).toBe('send-answers')
+  expect(focusAfter([1], 1, new Set(), false)).toBe(undefined)
+})
+
+// 입력칸을 그리지 못하는 화면에서만 쓴다
+test('without an input field, [답하기] puts the item in the prompt box: alone, in front of what was typed, or on a new line after other answers', () => {
   expect(withAnswerLine('debate를 끌까요?', '')).toBe('↩ debate를 끌까요? → ')
   expect(withAnswerLine('debate를 끌까요?', '  \n')).toBe('↩ debate를 끌까요? → ')
   expect(withAnswerLine('B?', 'ㅇㅇ 그렇게 해')).toBe('↩ B? → ㅇㅇ 그렇게 해')
@@ -91,7 +104,7 @@ async function seed($: Engine, on: On, texts: string[]) {
   return $.ui.mount({ plugin: 'baton', surface: 'terminal', component: 'Pane', props: PANE_PROPS, requestId: 'side-chat' })
 }
 
-// 테스트의 입력창: [답하기]와 q가 읽고 쓰는 곳
+// 테스트의 입력창: q가 읽고 쓰는 곳
 function fakeBox(on: On) {
   const box = { text: '' }
   on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
@@ -103,23 +116,67 @@ function fakeBox(on: On) {
   return box
 }
 
-// 패널 입력칸은 한글 조합이 깨져서(2026-10-10) 답은 입력창에서 쓴다. 보낸 답의 항목은 바로 닫혀 패널에서 사라진다
-test('answers go through the prompt box, and sending them closes their items in the panel', async ($, on) => {
-  const box = fakeBox(on)
-  on('prompt.submit', (_$, e) => ({ text: e.text }))
+// 2026-10-11 사용자 "그전에 클릭해서 input채우는 경험이 좋앗던거 같음": 답은 다시 패널 입력칸에서 쓴다(0.7.1처럼).
+// 보내는 쪽이 사람 턴을 직접 세서 보낸 항목은 바로 닫힌다(0.7.2): 엔진은 baton이 보낸 글에 baton의 prompt.submit 훅을 돌리지 않는다
+test('answers written in the panel are sent together as the person\'s words, and their items close at once', async ($, on) => {
+  const got: { text: string; origin: unknown }[] = []
+  on('prompt.submit', (_$, e) => {
+    got.push({ text: e.text, origin: e.origin })
+    return { text: e.text }
+  })
   const ui = await seed($, on, ['debate를 옮길까요?', '자동 분리를 끌까요?'])
-  expect(await ui.find({ type: 'Input' })).toBe(undefined)
+  expect(await ui.find({ key: 'send-answers' })).toBe(undefined)
   await ui.press({ key: 'todo-btn-1' })
-  expect(box.text).toBe('↩ debate를 옮길까요? → ')
-  box.text += 'ㅇㅇ'
-  await ui.press({ key: 'todo-btn-2' })
-  expect(box.text).toBe('↩ debate를 옮길까요? → ㅇㅇ\n↩ 자동 분리를 끌까요? → ')
-  box.text += '아니, 첫 문단 규칙만'
-  await $.prompt.submit({ text: box.text, origin: { kind: 'composer' }, wait: false })
-  await ui.redraw()
+  // 입력칸이 열린 항목은 버튼 줄 대신 입력칸을 둔다
   expect(await ui.find({ key: 'todo-btn-1' })).toBe(undefined)
-  expect(await ui.find({ key: 'todo-btn-2' })).toBe(undefined)
+  await ui.input({ key: 'answer-1', text: 'ㅇㅇ' })
+  await ui.press({ key: 'todo-btn-2' })
+  await ui.input({ key: 'answer-2', text: ' 아니, 첫 문단 규칙만 ' })
+  expect((await ui.find({ key: 'send-answers' }))?.text).toContain('답 2개 본 대화로 보내기')
+  expect((await ui.find({ key: 'todo-btn-1' }))?.text).toContain('고치기')
+  expect(await ui.find({ text: '답: ㅇㅇ' })).not.toBe(undefined)
+  await ui.press({ key: 'send-answers' })
+  expect(got).toEqual([{ text: '↩ debate를 옮길까요? → ㅇㅇ\n↩ 자동 분리를 끌까요? → 아니, 첫 문단 규칙만', origin: { kind: 'plugin', name: 'baton', asUser: true } }])
+  await ui.redraw()
+  expect(await ui.find({ key: 'send-answers' })).toBe(undefined)
+  expect(await ui.find({ key: 'todo-btn-1' })).toBe(undefined)
   expect(await ui.find({ text: '내 차례 0' })).not.toBe(undefined)
+})
+
+test('an empty answer removes the draft', async ($, on) => {
+  const ui = await seed($, on, ['A?'])
+  await ui.press({ key: 'todo-btn-1' })
+  await ui.input({ key: 'answer-1', text: 'ㅇㅇ' })
+  expect(await ui.find({ key: 'send-answers' })).not.toBe(undefined)
+  await ui.press({ key: 'todo-btn-1' })
+  await ui.input({ key: 'answer-1', text: '  ' })
+  expect(await ui.find({ key: 'send-answers' })).toBe(undefined)
+})
+
+// 쓰는 동안 value가 바뀌어 다시 그려지면 엔진이 친 글을 그 값으로 되돌린다: 새 답에는 value를 주지 않고, 고칠 때만 써 둔 답을 준다
+test('the answer field gets no value for a new answer, the saved one when fixing it, and no change handler', async ($, on) => {
+  const ui = await seed($, on, ['A?'])
+  await ui.press({ key: 'todo-btn-1' })
+  const fresh = await ui.find({ key: 'answer-1' })
+  expect(fresh?.props.value).toBe(undefined)
+  expect(fresh?.props.autoFocus).toBe(true)
+  expect('onInput' in (fresh?.props ?? {})).toBe(false)
+  await ui.input({ key: 'answer-1', text: '여름' })
+  await ui.press({ key: 'todo-btn-1' })
+  expect((await ui.find({ key: 'answer-1' }))?.props.value).toBe('여름')
+})
+
+test('answers that could not be sent come back with their items', async ($, on) => {
+  on('prompt.submit', () => ({ drop: '지금은 보낼 수 없어요' }))
+  on('ui.toast', () => ({ value: undefined }))
+  const ui = await seed($, on, ['A?'])
+  await ui.press({ key: 'todo-btn-1' })
+  await ui.input({ key: 'answer-1', text: 'ㅇㅇ' })
+  await ui.press({ key: 'send-answers' })
+  await ui.redraw()
+  expect(await ui.find({ text: '내 차례 1' })).not.toBe(undefined)
+  expect(await ui.find({ text: '답: ㅇㅇ' })).not.toBe(undefined)
+  expect(await ui.find({ key: 'send-answers' })).not.toBe(undefined)
 })
 
 // 2026-10-11 사용자 "답이 필요없는 질문인데 사이드로옴": 다르게 한 것 줄 하나만 남긴 답이 내 차례에 [답하기] 항목을 올리고 패널을 열었다
@@ -189,11 +246,16 @@ test('a side question sent to the main conversation goes as the person\'s words,
   expect(judged.at(-1)).toContain('[이번 사용자 메시지]\nzsh랑 bash 차이?')
 })
 
-test('keys: digits answer the item, q asks on the side, and the ring starts on the first item', async ($, on) => {
+test('keys: digits answer the item, s sends, q asks on the side, and the ring starts on the first unanswered item', async ($, on) => {
   const ui = await seed($, on, ['A?', 'B?'])
   expect((await ui.find({ key: 'todo-btn-1' }))?.props).toMatchObject({ hotkey: '1', autoFocus: true })
   expect((await ui.find({ key: 'todo-btn-2' }))?.props.hotkey).toBe('2')
   expect((await ui.find({ key: 'todo-btn-2' }))?.props.autoFocus).toBe(undefined)
+  await ui.press({ key: 'todo-btn-1' })
+  await ui.input({ key: 'answer-1', text: 'ㅇㅇ' })
+  expect((await ui.find({ key: 'todo-btn-1' }))?.props.autoFocus).toBe(undefined)
+  expect((await ui.find({ key: 'todo-btn-2' }))?.props.autoFocus).toBe(true)
+  expect((await ui.find({ key: 'send-answers' }))?.props.hotkey).toBe('s')
   expect((await ui.find({ key: 'ask-focus' }))?.props.hotkey).toBe('q')
 })
 
@@ -233,10 +295,13 @@ test('with the side_auto option on, an unrelated question goes to the side chat'
 
 import { fromKeep, toKeep } from './side-panel'
 
-test('the side chat survives a reload through state', () => {
-  const k = toKeep([{ q: '먼저?', a: '답' }, { q: '기다리는 중' }])
-  expect(k).toEqual({ chat: [{ q: '먼저?', a: '답' }, { q: '기다리는 중' }] })
+test('the side chat and the answers written in the panel survive a reload through state', () => {
+  const k = toKeep([{ q: '먼저?', a: '답' }, { q: '기다리는 중' }], new Map([[3, 'ㅇㅇ']]))
+  expect(k).toEqual({ chat: [{ q: '먼저?', a: '답' }, { q: '기다리는 중' }], drafts: { 3: 'ㅇㅇ' } })
   const back = fromKeep(k)
+  expect(back.drafts.get(3)).toBe('ㅇㅇ')
+  // 0.7.2~0.7.3이 남긴 값에는 drafts가 없다
+  expect(fromKeep({ chat: [] }).drafts.size).toBe(0)
   expect(back.chat[0]).toEqual({ q: '먼저?', a: '답' })
   // 답을 기다리던 질문은 다시 불러온 뒤 답이 오지 않으니 그렇다고 보여 준다
   expect(back.chat[1]?.err).toContain('다시 불러와')

@@ -8,8 +8,11 @@ import { paneTitle } from './debate'
 import { answerMark, closeAnswered, EMPTY, restore, settingsFrom as asksSettingsFrom } from './open-asks'
 
 // 전체 화면 모드의 옆 패널 하나에 위는 "내 차례"(open-asks가 모은 할 일), 아래는 "곁대화"를 보여 준다.
-// 내 차례의 [답하기]는 그 항목을 입력창에 "↩ 항목 → "로 붙이고, 답은 입력창에서 쓴다. 곁질문도 입력창에서 /baton-side로 쓴다:
-// 패널 입력칸(Input)은 한글 조합이 깨졌다(2026-10-10 "ㅌ튀어나와서", "기억ㅇ ㅣ섞인단"). 지난 대화 기록에서 입력창으로 친 글에는 이런 깨짐이 거의 없었다
+// 내 차례는 [답하기]를 누르면 그 질문 아래 입력칸에 답을 써 두었다가(Enter 저장), 모은 답을 한 번에 본 대화로 보낸다(s).
+// 0.7.2~0.7.3은 패널 입력칸에서 한글 조합이 깨져서(2026-10-10 "ㅌ튀어나와서", "기억ㅇ ㅣ섞인단") 답을 입력창에서 쓰게 했다.
+// 2026-10-11 사용자 "그전에 클릭해서 input채우는 경험이 좋앗던거 같음": 깨질 수 있다는 것을 알고 패널 입력칸을 골랐다.
+// 같은 날 tmux에서 패널 입력칸의 커서는 제자리에 놓였다. 쓰는 도중에 패널을 다시 그리는 것이 남은 의심이라, 쓰는 동안은 입력칸 값을 다시 넣지 않고 곁대화 답이 와도 다시 그리지 않는다.
+// 곁질문은 입력창에서 /baton-side로 쓴다
 // 작업과 관계없는 곁질문은 본 대화에 넣지 않고 곁대화로 보낸다: 질문처럼 보이는 메시지만 작은 모델로 가르고,
 // 애매하거나 판정이 늦거나 패널을 둘 자리가 없으면 본 대화로 보낸다. 곁대화의 답은 지금 대화를 이어받은 모델($.model.fork)이 쓴다.
 const ENABLED = { plugin: 'baton', key: 'sideEnabled' } as const
@@ -44,20 +47,25 @@ let chat: SideTurn[] = []
 const KEEP = { plugin: 'baton', key: 'sideKeep' } as const
 const PANE = 'side-chat'
 export const SIDE_PANE = PANE
+const SEND_KEY = 'send-answers'
+// 내 차례 항목 id별로 써 두고 아직 보내지 않은 답, 지금 입력칸이 열린 항목
+const drafts = new Map<number, string>()
+let editing: number | undefined
 
-// 0.7.1까지는 패널에 써 둔 답(drafts·sent)도 여기 두었다. 이제 답은 입력창에 있어서 곁대화만 남기고, 예전 값은 읽을 때 버린다
-export function toKeep(c: readonly SideTurn[]): SideKeep {
-  return { chat: [...c] }
+// 곁대화와 써 둔 답을 함께 둔다. 0.7.1의 sent(보냈지만 아직 닫히지 않은 답)는 이제 없다: 보내는 쪽이 항목을 바로 닫는다(0.7.2)
+export function toKeep(c: readonly SideTurn[], d: ReadonlyMap<number, string>): SideKeep {
+  return { chat: [...c], drafts: Object.fromEntries(d) }
 }
 
-export function fromKeep(k: SideKeep | undefined): { chat: SideTurn[] } {
+export function fromKeep(k: SideKeep | undefined): { chat: SideTurn[]; drafts: Map<number, string> } {
   // 답을 기다리던 중에 다시 불러왔으면 그 답은 오지 않는다
   const chat = (k?.chat ?? []).map(t => (t.a || t.err ? t : { ...t, err: '답을 기다리는 중에 플러그인을 다시 불러와 답을 받지 못했어요.' }))
-  return { chat }
+  const drafts = new Map(Object.entries(k?.drafts ?? {}).map(([id, v]) => [Number(id), v] as const))
+  return { chat, drafts }
 }
 
 async function persist($: EngineInterface) {
-  await $.state.set(KEEP, toKeep(chat))
+  await $.state.set(KEEP, toKeep(chat, drafts))
 }
 
 // 처음 그리거나 처음 쓸 때 한 번 state에서 되살린다: /reload-plugins로 다시 불러왔을 때는 session.start가 오지 않아 거기서만 되살리면 비어 보였다(2026-10-09 tmux로 확인)
@@ -70,7 +78,10 @@ async function ensureLoaded($: EngineInterface) {
 
 async function hydrate($: EngineInterface) {
   const { value } = await $.state.get(KEEP)
-  chat = fromKeep(value).chat
+  const k = fromKeep(value)
+  chat = k.chat
+  drafts.clear()
+  for (const [id, v] of k.drafts) drafts.set(id, v)
 }
 
 export function isHuman(origin: { kind?: string } | undefined): boolean {
@@ -164,7 +175,7 @@ export function forkPrompt(history: readonly SideTurn[], question: string): stri
   ].join('\n')
 }
 
-// [답하기]가 입력창에 붙이는 글. 빈 입력창이면 "↩ 항목 → "만 붙이고, 먼저 써 둔 글이 있으면 그 글을 답으로 보고 앞에 항목을 붙인다.
+// 입력칸을 그리지 못하는 화면에서 [답하기]가 입력창에 붙이는 글. 빈 입력창이면 "↩ 항목 → "만 붙이고, 먼저 써 둔 글이 있으면 그 글을 답으로 보고 앞에 항목을 붙인다.
 // 이미 "↩" 줄이 있으면 다음 줄에 하나 더 붙여 여러 답을 한 번에 보낸다. 같은 항목은 두 번 붙이지 않는다.
 // 입력창에서 Enter를 치면 open-asks가 "↩ 항목 → 답" 줄을 보고 그 항목을 바로 닫는다
 export function withAnswerLine(q: string, draft: string): string {
@@ -185,12 +196,12 @@ export function withSideCommand(draft: string): string | undefined {
   return d ? `/baton-side ${d}` : '/baton-side '
 }
 
-// 패널은 키보드를 입력창에 돌려줄 수 없어서(엔진에 그런 호출이 없다) Esc를 누르라고 알린다
+// 입력창에 붙인 뒤에는 Esc 없이 바로 이어 쓸 수 있다: 패널에서 클릭하든 숫자·q를 누르든 이어 친 글자는 입력창에 들어갔다(2026-10-11 tmux로 확인)
 async function answerTodo($: EngineInterface, q: string) {
   const { text: draft } = await $.prompt.read()
   const text = withAnswerLine(q, draft)
   const r = text === draft ? { isFilled: true } : await $.prompt.fill({ text, mode: 'replace' })
-  $.ui.toast(r.isFilled ? '입력창에 붙였어요. Esc를 누르고 답을 쓰세요.' : '입력창에 붙이지 못했어요.', { timeoutMs: 6000 })
+  $.ui.toast(r.isFilled ? '입력창에 붙였어요. 이어서 답을 쓰고 Enter.' : '입력창에 붙이지 못했어요.', { timeoutMs: 6000 })
 }
 
 async function askInBox($: EngineInterface) {
@@ -201,7 +212,73 @@ async function askInBox($: EngineInterface) {
     return
   }
   const r = text === draft ? { isFilled: true } : await $.prompt.fill({ text, mode: 'replace' })
-  $.ui.toast(r.isFilled ? 'Esc를 누르고 곁질문을 쓰세요. 답은 이 패널에 와요.' : '입력창에 붙이지 못했어요.', { timeoutMs: 6000 })
+  $.ui.toast(r.isFilled ? '입력창에 붙였어요. 곁질문을 쓰고 Enter. 답은 이 패널에 와요.' : '입력창에 붙이지 못했어요.', { timeoutMs: 6000 })
+}
+
+// 모은 답을 본 대화로 보낼 글: 한 줄에 한 항목. "↩ 항목 → 답" 줄을 보고 보내는 쪽(countHumanTurn)이 그 항목을 닫는다
+export function answersText(list: readonly { q: string; a: string }[]): string {
+  return list
+    .filter(x => x.a.trim())
+    .map(x => `↩ ${x.q} → ${x.a.trim()}`)
+    .join('\n')
+}
+
+// 답을 저장한 뒤 링이 갈 곳: 아직 답이 없는 다음 항목의 [답하기], 다 썼으면 보내기 버튼
+export function focusAfter(order: readonly number[], from: number, done: ReadonlySet<number>, canSend: boolean): string | undefined {
+  const i = order.indexOf(from)
+  const next = [...order.slice(i + 1), ...order.slice(0, Math.max(0, i))].find(id => !done.has(id))
+  if (next !== undefined) return `todo-btn-${next}`
+  return canSend ? SEND_KEY : undefined
+}
+
+// 닫힌 항목의 답은 버린다
+function prune(open: readonly number[]) {
+  for (const id of [...drafts.keys()]) if (!open.includes(id)) drafts.delete(id)
+  if (editing !== undefined && !open.includes(editing)) editing = undefined
+}
+
+// 숫자나 Enter로 눌렀으면 패널이 키보드를 쥐고 있어서 바로 새 입력칸으로 옮긴다.
+// 마우스로 눌렀으면 키보드는 아직 입력창에 있어 옮기기가 거절된다(2026-10-11 tmux로 확인). 그때는 패널을 focus로 다시 열어 키보드를 가져온 뒤 옮긴다:
+// 엔진은 입력창이 비어 있을 때만 내주므로, 쓰던 글이 있으면 입력칸을 눌러 쓰라고 알린다
+async function startAnswer($: EngineInterface, id: number) {
+  editing = id
+  $.ui.invalidate('ui.render')
+  const to = { requestId: PANE, key: `answer-${id}` }
+  if (!(await $.ui.focus(to)).deny) return
+  await openPane($, true)
+  if (!(await $.ui.focus(to)).deny) return
+  $.ui.toast('입력창에 쓰던 글이 있어서 키보드가 아직 입력창에 있어요. 답 칸을 눌러서 쓰세요.', { timeoutMs: 6000 })
+}
+
+function saveAnswer($: EngineInterface, id: number, value: string, order: readonly number[]) {
+  const v = value.trim()
+  if (v) drafts.set(id, v)
+  else drafts.delete(id)
+  editing = undefined
+  $.ui.invalidate('ui.render')
+  void persist($).catch(() => undefined)
+  const key = focusAfter(order, id, new Set(drafts.keys()), drafts.size > 0)
+  // 입력칸이 사라진 뒤 다시 그려지고 나서 옮긴다
+  if (key) moveRing($, key)
+}
+
+// 써 둔 답을 한 번에 보낸다. 보내는 쪽이 사람 턴을 세며 그 항목들을 바로 닫고(sendAsUser), 못 보냈으면 항목과 답을 되살린다
+async function sendAnswers($: EngineInterface) {
+  await ensureLoaded($)
+  const { value: b } = await $.state.get(ASKS)
+  const list = (b?.items ?? []).filter(a => drafts.has(a.id))
+  const said = new Map(list.map(a => [a.id, drafts.get(a.id) ?? ''] as const))
+  const text = answersText(list.map(a => ({ q: a.text, a: said.get(a.id) ?? '' })))
+  if (!text) return
+  for (const a of list) drafts.delete(a.id)
+  editing = undefined
+  $.ui.invalidate('ui.render')
+  await persist($).catch(() => undefined)
+  if (await sendAsUser($, text)) return
+  await update($, asks, (cur: Book): Book => restore(cur, list))
+  for (const [id, v] of said) drafts.set(id, v)
+  $.ui.invalidate('ui.render')
+  await persist($).catch(() => undefined)
 }
 
 // open-asks의 countHumanTurn과 같다: baton이 보낸 글은 baton의 prompt.submit 훅을 모두 건너뛰고, $는 다른 파일의 함수로 넘길 수 없다
@@ -212,16 +289,18 @@ async function countHumanTurn($: EngineInterface, text: string) {
   await update($, asks, (cur: Book): Book => closeAnswered(cur, text, turnNo, Date.now()))
 }
 
-// 사용자가 쓴 글을 본 대화로 보낸다(asUser: 본 대화의 모델은 사용자의 말로 읽는다).
+// 사용자가 쓴 글을 본 대화로 보낸다(asUser: 본 대화의 모델은 사용자의 말로 읽는다). 보냈으면 true.
 // baton이 보낸 글은 baton의 prompt.submit 훅을 모두 건너뛰므로, 사람 턴 세기와 [되돌리기] 내리기를 여기서 한다
-async function sendAsUser($: EngineInterface, text: string) {
+async function sendAsUser($: EngineInterface, text: string): Promise<boolean> {
   if (lastRemoved.length) {
     lastRemoved = []
     $.ui.invalidate('ui.render')
   }
   await countHumanTurn($, text)
   const r = await $.prompt.submit({ text, asUser: true }).catch((err: unknown) => ({ drop: String(err) }))
-  if (r.drop !== undefined) $.ui.toast(`본 대화로 못 보냈어요: ${r.drop}`, { timeoutMs: 8000 })
+  if (r.drop === undefined) return true
+  $.ui.toast(`본 대화로 못 보냈어요: ${r.drop}`, { timeoutMs: 8000 })
+  return false
 }
 
 const FOCUS_DELAY_MS = 150
@@ -238,7 +317,8 @@ async function askSide($: EngineInterface, question: string) {
   const r = await $.model.fork({ prompt: forkPrompt(history, q) })
   if (r.isAnswered) turn.a = r.text
   else turn.err = `답을 받지 못했어요: ${r.reason}`
-  $.ui.invalidate('ui.render')
+  // 패널 입력칸에 답을 쓰는 중이면 지금 다시 그리지 않는다: 저장하면 그때 함께 그려진다(머리 주석)
+  if (editing === undefined) $.ui.invalidate('ui.render')
   await persist($).catch(() => undefined)
 }
 
@@ -392,35 +472,76 @@ export function registerSide(on: On, options: PluginOptions): void {
   const judgeModel = asksSettingsFrom(options).model
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Markdown, Button } = $.ui.resolve(e)
+    const els = $.ui.resolve(e)
+    const { Box, Text, Markdown, Button } = els
     if (!(await live($))) return <Text dimColor>{OFF_TEXT}</Text>
+    // 입력칸을 그리지 못하는 화면이면 [답하기]가 입력창에 붙인다(answerTodo)
+    const Input = 'Input' in els ? els.Input : undefined
     const width = Math.max(20, e.props.bodyColumns - 2)
     await ensureLoaded($)
     const todo = (await read($, asks)).items
+    prune(todo.map(a => a.id))
     const shown = todo.slice(0, 8)
-    // 항목 글은 패널 폭을 다 쓰고(줄이 바뀌면 번호 뒤에 맞춰 들여 쓴다), 버튼은 그 아래 줄에 둔다.
+    const order = shown.map(a => a.id)
+    // 패널이 키보드를 받으면 링은 아직 답 안 한 첫 [답하기]에서 시작한다: 숫자·글자 단축키는 버튼에 링이 있을 때만 먹고, 입력칸에 있으면 글자로 들어가기 때문
+    const firstOpen = editing === undefined ? shown.findIndex(a => !drafts.has(a.id)) : -1
+    // 항목 글은 패널 폭을 다 쓰고(줄이 바뀌면 번호 뒤에 맞춰 들여 쓴다), 써 둔 답과 입력칸과 버튼은 그 아래 줄에 둔다.
     // 버튼을 글 양옆에 두던 때는 글이 패널의 반쯤으로 좁아져 한 항목이 예닐곱 줄이 됐다(2026-10-10)
-    const rows = shown.map((a, i) => (
-      <Box key={`todo-${a.id}`} flexDirection="column">
+    const rows = shown.map((a, i) => {
+      const draft = drafts.get(a.id)
+      const isEditing = Input !== undefined && editing === a.id
+      const question = (
         <Box key={`todo-q-${a.id}`} flexDirection="row">
           <Text key={`todo-n-${a.id}`}>{`${i + 1}. `}</Text>
           <Box key={`todo-tb-${a.id}`} flexShrink={1}>
             <Text key={`todo-t-${a.id}`} wrap="wrap">{a.text}</Text>
           </Box>
         </Box>
-        <Box key={`todo-acts-${a.id}`} flexDirection="row" gap={1} marginLeft={3}>
-          <Button
-            key={`todo-btn-${a.id}`}
-            label="답하기"
-            hotkey={String(i + 1)}
-            dimColor
-            {...(i === 0 ? { autoFocus: true as const } : {})}
-            onPress={() => void answerTodo($, a.text).catch(() => undefined)}
-          />
-          <Button key={`todo-del-${a.id}`} label="지우기" dimColor onPress={() => void dropTodo($, a).catch(() => undefined)} />
+      )
+      // 입력칸의 value는 여는 순간의 답으로 두고 쓰는 동안 바꾸지 않는다: 값이 바뀌어 다시 그려지면 엔진이 친 글을 그 값으로 되돌린다
+      const field =
+        Input && isEditing
+          ? [
+              <Box key={`answer-box-${a.id}`} marginLeft={3}>
+                <Input
+                  key={`answer-${a.id}`}
+                  label="답"
+                  placeholder="짧게 답하고 Enter (비우면 지움)"
+                  submitLabel="저장"
+                  {...(draft !== undefined ? { value: draft } : {})}
+                  autoFocus
+                  onSubmit={v => saveAnswer($, a.id, v, order)}
+                />
+              </Box>,
+            ]
+          : draft !== undefined
+            ? [
+                <Box key={`todo-said-${a.id}`} marginLeft={3} flexShrink={1}>
+                  <Text key={`todo-a-${a.id}`} wrap="wrap">{`답: ${draft}`}</Text>
+                </Box>,
+              ]
+            : []
+      const actions = isEditing
+        ? []
+        : [
+            <Box key={`todo-acts-${a.id}`} flexDirection="row" gap={1} marginLeft={3}>
+              <Button
+                key={`todo-btn-${a.id}`}
+                label={draft === undefined ? '답하기' : '고치기'}
+                hotkey={String(i + 1)}
+                dimColor
+                {...(i === firstOpen ? { autoFocus: true as const } : {})}
+                onPress={() => void (Input ? startAnswer($, a.id) : answerTodo($, a.text)).catch(() => undefined)}
+              />
+              <Button key={`todo-del-${a.id}`} label="지우기" dimColor onPress={() => void dropTodo($, a).catch(() => undefined)} />
+            </Box>,
+          ]
+      return (
+        <Box key={`todo-${a.id}`} flexDirection="column">
+          {[question, ...field, ...actions]}
         </Box>
-      </Box>
-    ))
+      )
+    })
     // 방금 지운 항목은 다음 메시지를 보내기 전까지 [되돌리기]로 살린다
     const removed = lastRemoved
     const undoRow = removed.length
@@ -437,6 +558,10 @@ export function registerSide(on: On, options: PluginOptions): void {
       <Text key="todo-h" bold>{`내 차례 ${todo.length}`}</Text>,
       ...(todo.length ? rows : [<Text key="todo-none" dimColor>지금 답하거나 볼 것이 없어요.</Text>]),
       ...undoRow,
+      // 보내기는 이 패널의 주된 버튼이라 하나만 진하게 둔다
+      ...(drafts.size
+        ? [<Button key={SEND_KEY} label={`답 ${drafts.size}개 본 대화로 보내기 (s)`} hotkey="s" variant="primary" onPress={() => void sendAnswers($).catch(() => undefined)} />]
+        : []),
       // 모두 지우기 버튼은 두지 않는다: 2026-10-06 잘못 눌려 다 지워졌다. 항목마다 [지우기]를 두고, 지운 직후에는 [되돌리기]를 띄운다
       ...(todo.length ? [<Text key="todo-hint" dimColor wrap="wrap">{KEYS_HINT}</Text>] : []),
     ]
@@ -557,7 +682,7 @@ export function registerSide(on: On, options: PluginOptions): void {
     return {
       text: question
         ? '옆 패널의 곁대화에서 답해요.'
-        : '옆 패널을 열었어요. 위는 내 차례, 아래는 곁대화예요. 숫자를 누르면 그 질문이 입력창에 붙어요: Esc로 입력창에 가서 답을 쓰고 Enter. q는 곁질문, ctrl+x tab은 다시 패널로.',
+        : '옆 패널을 열었어요. 위는 내 차례, 아래는 곁대화예요. 숫자를 누르면 그 질문 아래에 답 칸이 열려요: 쓰고 Enter로 저장, s로 모아 보내요. q는 곁질문, Esc는 입력창으로, ctrl+x tab은 다시 패널로.',
     }
   })
 }
