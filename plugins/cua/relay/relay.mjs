@@ -158,9 +158,10 @@ function relay(child) {
   let records = null;            // {dir, file, socketPath, activity, lock, startedAt, appServerPid, controlPath, ownerRunning}
   let persistTimer = null;
 
-  function processInfo(pids) {
+  // `stderr`: 'pipe' keeps what ps says there for the caller (in the error it throws), never for this relay's stderr.
+  function processInfo(pids, stderr = 'ignore') {
     const output = execFileSync('/bin/ps', ['-o', 'pid=,ppid=,lstart=', '-p', pids.join(',')], {
-      encoding: 'utf8', env: {...process.env, LC_ALL: 'C'}, timeout: 2000, stdio: ['ignore', 'pipe', 'ignore']});
+      encoding: 'utf8', env: {...process.env, LC_ALL: 'C'}, timeout: 2000, stdio: ['ignore', 'pipe', stderr]});
     const months = {Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11};
     const result = new Map();
     for (const line of output.split('\n')) {
@@ -176,16 +177,18 @@ function relay(child) {
   // Whether the bridge called `name` (bridge-<pid>-<started_at>) runs, by the engine's own test: its pid is a process
   // that started when the name says, a second either way. true or false when the look was made, null when it could not
   // be. That pid is looked up on its own and in a try of its own, never in the call that reads this relay's identity:
-  // ps -p exits 1, and execFileSync throws, when no listed process exists, and a bridge that is gone must not cost
-  // the relay its records. Exit 1 with nothing printed is the answer "not running"; any other failure is no answer.
+  // whatever ps makes of a bridge that is gone must not cost the relay its records. Exit 1 with nothing printed on
+  // either stream is the answer "not running" (ps found no such process); ps saying why on stderr (a pid it will not
+  // look up), a listing without that pid, or any other failure is no answer.
   function bridgeRuns(name) {
     try {
       if (process.env.CODEX_CUA_RELAY_TEST_FAIL === 'owner-check') throw new Error('injected');   // test hook, as in prepare()
       const [, pid, startedAt] = name.split('-');
-      const found = processInfo([Number(pid)]).get(Number(pid));
-      return found !== undefined && Math.abs(found.startedAt - Number(startedAt)) <= 1;
+      const found = processInfo([Number(pid)], 'pipe').get(Number(pid));
+      if (found === undefined) return null;
+      return Math.abs(found.startedAt - Number(startedAt)) <= 1;
     } catch (error) {
-      return error && error.status === 1 && !error.stdout ? false : null;
+      return error && error.status === 1 && !error.stdout && !error.stderr ? false : null;
     }
   }
 

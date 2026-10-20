@@ -24,9 +24,9 @@ PRUNE_MIN_AGE = 60
 HOST_START_GRACE = 30
 # A bridge starts its thread, and so the runtime of it, within seconds. A runtime that came up this much later than the
 # bridge it names, with the bridge gone, was started again by Codex (S17, S18), not by that conversation. This tells the
-# runtimes whose relay did not say whether the bridge was there as it came up (`owner_running` missing, in a record from
-# before it was written, or null, the look failed). A relay that says it was not there needs no age (S4: a conversation
-# of 18 seconds, whose runtime Codex started again right after it ended).
+# runtimes whose relay did not see the bridge gone as it came up: `owner_running` true (the bridge was there), null (the
+# look failed) or missing (a record from before it was written). A relay that says the bridge was not there needs no
+# age (S4: a conversation of 18 seconds, whose runtime Codex started again right after it ended).
 REVIVED_AFTER = 120
 
 
@@ -108,7 +108,8 @@ class RevivedRuntime:
 
     Codex keeps the thread of a bridge for about half an hour after it was last used and, now and then, starts the
     servers of all its threads again; nothing of ours asks for that. The relay of the new runtime still carries the
-    old bridge's name, and saw that bridge gone as it came up (`owner_running`). It belongs to no conversation and
+    old bridge's name. Either it saw that bridge gone as it came up (`owner_running` false), or, when it does not say
+    so, it came up more than REVIVED_AFTER after that bridge. It belongs to no conversation and
     holds nothing: nobody ever called it and it has no open scope. It is therefore no connection (not listed, not ended,
     not released or stopped by the app); the diagnosis counts it, and Codex takes it down with the thread. One that was
     used even once stays an ended connection."""

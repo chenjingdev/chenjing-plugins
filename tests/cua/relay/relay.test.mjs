@@ -118,7 +118,6 @@ test('a relay whose bridge is gone says so: no such process, or another one that
     ['... 100 seconds before', bridgeName(process.pid, started + 100)],
     ['... 2 seconds after', bridgeName(process.pid, started - 2)],
     ['... 2 seconds before', bridgeName(process.pid, started + 2)],
-    ['a pid no process can have', bridgeName(9999999999, started)],
   ]) {
     const {fixture, client} = await boot(t, {env: {CODEX_CUA_OWNER: name}});
     const record = await readRecord(fixture);
@@ -126,6 +125,16 @@ test('a relay whose bridge is gone says so: no such process, or another one that
     assert.equal(record.owner_running, false, label);
     assert.equal((await client.call('still relayed', turn('s-gone', 't1'))).result.content[0].text, 'echo:still relayed', label);
   }
+});
+
+test('a pid ps will not look up is no answer, not a bridge that is gone: ps said why, and none of it reaches stderr', async t => {
+  const name = bridgeName(9999999999, startedAtOf(process.pid));   // a bridge name, but too large for a pid
+  const {fixture, client} = await boot(t, {env: {CODEX_CUA_OWNER: name}});
+  const record = await readRecord(fixture);
+  assert.equal(record.owner, name);
+  assert.equal(record.owner_running, null);
+  assert.equal((await client.call('still relayed', turn('s-nopid', 't1'))).result.content[0].text, 'echo:still relayed');
+  assert.equal(client.stderr, '');
 });
 
 test('a relay nobody named, or named by something that is not a bridge, has no owner_running at all', async t => {
