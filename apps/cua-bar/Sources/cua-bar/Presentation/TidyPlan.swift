@@ -54,15 +54,34 @@ enum TidyPlan {
         }
     }
 
-    /// The ended connection whose 정리 is the way to let go of this leftover lease, if there is one: it still
-    /// serves the session, so the lease cannot be aimed at by its id (not `releasable`) until that connection
-    /// has let go of it. The lease is then no thing of its own: the connection's line is where to press, and a
-    /// second line for the same session would count it twice and send the person to the extension reset (S16).
-    /// A connection whose 정리 is off (the app can neither stop nor release it) is no way: the lease keeps its
-    /// line, with the advice to reset the extension, which is all that is left for it.
-    static func endedConnection(serving lease: LeftoverLease, in status: EngineStatus) -> Connection? {
-        guard !lease.releasable, let session = lease.sessionID else { return nil }
-        return endedConnections(in: status).first { $0.sessionID == session && way(for: $0) != nil }
+    /// Whether the line of a connection has a button to press: 정리 on an ended connection the app can tidy, 탭 풀기
+    /// on a live one that can release. The other has its button off, and no way to press.
+    static func hasButton(_ connection: Connection) -> Bool {
+        connection.state == .ended ? way(for: connection) != nil : connection.canRelease
+    }
+
+    /// The connections of the list that hold the session of this leftover lease now. A lease that cannot be aimed
+    /// at by its id (not `releasable`) is held by a connection of the list: the lease is its to let go of.
+    static func holders(of lease: LeftoverLease, in status: EngineStatus) -> [Connection] {
+        guard !lease.releasable, let session = lease.sessionID else { return [] }
+        return status.connections.filter { $0.sessionID == session }
+    }
+
+    /// The line to press instead of this leftover lease's own, if there is one: the connection that holds its session
+    /// and has a button. For an ended connection that is 정리, for a live one 탭 풀기; either lets go of the session.
+    /// The lease is then no thing of its own: a second line for the same session would count it twice and send the
+    /// person to the extension reset (S16), when the line to press is another one, and a light one.
+    /// A holder without a button is no way: the lease keeps its line, with the advice to reset the extension, which
+    /// is all that is left for it. A live holder is preferred to an ended one.
+    static func lineToPress(for lease: LeftoverLease, in status: EngineStatus) -> Connection? {
+        let pressable = holders(of: lease, in: status).filter(hasButton)
+        return pressable.first { $0.state != .ended } ?? pressable.sorted(by: newestFirst).first
+    }
+
+    /// Whether a connection that is not over holds the session of this leftover lease. Its owner is there, so
+    /// nothing was left behind by one that is gone: the lease is no news for a notification.
+    static func ownerIsAlive(for lease: LeftoverLease, in status: EngineStatus) -> Bool {
+        holders(of: lease, in: status).contains { $0.state != .ended }
     }
 
     /// The leftover leases of Claude conversations the engine can aim at. A Codex chat's lease is

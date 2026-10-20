@@ -432,6 +432,35 @@ struct StatusEvaluatorTests {
         #expect(problem.nextStep == "하나씩 풀 방법이 없어요 — 목록 맨 아래 안내를 따라 주세요")
     }
 
+    @Test func aLeaseTheLineOfAConnectionLetsGoOfIsNoProblemOfItsOwn() throws {
+        // A live connection holds the leftover session (its thread's relay died with a scope open): its 탭 풀기 is where to press.
+        var status = try healthy()
+        status.connections[0].sessionID = "019a-live"
+        status.connections[0].canRelease = true
+        status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-live", agent: .codex, connectionID: "codex-2-2", cwd: nil, endedAt: Fixtures.now, releasable: false)]
+        let summary = evaluate(status)
+        #expect(summary.problem == nil, "nothing but the hidden lease is left, so no card")
+        #expect(summary.icon == .ready)
+        // Its button off: nothing to press there, and the card says so with the guidance at the bottom.
+        status.connections[0].canRelease = false
+        let problem = try #require(evaluate(status).problem)
+        #expect(problem.kind == .leasesMaybeLeft)
+        #expect(problem.nextStep == "하나씩 풀 방법이 없어요 — 목록 맨 아래 안내를 따라 주세요")
+    }
+
+    @Test func theCardCountsOnlyTheLeasesTheListShowsAndAimsAtThose() throws {
+        var status = try healthy()
+        status.connections[0].sessionID = "019a-live"
+        status.connections[0].canRelease = true
+        status.leases.maybeLeft = [
+            LeftoverLease(sessionID: "019a-live", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: false), // held: hidden
+            LeftoverLease(sessionID: "019a-shown", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: false),
+        ]
+        #expect(try #require(evaluate(status).problem).nextStep == "하나씩 풀 방법이 없어요 — 목록 맨 아래 안내를 따라 주세요")
+        status.leases.maybeLeft[1].releasable = true // the shown one can be aimed at
+        #expect(try #require(evaluate(status).problem).nextStep == "목록 맨 위의 탭 풀기를 눌러 주세요")
+    }
+
     @Test func onlyCodexSessionsToAimAtSendThePersonToTheirRows() throws {
         var status = try healthy()
         status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-codex", agent: .codex, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]

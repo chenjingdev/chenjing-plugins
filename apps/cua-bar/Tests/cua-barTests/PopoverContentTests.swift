@@ -323,11 +323,47 @@ struct PopoverContentTests {
         #expect(connections.guidance.needsAttention, "the extension reset is what is left, so its advice opens")
     }
 
-    @Test func onlyAnEndedConnectionTakesTheLeaseLineAway() throws {
-        var status = try runtimeAndItsDeadBridge()
-        status.connections[0].state = .active
-        let tidy = try #require(content(of: status).connections.tidy)
-        #expect(tidy.rows.map(\.id) == ["lease-left-019a-c21"], "a live connection's session is not the 정리 of anything")
+    // MARK: One session, one line — a live connection holds it (build 7)
+
+    /// What a person had on screen: a live Claude bridge (resting) whose thread's relay died with a scope open. The dead
+    /// record lists the bridge's own session, so the lease cannot be aimed at while the bridge holds it.
+    private func liveConnectionAndItsDeadRelay(state: ConnectionState = .idle, canRelease: Bool = true) throws -> EngineStatus {
+        var status = try Fixtures.status("status-ready")
+        status.connections = [Connection(
+            id: "claude-23601-1792412520", agent: .claude, state: state, cwd: "/Users/chenjing/dev/unified-login",
+            startedAt: Fixtures.now.addingTimeInterval(-3600), sessionID: "019a-live", canRelease: canRelease, canStop: true)]
+        status.leases.maybeLeft = [LeftoverLease(
+            sessionID: "019a-live", agent: .codex, connectionID: "codex-23654-1792412521", cwd: "/Users/chenjing/dev/unified-login",
+            endedAt: Fixtures.now.addingTimeInterval(-7200), releasable: false)]
+        return status
+    }
+
+    @Test func aLeaseALiveConnectionHoldsIsNotASecondLine() throws {
+        for state in [ConnectionState.idle, .active] {
+            let connections = content(of: try liveConnectionAndItsDeadRelay(state: state)).connections
+            #expect(connections.tidy == nil, "the live line's 탭 풀기 is the one place to press: \(state)")
+            #expect(connections.groups.flatMap(\.rows).map(\.id) == ["claude-23601-1792412520"])
+            #expect(connections.guidance.needsAttention == false, "and no advice to reset the extension")
+        }
+    }
+
+    @Test func aLiveConnectionWithItsButtonOffLeavesTheLeaseLineAndItsAdvice() throws {
+        let connections = content(of: try liveConnectionAndItsDeadRelay(canRelease: false)).connections
+        let tidy = try #require(connections.tidy)
+        #expect(tidy.rows.map(\.id) == ["lease-left-019a-live"], "no button to press on the live line: the lease keeps its own")
+        #expect(connections.guidance.needsAttention)
+    }
+
+    @Test func aLiveConnectionOfAnotherSessionTakesNothingAway() throws {
+        var status = try liveConnectionAndItsDeadRelay()
+        status.connections[0].sessionID = "019a-other"
+        #expect(try #require(content(of: status).connections.tidy).rows.map(\.id) == ["lease-left-019a-live"])
+    }
+
+    @Test func aLeaseTheEngineCanAimAtKeepsItsLineBesideTheLiveConnectionToo() throws {
+        var status = try liveConnectionAndItsDeadRelay()
+        status.leases.maybeLeft[0].releasable = true
+        #expect(try #require(content(of: status).connections.tidy).rows.map(\.id) == ["lease-left-019a-live"])
     }
 
     @Test func theLeaseNoticeIsSaidOnlyWhereThereIsALeaseLine() throws {

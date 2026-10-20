@@ -6,7 +6,8 @@ import Foundation
 /// - A lease the owner left behind: once per session, when the owner has been gone for more than a
 ///   minute (`ended_at`, or when the app first saw it if that is null) and it is still listed (R16).
 ///   One the automatic cleanup is about to let go of, by itself or with the ended connection that still
-///   serves its session, waits until the cleanup has tried and is done.
+///   serves its session, waits until the cleanup has tried and is done. One a live connection holds is
+///   none: its owner is there.
 struct NotificationPlanner: Sendable {
     static let lingeringAfter: TimeInterval = 60
     /// After a post that did not go out (notifications off), try again no sooner than this.
@@ -39,6 +40,9 @@ struct NotificationPlanner: Sendable {
         var listed: Set<String> = []
         for entry in status.leases.maybeLeft {
             guard let id = entry.sessionID ?? entry.connectionID else { continue }
+            // A live connection holds the session: its owner is there, so nobody left it behind (a thread whose runtime
+            // died with a scope open and runs again). Not listed, so its minute starts over if the owner ever goes.
+            if TidyPlan.ownerIsAlive(for: entry, in: status) { continue }
             let key = "lease:" + id
             listed.insert(key)
             let seen = firstSeen[key] ?? now
@@ -47,7 +51,7 @@ struct NotificationPlanner: Sendable {
             guard now.timeIntervalSince(goneSince) > Self.lingeringAfter else { continue }
             if CleanupPlanner.isCandidate(entry) {
                 guard let cleanupKey = CleanupPlanner.key(for: entry), cleanupTried.contains(cleanupKey), !cleanupRunning else { continue }
-            } else if let covering = TidyPlan.endedConnection(serving: entry, in: status), CleanupPlanner.isCandidate(covering) {
+            } else if let covering = TidyPlan.lineToPress(for: entry, in: status), CleanupPlanner.isCandidate(covering) {
                 // An ended connection still serves the session: the same cleanup lets go of both (S21).
                 guard cleanupTried.contains(CleanupPlanner.key(for: covering)), !cleanupRunning else { continue }
             }

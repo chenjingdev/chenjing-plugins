@@ -166,6 +166,23 @@ struct NotificationPlannerTests {
         #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).count == 1)
     }
 
+    @Test func aLeaseALiveConnectionHoldsIsNeverNewsOfAnOwnerThatIsGone() throws {
+        var planner = NotificationPlanner()
+        let entry = LeftoverLease(sessionID: "019a-live", agent: .codex, connectionID: "codex-23654-1", cwd: nil, endedAt: nil, releasable: false)
+        var status = try leaseStatus([entry])
+        status.connections = [Connection(id: "claude-23601-1", agent: .claude, state: .idle, sessionID: "019a-live", canRelease: true, canStop: true)]
+        // The owner is there, with its 탭 풀기 or without it: nothing was left behind, so there is nothing to say.
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).isEmpty)
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(3600), cleanupTried: [], cleanupRunning: false).isEmpty)
+        status.connections[0].canRelease = false
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(7200), cleanupTried: [], cleanupRunning: false).isEmpty)
+        // The owner goes (an ended line the app cannot tidy): the lease is news a minute after the app saw it without one.
+        status.connections[0].state = .ended
+        status.connections[0].canStop = false
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(10_800), cleanupTried: [], cleanupRunning: false).isEmpty)
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(10_861), cleanupTried: [], cleanupRunning: false).map(\.key) == ["lease:019a-live"])
+    }
+
     @Test func anEntryWithNoSessionIsKeyedByItsConnection() throws {
         var planner = NotificationPlanner()
         let entry = LeftoverLease(sessionID: nil, agent: .codex, connectionID: "codex-5-5", cwd: nil, endedAt: t0.addingTimeInterval(-600), releasable: false)

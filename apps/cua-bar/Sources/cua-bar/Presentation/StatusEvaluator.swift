@@ -201,9 +201,11 @@ enum StatusEvaluator {
                 nextStep: worthTidying ? tidyStep : settled ? tabsReleasedStep : cannotTidyStep,
                 warning: nil, fix: nil, fixLabel: nil)
         }
-        if !status.leases.maybeLeft.isEmpty {
+        // A lease the line of a connection lets go of is no problem of its own: that line is where to press (S16).
+        let leftover = status.leases.maybeLeft.filter { TidyPlan.lineToPress(for: $0, in: status) == nil }
+        if !leftover.isEmpty {
             // No count: when the lease list cannot be read, the number would be a guess (R14).
-            let aimable = status.leases.maybeLeft.filter { $0.releasable && $0.sessionID != nil }
+            let aimable = leftover.filter { $0.releasable && $0.sessionID != nil }
             let nextStep = aimable.isEmpty ? noWayToReleaseStep : releaseLeasesStep
             return Problem(
                 kind: .leasesMaybeLeft, title: "점유가 남았을 수 있어요", nextStep: nextStep,
