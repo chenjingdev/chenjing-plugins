@@ -313,6 +313,18 @@ struct PopoverContentTests {
         #expect(tidy.rows.map(\.id) == ["ended-claude-31806-1792419210"])
     }
 
+    @Test func anEndedLineTheAppHasDoneAllItCanForIsNoButtonAndTheLeaseKeepsItsLine() throws {
+        var status = try runtimeAndItsDeadBridge()
+        status.connections[0].canStop = false // the app may only release it
+        let settled = PopoverContent(status: status, now: Fixtures.now, calendar: Fixtures.utc, tabsReleased: ["claude-31806-1792419210"])
+        // Its tabs are released in this run and its 정리 is off: the lease still there is not behind a button that works.
+        let tidy = try #require(settled.connections.tidy)
+        #expect(tidy.rows.map(\.id) == ["ended-claude-31806-1792419210", "lease-left-019a-c21"])
+        #expect(settled.connections.guidance.needsAttention)
+        // Before that, its 정리 is the way, as ever.
+        #expect(try #require(content(of: status).connections.tidy).rows.map(\.id) == ["ended-claude-31806-1792419210"])
+    }
+
     @Test func anEndedConnectionTheAppCannotTidyLeavesTheLeaseLineAndItsAdviceAsTheOnlyWayOn() throws {
         var status = try runtimeAndItsDeadBridge()
         status.connections[0].canStop = false

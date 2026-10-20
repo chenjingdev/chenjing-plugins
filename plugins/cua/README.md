@@ -128,7 +128,7 @@ CUA Bar가 쓰는 명령을 직접 부를 수도 있습니다. 모두 `~/.local/
 
 안전 규칙은 다음과 같습니다.
 
-- `release-session`은 주인이 사라진 세션만 풉니다. 살아 있는 연결이 쓰는 세션은 `session_live`로, 기록에 없는 세션은 `not_found`로 거절합니다. Codex 대화의 세션은 나중에 다시 열 수 있으므로 `--user`(사용자가 직접 누른 일)를 붙일 때만 풀고, 안 붙이면 `needs_user`로 거절합니다. AI는 `--user`를 붙이지 않고, AI가 쓰는 MCP 도구에는 이 기능이 없습니다.
+- `release-session`은 주인이 사라진 세션만 풉니다. 살아 있는 연결이 쓰는 세션은 `session_live`로, 기록에 없는 세션은 `not_found`로 거절합니다. Codex 대화의 세션은 나중에 다시 열 수 있으므로 `--user`(사용자가 직접 누른 일)를 붙일 때만 풀고, 안 붙이면 `needs_user`로 거절합니다. 다만 기록의 `owner`가 다리 이름인 중계기가 적은 세션은 Claude 다리가 연 일회용 대화의 것이라 다시 이을 수 없으므로 Codex 대화로 보지 않고 `--user` 없이 풉니다(그 다리가 살아 있는 동안은 `session_live`). AI는 `--user`를 붙이지 않고, AI가 쓰는 MCP 도구에는 이 기능이 없습니다.
 - `release --ended`는 살아 있는 연결이 지금 쓰는 점유를 건드리지 않습니다. `release --connection`을 일하는 중인 연결에 쓰면 하던 브라우저 작업의 탭이 닫히고, Codex 대화는 그 턴의 다음 브라우저 조작이 시간 초과까지 멈춥니다. CUA Bar는 이럴 때 한 번 묻습니다.
 - `stop`은 연결 프로세스(Claude의 브리지, Codex 대화의 런타임, cmux-cua 연결의 `cmux-cua mcp`)만 끕니다. Codex 앱, AI 클라이언트, Chrome, cmux-cua 데몬(`serve`)은 어떤 경우에도 끄지 않습니다. cmux-cua 연결은 `stop --connection cmux-…`로 하나씩만, 놓아주기 없이 끄며 묶음 종료에는 들어가지 않습니다. 끄면 그 AI 대화의 cmux-cua 도구는 다시 붙을 때까지 끊깁니다.
 - `stop --group codex`는 주인을 알 수 없는 연결을 건너뜁니다(`unattributed`). Claude 대화의 런타임일 수 있기 때문이며, 그런 연결은 하나씩 끄거나 `--group all`로 끕니다.

@@ -905,7 +905,7 @@ final class CUABarViewModel: ObservableObject {
         guard let status = lastStatus else { return }
         let due = notificationPlanner.due(
             status: status, appVersion: appVersion, now: now,
-            cleanupTried: cleanupPlanner.tried, cleanupRunning: automaticCleanupTask != nil)
+            cleanupTried: cleanupPlanner.tried, cleanupRunning: automaticCleanupTask != nil, tabsReleased: tabsReleasedIDs)
         for notification in due {
             runInBackground { [weak self, notifier] in
                 let delivered = await notifier.post(notification)

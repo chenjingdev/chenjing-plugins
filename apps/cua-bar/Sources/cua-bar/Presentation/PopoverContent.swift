@@ -346,7 +346,7 @@ struct ConnectionsContent: Equatable, Sendable {
         let ended = TidyPlan.endedConnections(in: status).map {
             TidyRow.ended(ConnectionRow($0, now: now, calendar: calendar, tabsReleased: tabsReleased))
         }
-        let leases = Self.leaseRows(in: status, now: now, calendar: calendar)
+        let leases = Self.leaseRows(in: status, now: now, calendar: calendar, tabsReleased: tabsReleased)
         let orphans = status.otherTools.flatMap { tool in
             tool.clients.enumerated().filter { $0.element.isOrphan }.map { TidyRow.orphan(ToolClientRow($0.element, index: $0.offset, now: now)) }
         }
@@ -385,7 +385,7 @@ struct ConnectionsContent: Equatable, Sendable {
     /// The lease lines: what the engine could read (`items`) unless a connection of the list holds it,
     /// then the sessions whose owner is gone (`maybe_left`) unless the line of the connection that holds them,
     /// ended or alive, has the button that lets go of them.
-    private static func leaseRows(in status: EngineStatus, now: Date, calendar: Calendar) -> [LeaseRow] {
+    private static func leaseRows(in status: EngineStatus, now: Date, calendar: Calendar, tabsReleased: Set<String>) -> [LeaseRow] {
         let leases = status.leases
         let connectionSessions = Set(status.connections.compactMap(\.sessionID))
         let leftSessions = Set(leases.maybeLeft.compactMap(\.sessionID))
@@ -403,7 +403,7 @@ struct ConnectionsContent: Equatable, Sendable {
         }
         for (index, item) in leases.maybeLeft.enumerated() {
             // The line of the connection that holds the session is where to press (S16).
-            if TidyPlan.lineToPress(for: item, in: status) != nil { continue }
+            if TidyPlan.lineToPress(for: item, in: status, tabsReleased: tabsReleased) != nil { continue }
             var parts: [String] = []
             if let ended = item.endedAt { parts.append("\(Format.when(ended, now: now, calendar: calendar))에 끝남") }
             let releasable = item.sessionID != nil && item.releasable

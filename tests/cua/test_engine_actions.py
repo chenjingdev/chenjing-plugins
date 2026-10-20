@@ -460,9 +460,10 @@ class SessionReleaseInEndedTests(ActionCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def dead(self, name, pid, session, kind='bridge'):
+    def dead(self, name, pid, session, kind='bridge', **fields):
         builder = self.state.bridge if kind == 'bridge' else self.state.relay
-        return builder(name, pid, NOW-5000, cwd='/work/dead', scopes=[State.scope(session, last=at(1000))], cleanup='open')
+        return builder(name, pid, NOW-5000, cwd='/work/dead', scopes=[State.scope(session, last=at(1000))], cleanup='open',
+                       **fields)
 
     def test_sessions_of_dead_bridges_are_released_and_those_of_codex_threads_are_left_for_a_click(self):
         bridge = self.dead('d1', 7001, SESSION_C)
@@ -472,6 +473,24 @@ class SessionReleaseInEndedTests(ActionCase):
         self.assertFalse(bridge.exists())
         self.assertTrue(relay.exists())
         self.assertNotIn(SESSION_D, json.dumps([call for host in self.hosts for call in host.calls]))
+
+    def test_a_dead_relay_that_names_its_bridge_is_a_claude_session_and_is_released_by_id(self):
+        relay = self.dead('d2', 7101, SESSION_D, kind='relay', owner='bridge-4242-%d' % (NOW-900))      # the bridge is gone
+        result = engine_actions.release_ended(self.ctx())
+        self.assertEqual(result, {'ok': True, 'results': [{'connection_id': 'codex-7101-%d' % (NOW-5000), 'released': True, 'reason': None}]})
+        self.assertFalse(relay.exists())
+        self.assertIn(SESSION_D, json.dumps([call for host in self.hosts for call in host.calls]))
+
+    def test_while_that_bridge_lives_its_session_is_asked_about_and_refused_without_a_browser_call(self):
+        """The conversation is still there: nothing of its session is touched."""
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        self.state.bridge('a1', 4242, NOW-900, owner_pid=500, cwd='/work/x', session_id=SESSION_D)
+        relay = self.dead('d2', 7101, SESSION_D, kind='relay', owner='bridge-4242-%d' % (NOW-900))
+        result = engine_actions.release_ended(self.ctx())
+        self.assertEqual([item['reason'] for item in result['results']], ['session_live'])
+        self.assertTrue(relay.exists())
+        self.assertEqual(self.hosts, [])
 
     def test_a_dead_bridge_with_two_sessions_is_one_result_that_reports_the_first_failure(self):
         self.state.bridge('d1', 7001, NOW-5000, scopes=[State.scope(SESSION_C, last=at(1000)), State.scope(SESSION_D, last=at(900))],

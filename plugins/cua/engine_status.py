@@ -135,6 +135,12 @@ def relay_owner(relay):
     return value if match is not None and match.group(1) == 'bridge' else None
 
 
+def claude_record(record):
+    """Whether a record is a Claude conversation's: a bridge's, or a relay's that names the bridge that started its
+    runtime (`owner`, the same test `_relay_connections` makes). A relay with no such name serves a Codex thread."""
+    return record.kind == 'bridge' or relay_owner(record) is not None
+
+
 def attribute_runtimes(bridges, relays, relay_sessions):
     """relay writer -> the live bridge whose thread that relay's runtime serves.
 
@@ -455,15 +461,19 @@ class View:
                 continue
             records = entry['records']
             primary = max(records, key=lambda record: (record.kind == 'bridge', record.last_scope_time(session) or 0))
+            # A relay that names its bridge belongs to a Claude conversation, whose thread is a bridge's own and can
+            # never be resumed, though the record of the relay is all that lists the session (S16, B7).
+            claude = any(claude_record(record) for record in records)
             exited = None
             if not primary.live and primary.data.get('cleanup') == 'not_confirmed':
                 exited = primary.time('updated_at')
-            entries.append({'session_id': session, 'agent': primary.agent, 'connection_id': primary.connection_id,
+            entries.append({'session_id': session, 'agent': 'claude' if claude else primary.agent,
+                            'connection_id': primary.connection_id,
                             'cwd': primary.path('cwd'), 'ended_at': iso(exited),
                             'releasable': ready and session not in listed,
                             'last': entry['last'] or 0,
-                            # Only a bridge's thread can never be resumed; a Codex thread can (needs a click).
-                            'needs_user': all(record.kind == 'relay' for record in records)})
+                            # Only a Claude conversation's thread can never be resumed; a Codex thread can (needs a click).
+                            'needs_user': not claude})
         entries.sort(key=lambda item: (-item['last'], item['session_id']))
         self.maybe_left = entries
         for record in self.dead:

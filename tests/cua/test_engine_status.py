@@ -788,6 +788,43 @@ class LeaseTests(StatusCase):
         entry = self.left()[0]
         self.assertFalse(entry['releasable'])                   # a live relay still lists it
 
+    def named_relay(self, name='d9', pid=7101, session=SESSION_A, bridge='bridge-4242-%d' % (NOW-900), cleanup='not_confirmed'):
+        """The relay of a Claude bridge's thread that died with a scope open (B7): its record names the bridge."""
+        return self.state.relay(name, pid, NOW-4000, cwd='/work/x', owner=bridge, cleanup=cleanup,
+                                scopes=[State.scope(session, last=at(900))])
+
+    def needs_user(self):
+        return [item['needs_user'] for item in engine_status.build_view(self.context()).maybe_left]
+
+    def test_a_dead_relay_that_names_its_bridge_lists_a_claude_session_that_needs_no_click_and_is_held_while_the_bridge_lives(self):
+        self.start_world()
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        self.state.bridge('a1', 4242, NOW-900, owner_pid=500, cwd='/work/x', session_id=SESSION_A)
+        self.named_relay()
+        [entry] = self.left()
+        self.assertEqual((entry['agent'], entry['releasable'], entry['connection_id']),
+                         ('claude', False, 'codex-7101-%d' % (NOW-4000)))      # the live bridge holds it; the id is the relay's
+        self.assertEqual(self.needs_user(), [False])
+
+    def test_when_the_bridge_is_gone_it_is_a_claude_session_the_engine_may_release_by_itself(self):
+        self.start_world()
+        self.named_relay()
+        [entry] = self.left()
+        self.assertEqual((entry['agent'], entry['releasable'], entry['session_id']), ('claude', True, SESSION_A))
+        self.assertEqual(self.needs_user(), [False])
+
+    def test_a_relay_that_names_no_bridge_is_still_a_codex_session_that_needs_a_click(self):
+        self.start_world()
+        self.state.relay('d2', 7102, NOW-4000, cwd='/work/codex', scopes=[State.scope(SESSION_B, last=at(900))], cleanup='open')
+        [entry] = self.left()
+        self.assertEqual((entry['agent'], entry['releasable']), ('codex', True))
+        self.assertEqual(self.needs_user(), [True])
+        self.state.relay('d3', 7103, NOW-4000, cwd='/work/codex', scopes=[State.scope(SESSION_C, last=at(900))], cleanup='open',
+                         owner='relay-4242-%d' % (NOW-900))          # a name that is not a bridge's counts as none
+        self.assertEqual({item['session_id']: item['agent'] for item in self.status()['leases']['maybe_left']},
+                         {SESSION_B: 'codex', SESSION_C: 'codex'})
+
     def test_a_live_bridges_own_session_is_not_released_by_id_either(self):
         self.start_world()
         self.dead_bridge()

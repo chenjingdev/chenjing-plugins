@@ -183,6 +183,41 @@ struct NotificationPlannerTests {
         #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(10_861), cleanupTried: [], cleanupRunning: false).map(\.key) == ["lease:019a-live"])
     }
 
+    @Test func theMinuteOfAHeldLeaseCountsFromTheOwnerGoingEvenWhenItsEndTimeIsOld() throws {
+        // The lease the dead relay left (it ended long ago, `ended_at` says so) is held by a live conversation. When that
+        // conversation is closed the lease is news a minute after the app first sees it without one, not at once.
+        var planner = NotificationPlanner()
+        let entry = LeftoverLease(sessionID: "019a-live", agent: .claude, connectionID: "codex-23654-1", cwd: nil, endedAt: t0.addingTimeInterval(-50_000), releasable: false)
+        var status = try leaseStatus([entry])
+        status.connections = [Connection(id: "claude-23601-1", agent: .claude, state: .idle, sessionID: "019a-live", canRelease: true, canStop: true)]
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).isEmpty)
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(3600), cleanupTried: [], cleanupRunning: false).isEmpty)
+        status.connections[0].state = .ended
+        status.connections[0].canStop = false
+        status.connections[0].canRelease = false // an ended line with no way: nothing to wait for
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(7200), cleanupTried: [], cleanupRunning: false).isEmpty,
+                "the first look without the owner: not news yet, however old ended_at is")
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(7260), cleanupTried: [], cleanupRunning: false).isEmpty)
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0.addingTimeInterval(7261), cleanupTried: [], cleanupRunning: false).map(\.key) == ["lease:019a-live"])
+    }
+
+    @Test func aLeaseNobodyLiveEverHeldKeepsCountingFromItsEndTime() throws {
+        var planner = NotificationPlanner()
+        let entry = LeftoverLease(sessionID: "019a-old", agent: .codex, connectionID: nil, cwd: nil, endedAt: t0.addingTimeInterval(-50_000), releasable: false)
+        #expect(planner.due(status: try leaseStatus([entry]), appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).map(\.key) == ["lease:019a-old"])
+    }
+
+    @Test func anEndedLineTheAppHasDoneAllItCanForDoesNotHoldTheNotificationBack() throws {
+        var planner = NotificationPlanner()
+        let entry = LeftoverLease(sessionID: "019a-claude", agent: .claude, connectionID: "claude-31569-1", cwd: nil, endedAt: t0.addingTimeInterval(-600), releasable: false)
+        var status = try leaseStatus([entry])
+        status.connections = [Connection(id: "claude-31806-1", agent: .claude, state: .ended, sessionID: "019a-claude", canRelease: true, canStop: false)]
+        // The line's 정리 releases the tabs: the cleanup comes first.
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false).isEmpty)
+        // Its tabs already released in this run, the 정리 is off: there is no way left on that line, so the lease is news.
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: t0, cleanupTried: [], cleanupRunning: false, tabsReleased: ["claude-31806-1"]).map(\.key) == ["lease:019a-claude"])
+    }
+
     @Test func anEntryWithNoSessionIsKeyedByItsConnection() throws {
         var planner = NotificationPlanner()
         let entry = LeftoverLease(sessionID: nil, agent: .codex, connectionID: "codex-5-5", cwd: nil, endedAt: t0.addingTimeInterval(-600), releasable: false)

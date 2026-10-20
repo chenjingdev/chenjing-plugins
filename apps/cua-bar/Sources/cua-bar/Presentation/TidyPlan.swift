@@ -54,10 +54,13 @@ enum TidyPlan {
         }
     }
 
-    /// Whether the line of a connection has a button to press: 정리 on an ended connection the app can tidy, 탭 풀기
-    /// on a live one that can release. The other has its button off, and no way to press.
-    static func hasButton(_ connection: Connection) -> Bool {
-        connection.state == .ended ? way(for: connection) != nil : connection.canRelease
+    /// Whether the line of a connection has a button to press: 정리 on an ended connection the app can tidy and has not
+    /// already done what it can for (`tabsReleased`), 탭 풀기 on a live one that can release. The other has its button
+    /// off, and no way to press.
+    static func hasButton(_ connection: Connection, tabsReleased: Set<String> = []) -> Bool {
+        connection.state == .ended
+            ? way(for: connection) != nil && !isSettled(connection, tabsReleased: tabsReleased)
+            : connection.canRelease
     }
 
     /// The connections of the list that hold the session of this leftover lease now. A lease that cannot be aimed
@@ -71,10 +74,11 @@ enum TidyPlan {
     /// and has a button. For an ended connection that is 정리, for a live one 탭 풀기; either lets go of the session.
     /// The lease is then no thing of its own: a second line for the same session would count it twice and send the
     /// person to the extension reset (S16), when the line to press is another one, and a light one.
-    /// A holder without a button is no way: the lease keeps its line, with the advice to reset the extension, which
-    /// is all that is left for it. A live holder is preferred to an ended one.
-    static func lineToPress(for lease: LeftoverLease, in status: EngineStatus) -> Connection? {
-        let pressable = holders(of: lease, in: status).filter(hasButton)
+    /// A holder without a button is no way (also an ended one whose 정리 the app has done all it can for): the lease
+    /// keeps its line, with the advice to reset the extension, which is all that is left for it. A live holder is
+    /// preferred to an ended one.
+    static func lineToPress(for lease: LeftoverLease, in status: EngineStatus, tabsReleased: Set<String> = []) -> Connection? {
+        let pressable = holders(of: lease, in: status).filter { hasButton($0, tabsReleased: tabsReleased) }
         return pressable.first { $0.state != .ended } ?? pressable.sorted(by: newestFirst).first
     }
 
