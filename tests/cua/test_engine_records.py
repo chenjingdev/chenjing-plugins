@@ -319,6 +319,21 @@ class ActivityTests(EngineCase):
                           ('bridge', 'js', True, 1234, SESSION_A)])
         self.assertEqual(lines[0]['at'], at(30))
 
+    def test_a_line_carries_the_bridge_its_runtime_serves_only_when_that_is_a_bridges_name(self):
+        bridge, relay = 'bridge-4242-%d' % (NOW-900), 'relay-5151-%d' % (NOW-800)
+        self.state.activity([
+            State.line(relay, 60, SESSION_A, owner=bridge),
+            State.line(relay, 50, SESSION_A),                                          # an older relay's, or Codex's
+            State.line(relay, 40, SESSION_A, owner='relay-4242-%d' % (NOW-900)),       # a relay is nobody's owner
+            State.line(relay, 30, SESSION_A, owner='bridge-4242-x'),
+            State.line(relay, 20, SESSION_A, owner='bridge-%s-1' % ('9'*11)),
+            State.line(relay, 10, SESSION_A, owner=bridge+'; rm'),
+            State.line(relay, 5, SESSION_A, owner=4242)])
+        lines = self.read()
+        # A value that does not fit costs the line nothing but that value: the line itself is still a call.
+        self.assertEqual(len(lines), 7)
+        self.assertEqual([item['owner'] for item in lines], [bridge, None, None, None, None, None, None])
+
     def test_only_the_tail_of_a_big_file_is_read_and_a_cut_first_line_is_skipped(self):
         old = records.ACTIVITY_TAIL_BYTES
         records.ACTIVITY_TAIL_BYTES = 600

@@ -16,7 +16,7 @@ import re
 from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, HOST_STOP_GRACE, IDLE_SECONDS, SCHEMA_VERSION, connection_id,
                          iso)
 from engine_inventory import (collect, is_app_server, is_cua_repl, mark_live, working_folders)
-from engine_records import (WRITER, control_socket, forget_released, load_records, prune, read_activity,
+from engine_records import (WRITER, bridge_name, control_socket, forget_released, load_records, prune, read_activity,
                             read_released)
 
 PRUNE_MIN_AGE = 60
@@ -129,9 +129,7 @@ def _bridge_expects_relay(bridge):
 
 def relay_owner(relay):
     """The name (`bridge-<pid>-<started_at>`) of the bridge that started the relay's runtime, or None."""
-    value = relay.text('owner')
-    match = WRITER.match(value) if value else None
-    return value if match is not None and match.group(1) == 'bridge' else None
+    return bridge_name(relay.text('owner'))
 
 
 def claude_record(record):
@@ -364,7 +362,14 @@ class View:
         self.cmux.sort(key=lambda conn: (conn.client_pid is None, conn.client_pid or 0, conn.started, conn.pid))
 
     def _map_activity(self, activity):
-        """Which connection each line of the activity log belongs to, and each connection's newest call."""
+        """Which connection each line of the activity log belongs to, and each connection's newest call.
+
+        In this order: a line whose writer is a listed connection takes that connection's id and agent (the app finds
+        the line's folder through the id); a bridge's own line is that bridge's; a line that names its bridge (`owner`,
+        written by the relay of a Claude conversation) is that bridge's, trusted before any guess from sessions, so it
+        stays Claude's when the connection, the relay and the bridge's record are all gone (S23); a session that a
+        bridge's record lists points to that bridge; anything else is a Codex runtime's. Lines without a name (an older
+        relay's, or Codex's own runtime) are therefore told as they always were."""
         session_bridge = {}
         for record in self.live_bridges + self.dead_bridges:
             for session in record.sessions():
@@ -376,6 +381,8 @@ class View:
                 target, agent = conn.id, conn.agent
             elif line['writer'].startswith('bridge-'):
                 target, agent = 'claude-'+line['writer'][len('bridge-'):], 'claude'
+            elif line['owner'] is not None:
+                target, agent = 'claude-'+line['owner'][len('bridge-'):], 'claude'
             elif line['session_id'] in session_bridge:
                 target, agent = session_bridge[line['session_id']], 'claude'
             else:

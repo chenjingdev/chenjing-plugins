@@ -49,6 +49,14 @@ def _valid_session(value):
     return isinstance(value, str) and SESSION_ID.match(value) is not None
 
 
+def bridge_name(value):
+    """`value` when it is the name of a bridge (`bridge-<pid>-<started_at>`), else None.
+
+    A relay that a bridge started carries that name, in its record and in every activity line it writes (`owner`)."""
+    match = WRITER.fullmatch(value) if isinstance(value, str) else None
+    return value if match is not None and match.group(1) == 'bridge' else None
+
+
 class Record:
     """One bridge or relay record. `live` is decided from the process table (engine_inventory.mark_live)."""
 
@@ -430,8 +438,10 @@ def prune(state_dir, uid, record, droppable=(), now=None, min_age=0):
 def read_activity(state_dir, uid):
     """Every valid line of activity.jsonl that the tail of the file holds, oldest first.
 
-    A line is {"at", "writer", "session_id", "tool", "ok", "ms"}; anything else in a line is ignored and a
-    line that does not fit is skipped, so a damaged file never breaks the status."""
+    A line is {"at", "writer", "session_id", "tool", "ok", "ms"}, and a relay that a bridge started adds "owner", that
+    bridge's name (None here for a line without one, or with a value that is no bridge's name: the line still counts).
+    Anything else in a line is ignored and a line that does not fit is skipped, so a damaged file never breaks the
+    status."""
     if not private_directory(state_dir, uid):
         return []
     try:
@@ -471,5 +481,6 @@ def read_activity(state_dir, uid):
                 or not isinstance(ms, (int, float)) or isinstance(ms, bool) or not 0 <= ms < 10**9
                 or not (session is None or _valid_session(session))):
             continue
-        found.append({'at': at, 'writer': writer, 'session_id': session, 'tool': tool, 'ok': ok, 'ms': int(ms)})
+        found.append({'at': at, 'writer': writer, 'session_id': session, 'tool': tool, 'ok': ok, 'ms': int(ms),
+                      'owner': bridge_name(item.get('owner'))})
     return found

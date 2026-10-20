@@ -254,6 +254,37 @@ test('activity lines hold the tool name, success and duration, and nothing of wh
   assert.equal(client.stderr, '');
 });
 
+const activityLines = fixture => fs.readFileSync(path.join(fixture.state, 'activity.jsonl'), 'utf8')
+  .split('\n').filter(Boolean).map(line => JSON.parse(line));
+
+test('every activity line of a runtime that a bridge started carries the bridge\'s name, as the record does', async t => {
+  const owner = 'bridge-4242-1792345678';
+  const {fixture, client} = await boot(t, {env: {CODEX_CUA_OWNER: owner}});
+  await client.call('one', turn('s-own', 't1'));
+  await client.call('fail', turn('s-own', 't1'));
+  await client.request('tools/call', {name: 'js_reset', arguments: {}});
+  await client.request('tools/call', {name: 'turn_ended', arguments: {hook_event_name: 'Stop', session_id: 's-own', turn_id: 't1'}});
+  const lines = activityLines(fixture);
+  assert.deepEqual(lines.map(line => [line.tool, line.session_id, line.ok]), [
+    ['js', 's-own', true], ['js', 's-own', false], ['js_reset', null, true], ['turn_ended', 's-own', true]]);
+  for (const line of lines) {
+    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'owner']);
+    assert.equal(line.owner, owner);
+  }
+  assert.equal((await readRecord(fixture)).owner, owner, 'the same name as in the record');
+  assert.equal(fixture.events('start')[0].env.owner, null, 'the runtime still never sees the name');
+});
+
+test('a runtime nobody named, or named by something that is not a bridge, writes lines without an owner', async t => {
+  for (const value of [undefined, '', 'relay-1-2', 'bridge-1-2; rm', 'bridge-' + '9'.repeat(11) + '-1']) {
+    const {fixture, client} = await boot(t, {env: {CODEX_CUA_OWNER: value}});
+    await client.call('one', turn('s-none', 't1'));
+    const [line, ...others] = activityLines(fixture);
+    assert.deepEqual(others, [], String(value));
+    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms'], String(value));
+  }
+});
+
 test('a big activity file is cut to the newest 200 lines, unless somebody else is already cutting', async t => {
   const {fixture, client} = await boot(t);
   const file = path.join(fixture.state, 'activity.jsonl');

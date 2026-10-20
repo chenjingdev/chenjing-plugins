@@ -551,6 +551,93 @@ class OwnerNameTests(StatusCase):
         self.assertEqual((connection['agent'], connection['state']), ('claude', 'ended'))     # a reused pid
 
 
+class LineOwnerTests(StatusCase):
+    """A relay that a bridge started writes the bridge's name (`owner`) into every activity line. The line says Claude for
+    as long as it is in the log, when the connection, the runtime and the bridge's record are long gone (S23)."""
+    BRIDGE = 'bridge-4242-%d' % (NOW-900)
+    CLAUDE = 'claude-4242-%d' % (NOW-900)
+
+    def lines(self, status=None):
+        """(ms, agent, connection id) of every activity entry, newest first."""
+        status = self.status() if status is None else status
+        return [(item['ms'], item['agent'], item['connection_id']) for item in status['activity']]
+
+    def test_a_claude_conversation_whose_connection_and_bridge_record_are_gone_keeps_its_lines_claude(self):
+        self.start_world()
+        self.state.activity([State.line('relay-2001-%d' % (NOW-890), 100, SESSION_A, ms=11, owner=self.BRIDGE),
+                             State.line('relay-2001-%d' % (NOW-890), 80, SESSION_A, tool='turn_ended', ms=22,
+                                        owner=self.BRIDGE)])
+        self.assertEqual((self.state.names('bridge'), self.state.names('relay')), ([], []))
+        status = self.status()
+        # Nothing of that conversation is left to ask: no connection, no lease, no record.
+        self.assertEqual((status['connections'], status['leases']['maybe_left']), ([], []))
+        self.assertEqual(self.lines(status), [(22, 'claude', self.CLAUDE), (11, 'claude', self.CLAUDE)])
+
+    def test_a_codex_conversations_lines_stay_codex_whether_its_runtime_runs_or_not(self):
+        self.start_world()
+        self.add_runtime(3000, NOW-2000)
+        self.state.relay('r2', 3001, NOW-2000, root_pid=3000, runtime_pid=3002, scopes=[State.scope(SESSION_B)])
+        self.state.activity([
+            State.line('relay-3001-%d' % (NOW-2000), 100, SESSION_B, ms=1),       # a Codex runtime that runs
+            State.line('relay-9001-%d' % (NOW-9000), 90, SESSION_C, ms=2),        # one that is gone
+            State.line('relay-9002-%d' % (NOW-9000), 80, None, ms=3),             # ... that named no session
+            State.line('relay-2001-%d' % (NOW-890), 70, SESSION_A, ms=4, owner=self.BRIDGE)])      # next to a Claude one
+        status = self.status()
+        self.assertEqual([(item['agent'], item['state']) for item in status['connections']], [('codex', 'active')])
+        self.assertEqual(self.lines(status), [
+            (4, 'claude', self.CLAUDE), (3, 'codex', 'codex-9002-%d' % (NOW-9000)),
+            (2, 'codex', 'codex-9001-%d' % (NOW-9000)), (1, 'codex', 'codex-3001-%d' % (NOW-2000))])
+
+    def test_lines_without_the_name_are_read_as_before(self):
+        self.start_world()
+        # A dead bridge's record that still lists a session, as the bridge's records do until a release is confirmed.
+        self.state.bridge('d1', 7001, NOW-5000, owner_pid=501, session_id=SESSION_C, scopes=[State.scope(SESSION_C)],
+                          cleanup='open')
+        self.state.activity([
+            State.line('relay-9001-%d' % (NOW-9000), 90, SESSION_C, ms=1),        # a relay that is gone, a listed session
+            State.line('relay-9002-%d' % (NOW-9000), 80, SESSION_D, ms=2),        # ... a session nobody lists
+            State.line('bridge-8001-%d' % (NOW-8000), 70, SESSION_D, ms=3)])      # a bridge's own line
+        self.assertEqual(self.lines(), [(3, 'claude', 'claude-8001-%d' % (NOW-8000)),
+                                        (2, 'codex', 'codex-9002-%d' % (NOW-9000)),
+                                        (1, 'claude', 'claude-7001-%d' % (NOW-5000))])
+
+    def test_a_name_that_is_not_a_bridges_changes_nothing(self):
+        self.start_world()
+        self.state.activity([State.line('relay-9001-%d' % (NOW-9000), 90, SESSION_C, ms=1,
+                                        owner='relay-4242-%d' % (NOW-900)),
+                             State.line('relay-9002-%d' % (NOW-9000), 80, SESSION_D, ms=2, owner='bridge-4242-x')])
+        self.assertEqual(self.lines(), [(2, 'codex', 'codex-9002-%d' % (NOW-9000)),
+                                        (1, 'codex', 'codex-9001-%d' % (NOW-9000))])
+
+    def test_the_name_in_a_line_is_trusted_before_what_its_session_suggests(self):
+        self.start_world()
+        self.state.bridge('d1', 7001, NOW-5000, owner_pid=501, session_id=SESSION_C, scopes=[State.scope(SESSION_C)],
+                          cleanup='open')
+        self.state.activity([State.line('relay-2001-%d' % (NOW-890), 60, SESSION_C, ms=1, owner=self.BRIDGE)])
+        self.assertEqual(self.lines(), [(1, 'claude', self.CLAUDE)])      # not the dead bridge whose record lists SESSION_C
+
+    def test_a_line_of_a_runtime_that_runs_keeps_the_id_of_the_connection_it_is_listed_under(self):
+        """The app finds a line's folder through the id of a listed connection, so a runtime that is listed keeps its own."""
+        self.start_world()
+        self.add_runtime(2000, NOW-600)
+        self.state.relay('r1', 2001, NOW-600, root_pid=2000, runtime_pid=2002, cwd='/work/y', owner=self.BRIDGE,
+                         last_call_at=iso(at(100)))
+        self.state.activity([State.line('relay-2001-%d' % (NOW-600), 100, SESSION_A, ms=1, owner=self.BRIDGE)])
+        status = self.status()
+        self.assertEqual([(item['id'], item['agent'], item['state']) for item in status['connections']],
+                         [('claude-2001-%d' % (NOW-600), 'claude', 'ended')])
+        self.assertEqual(self.lines(status), [(1, 'claude', 'claude-2001-%d' % (NOW-600))])
+
+    def test_a_line_of_a_runtime_that_is_gone_belongs_to_its_bridge_while_that_runs(self):
+        self.start_world()
+        self.bridge_with_runtime()
+        # An earlier runtime of the same bridge (Codex had started again), for a session the bridge no longer lists.
+        self.state.activity([State.line('relay-1777-%d' % (NOW-4000), 300, SESSION_B, ms=1, owner=self.BRIDGE)])
+        status = self.status()
+        self.assertEqual([item['id'] for item in status['connections']], [self.CLAUDE])
+        self.assertEqual(self.lines(status), [(1, 'claude', self.CLAUDE)])
+
+
 class RevivedRuntimeTests(StatusCase):
     """A runtime Codex started again for the thread of a bridge that is long gone, and that nobody used, is no connection
     (S17, S18): it is in no list and only counted in the diagnosis. Any use of it, even one call, keeps it an ended one."""
