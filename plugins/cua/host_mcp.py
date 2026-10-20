@@ -11,9 +11,11 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import signal
 import stat
 import sys
+import time
 import uuid
 
 try:
@@ -22,10 +24,25 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.5.0'
-PORTWARDEN_RELAY = Path.home()/'dev/portwarden/scripts/cua-runtime-proxy.mjs'
+VERSION = '0.7.0'
+# A plugin or server name that can stand in a dotted configuration key as itself.
+CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
+EXIT_RELEASE_SECONDS = 3.0
+# Fixed texts: a call that lost its host is never sent again, and the AI is told so (R12).
+LOST_BEFORE_SEND = ('The Codex host connection was lost before this call was sent, so it did not run. '
+                    'The next call connects to Codex again.')
+LOST_DURING_CALL = ('The Codex host connection was lost while this call ran, so its outcome is unknown. '
+                    'The call was not sent again. The next call connects to Codex again.')
+# turn_ended never starts or reopens Codex: a new host could not end the turn of the old one anyway.
+TURN_ENDED_WITHOUT_HOST = ('The Codex host connection was lost, so the CUA turn of this connection could not be ended. '
+                           'turn_ended never connects to Codex again; the next CUA tool call does.')
+NOTHING_TO_END = 'No CUA turn of this connection is open, so there was nothing to end.'
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
+
+
+def utc_now():
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
 class BridgeFailure(Exception):
@@ -60,6 +77,33 @@ def encode(message):
     return (json.dumps(message, ensure_ascii=True, separators=(',', ':')) + '\n').encode()
 
 
+def quiet_config(installed, config, server='cua_repl', keep_plugin=NATIVE_PLUGIN_ID):
+    """Thread configuration that turns off every MCP server of the user's set-up except the CUA one.
+
+    An owned thread never runs a model turn, so the other servers would only start processes there, and the host keeps
+    them, like the thread, for about half an hour after its last use (it does not unload a thread when its last client
+    leaves). Built from the answers of plugin/installed and config/read; a name that cannot stand in a dotted key is
+    left as it is.
+    """
+    out = {}
+    markets = installed.get('marketplaces') if isinstance(installed, dict) else None
+    for market in markets if isinstance(markets, list) else []:
+        plugins = market.get('plugins') if isinstance(market, dict) else None
+        for plugin in plugins if isinstance(plugins, list) else []:
+            if not isinstance(plugin, dict) or plugin.get('enabled') is not True:
+                continue
+            ident = plugin.get('id')
+            if isinstance(ident, str) and ident != keep_plugin and CONFIG_NAME.match(ident):
+                out['plugins.' + ident + '.enabled'] = False
+    settings = config.get('config') if isinstance(config, dict) else None
+    servers = settings.get('mcp_servers') if isinstance(settings, dict) else None
+    for name, entry in servers.items() if isinstance(servers, dict) else ():
+        if (isinstance(name, str) and name != server and CONFIG_NAME.match(name)
+                and not (isinstance(entry, dict) and entry.get('enabled') is False)):
+            out['mcp_servers.' + name + '.enabled'] = False
+    return out
+
+
 def ident_key(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'))
 
@@ -75,6 +119,8 @@ class ProxyRpc:
         self.pending = {}
         self.next_id = 0
         self.closed = False
+        # Called with this object once the connection has ended, whichever side ended it.
+        self.on_closed = None
 
     async def start(self):
         if not self.socket_path.is_absolute():
@@ -156,6 +202,11 @@ class ProxyRpc:
             for future in tuple(self.pending.values()):
                 if not future.done():
                     future.set_exception(failure)
+            if self.on_closed is not None:
+                try:
+                    self.on_closed(self)
+                except Exception:
+                    pass
 
     async def close(self):
         failure = None
@@ -178,26 +229,6 @@ class ProxyRpc:
             raise failure
 
 
-def verified_portwarden_transport(transport, native_cua_root):
-    """Check effective host configuration; never trust caller-supplied metadata."""
-    if (native_cua_root is None or not Path(native_cua_root).is_absolute()
-            or not isinstance(transport, dict) or not isinstance(transport.get('env'), dict)):
-        return False
-    native_cua_root = Path(native_cua_root)
-    env = transport['env']
-    if (transport.get('command') != str(native_cua_root/'bin/node')
-            or transport.get('args') != [str(native_cua_root/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')]
-            or env.get('CUA_REPL_NODE_REPL_PATH') != str(PORTWARDEN_RELAY)
-            or env.get('PORTWARDEN_CUA_NATIVE_RUNTIME') != str(native_cua_root/'bin/node_repl')):
-        return False
-    try:
-        info = PORTWARDEN_RELAY.lstat()
-        return (stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
-                and not stat.S_IMODE(info.st_mode) & 0o022)
-    except OSError:
-        return False
-
-
 class HostMcp:
     def __init__(self, cli_path, socket_path, server='cua_repl', emit=None, log=None,
                  startup_timeout=15.0, cleanup_timeout=5.0,
@@ -211,8 +242,15 @@ class HostMcp:
         # No installation is assumed when only a raw socket is supplied.
         self.native_cua_root = Path(native_cua_root) if native_cua_root is not None else None
         self.startup_timeout, self.cleanup_timeout = startup_timeout, cleanup_timeout
-        self.rpc = ProxyRpc(cli_path, socket_path, self.host_request, startup_timeout)
+        self.rpc_arguments = (cli_path, socket_path)
+        self.rpc = self.new_rpc()
         self.thread_id = None
+        # The owned thread works in this folder: the bridge's own (the Claude conversation's).
+        self.thread_cwd = os.getcwd()
+        # The bridge's name for the relay record (bridge-<pid>-<started_at>), set by whoever keeps its record.
+        self.owner = None
+        # Whether this plugin's relay runs in front of the owned thread's runtime: then the relay logs the calls.
+        self.thread_relay = False
         # A connection owns one ephemeral host thread and one tool lifecycle.
         # Context is authored here, never copied from the calling agent.
         self.turn_id = str(uuid.uuid4())
@@ -228,6 +266,19 @@ class HostMcp:
         self.approvals = {}
         self.next_approval = 0
         self.supports_elicitation = False
+        # Scopes and lifecycle. A scope is the exact (session, turn) pair a tool call was sent under; it stays open
+        # until the runtime confirmed turn_ended for that pair. Calls register their scope and turn_ended runs under
+        # turn_lock, so a call never goes out under a pair that is being ended.
+        self.scopes = {}
+        self.turn_lock = asyncio.Lock()
+        self.reconnect_lock = asyncio.Lock()
+        self.cleanup_unconfirmed = False
+        self.ready = False
+        self.host = None
+        self.session_id = None  # the thread of the last verified connection; what the records call the session
+        self.connected_at = self.last_call_at = None
+        # Set by whoever keeps the records; both are best effort and never raise into a call.
+        self.on_change = self.on_call = None
 
     @staticmethod
     def emit_stdout(message):
@@ -240,13 +291,117 @@ class HostMcp:
     @staticmethod
     def log_stderr(event):
         # All call sites use authored fixed strings, never exception/result text.
-        sys.stderr.write('cua: ' + event + '\n')
-        sys.stderr.flush()
+        try:
+            sys.stderr.write('cua: ' + event + '\n')
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            # Claude closes the bridge's stdio a few milliseconds after it stops it, while the bridge still cleans up and
+            # logs what it does (c43, c45). A log that raised there would cut the clean-up short. Like emit_stdout, it
+            # says nothing instead: the pipe, the descriptor or the file object can be the closed one.
+            pass
 
     def reply(self, ident, result=None, error=None):
         message = {'jsonrpc': '2.0', 'id': ident}
         message['error' if error is not None else 'result'] = error if error is not None else result
         self.emit(message)
+
+    def new_rpc(self):
+        rpc = ProxyRpc(self.rpc_arguments[0], self.rpc_arguments[1], self.host_request, self.startup_timeout)
+        rpc.on_closed = self.connection_lost
+        return rpc
+
+    @property
+    def connected(self):
+        """The host connection is up, and its owned thread and CUA catalogue were verified."""
+        return self.ready and not self.rpc.closed
+
+    def changed(self):
+        callback = self.on_change
+        if callback is not None:
+            try:
+                callback()
+            except Exception:
+                pass
+
+    def host_info(self):
+        """Which host this connection is attached to; the registered-host entry point knows more."""
+        return {'pid': None, 'relay': False}
+
+    async def thread_config(self, request):
+        """The configuration of the owned thread: only the CUA server starts there. An answer the host does not
+        give is left out; the thread then starts with the host's own configuration, as before."""
+        answers = []
+        for method, params in (('plugin/installed', {}), ('config/read', {'includeLayers': False})):
+            try:
+                answers.append(await request(method, params))
+            except RpcFailure:
+                answers.append(None)
+        return quiet_config(answers[0], answers[1], self.server)
+
+    def mark_connected(self):
+        # A new connection has a new owned thread and never inherits the turn id of an older one.
+        self.rotate_turn()
+        self.session_id = self.thread_id
+        # The record says relay only when the relay really runs in front of this thread's runtime; the calls of a
+        # connection are logged by the relay then, else by the bridge.
+        self.host = {**self.host_info(), 'relay': self.thread_relay}
+        self.connected_at = utc_now()
+        self.ready = True
+        self.changed()
+
+    def connection_lost(self, rpc):
+        if rpc is not self.rpc:
+            return
+        if self.ready:
+            self.log('host_connection_lost')
+        self.ready = False
+        self.host = None
+        self.changed()
+
+    def snapshot(self):
+        """What the records say about this connection right now."""
+        # Until a replacement host is verified, the session of the lost one stays the current one.
+        return {'host': dict(self.host) if self.host is not None else None,
+                'session_id': self.session_id, 'turn_id': self.turn_id if self.session_id is not None else None,
+                'connected_at': self.connected_at, 'last_call_at': self.last_call_at,
+                'busy': self.active_tool_calls > 0,
+                'scopes': [{'session_id': key[0], 'turn_id': key[1], **times} for key, times in self.scopes.items()],
+                'cleanup': 'none' if not self.scopes else 'not_confirmed' if self.cleanup_unconfirmed else 'open'}
+
+    def current_scope(self):
+        return {'session_id': self.thread_id, 'turn_id': self.turn_id}
+
+    def is_current(self, scope):
+        return scope['session_id'] == self.thread_id and scope['turn_id'] == self.turn_id
+
+    def rotate_turn(self):
+        """The one place a turn id is made after construction. Release paths reach it through end_scope.
+
+        A turn the runtime has ended must not be used again: the next browser call under that pair hangs until the
+        js timeout and resets the kernel, and a repeated turn_ended for the pair is ignored.
+        """
+        self.turn_id = str(uuid.uuid4())
+
+    def open_scope(self, scope):
+        key = (scope['session_id'], scope['turn_id'])
+        now = utc_now()
+        entry = self.scopes.get(key)
+        if entry is None:
+            self.scopes[key] = {'first_at': now, 'last_at': now}
+        else:
+            entry['last_at'] = now
+
+    def drop_scope(self, scope):
+        self.scopes.pop((scope['session_id'], scope['turn_id']), None)
+        if not self.scopes:
+            self.cleanup_unconfirmed = False
+
+    def tool_request(self, name, arguments, scope):
+        # Use only this adapter-owned host thread and lifecycle. Never copy client
+        # session/turn identities, policies or environment.
+        session = scope['session_id']
+        return {'threadId': session, 'server': self.server, 'tool': name, 'arguments': arguments,
+                '_meta': {'thread_id': session, 'threadId': session, 'x-codex-turn-metadata': dict(scope)}}
 
     async def boot(self):
         deadline = asyncio.get_running_loop().time() + self.startup_timeout
@@ -266,8 +421,18 @@ class HostMcp:
                 or not Path(initialized['codexHome']).is_absolute()):
             raise BridgeFailure('The existing Codex host returned an invalid initialization response.')
         await self.rpc.send({'method': 'initialized', 'params': {}})
+        config = await self.thread_config(request)
+        self.thread_relay = False
         self.thread_creation_requested = True
-        started = await request('thread/start', {'ephemeral': True, 'cwd': os.getcwd()})
+        plain = {'ephemeral': True, 'cwd': self.thread_cwd}
+        try:
+            started = await request('thread/start', {**plain, 'config': config} if config else plain)
+        except RpcFailure:
+            if not config:
+                raise
+            # A host that does not take one of these keys starts the thread with its own configuration, as before.
+            self.log('owned_thread_config_refused')
+            started = await request('thread/start', plain)
         thread = started.get('thread') if isinstance(started, dict) else None
         if isinstance(thread, dict) and isinstance(thread.get('id'), str) and thread['id']:
             self.thread_id = thread['id']
@@ -282,14 +447,10 @@ class HostMcp:
                 raise BridgeFailure('The owned Codex thread has no configured CUA server. No fallback runtime was started.')
             selected = matches[0]
             if self.expected_plugin_id is not None and selected.get('pluginId') != self.expected_plugin_id:
-                # A user-configured stdio relay has no pluginId. Accept only the
-                # original engine through the explicitly configured owned relay.
-                if selected.get('pluginId') is not None:
+                from relay_install import accept_relay  # only this plugin's relay in front of the bundled runtime
+                if not await accept_relay(self, request, selected):
                     raise BridgeFailure('The selected host server is not identified as the original bundled CUA plugin.')
-                config = await request('config/read', {'includeLayers': False, 'cwd': os.getcwd()})
-                transport = config.get('config', {}).get('mcp_servers', {}).get(self.server, {})
-                if not verified_portwarden_transport(transport, self.native_cua_root):
-                    raise BridgeFailure('The selected host server is not the original bundled CUA plugin or its verified Portwarden relay.')
+                self.thread_relay = True
             state = selected.get('runtimeStatus')
             tools = selected.get('tools')
             if state in ('notStarted', 'starting', None) or (state == 'connected' and tools == {} and selected.get('toolsError') is None):
@@ -324,6 +485,7 @@ class HostMcp:
             raise BridgeFailure('The selected host server does not advertise the original CUA js and js_reset tools.')
         self.tools, self.tool_names = original, names
         self.initialized = True
+        self.mark_connected()
         self.log('connected_owned_thread_and_catalogue')
 
     async def host_request(self, message):
@@ -400,9 +562,10 @@ class HostMcp:
                     'instructions': 'Tools execute on this connection\'s new Codex-hosted ephemeral thread. This adapter does not start a runtime or reuse another thread. Call turn_ended with an empty object; the adapter supplies only its owned lifecycle scope.'})
             elif method == 'ping':
                 self.reply(ident, {})
-            elif not self.initialized or self.rpc.closed:
+            elif not self.initialized:
                 raise BridgeFailure('The existing Codex host and original CUA catalogue are not connected.')
             elif method == 'tools/list':
+                # The last verified catalogue, also while the host is away.
                 self.reply(ident, {'tools': self.tools})
             elif method == 'tools/call':
                 if self.stopping:
@@ -419,20 +582,15 @@ class HostMcp:
                     self.reply(ident, error={'code': -32602,
                         'message': 'This host adapter accepts only empty turn_ended arguments; caller session or turn scope is not accepted.'})
                     return
-                scope = {'session_id': self.thread_id, 'turn_id': self.turn_id}
-                if name == 'turn_ended':
-                    arguments = {'hook_event_name': 'Stop', **scope}
-                # Use only this adapter-owned host thread and lifecycle. Never
-                # copy client session/turn identities, policies or environment.
-                self.active_tool_calls += 1
-                try:
-                    result = await self.rpc.request('mcpServer/tool/call', {
-                        'threadId': self.thread_id, 'server': self.server, 'tool': name, 'arguments': arguments,
-                        '_meta': {'thread_id': self.thread_id, 'threadId': self.thread_id,
-                                  'x-codex-turn-metadata': scope}})
-                finally:
-                    self.active_tool_calls -= 1
-                self.reply(ident, result)
+                if name != 'turn_ended':
+                    # A host that went away is found again the way the conversation start finds it (R12). turn_ended
+                    # is left out on purpose: ending a turn must never start or reopen Codex.
+                    await self.ensure_connected()
+                if name not in self.tool_names:
+                    # The catalogue of the new host does not have this tool any more.
+                    self.reply(ident, error={'code': -32601, 'message': 'The tool is not advertised by the owned host CUA server.'})
+                    return
+                self.reply(ident, await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments)))
             else:
                 self.reply(ident, error={'code': -32601, 'message': 'Unsupported MCP method.'})
         except RpcFailure as error:
@@ -445,32 +603,241 @@ class HostMcp:
             self.reply(ident, error={'code': -32603, 'message': 'The Codex host CUA adapter could not complete this request.'})
             self.log('local_request_failure')
 
-    async def release_turn(self):
-        if not self.initialized or self.rpc.closed or 'turn_ended' not in self.tool_names:
-            return {'released': False, 'reason': 'cleanup_tool_unavailable'}
-        scope = {'session_id': self.thread_id, 'turn_id': self.turn_id}
+    async def ensure_connected(self):
+        if self.connected:
+            return
+        async with self.reconnect_lock:
+            if self.connected:
+                return
+            if self.stopping:
+                raise BridgeFailure('This owned CUA connection is stopping.')
+            await self.reconnect()
+
+    async def reconnect(self):
+        """Attach to the host again after the old one went away, the way a conversation start attaches (R12).
+
+        Transport, owned thread and catalogue are new. The scopes of the old host stay open: its runtime is gone,
+        and only an exact (session, turn) pair on that runtime could have ended them.
+        """
+        old, old_thread = self.rpc, self.thread_id
+        self.ready = False
+        self.host = None
+        self.thread_id = None
+        self.thread_creation_requested = False
+        self.approvals.clear()
+        self.changed()
         try:
-            result = await self.rpc.request('mcpServer/tool/call', {
-                'threadId': self.thread_id, 'server': self.server, 'tool': 'turn_ended',
-                'arguments': {'hook_event_name': 'Stop', **scope},
-                '_meta': {'thread_id': self.thread_id, 'threadId': self.thread_id,
-                          'x-codex-turn-metadata': scope}}, self.cleanup_timeout)
-            if not isinstance(result, dict) or result.get('isError'):
-                return {'released': False, 'reason': 'cleanup_not_confirmed'}
-            return {'released': True, 'scopeCount': 1}
+            await old.close()
         except Exception:
-            return {'released': False, 'reason': 'cleanup_not_confirmed'}
+            pass
+        self.rpc = self.new_rpc()
+        try:
+            await self.boot()
+        except BaseException:
+            await self.abandon_connection()
+            self.thread_id = old_thread
+            self.changed()
+            raise
+
+    async def abandon_connection(self):
+        """Detach from the host this connection is on and close it, without ending the bridge."""
+        rpc = self.rpc
+        if self.thread_id is not None and rpc.connection is not None and not rpc.closed:
+            try:
+                await rpc.request('thread/unsubscribe', {'threadId': self.thread_id}, self.cleanup_timeout)
+            except Exception:
+                self.log('owned_thread_cleanup_unconfirmed')
+        try:
+            await rpc.close()
+        except Exception:
+            self.log('owned_connection_cleanup_unconfirmed')
+
+    def begin_call(self):
+        self.active_tool_calls += 1
+        self.last_call_at = utc_now()
+        self.changed()
+
+    def finish_call(self, name, ok, started, scope, relay):
+        self.active_tool_calls -= 1
+        self.last_call_at = utc_now()
+        entry = self.scopes.get((scope['session_id'], scope['turn_id']))
+        if entry is not None:
+            entry['last_at'] = self.last_call_at
+        self.changed()
+        callback = self.on_call
+        if callback is not None:
+            try:
+                callback(name, ok, int((time.monotonic()-started)*1000), scope['session_id'], relay)
+            except Exception:
+                pass
+
+    async def call_tool(self, name, arguments):
+        """One tool call under the current scope. It is recorded as open before it leaves, and never sent twice."""
+        await self.turn_lock.acquire()
+        try:
+            if self.stopping:
+                raise BridgeFailure('This owned CUA connection is stopping.')
+            if not self.connected:
+                raise BridgeFailure(LOST_BEFORE_SEND)
+            rpc, scope = self.rpc, self.current_scope()
+            relay = bool(self.host and self.host.get('relay'))
+            self.open_scope(scope)
+            started = time.monotonic()
+            self.begin_call()
+        finally:
+            self.turn_lock.release()
+        ok = False
+        try:
+            result = await rpc.request('mcpServer/tool/call', self.tool_request(name, arguments, scope))
+            ok = isinstance(result, dict) and not result.get('isError')
+            return result
+        except BridgeFailure:
+            if rpc.closed:
+                raise BridgeFailure(LOST_DURING_CALL) from None
+            raise
+        finally:
+            self.finish_call(name, ok, started, scope, relay)
+
+    async def end_scope(self, scope, timeout=None):
+        """Ask the runtime to end one exact (session, turn) pair; returns (confirmed, result).
+
+        The one place a scope closes and the turn rotates, whoever asked: the AI's turn_ended, a control release or
+        the exit release. Confirmed means a result without isError. Only confirmation rotates the turn of the
+        current scope: a refusal leaves the pair usable and open for the next try. An unanswered request is
+        different, because the runtime may still end the pair; the turn rotates and the scope stays open for a retry.
+        """
+        rpc = self.rpc
+        request = self.tool_request('turn_ended', {'hook_event_name': 'Stop', **scope}, scope)
+        try:
+            result = await rpc.request('mcpServer/tool/call', request, timeout)
+        except BridgeFailure:
+            if timeout is not None and not rpc.closed and self.is_current(scope):
+                self.rotate_turn()
+                self.changed()
+            raise
+        confirmed = isinstance(result, dict) and not result.get('isError')
+        if confirmed:
+            self.drop_scope(scope)
+            if self.is_current(scope):
+                self.rotate_turn()
+            self.changed()
+        return confirmed, result
+
+    async def end_turn_tool(self):
+        """The AI's turn_ended: end the current scope. Calls made meanwhile wait and run under the next turn.
+
+        Without a host there is nothing to ask: the answer is fixed, the scopes stay as they are and, if any are
+        open, the record says they could not be confirmed. The request is bounded by cleanup_timeout, so a runtime
+        that never answers cannot hold up the calls behind it; the turn then rotates like in any unanswered release.
+        """
+        await self.turn_lock.acquire()
+        try:
+            if self.stopping:
+                raise BridgeFailure('This owned CUA connection is stopping.')
+            if not self.connected:
+                if not self.scopes:
+                    # Nothing was opened, so there is nothing to confirm: not an error, like an empty turn on a host.
+                    return {'content': [{'type': 'text', 'text': NOTHING_TO_END}]}
+                self.cleanup_unconfirmed = True
+                self.changed()
+                raise BridgeFailure(TURN_ENDED_WITHOUT_HOST)
+            rpc, scope = self.rpc, self.current_scope()
+            relay = bool(self.host and self.host.get('relay'))
+            started = time.monotonic()
+            self.begin_call()
+            ok = False
+            try:
+                ok, result = await self.end_scope(scope, self.cleanup_timeout)
+                return result
+            except BridgeFailure:
+                if rpc.closed:
+                    raise BridgeFailure(LOST_DURING_CALL) from None
+                raise
+            finally:
+                if not ok and (scope['session_id'], scope['turn_id']) in self.scopes:
+                    self.cleanup_unconfirmed = True
+                self.finish_call('turn_ended', ok, started, scope, relay)
+        finally:
+            self.turn_lock.release()
+
+    async def take_turn_lock(self, timeout):
+        """Take turn_lock, or give up after `timeout` seconds. None waits as long as it takes."""
+        if timeout is None or not self.turn_lock.locked():
+            await self.turn_lock.acquire()
+            return True
+        try:
+            await asyncio.wait_for(self.turn_lock.acquire(), timeout)
+        except asyncio.TimeoutError:
+            return False
+        return True
+
+    async def release_scopes(self, wait=None, budget=None):
+        """End every open scope this connection can still reach, oldest first.
+
+        wait: seconds to give tool calls that are still running (the control release: 2.5). None does not wait.
+        budget: seconds for the whole operation (exit: 3). None leaves each request its own cleanup timeout.
+        Returns {'released', 'reason', 'scope_count'}; scope_count counts the scopes this request confirmed.
+        New calls wait behind the release and then run under the rotated turn, so the release is not starved.
+        """
+        begun = time.monotonic()
+        if not await self.take_turn_lock(wait if wait is not None else budget):
+            return self.release_result(False, 'request_in_flight', 0)
+        try:
+            if wait is not None:
+                while self.active_tool_calls and time.monotonic()-begun < wait:
+                    await asyncio.sleep(0.025)
+                if self.active_tool_calls:
+                    return self.release_result(False, 'request_in_flight', 0)
+            if not self.scopes:
+                return self.release_result(False, 'no_trusted_scope', 0)
+            if not self.connected or 'turn_ended' not in self.tool_names:
+                self.cleanup_unconfirmed = True
+                self.changed()
+                return self.release_result(False, 'cleanup_not_confirmed', 0)
+            # Only this host's thread can end its scopes; those of an earlier host stay open in the records.
+            targets = [key for key in self.scopes if key[0] == self.thread_id]
+            confirmed, failed = 0, not targets
+            for session, turn in targets:
+                timeout = self.cleanup_timeout
+                if budget is not None:
+                    timeout = min(timeout, budget-(time.monotonic()-begun))
+                if timeout <= 0 or not self.connected:
+                    failed = True
+                    break
+                try:
+                    done, _ = await self.end_scope({'session_id': session, 'turn_id': turn}, timeout)
+                except Exception:
+                    done = False
+                confirmed += 1 if done else 0
+                failed = failed or not done
+            self.cleanup_unconfirmed = bool(self.scopes)
+            self.changed()
+            return self.release_result(not failed, 'cleanup_not_confirmed' if failed else None, confirmed)
+        finally:
+            self.turn_lock.release()
+
+    @staticmethod
+    def release_result(released, reason, scope_count):
+        return {'released': released, 'reason': reason, 'scope_count': scope_count}
 
     async def close(self):
         async with self.close_lock:
             if self.cleanup_report is not None:
                 return self.cleanup_report
+            self.stopping = True
+            begun = time.monotonic()
             report = {'owned_thread_unsubscribe': 'not_created', 'connection_close': 'unconfirmed'}
-            if self.initialized and not self.rpc.closed:
-                await self.release_turn()
+            if self.initialized and self.connected:
+                try:
+                    await self.release_scopes(budget=EXIT_RELEASE_SECONDS)
+                except Exception:
+                    pass  # whatever failed, the thread is still detached and the connection closed below
             if self.thread_id is not None and not self.rpc.closed:
                 try:
-                    result = await self.rpc.request('thread/unsubscribe', {'threadId': self.thread_id}, self.cleanup_timeout)
+                    # The release and this request share the exit budget; whatever the release left is all there is.
+                    left = max(0.0, EXIT_RELEASE_SECONDS-(time.monotonic()-begun))
+                    result = await self.rpc.request('thread/unsubscribe', {'threadId': self.thread_id},
+                                                    min(self.cleanup_timeout, left))
                     status = result.get('status') if isinstance(result, dict) else None
                     if status not in ('unsubscribed', 'notLoaded'):
                         raise BridgeFailure('The host did not confirm owned-thread detachment.')
@@ -486,6 +853,7 @@ class HostMcp:
                 self.log('owned_thread_cleanup_unconfirmed')
             self.approvals.clear()
             self.initialized = False
+            self.ready = False
             try:
                 await self.rpc.close()
                 report['connection_close'] = 'confirmed'
@@ -495,28 +863,35 @@ class HostMcp:
             return report
 
 
-async def serve(adapter, control_factory=None):
+async def serve(adapter, control_factory=None, stdin=None):
+    """Run the MCP session on stdin and stdout until stdin ends or a stop signal arrives.
+
+    control_factory(adapter) makes the record and control endpoint of this bridge. They exist from the start, also
+    before the host is connected. If they cannot be set up the bridge runs without them: records never decide
+    whether a CUA call works. On the way out the open scopes are released first (adapter.close), then the record
+    is removed, or left as not confirmed when scopes are still open.
+    """
     loop = asyncio.get_running_loop()
     reader = asyncio.StreamReader()
     protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
+    await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer if stdin is None else stdin)
     stopped = asyncio.Event()
     previous = {}
-    for signum in (signal.SIGINT, signal.SIGTERM):
-        previous[signum] = signal.getsignal(signum)
+    for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        handler = signal.getsignal(signum)
+        if signum == signal.SIGHUP and handler == signal.SIG_IGN:
+            continue  # started under nohup: a closing terminal must not end this bridge
+        previous[signum] = handler
         loop.add_signal_handler(signum, stopped.set)
     tasks = set()
     control = None
-    control_lock = asyncio.Lock()
-
-    async def handle(message):
-        nonlocal control
-        await adapter.handle(message)
-        if control_factory and adapter.initialized and control is None:
-            async with control_lock:
-                if control is None:
-                    control = control_factory(adapter)
-                    await control.start()
+    if control_factory is not None:
+        try:
+            control = control_factory(adapter)
+            await control.start()
+        except Exception:
+            control = None
+            adapter.log('bridge_records_unavailable')
 
     def completed(task):
         tasks.discard(task)
@@ -530,12 +905,13 @@ async def serve(adapter, control_factory=None):
             except (ValueError, UnicodeError):
                 adapter.reply(None, error={'code': -32700, 'message': 'Invalid MCP JSON.'})
                 continue
-            task = asyncio.create_task(handle(message))
+            task = asyncio.create_task(adapter.handle(message))
             tasks.add(task)
             task.add_done_callback(completed)
 
     upstream = asyncio.create_task(incoming())
     signal_waiter = asyncio.create_task(stopped.wait())
+    cleanup = None
     try:
         done, _ = await asyncio.wait((upstream, signal_waiter), return_when=asyncio.FIRST_COMPLETED)
         if upstream in done:
@@ -550,10 +926,18 @@ async def serve(adapter, control_factory=None):
         for task in list(tasks):
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        if control is not None:
-            await control.close()
-        cleanup = await adapter.close()
-        for signum, handler in previous.items():
-            loop.remove_signal_handler(signum)
-            signal.signal(signum, handler)
+        try:
+            if control is not None:
+                try:
+                    await control.stop()
+                except Exception:
+                    pass
+            cleanup = await adapter.close()
+        finally:
+            if control is not None:
+                await control.finalize()
+            for signum, handler in previous.items():
+                loop.remove_signal_handler(signum)
+                if handler is not None:
+                    signal.signal(signum, handler)
     return cleanup

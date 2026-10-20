@@ -1,0 +1,28 @@
+#!/bin/sh
+# codex-cua relay launcher. cua-repl starts this file where it would start node_repl.
+#
+# It runs relay.mjs (next to this file) with the node named by CODEX_CUA_RELAY_NODE. Whenever that is not
+# possible - no such node, no relay.mjs, a damaged or cut-off one (its last line must be the end marker) - it
+# starts the original runtime named by CODEX_CUA_NATIVE_RUNTIME with the same arguments instead, so the runtime
+# always starts.
+# Every decision is made before exec: a failed exec ends a non-interactive shell, so "try exec, fall through"
+# does not work.
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd) || dir=
+relay_node=${CODEX_CUA_RELAY_NODE-}
+native=${CODEX_CUA_NATIVE_RUNTIME-}
+if [ -n "$dir" ] && [ -n "$relay_node" ] && [ -x "$relay_node" ] && [ ! -d "$relay_node" ] \
+    && [ -f "$dir/relay.mjs" ] && [ -r "$dir/relay.mjs" ] \
+    && [ "$(tail -n 1 "$dir/relay.mjs" 2>/dev/null)" = '// codex-cua relay end' ] \
+    && "$relay_node" --check "$dir/relay.mjs" </dev/null >/dev/null 2>&1; then
+  exec "$relay_node" "$dir/relay.mjs" "$@"
+fi
+if [ -n "$native" ] && [ -x "$native" ] && [ ! -d "$native" ] && [ "$native" != "$0" ] && [ "$native" != "$dir/node-repl-relay" ]; then
+  # The runtime gets the environment it would have had without the relay.
+  CUA_REPL_NODE_REPL_PATH=$native
+  export CUA_REPL_NODE_REPL_PATH
+  unset CODEX_CUA_NATIVE_RUNTIME CODEX_CUA_RELAY_NODE CODEX_CUA_STATE_DIR CODEX_CUA_OWNER
+  exec "$native" "$@"
+fi
+printf '%s\n' 'codex-cua relay: the original runtime is unavailable' >&2
+exit 127
+# codex-cua relay end

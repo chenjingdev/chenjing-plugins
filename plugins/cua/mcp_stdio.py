@@ -6,8 +6,9 @@ import os
 from pathlib import Path
 import stat
 import sys
+from bridge_control import BridgeControl
+from host_autostart import AutostartFailure, ensure_host, give_back_first_call, watch_first_call
 from host_mcp import HostMcp, serve, BridgeFailure
-from portwarden_control import PortwardenControl
 from runtime_paths import default_state, installation_from_native_cli, InstallationError
 
 DEFAULT_STATE = default_state()
@@ -48,15 +49,20 @@ def endpoint_from_registry(state):
     return Path(read_host_registry(state)['socket_path'])
 
 
-async def main():
-    # Resolve on initialize, so a missing host yields a real MCP error instead
-    # of quietly spawning an independent CUA process or inventing tool schemas.
-    state = Path(os.environ.get('CODEX_HOST_CUA_STATE_DIR', str(DEFAULT_STATE)))
+def build_adapter(state, **options):
+    # Resolve on initialize, and again whenever the host connection was lost. A closed app is opened as the
+    # original host; a failure stays a real MCP error instead of an independent CUA process.
     class RegisteredHost(HostMcp):
         async def boot(self):
             try:
-                registry = read_host_registry(state)
+                try:
+                    registry = await asyncio.to_thread(ensure_host, state, read_host_registry, log=self.log)
+                except AutostartFailure as error:
+                    raise BridgeFailure(str(error)) from None
+                except InstallationError:
+                    raise BridgeFailure('Install Codex Desktop, or set CODEX_CUA_APP_PATH to its original app bundle.') from None
                 self.rpc.socket_path = Path(registry['socket_path'])
+                self.registry = registry
                 self.native_cua_root = None
                 if isinstance(registry.get('native_cli'), str):
                     try:
@@ -70,8 +76,54 @@ async def main():
             except (OSError, ValueError):
                 raise BridgeFailure('Start Codex with the prepared host launcher before using this MCP plugin. No runtime was started.') from None
             await super().boot()
-    adapter = RegisteredHost(None, Path('/unconfigured-codex-host'), 'cua_repl')
-    cleanup = await serve(adapter, control_factory=PortwardenControl)
+
+        async def call_tool(self, name, arguments):
+            # A Codex this process opened in the background is watched again at the first tool call: the first screen
+            # call of a fresh Codex brings it forward (S4). The front app is read before the call goes out, off the
+            # event loop, so a Codex that comes forward within milliseconds is not taken for one in front already;
+            # the watch itself has a thread. A watch that cannot start must not fail the call, and a call that failed
+            # on this side (BridgeFailure: never sent, or the connection was lost) leaves the chance to the next one;
+            # a call Codex answered with an error did reach it.
+            first = False
+            try:
+                first = await asyncio.to_thread(watch_first_call)
+            except Exception:
+                self.log('first_call_watch_unavailable')
+            try:
+                return await super().call_tool(name, arguments)
+            except BridgeFailure:
+                if first:
+                    give_back_first_call()
+                raise
+
+        async def thread_config(self, request):
+            # The desktop app takes the launcher's relay override out of the host's configuration, so the relay
+            # definition the launcher verified is given to this thread directly, with this bridge's name.
+            config = await super().thread_config(request)
+            try:
+                from relay_install import SERVER_KEY, relay_thread_server
+            except Exception:
+                return config
+            server = relay_thread_server(getattr(self, 'registry', None), self.native_cua_root, self.owner)
+            if server is not None:
+                config[SERVER_KEY] = server
+            return config
+
+        def host_info(self):
+            # The registry the host wrote, but only when it still names the endpoint this connection is on.
+            try:
+                registry = read_host_registry(state)
+                if Path(registry['socket_path']) == self.rpc.socket_path:
+                    return {'pid': registry['backend_pid'], 'relay': registry.get('relay') is True}
+            except Exception:
+                pass
+            return {'pid': None, 'relay': False}
+    return RegisteredHost(None, Path('/unconfigured-codex-host'), 'cua_repl', **options)
+
+
+async def main():
+    state = Path(os.environ.get('CODEX_HOST_CUA_STATE_DIR', str(DEFAULT_STATE)))
+    cleanup = await serve(build_adapter(state), control_factory=BridgeControl)
     return 0 if cleanup['owned_thread_unsubscribe'] != 'unconfirmed' and cleanup['connection_close'] == 'confirmed' else 1
 
 

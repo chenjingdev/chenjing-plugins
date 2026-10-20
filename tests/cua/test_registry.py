@@ -52,7 +52,8 @@ class RegistryTests(unittest.TestCase):
                 mcp_stdio.endpoint_from_registry(self.state)
 
     def test_unready_or_wrong_mechanism_is_rejected(self):
-        for changes in ({'status': 'closed'}, {'mechanism': 'standalone'}, {'owner_pid': True}, {'socket_path': 'relative.sock'}):
+        for changes in ({'status': 'closed'}, {'status': 'stopping', 'stopping_at': '2026-10-21T00:00:00Z'},
+                        {'mechanism': 'standalone'}, {'owner_pid': True}, {'socket_path': 'relative.sock'}):
             original = dict(self.record)
             self.record.update(changes)
             self.write()

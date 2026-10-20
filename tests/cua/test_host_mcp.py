@@ -3,10 +3,12 @@ import asyncio
 import copy
 from contextlib import ExitStack
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import stat
+import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -30,19 +32,20 @@ TOOLS = {
                    'annotations': {'readOnlyHint': False}, '_meta': {'original': True}},
 }
 HOST_THREAD = 'host-issued-owned-thread'
-FIXTURE_CUA_ROOT = Path('/fixture/Installed Codex.app/Contents/Resources/cua_node')
 
 
 class FakeProxy:
     def __init__(self, *, mode='normal', tools=None, result=None, unsubscribe=None, states=None,
-                 plugin_id=bridge.NATIVE_PLUGIN_ID, relay_cua_root=FIXTURE_CUA_ROOT):
+                 plugin_id=bridge.NATIVE_PLUGIN_ID, installed=None, config=None):
         self.mode = mode
+        # What plugin/installed and config/read answer: by default nothing to turn off in the owned thread.
+        self.installed = {'marketplaces': []} if installed is None else installed
+        self.config = {} if config is None else config
         self.tools = copy.deepcopy(TOOLS if tools is None else tools)
         self.result = copy.deepcopy(result if result is not None else {'content': [{'type': 'text', 'text': 'fixture'}]})
         self.unsubscribe = {'status': 'unsubscribed'} if unsubscribe is None else unsubscribe
         self.states = list(states or ['connected'])
         self.plugin_id = plugin_id
-        self.relay_cua_root = relay_cua_root
         self.incoming = asyncio.Queue()
         self.was_closed = False
         self.received, self.tasks = [], set()
@@ -99,19 +102,15 @@ class FakeProxy:
         elif method == 'initialized':
             return
         elif method == 'thread/start':
+            if self.mode == 'refuse_config' and 'config' in message['params']:
+                self.emit({'id': ident, 'error': {'code': -32602, 'message': 'PRIVATE_UNKNOWN_KEY'}})
+                return
             result = {'thread': {'id': HOST_THREAD, 'ephemeral': self.mode != 'not_ephemeral'}}
         elif method == 'mcpServerStatus/list':
             state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
             result = {'data': [{'name': 'cua_repl', 'pluginId': self.plugin_id, 'runtimeStatus': state, 'tools': self.tools, 'toolsError': None}], 'nextCursor': None}
             if self.mode == 'missing_catalogue':
                 result = {'data': [], 'nextCursor': None}
-        elif method == 'config/read':
-            result = {'config': {'mcp_servers': {'cua_repl': {
-                'command': str(self.relay_cua_root/'bin/node'),
-                'args': [str(self.relay_cua_root/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')],
-                'env': {'CUA_REPL_NODE_REPL_PATH': str(bridge.PORTWARDEN_RELAY),
-                        'PORTWARDEN_CUA_NATIVE_RUNTIME': str(self.relay_cua_root/'bin/node_repl')}
-            }}}} if self.mode == 'verified_relay' else {'config': {}}
         elif method == 'mcpServer/tool/call':
             if self.mode == 'rpc_error':
                 self.emit({'id': ident, 'error': {'code': -32000, 'message': 'PRIVATE_NATIVE_ERROR', 'data': {'original': [1, 2]}}})
@@ -125,9 +124,79 @@ class FakeProxy:
             result = self.result
         elif method == 'thread/unsubscribe':
             result = self.unsubscribe
+        elif method == 'plugin/installed':
+            if self.mode == 'no_plugin_list':
+                self.emit({'id': ident, 'error': {'code': -32601, 'message': 'PRIVATE_NO_METHOD'}})
+                return
+            result = self.installed
+        elif method == 'config/read':
+            result = {'config': self.config, 'origins': {}}
         else:
             raise AssertionError('Unexpected method in mock: ' + str(method))
         self.emit({'id': ident, 'result': result})
+
+
+INSTALLED = {'marketplaces': [
+    {'name': 'openai-bundled', 'plugins': [{'id': bridge.NATIVE_PLUGIN_ID, 'enabled': True},
+                                           {'id': 'browser-use@openai-bundled', 'enabled': True}]},
+    {'name': 'team', 'plugins': [{'id': 'team-memory@team', 'enabled': True}, {'id': 'off@team', 'enabled': False},
+                                 {'id': 'odd.name@team', 'enabled': True}, {'enabled': True}, 'junk']},
+    'junk']}
+CONFIGURED = {'mcp_servers': {'honcho': {'command': 'honcho'}, 'cua_repl': {'command': 'cua'},
+                              'paused': {'command': 'p', 'enabled': False}, 'has space': {'command': 's'}}}
+
+
+class QuietConfigTests(unittest.TestCase):
+    def test_every_other_enabled_plugin_and_configured_server_is_turned_off(self):
+        self.assertEqual(bridge.quiet_config(INSTALLED, {'config': CONFIGURED}), {
+            'plugins.browser-use@openai-bundled.enabled': False, 'plugins.team-memory@team.enabled': False,
+            'mcp_servers.honcho.enabled': False})
+
+    def test_answers_that_are_missing_or_malformed_turn_nothing_off(self):
+        for installed, config in ((None, None), ({}, {}), ({'marketplaces': 'x'}, {'config': {'mcp_servers': []}}),
+                                  ([], 'x')):
+            self.assertEqual(bridge.quiet_config(installed, config), {})
+
+
+def gone_stream():
+    """A stderr nobody reads any more: the other end of the pipe is closed, so every write fails with BrokenPipeError."""
+    reader, writer = os.pipe()
+    os.close(reader)
+    return os.fdopen(writer, 'w', buffering=1)
+
+
+def closed_stream():
+    stream = io.StringIO()
+    stream.close()
+    return stream
+
+
+def let_go(stream):
+    """Close a stream whose pending text can no longer be written."""
+    try:
+        stream.close()
+    except OSError:
+        pass
+
+
+class ClosedStderrTests(unittest.TestCase):
+    """Claude closes the bridge's stdio a few milliseconds after it stops the bridge (the MCP records of c43 and c45),
+    while the bridge is still cleaning up and logging what it does."""
+
+    def test_the_log_raises_nothing_when_stderr_is_gone_or_closed(self):
+        for label, make in (('the other end of the pipe is closed', gone_stream), ('the file is closed', closed_stream)):
+            with self.subTest(label):
+                stream = make()
+                self.addCleanup(let_go, stream)
+                with patch.object(sys, 'stderr', stream):
+                    bridge.HostMcp.log_stderr('owned_thread_unsubscribe_confirmed')
+                    bridge.HostMcp.log_stderr('owned_thread_cleanup_unconfirmed')       # again, with the first one unwritten
+
+    def test_the_log_still_writes_its_one_fixed_line_to_a_stderr_that_works(self):
+        stream = io.StringIO()
+        with patch.object(sys, 'stderr', stream):
+            bridge.HostMcp.log_stderr('owned_thread_unsubscribe_confirmed')
+        self.assertEqual(stream.getvalue(), 'cua: owned_thread_unsubscribe_confirmed\n')
 
 
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
@@ -140,7 +209,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         for stack in reversed(self.stacks):
             stack.close()
 
-    def fixture(self, *, native_cua_root=FIXTURE_CUA_ROOT, **options):
+    def fixture(self, **options):
         proxy = FakeProxy(**options)
         stack = ExitStack()
         stack.enter_context(patch.object(Path, 'stat', new=lambda path: SimpleNamespace(
@@ -152,8 +221,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         stack.enter_context(patch.object(bridge.asyncio, 'create_subprocess_exec', side_effect=AssertionError('No subprocess is permitted')))
         output, logs = [], []
         adapter = bridge.HostMcp(Path('/fixture/codex'), Path('/fixture/existing-host.sock'),
-            emit=output.append, log=logs.append, startup_timeout=0.3, cleanup_timeout=0.2,
-            native_cua_root=native_cua_root)
+            emit=output.append, log=logs.append, startup_timeout=0.3, cleanup_timeout=0.2)
         self.stacks.append(stack)
         self.adapters.append(adapter)
         return adapter, proxy, output, logs, spawn
@@ -188,33 +256,49 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(m.get('method') in ('thread/resume', 'turn/start', 'thread/fork') for m in proxy.received))
         self.assertNotIn('PRIVATE', json.dumps(logs))
 
-    async def test_verified_native_portwarden_relay_is_accepted(self):
-        adapter, proxy, output, _, _ = self.fixture(plugin_id=None, mode='verified_relay')
+    async def test_the_owned_thread_turns_off_the_other_servers_of_the_users_set_up(self):
+        adapter, proxy, output, logs, _ = self.fixture(installed=INSTALLED, config=CONFIGURED)
         await self.initialize(adapter)
         self.assertNotIn('error', output[-1])
-        self.assertTrue(any(m.get('method') == 'config/read' for m in proxy.received))
+        methods = [m.get('method') for m in proxy.received]
+        self.assertEqual(methods[:5], ['initialize', 'initialized', 'plugin/installed', 'config/read', 'thread/start'])
+        start = next(m for m in proxy.received if m.get('method') == 'thread/start')
+        self.assertEqual(start['params'], {'ephemeral': True, 'cwd': os.getcwd(), 'config': {
+            'plugins.browser-use@openai-bundled.enabled': False, 'plugins.team-memory@team.enabled': False,
+            'mcp_servers.honcho.enabled': False}})
+        self.assertNotIn('owned_thread_config_refused', logs)
 
-    async def test_portwarden_relay_uses_the_explicit_installed_runtime_location(self):
-        relocated = Path('/fixture/Custom Location/Codex.app/Contents/Resources/cua_node')
-        adapter, _, output, _, _ = self.fixture(plugin_id=None, mode='verified_relay',
-            native_cua_root=relocated, relay_cua_root=relocated)
+    async def test_a_host_that_refuses_the_configuration_starts_the_thread_with_its_own(self):
+        adapter, proxy, output, logs, _ = self.fixture(mode='refuse_config', installed=INSTALLED)
         await self.initialize(adapter)
         self.assertNotIn('error', output[-1])
+        starts = [m['params'] for m in proxy.received if m.get('method') == 'thread/start']
+        self.assertEqual(starts, [{'ephemeral': True, 'cwd': os.getcwd(), 'config': {
+            'plugins.browser-use@openai-bundled.enabled': False, 'plugins.team-memory@team.enabled': False}},
+            {'ephemeral': True, 'cwd': os.getcwd()}])
+        self.assertEqual(adapter.thread_id, HOST_THREAD)
+        self.assertIn('owned_thread_config_refused', logs)
+        self.assertNotIn('PRIVATE', json.dumps(logs))
 
-    async def test_portwarden_relay_requires_a_matching_explicit_runtime_location(self):
-        for root in (None, Path('/fixture/another-app/cua_node'), Path('relative/cua_node')):
-            adapter, proxy, output, _, _ = self.fixture(plugin_id=None, mode='verified_relay',
-                native_cua_root=root)
-            await self.initialize(adapter)
-            self.assertIn('verified Portwarden relay', output[-1]['error']['message'])
-            self.assertTrue(proxy.was_closed)
-            self.assertFalse(any(m.get('method') == 'mcpServer/tool/call' for m in proxy.received))
+    async def test_a_host_without_the_plugin_list_still_turns_off_the_configured_servers(self):
+        adapter, proxy, output, _, _ = self.fixture(mode='no_plugin_list', config=CONFIGURED)
+        await self.initialize(adapter)
+        self.assertNotIn('error', output[-1])
+        start = next(m for m in proxy.received if m.get('method') == 'thread/start')
+        self.assertEqual(start['params']['config'], {'mcp_servers.honcho.enabled': False})
 
-    async def test_unverified_non_plugin_server_is_rejected(self):
+    async def test_server_without_the_bundled_plugin_identity_is_rejected_and_owned_thread_is_cleaned(self):
         adapter, proxy, output, _, _ = self.fixture(plugin_id=None)
         await self.initialize(adapter)
-        self.assertIn('verified Portwarden relay', output[-1]['error']['message'])
+        self.assertIn('original bundled CUA plugin', output[-1]['error']['message'])
         self.assertTrue(proxy.was_closed)
+        self.assertTrue(any(m.get('method') == 'thread/unsubscribe' for m in proxy.received))
+        # No other source of identity is consulted (the configuration is read only to set up the thread, before it
+        # starts), and nothing is ever called on the unidentified server.
+        methods = [m.get('method') for m in proxy.received]
+        self.assertNotIn('config/read', methods[methods.index('thread/start'):])
+        self.assertNotIn('mcpServer/tool/call', methods)
+        self.assertFalse(adapter.initialized)
 
     async def test_catalogue_preserves_native_tools_except_owned_lifecycle_contract(self):
         adapter, proxy, output, _, _ = self.fixture()
@@ -240,12 +324,15 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         await adapter.handle({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list', 'params': {}})
         lifecycle = next(tool for tool in output[-1]['result']['tools'] if tool['name'] == 'turn_ended')
         self.assertNotIn('required', lifecycle['inputSchema'])
+        ended = adapter.turn_id
         await adapter.handle({'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call',
                               'params': {'name': lifecycle['name'], 'arguments': {}}})
         self.assertEqual(output[-1]['result'], result)
         sent = next(m for m in proxy.received if m.get('method') == 'mcpServer/tool/call')
         self.assertEqual(sent['params']['arguments'], {
-            'hook_event_name': 'Stop', 'session_id': HOST_THREAD, 'turn_id': adapter.turn_id})
+            'hook_event_name': 'Stop', 'session_id': HOST_THREAD, 'turn_id': ended})
+        # The confirmed turn_ended ended that turn; the next call is made under a new one.
+        self.assertNotEqual(adapter.turn_id, ended)
         self.assertEqual(proxy.tools, TOOLS)
 
     async def test_release_version_and_server_identity_are_advertised_consistently(self):
@@ -308,11 +395,12 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output[-1]['error']['code'], -32602)
         self.assertFalse(any(m.get('method') == 'mcpServer/tool/call' for m in proxy.received))
         call['params']['arguments'] = {}
+        owned = adapter.turn_id
         await adapter.handle(call)
         sent = next(m for m in proxy.received if m.get('method') == 'mcpServer/tool/call')
-        self.assertEqual(sent['params']['arguments'], {'hook_event_name': 'Stop', 'session_id': HOST_THREAD, 'turn_id': adapter.turn_id})
+        self.assertEqual(sent['params']['arguments'], {'hook_event_name': 'Stop', 'session_id': HOST_THREAD, 'turn_id': owned})
         self.assertEqual(sent['params']['_meta'], {'thread_id': HOST_THREAD, 'threadId': HOST_THREAD,
-            'x-codex-turn-metadata': {'session_id': HOST_THREAD, 'turn_id': adapter.turn_id}})
+            'x-codex-turn-metadata': {'session_id': HOST_THREAD, 'turn_id': owned}})
 
     async def test_missing_socket_does_not_connect_or_spawn_anything(self):
         adapter, _, output, _, spawn = self.fixture()
@@ -459,6 +547,20 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         cleanup = [m for m in proxy.received if m.get('method') == 'thread/unsubscribe']
         self.assertEqual([m['params'] for m in cleanup], [{'threadId': HOST_THREAD}])
         self.assertFalse(any(m.get('method') in ('thread/archive', 'thread/delete', 'turn/interrupt') for m in proxy.received))
+
+    async def test_a_stderr_that_is_gone_does_not_cut_the_cleanup_short(self):
+        """What the bridge logs while it cleans up must not raise: the sequence would stop in the middle, with the thread
+        reported unconfirmed that the host confirmed and the connection never closed."""
+        for make in (gone_stream, closed_stream):
+            adapter, proxy, _, _, _ = self.fixture()
+            await self.initialize(adapter)
+            adapter.log = bridge.HostMcp.log_stderr          # the real log, not the list the fixture collects into
+            stream = make()
+            self.addCleanup(let_go, stream)
+            with patch.object(sys, 'stderr', stream):
+                report = await adapter.close()
+            self.assertEqual(report, {'owned_thread_unsubscribe': 'confirmed', 'connection_close': 'confirmed'})
+            self.assertTrue(proxy.was_closed)
 
     async def test_close_is_idempotent_and_unknown_creation_is_never_reported_as_unloaded(self):
         adapter, proxy, _, _, _ = self.fixture()
