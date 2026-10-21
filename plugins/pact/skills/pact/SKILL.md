@@ -11,7 +11,7 @@ description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라�
 
 이 스킬의 Base directory에서 두 단계 위가 pact 폴더다. 아래에서 `<pact>`라고 쓴다. 스크립트는 `node <pact>/scripts/<이름>.mjs`로 부른다. 하위 에이전트는 `pact:spec-checker`, `pact:worker`, `pact:reviewer`, `pact:verifier`다.
 
-화면 확인에는 Codex CUA 도구(`mcp__plugin_cua_cua__js`)를 쓴다. 이 도구가 없으면 화면 없이 확인한다.
+화면 확인에는 CUA Bar가 까는 Codex CUA 도구(`mcp__cua__js`)를 쓴다. 없으면 옛 플러그인 이름(`mcp__plugin_cua_cua__js`)을 찾고, 둘 다 없으면 화면 없이 확인한다.
 
 페이지나 보고서를 사용자에게 열어 줄 때 macOS는 `open`, Linux는 `xdg-open`, Windows는 `start ""`를 쓴다. 아래에서 `open`이라고 쓴 곳은 모두 이것이다.
 
