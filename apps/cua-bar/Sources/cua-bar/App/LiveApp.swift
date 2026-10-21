@@ -71,7 +71,8 @@ final class LiveApp {
         let removal = RemovalFlow(
             engine: engine, loginItem: loginItem, claude: claude, quit: quit,
             isSetupRunning: { setup.isRunning || model.inFlight.contains(where: SetupOverlay.runsSetup) },
-            onRemoved: { model.stop() })
+            onRemoved: { model.stop() },
+            showing: { model.showRemoval(RemovalMessages.card(for: $0)) })
         let automaticSetup = AutomaticSetup(
             activity: setup, perform: { [weak model] in _ = await model?.perform($0) }, isBundled: bundle != nil,
             codexInstalled: { codex.isInstalled() }, claudeCodeFound: { claude.claudeCodeFound })

@@ -102,6 +102,29 @@ struct ViewModelTests {
         #expect(model.summary.problem?.fix == .runSetup)
     }
 
+    @Test func whileTheRemovalUndoesThingsItsCardStaysAndReadsAreDropped() async throws {
+        let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
+        let model = makeModel(engine)
+        await model.refresh()
+        let content = model.content
+        let card = try #require(RemovalMessages.card(for: .working))
+        model.showRemoval(card)
+        #expect(model.summary == card)
+        // The engine is half gone: this read would put up 연결 엔진이 없어요 with an install button.
+        engine.setStatusError(.engineMissing)
+        await model.refresh()
+        #expect(model.summary == card)
+        #expect(model.summary.fix == nil)
+        #expect(model.content == content)
+        let done = try #require(RemovalMessages.card(for: .finished(RemovalMessages.done)))
+        model.showRemoval(done)
+        #expect(model.summary == done)
+        // Refused: the reads have the card again.
+        model.showRemoval(nil)
+        await model.refresh()
+        #expect(model.summary.problem?.title == "연결 엔진이 없어요")
+    }
+
     @Test func oneSlowAnswerDoesNotFlipAWorkingIconButTwoDo() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
         let model = makeModel(engine)

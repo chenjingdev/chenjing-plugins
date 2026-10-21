@@ -307,6 +307,43 @@ struct RemovalTests {
         #expect(log.events.last == "quit")
     }
 
+    /// The card the app is shown for each new phase, by headline ("none" for the status card).
+    private func cards(_ log: EventLog) -> @MainActor (RemovalFlow.Phase) -> Void {
+        { log.add(RemovalMessages.card(for: $0).map { "\($0.headline), fix \($0.fix == nil ? "none" : "some")" } ?? "none") }
+    }
+
+    @Test func theCardSaysWhatItDoesFromTheFirstChangeUntilTheAppQuits() async {
+        let log = EventLog()
+        let shown = EventLog()
+        let suite = DefaultsSuite()
+        defer { suite.remove() }
+        let registrar = LoginItemRegistrar(service: LoggingLoginItem(log: log), defaults: suite.defaults)
+        let sleeper = ManualSleeper()
+        let flow = RemovalFlow(
+            engine: FakeEngineClient(), loginItem: registrar, quit: { log.add("quit") }, sleep: sleeper.sleep,
+            showing: cards(shown))
+        flow.ask()
+        let removal = Task { await flow.confirm() }
+        #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
+        #expect(shown.events == ["none", "\(RemovalMessages.working), fix none", "되돌렸어요, fix none"])
+        sleeper.releaseAll()
+        await removal.value
+        #expect(shown.events.count == 3)
+    }
+
+    @Test func aRefusalGivesTheCardBackToTheStatus() async {
+        let rig = rig(status: hostRunning())
+        defer { rig.suite.remove() }
+        let shown = EventLog()
+        let flow = RemovalFlow(
+            engine: rig.engine, loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: rig.log), defaults: rig.suite.defaults),
+            quit: { rig.log.add("quit") }, sleep: rig.sleeper.sleep, showing: cards(shown))
+        flow.ask()
+        await flow.confirm()
+        #expect(flow.phase == .refused(RemovalMessages.hostRunning))
+        #expect(shown.events == ["none", "\(RemovalMessages.working), fix none", "none"])
+    }
+
     // MARK: Refusal
 
     @Test func aSetupThatRunsMakesItWaitInsteadOfRemovingUnderneathIt() async {

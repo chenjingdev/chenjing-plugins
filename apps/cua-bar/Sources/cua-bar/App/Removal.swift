@@ -26,6 +26,24 @@ enum RemovalMessages {
     /// A setup (or an install or update) writes the same files; they do not run at the same time.
     static let setupRunning = "연결을 설정하는 중이라 지금은 못 해요. 끝난 뒤에 다시 해 주세요"
     static let loginItemStays = " 로그인 항목은 시스템 설정 > 일반 > 로그인 항목에서 직접 꺼 주세요."
+
+    /// The status card and the menu bar item while it undoes things and until the app quits; nil while nothing is
+    /// changed. A status read in those seconds finds the engine half gone and would show a problem with an install
+    /// button, so this card stands over it.
+    static func card(for phase: RemovalFlow.Phase) -> StatusSummary? {
+        switch phase {
+        case .working:
+            return StatusSummary(
+                icon: .working, stateLabel: confirmTitle, headline: working, nextStep: "끝나면 앱이 꺼져요",
+                tooltip: "CUA · 앱 지우는 중", accessibilityLabel: IconState.working.accessibilityDescription)
+        case .finished:
+            return StatusSummary(
+                icon: .ready, stateLabel: confirmTitle, headline: "되돌렸어요", nextStep: "곧 앱이 꺼져요",
+                tooltip: "CUA · 되돌렸어요", accessibilityLabel: IconState.ready.accessibilityDescription)
+        case .idle, .confirming, .refused:
+            return nil
+        }
+    }
 }
 
 /// 앱 지우기 at the bottom of 기록 (R3, once called 제거): asks once, then in this order: looks for a running
@@ -52,7 +70,9 @@ final class RemovalFlow: ObservableObject {
         case refused(String)
     }
 
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: Phase = .idle {
+        didSet { if phase != oldValue { showing(phase) } }
+    }
 
     /// It is undoing things, or has and is about to quit: the app does not replace itself meanwhile.
     var isRunning: Bool {
@@ -70,6 +90,7 @@ final class RemovalFlow: ObservableObject {
     private let readingTime: Duration
     private let isSetupRunning: @MainActor () -> Bool
     private let onRemoved: @MainActor () -> Void
+    private let showing: @MainActor (Phase) -> Void
 
     init(
         engine: any EngineClient,
@@ -83,7 +104,9 @@ final class RemovalFlow: ObservableObject {
         // True while a setup, install or update runs: removing waits until it is done.
         isSetupRunning: @escaping @MainActor () -> Bool = { false },
         // Called once it is undone, so the app can stop reading a status that no longer exists.
-        onRemoved: @escaping @MainActor () -> Void = {}
+        onRemoved: @escaping @MainActor () -> Void = {},
+        // Hears every new phase, so the status card can say what it does (`RemovalMessages.card(for:)`).
+        showing: @escaping @MainActor (Phase) -> Void = { _ in }
     ) {
         self.engine = engine
         self.loginItem = loginItem
@@ -93,6 +116,7 @@ final class RemovalFlow: ObservableObject {
         self.sleep = sleep
         self.isSetupRunning = isSetupRunning
         self.onRemoved = onRemoved
+        self.showing = showing
     }
 
     /// 앱 지우기 was pressed: ask.

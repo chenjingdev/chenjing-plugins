@@ -50,10 +50,12 @@ struct PopoverView: View {
             // Judged from what the model already read: opening the tab runs nothing.
             CheckTabView(content: model.checkContent, result: { model.placedResults[.check($0)] }) { model.send($0) }
         } else if model.selectedTab == .activity {
-            // Also without a status: 진단 복사 is most needed exactly then.
+            // Also without a status: 진단 복사 is most needed exactly then. The login item line steps aside while 앱 지우기
+            // runs: it is taken away then, and the result says so when it could not be.
             ActivityTabView(
                 content: model.activityContent, copying: model.inFlight.contains(.copyDiagnosis),
-                note: maintenance?.loginItem.line, result: model.placedResults[.diagnosis], maintenance: maintenance,
+                note: maintenance.flatMap { $0.removal.isRunning ? nil : $0.loginItem.line },
+                result: model.placedResults[.diagnosis], maintenance: maintenance,
                 notifications: model.notificationPermission, turnOnNotifications: { await model.turnOnNotifications() }
             ) {
                 model.send(.copyDiagnosis)

@@ -240,6 +240,17 @@ final class CUABarViewModel: ObservableObject {
 
     // MARK: Summary
 
+    /// 앱 지우기's card, from the moment it changes things until the app quits (`RemovalMessages.card(for:)`).
+    private var removalCard: StatusSummary?
+
+    /// While `card` is set it stands over the status card and the menu bar item, and status reads are dropped:
+    /// one in those seconds finds the engine half gone and would show a problem with an install button, and start
+    /// what an earlier start put off. nil (a refusal) gives the card back to the reads.
+    func showRemoval(_ card: StatusSummary?) {
+        removalCard = card
+        publishSummary()
+    }
+
     private func publish(_ evaluated: StatusSummary) {
         evaluatedSummary = evaluated
         // A failed setup is only remembered while the card still shows a setup problem.
@@ -252,6 +263,10 @@ final class CUABarViewModel: ObservableObject {
     /// restart waits for Codex to finish quitting, the next step says so: the banner is gone in
     /// seconds, and Codex may be asking whether to quit (S10).
     private func publishSummary() {
+        if let removalCard {
+            if removalCard != summary { summary = removalCard }
+            return
+        }
         var next = SetupOverlay.apply(
             to: evaluatedSummary, setup: setupActivity.phase, flowRunning: inFlight.contains(where: SetupOverlay.runsSetup))
         if pendingRelaunch != nil { next.nextStep = Self.quitWaitStep }
@@ -393,15 +408,22 @@ final class CUABarViewModel: ObservableObject {
             let status = try await engine.status()
             consecutiveFailures = 0
             let claude = await readClaude(launcher: status.engine.launcher)
-            accept(status, claude: claude, login: await readLoginEnvironment(for: status))
+            let login = await readLoginEnvironment(for: status)
+            // 앱 지우기 may have started meanwhile: what this read found is going away (`showRemoval`).
+            guard removalCard == nil else { return }
+            accept(status, claude: claude, login: login)
             answered = status
         } catch is CancellationError {
             return
         } catch let error as EngineError {
-            claudeSetup = await readClaude(launcher: nil)
+            let claude = await readClaude(launcher: nil)
+            guard removalCard == nil else { return }
+            claudeSetup = claude
             reject(error)
         } catch {
-            claudeSetup = await readClaude(launcher: nil)
+            let claude = await readClaude(launcher: nil)
+            guard removalCard == nil else { return }
+            claudeSetup = claude
             reject(.commandFailed(exitCode: -1, message: ""))
         }
         if let afterRead { runInBackground { await afterRead(answered) } }
