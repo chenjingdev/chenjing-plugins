@@ -3,45 +3,21 @@ import Foundation
 enum CommandLocation: Equatable, Sendable {
     /// `~/.local/bin/codex-cua`, ours.
     case ready(URL)
-    /// The plugin is installed but its command has not been set up yet.
+    /// An engine copy is bound (`source.json`) but its command has not been set up, or was taken away.
     case installedNotSetUp(installPath: URL)
-    case pluginMissing
+    case engineMissing
 }
 
-/// What Claude Code's registry says about the plugin, for a command that cannot answer.
-enum PluginPresence: Equatable, Sendable {
-    /// Not looked at, or the registry could not be read.
-    case unknown
-    /// No record of the plugin.
-    case absent
-    /// A record whose folder (its `setup.sh`) is gone.
-    case broken
-    case present
-}
-
-/// The plugin as Claude Code registered it: the `scope: user` record of `cua@chenjing-plugins`
-/// in `installed_plugins.json`.
-struct RegisteredPlugin: Equatable, Sendable {
-    var installPath: URL
-    /// The record's `version`; nil when it has none. The app compares this with its own.
-    var version: String?
-
-    /// The plugin's own installer, `<installPath>/setup.sh`.
-    var setupScript: URL { installPath.appendingPathComponent("setup.sh") }
-}
-
-/// "Finding the command" from the contract:
+/// "Finding the command":
 /// 1. `~/.local/bin/codex-cua` exists and its first 3 lines contain the authored-command marker;
-/// 2. otherwise the plugin is installed (`installed_plugins.json`, the `scope: user` record of
-///    `cua@chenjing-plugins`) but not set up;
-/// 3. otherwise the plugin is not installed.
+/// 2. otherwise an engine copy is bound in `~/.local/share/codex-cua/source.json` and its `setup.sh` is
+///    there, but the command is not;
+/// 3. otherwise there is no engine.
 ///
-/// It also reads what Claude Code registered, whatever state the command is in, because the
-/// app needs the registered version to tell an old plugin from a broken one.
+/// The engine copies themselves are put there by the app (`setup.sh install-engine` of the engine in its
+/// bundle); nothing here looks at Claude Code.
 struct CommandLocator: Sendable {
     static let marker = "# codex-cua authored command v1"
-    static let pluginID = "cua@chenjing-plugins"
-    static let marketplaceName = "chenjing-plugins"
 
     var home: URL
 
@@ -51,74 +27,27 @@ struct CommandLocator: Sendable {
 
     var commandURL: URL { home.appendingPathComponent(".local/bin/codex-cua") }
 
-    var registryURL: URL { home.appendingPathComponent(".claude/plugins/installed_plugins.json") }
+    var supportURL: URL { home.appendingPathComponent(".local/share/codex-cua", isDirectory: true) }
 
-    var marketplacesURL: URL { home.appendingPathComponent(".claude/plugins/known_marketplaces.json") }
-
-    /// What a setup leaves behind, and the first thing the plugin's remover reads: without it the
-    /// remover fails at once, because nothing was installed.
-    var supportBindingURL: URL { home.appendingPathComponent(".local/share/codex-cua/source.json") }
+    /// What a setup leaves behind: the engine copy the command is bound to.
+    var supportBindingURL: URL { supportURL.appendingPathComponent("source.json") }
 
     func locate() -> CommandLocation {
         if hasMarker(at: commandURL) { return .ready(commandURL) }
-        if let plugin = installedPlugin() { return .installedNotSetUp(installPath: plugin.installPath) }
-        return .pluginMissing
+        if let root = boundEngine() { return .installedNotSetUp(installPath: root) }
+        return .engineMissing
     }
 
-    /// The registered plugin when its folder is really there (its `setup.sh` exists). A registry
-    /// entry whose folder is gone is not an installed plugin.
-    func installedPlugin() -> RegisteredPlugin? {
-        guard let plugin = registeredPlugin(), FileManager.default.fileExists(atPath: plugin.setupScript.path) else { return nil }
-        return plugin
-    }
-
-    /// Whether the plugin is registered and its folder is there. A registry that does not exist means
-    /// Claude Code has installed no plugin at all.
-    func pluginPresence() -> PluginPresence {
-        if let plugin = registeredPlugin() {
-            return FileManager.default.fileExists(atPath: plugin.setupScript.path) ? .present : .broken
-        }
-        guard let data = try? Data(contentsOf: registryURL) else {
-            return FileManager.default.fileExists(atPath: registryURL.path) ? .unknown : .absent
-        }
-        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let plugins = root["plugins"] as? [String: Any] else { return .unknown }
-        return plugins[Self.pluginID] == nil || plugins[Self.pluginID] is [Any] ? .absent : .unknown
-    }
-
-    /// The registered plugin and its version, or nil when there is no usable record.
-    func registeredPlugin() -> RegisteredPlugin? {
+    /// The engine folder `source.json` binds, when its `setup.sh` is really there. A binding whose folder
+    /// is gone is no engine.
+    func boundEngine() -> URL? {
         guard
-            let data = try? Data(contentsOf: registryURL),
+            let data = try? Data(contentsOf: supportBindingURL),
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let plugins = root["plugins"] as? [String: Any],
-            let records = plugins[Self.pluginID] as? [[String: Any]]
+            let path = root["source_root"] as? String, path.hasPrefix("/")
         else { return nil }
-        let userRecord = records.first { ($0["scope"] as? String) == "user" && ($0["installPath"] as? String)?.isEmpty == false }
-        guard let record = userRecord, let path = record["installPath"] as? String else { return nil }
-        let version = (record["version"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return RegisteredPlugin(
-            installPath: URL(fileURLWithPath: path, isDirectory: true),
-            version: version?.isEmpty == false ? version : nil)
-    }
-
-    /// Whether Claude Code already knows the marketplace. `known_marketplaces.json` is an object
-    /// keyed by marketplace name (each entry has `source`, `installLocation`, `lastUpdated` and
-    /// `autoUpdate`), so only its top-level keys are names.
-    func knowsMarketplace(named name: String = CommandLocator.marketplaceName) -> Bool {
-        guard
-            let data = try? Data(contentsOf: marketplacesURL),
-            let marketplaces = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return false }
-        return marketplaces[name] != nil
-    }
-
-    /// Whether a setup left its support installation, judged as the remover judges it: only a
-    /// binding that is not there at all (`lstat` says ENOENT) means nothing was installed. A link or
-    /// a file the remover would refuse still counts as something.
-    func hasSupportInstallation() -> Bool {
-        var info = stat()
-        return lstat(supportBindingURL.path, &info) == 0 || errno != ENOENT
+        let folder = URL(fileURLWithPath: path, isDirectory: true)
+        return FileManager.default.fileExists(atPath: folder.appendingPathComponent("setup.sh").path) ? folder : nil
     }
 
     private func hasMarker(at url: URL) -> Bool {

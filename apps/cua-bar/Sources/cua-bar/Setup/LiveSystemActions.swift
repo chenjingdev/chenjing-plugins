@@ -18,229 +18,258 @@ enum ExternalPages {
     static let codexDownload = URL(string: "https://openai.com/codex/")!
 }
 
-/// The fixed lines the fix buttons say. A command that fails gives one of these and never the
-/// text it printed.
-enum PluginMessages {
-    static let claudeMissing = "Claude Code가 없어요"
+/// The fixed lines the install and the fix buttons say. A command that fails gives one of these and never
+/// the text it printed.
+enum InstallMessages {
     static let busy = "이미 하는 중이에요"
-    static let marketplaceAddFailed = "플러그인 저장소를 추가하지 못했어요"
-    static let marketplaceUpdateFailed = "플러그인 목록을 새로 받지 못했어요"
-    static let installFailed = "플러그인을 설치하지 못했어요"
-    static let updateFailed = "플러그인을 갱신하지 못했어요"
-    static let setupFailed = "플러그인은 준비됐지만 연결 설정에 실패했어요 — 다시 하기를 눌러 주세요"
-    /// R19: a new Claude conversation is where the plugin shows up.
+    /// What a run says when it did nothing worth a banner (the Mac needs nothing, or the card already says why).
+    static let nothingToSay = ActionOutcome(kind: .info, message: "")
+    static let engineFailed = "연결 엔진을 설치하지 못했어요"
+    static let mcpFailed = "Claude Code에 CUA를 연결하지 못했어요"
+    static let skillFailed = "Claude Code에 CUA 스킬을 깔지 못했어요"
+    /// An MCP server or a skill named cua that the app did not put there: left as it is.
+    static let conflict = "Claude Code에 앱이 깔지 않은 cua가 있어서 그대로 뒀어요 — 점검 탭에서 지우는 방법을 보세요"
+    /// A new Claude conversation is where the connection shows up.
     static let installed = "새 Claude 대화부터 CUA가 붙어요"
-    static let updated = "새 Claude 대화부터 새 판이 붙어요"
-    static let unchangedAfterUpdate = "플러그인 판이 그대로예요 — 받을 수 있는 가장 새 판이 앱과 달라요"
-    static let sameVersion = "앱과 플러그인 판이 이미 같아요"
-    static let appVersionUnknown = "앱 판을 알 수 없어요"
+    static let developerToolsOpened = "개발자 도구 설치 창을 열었어요 — 끝나면 설치를 한 번 더 눌러 주세요"
+    static let developerToolsFailed = "개발자 도구 설치 창을 열지 못했어요"
     static let openedCodexDownload = "Codex 받는 곳을 열었어요"
-    static let openedAppRelease = "새 앱 판 받는 곳을 열었어요 — 받아서 Applications로 옮겨 주세요"
     static let couldNotOpen = "받는 곳을 열지 못했어요"
 }
 
-/// What the `--json` commands of `claude plugin …` answered, read the careful way: the exit code
-/// decides first, then the result line (the last line of stdout that is a JSON object) may still
-/// say it failed. Nothing the command printed ever reaches the screen.
-enum ClaudeResult {
-    static func succeeded(_ output: ProcessOutput) -> Bool {
-        guard output.exitCode == 0 else { return false }
-        guard let object = resultLine(in: output.stdout) else { return true }
-        if (object["success"] as? Bool) == false || (object["ok"] as? Bool) == false { return false }
-        // Any error that is not null or an empty string.
-        if let error = object["error"], !(error is NSNull), (error as? String)?.isEmpty != true { return false }
-        if let status = (object["status"] as? String)?.lowercased(), ["error", "failed", "failure"].contains(status) { return false }
-        return true
-    }
-
-    private static func resultLine(in stdout: Data) -> [String: Any]? {
-        let text = String(decoding: stdout, as: UTF8.self)
-        for line in text.split(whereSeparator: \.isNewline).reversed() {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8) else { continue }
-            if let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] { return object }
-        }
-        return nil
-    }
-}
-
-/// The fixes that reach outside the engine (R19, F7): opening a download page, and installing or
-/// updating the Claude plugin with Claude Code's own `claude plugin …` commands.
+/// The fixes that reach outside the engine: opening a download page, the developer tools' installer, and the
+/// install itself (F1, R1): the engine in the app's bundle is unpacked by its own `setup.sh install-engine`,
+/// then the `cua` MCP server and skill are put into Claude Code.
 ///
-/// Every step runs only because the app was started or a button was pressed; a status read never
-/// reaches here. One install or update runs at a time, and the setup at its end takes the same
-/// slot as every other setup (`SetupActivity`). It never passes `-y`, `--yes` or `--accept-command`.
+/// Every step runs only because the app was started or a button was pressed; a status read never reaches
+/// here. The install takes the shared setup slot (`SetupActivity`), so two never run at once. It looks
+/// before it touches anything and changes only what is missing or the app's own and out of date:
+///
+/// 1. no Codex app: nothing (the card says so); put off until it is there
+/// 2. no developer tools (`xcode-select -p`): nothing (the card asks for them); the installer opens only on the button
+/// 3. no engine, or one of another version than the app's: `install-engine` from the bundle
+/// 4. Claude Code there: the MCP server and the skill, put in or replaced when the app's own, never over another's
+///
+/// A build that does not run from an app bundle (no engine inside) installs nothing.
 final class LiveSystemActions: SystemActions, @unchecked Sendable {
     struct Timeouts: Equatable, Sendable {
-        /// One `claude plugin …` command; they fetch from GitHub.
-        var claudeStep: Duration = .seconds(300)
-        /// The plugin's setup may be installing packages, and stopping that halfway leaves a broken environment.
-        var setup: Duration = EngineTimeouts().setup
+        /// `xcode-select -p`, and `xcode-select --install` (which only opens the system's installer).
+        var developerTools: Duration = .seconds(30)
+        /// `install-engine` may be installing packages, and stopping that halfway leaves a broken environment.
+        var engineInstall: Duration = EngineTimeouts().setup
     }
 
-    private let locator: CommandLocator
-    private let claude: ClaudeCLILocator
+    private let claude: ClaudeIntegration
+    private let engine: any EngineClient
     private let runner: any ProcessRunning
     private let opener: any URLOpening
+    private let bundle: BundledEngine?
     private let appVersion: String?
     private let setup: SetupActivity
-    private let newestAppRelease: @Sendable () async -> ReleaseInfo?
+    private let codex: CodexLocator
     private let timeouts: Timeouts
 
-    private let lock = NSLock()
-    private var working = false
-
     init(
-        locator: CommandLocator = CommandLocator(),
-        claude: ClaudeCLILocator = ClaudeCLILocator(),
+        claude: ClaudeIntegration,
+        engine: any EngineClient,
         runner: any ProcessRunning = SystemProcessRunner(),
         opener: any URLOpening = WorkspaceURLOpener(),
+        bundle: BundledEngine?,
         appVersion: String?,
         setup: SetupActivity,
-        newestAppRelease: @escaping @Sendable () async -> ReleaseInfo? = { nil },
+        codex: CodexLocator = CodexLocator(),
         timeouts: Timeouts = Timeouts()
     ) {
-        self.locator = locator
         self.claude = claude
+        self.engine = engine
         self.runner = runner
         self.opener = opener
+        self.bundle = bundle
         self.appVersion = appVersion
         self.setup = setup
-        self.newestAppRelease = newestAppRelease
+        self.codex = codex
         self.timeouts = timeouts
     }
 
     // MARK: Codex download
 
     func openCodexDownload() async -> ActionOutcome {
-        await open(ExternalPages.codexDownload, saying: PluginMessages.openedCodexDownload)
+        await opener.open(ExternalPages.codexDownload)
+            ? ActionOutcome(kind: .info, message: InstallMessages.openedCodexDownload)
+            : ActionOutcome(kind: .failure, message: InstallMessages.couldNotOpen)
     }
 
-    // MARK: Install (plugin_missing)
+    // MARK: Developer tools
 
-    /// Adds the marketplace when Claude Code does not know it yet, installs the plugin for the
-    /// user, then sets it up. A record whose folder is gone is taken away first, keeping the
-    /// plugin's data: Claude Code installs nothing over a plugin it already lists.
-    func installPlugin() async -> ActionOutcome {
-        guard enter() else { return ActionOutcome(kind: .info, message: PluginMessages.busy) }
-        defer { leave() }
-        guard let claudeCLI = claude.locate() else { return failure(PluginMessages.claudeMissing) }
-
-        if locator.pluginPresence() == .broken {
-            guard await runClaude(claudeCLI, Self.uninstall) else { return failure(PluginMessages.installFailed) }
-        }
-        if !locator.knowsMarketplace() {
-            guard await runClaude(claudeCLI, Self.marketplaceAdd) else { return failure(PluginMessages.marketplaceAddFailed) }
-        }
-        guard await runClaude(claudeCLI, Self.install) else { return failure(PluginMessages.installFailed) }
-        // The command said it worked; the registry is what says the plugin is really there.
-        guard let plugin = registeredPluginWithSetupScript() else { return failure(PluginMessages.installFailed) }
-
-        switch await runSetup(of: plugin) {
-        case .done: return ActionOutcome(kind: .success, message: PluginMessages.installed)
-        case .busy: return ActionOutcome(kind: .info, message: PluginMessages.busy)
-        case .failed: return failure(PluginMessages.setupFailed)
-        }
-    }
-
-    // MARK: Matching versions (version_mismatch)
-
-    /// The plugin older than the app: refresh the marketplace, update the plugin, set it up. The
-    /// plugin newer than the app (the marketplace updates by itself): open the app's release page.
-    func matchPluginVersion() async -> ActionOutcome {
-        guard let app = VersionNumber(appVersion) else { return failure(PluginMessages.appVersionUnknown) }
-        let before = locator.registeredPlugin()
-        if let plugin = VersionNumber(before?.version) {
-            if plugin > app { return await openNewestAppRelease(than: app) }
-            if plugin == app { return ActionOutcome(kind: .info, message: PluginMessages.sameVersion) }
-        }
-
-        guard enter() else { return ActionOutcome(kind: .info, message: PluginMessages.busy) }
-        defer { leave() }
-        guard let claudeCLI = claude.locate() else { return failure(PluginMessages.claudeMissing) }
-
-        guard await runClaude(claudeCLI, Self.marketplaceUpdate) else { return failure(PluginMessages.marketplaceUpdateFailed) }
-        guard await runClaude(claudeCLI, Self.update) else { return failure(PluginMessages.updateFailed) }
-        guard let plugin = registeredPluginWithSetupScript() else { return failure(PluginMessages.updateFailed) }
-
-        // An update that changed nothing and still does not match must not claim a new version.
-        let after = VersionNumber(plugin.version)
-        if after != app, after == VersionNumber(before?.version), plugin.installPath == before?.installPath {
-            return ActionOutcome(kind: .warning, message: PluginMessages.unchangedAfterUpdate)
-        }
-        switch await runSetup(of: plugin) {
-        case .done: return ActionOutcome(kind: .success, message: PluginMessages.updated)
-        case .busy: return ActionOutcome(kind: .info, message: PluginMessages.busy)
-        case .failed: return failure(PluginMessages.setupFailed)
-        }
-    }
-
-    private func openNewestAppRelease(than app: VersionNumber) async -> ActionOutcome {
-        let release = await newestAppRelease()
-        let url = (release.flatMap { $0.version > app ? $0.url : nil }) ?? ReleaseSource.releasesPage
-        return await open(url, saying: PluginMessages.openedAppRelease)
-    }
-
-    // MARK: Steps
-
-    static let marketplaceAdd = ["plugin", "marketplace", "add", ReleaseSource.repository, "--json"]
-    static let install = ["plugin", "install", CommandLocator.pluginID, "--scope", "user", "--json"]
-    static let uninstall = ["plugin", "uninstall", CommandLocator.pluginID, "--scope", "user", "--keep-data", "--json"]
-    static let marketplaceUpdate = ["plugin", "marketplace", "update", CommandLocator.marketplaceName, "--json"]
-    static let update = ["plugin", "update", CommandLocator.pluginID, "--scope", "user", "--json"]
-
-    private func runClaude(_ cli: URL, _ arguments: [String]) async -> Bool {
+    /// The card's button when the developer tools are missing. The tools may have come since (the person
+    /// finished the installer): then it is the whole install. Otherwise the system's installer opens.
+    func installDeveloperTools() async -> ActionOutcome {
+        if await developerToolsPresent() { return await setUp() }
         do {
-            return ClaudeResult.succeeded(try await runner.run(cli, arguments: arguments, timeout: timeouts.claudeStep))
+            let output = try await runner.run(Self.xcodeSelect, arguments: ["--install"], timeout: timeouts.developerTools)
+            return output.exitCode == 0
+                ? ActionOutcome(kind: .info, message: InstallMessages.developerToolsOpened)
+                : ActionOutcome(kind: .failure, message: InstallMessages.developerToolsFailed)
+        } catch {
+            return ActionOutcome(kind: .failure, message: InstallMessages.developerToolsFailed)
+        }
+    }
+
+    static let xcodeSelect = URL(fileURLWithPath: "/usr/bin/xcode-select")
+
+    /// `xcode-select -p`. Never `/usr/bin/python3`: without the tools that opens the installer's window.
+    private func developerToolsPresent() async -> Bool {
+        do {
+            return try await runner.run(Self.xcodeSelect, arguments: ["-p"], timeout: timeouts.developerTools).exitCode == 0
         } catch {
             return false
         }
     }
 
-    private enum SetupStep { case done, failed, busy }
+    // MARK: The install
 
-    /// `/bin/sh <installPath>/setup.sh setup`, the plugin's own installer, in the shared setup
-    /// slot. Through `sh`, so a copy that lost its executable bit still runs.
-    private func runSetup(of plugin: RegisteredPlugin) async -> SetupStep {
-        guard await setup.begin() else { return .busy }
-        var succeeded = false
+    private struct Run {
+        var outcome = InstallMessages.nothingToSay
+        var succeeded = true
+        var waiting: Set<SetupWait> = []
+        var developerToolsNeeded = false
+
+        static func failure(_ message: String) -> Run {
+            Run(outcome: ActionOutcome(kind: .failure, message: message), succeeded: false)
+        }
+    }
+
+    func setUp() async -> ActionOutcome {
+        guard await setup.begin() else { return ActionOutcome(kind: .info, message: InstallMessages.busy) }
+        let result = await install()
+        await setup.record(waitingFor: result.waiting, developerToolsNeeded: result.developerToolsNeeded)
+        await setup.end(succeeded: result.succeeded)
+        return result.outcome
+    }
+
+    private func install() async -> Run {
+        guard codex.isInstalled() else { return Run(waiting: [.codex]) }
+        guard let bundle else { return Run() }
+        guard await developerToolsPresent() else { return Run(developerToolsNeeded: true) }
+
+        var changed = false
+        let launcher: String?
+        switch await engineState() {
+        case .current(let current):
+            launcher = current
+        case .unknown:
+            // It could not be asked in time; the engine may be fine. The next try is the person's.
+            return Run()
+        case .needsInstall:
+            guard let installed = await installEngine(from: bundle) else { return .failure(InstallMessages.engineFailed) }
+            launcher = installed.launcher
+            changed = true
+        }
+
+        guard claude.claudeCodeFound else {
+            return Run(outcome: changed ? ActionOutcome(kind: .success, message: Self.engineOnly) : InstallMessages.nothingToSay, waiting: [.claudeCode])
+        }
+        var conflict = false
+
+        switch claude.mcpState(launcher: launcher) {
+        case .missing:
+            guard await putMCP(launcher: launcher, replacing: false) else { return .failure(InstallMessages.mcpFailed) }
+            changed = true
+        case .outdated:
+            guard await putMCP(launcher: launcher, replacing: true) else { return .failure(InstallMessages.mcpFailed) }
+            changed = true
+        case .conflict:
+            conflict = true
+        case .ready, .unknown:
+            break
+        }
+
+        switch claude.skillState(source: bundle.skillSource, appVersion: appVersion) {
+        case .missing, .outdated:
+            guard claude.installSkill(from: bundle.skillSource, version: appVersion ?? "dev") else {
+                return .failure(InstallMessages.skillFailed)
+            }
+            changed = true
+        case .conflict:
+            conflict = true
+        case .ready, .unknown:
+            break
+        }
+
+        if conflict { return Run(outcome: ActionOutcome(kind: .warning, message: InstallMessages.conflict)) }
+        return Run(outcome: changed ? ActionOutcome(kind: .success, message: InstallMessages.installed) : InstallMessages.nothingToSay)
+    }
+
+    /// Said when the engine was installed but there is no Claude Code to connect it to yet.
+    static let engineOnly = "연결 설정을 마쳤어요"
+
+    private enum EngineState {
+        /// The engine is the app's; this is the launcher it reported (nil: it did not say).
+        case current(String?)
+        case needsInstall
+        case unknown
+    }
+
+    /// The command's own status says which engine runs: the app's version is what it must be.
+    private func engineState() async -> EngineState {
+        do {
+            let status = try await engine.status()
+            if versionIsTheApps(status.engine.version) { return .current(status.engine.launcher) }
+            return .needsInstall
+        } catch let error as EngineError {
+            return error.needsEngineInstall ? .needsInstall : .unknown
+        } catch {
+            return .unknown
+        }
+    }
+
+    private func versionIsTheApps(_ version: String?) -> Bool {
+        let engineVersion = version?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !engineVersion.isEmpty else { return false }
+        guard let app = appVersion?.trimmingCharacters(in: .whitespacesAndNewlines), !app.isEmpty else { return true }
+        return engineVersion == app
+    }
+
+    private struct InstalledEngine {
+        /// The launcher the install reported, or what the status says after it; nil when neither does.
+        var launcher: String?
+    }
+
+    /// `/bin/sh <bundle>/setup.sh install-engine --json`: the folder it is run from is unpacked to
+    /// `~/.local/share/codex-cua/engine/<version>/` and set up from there. Through `sh`, so a copy that lost
+    /// its executable bit still runs. Nil when it failed.
+    private func installEngine(from bundle: BundledEngine) async -> InstalledEngine? {
         do {
             let output = try await runner.run(
-                URL(fileURLWithPath: "/bin/sh"), arguments: [plugin.setupScript.path, "setup"], timeout: timeouts.setup)
-            succeeded = output.exitCode == 0
+                URL(fileURLWithPath: "/bin/sh"), arguments: [bundle.setupScript.path, "install-engine", "--json"],
+                timeout: timeouts.engineInstall)
+            guard output.exitCode == 0 else { return nil }
+            if let launcher = Self.launcher(in: output.stdout) { return InstalledEngine(launcher: launcher) }
+            // The install did not name it: the status of the engine it just set up may.
+            return InstalledEngine(launcher: (try? await engine.status())?.engine.launcher)
         } catch {
-            succeeded = false
-        }
-        await setup.end(succeeded: succeeded)
-        return succeeded ? .done : .failed
-    }
-
-    private func registeredPluginWithSetupScript() -> RegisteredPlugin? {
-        guard let plugin = locator.registeredPlugin(), FileManager.default.fileExists(atPath: plugin.setupScript.path) else { return nil }
-        return plugin
-    }
-
-    private func open(_ url: URL, saying message: String) async -> ActionOutcome {
-        await opener.open(url)
-            ? ActionOutcome(kind: .info, message: message)
-            : ActionOutcome(kind: .failure, message: PluginMessages.couldNotOpen)
-    }
-
-    private func failure(_ message: String) -> ActionOutcome {
-        ActionOutcome(kind: .failure, message: message)
-    }
-
-    // MARK: One at a time
-
-    private func enter() -> Bool {
-        lock.withLock {
-            if working { return false }
-            working = true
-            return true
+            return nil
         }
     }
 
-    private func leave() {
-        lock.withLock { working = false }
+    /// `launcher` of the result line (the last line of stdout that is a JSON object): an absolute path.
+    static func launcher(in stdout: Data) -> String? {
+        let text = String(decoding: stdout, as: UTF8.self)
+        for line in text.split(whereSeparator: \.isNewline).reversed() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8),
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+            guard let launcher = object["launcher"] as? String, launcher.hasPrefix("/") else { return nil }
+            return launcher
+        }
+        return nil
+    }
+
+    /// The server is added (after the app's out-of-date one is removed), and then read back from the file: the
+    /// command's word is not enough.
+    private func putMCP(launcher: String?, replacing: Bool) async -> Bool {
+        if replacing, !(await claude.removeMCP()) { return false }
+        guard await claude.addMCP(command: claude.expectedLauncher(launcher)) else { return false }
+        return claude.mcpState(launcher: launcher) == .ready
     }
 }

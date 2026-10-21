@@ -3,21 +3,6 @@ import Testing
 @testable import cua_bar
 
 struct CommandLocatorTests {
-    @Test func thePresenceOfThePluginIsReadFromTheRegistryAndItsFolder() throws {
-        let home = try TempHome()
-        defer { home.remove() }
-        let locator = CommandLocator(home: home.url)
-        #expect(locator.pluginPresence() == .absent)                     // Claude Code has installed nothing
-        try home.write(#"{"version": 2, "plugins": {"other@market": [{"scope": "user", "installPath": "/x"}]}}"#, to: locator.registryURL)
-        #expect(locator.pluginPresence() == .absent)
-        try home.installPlugin(createFolder: false)
-        #expect(locator.pluginPresence() == .broken)
-        try home.installPlugin()
-        #expect(locator.pluginPresence() == .present)
-        try home.write("{not json", to: locator.registryURL)
-        #expect(locator.pluginPresence() == .unknown)
-    }
-
     @Test func theAuthoredCommandWinsWhenItsMarkerIsInTheFirstThreeLines() throws {
         let home = try TempHome()
         defer { home.remove() }
@@ -33,14 +18,14 @@ struct CommandLocatorTests {
         let home = try TempHome()
         defer { home.remove() }
         try home.writeCommand("#!/bin/sh\n\n\n# codex-cua authored command v1\n")
-        #expect(CommandLocator(home: home.url).locate() == .pluginMissing)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
     }
 
     @Test func someoneElsesCodexCuaIsNotOurs() throws {
         let home = try TempHome()
         defer { home.remove() }
         try home.writeCommand("#!/bin/sh\necho not ours\n")
-        #expect(CommandLocator(home: home.url).locate() == .pluginMissing)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
     }
 
     @Test func aBinaryAtThePathIsNotOurs() throws {
@@ -48,45 +33,58 @@ struct CommandLocatorTests {
         defer { home.remove() }
         try FileManager.default.createDirectory(at: home.command.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data([0xCF, 0xFA, 0xED, 0xFE, 0x00, 0x01, 0x02]).write(to: home.command)
-        #expect(CommandLocator(home: home.url).locate() == .pluginMissing)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
     }
 
-    @Test func aRegisteredPluginWithoutTheCommandIsInstalledButNotSetUp() throws {
+    // MARK: The engine copy a setup bound
+
+    @Test func aBoundEngineCopyWithoutTheCommandIsInstalledButNotSetUp() throws {
         let home = try TempHome()
         defer { home.remove() }
-        let install = try home.installPlugin()
-        #expect(CommandLocator(home: home.url).locate() == .installedNotSetUp(installPath: install))
+        let engine = try home.installEngine()
+        #expect(CommandLocator(home: home.url).locate() == .installedNotSetUp(installPath: engine))
+        #expect(CommandLocator(home: home.url).boundEngine() == engine)
     }
 
-    @Test func theCommandBeatsTheRegistry() throws {
+    @Test func theCommandBeatsTheBinding() throws {
         let home = try TempHome()
         defer { home.remove() }
-        try home.installPlugin()
+        try home.installEngine()
         try home.writeCommand()
         #expect(CommandLocator(home: home.url).locate() == .ready(home.command))
     }
 
-    @Test func onlyTheUserScopedRecordCounts() throws {
+    @Test func aBindingWhoseFolderIsGoneIsNoEngine() throws {
         let home = try TempHome()
         defer { home.remove() }
-        try home.installPlugin(scope: "project")
-        #expect(CommandLocator(home: home.url).locate() == .pluginMissing)
+        try home.installEngine(createFolder: false)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
+        #expect(CommandLocator(home: home.url).boundEngine() == nil)
     }
 
-    @Test func aRegistryEntryWhoseFolderIsGoneIsNotAnInstalledPlugin() throws {
+    @Test func noBindingOrABrokenOneMeansNoEngine() throws {
         let home = try TempHome()
         defer { home.remove() }
-        try home.installPlugin(createFolder: false)
-        #expect(CommandLocator(home: home.url).locate() == .pluginMissing)
+        let binding = CommandLocator(home: home.url).supportBindingURL
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
+        try home.write("not json", to: binding)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
+        try home.write(#"{"source_root": 5}"#, to: binding)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
+        try home.write(#"{"source_root": "relative/engine"}"#, to: binding)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
+        try home.write(#"{"plugin_id": "cua@chenjing-plugins"}"#, to: binding)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing, "a binding without its folder")
+        try home.write(#"{"source_root": "/nonexistent/engine/0.7.0"}"#, to: binding)
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing, "a binding to a folder that is gone")
     }
 
-    @Test func anEmptyOrBrokenRegistryMeansNotInstalled() throws {
+    @Test func theClaudePluginRegistryIsNotLookedAt() throws {
+        // The old plugin's record (and its folder) neither make an engine nor take one away.
         let home = try TempHome()
         defer { home.remove() }
-        #expect(CommandLocator(home: home.url).locate() == .pluginMissing)
-        try home.write("not json", to: home.url.appendingPathComponent(".claude/plugins/installed_plugins.json"))
-        #expect(CommandLocator(home: home.url).locate() == .pluginMissing)
-        try home.write(#"{"plugins": {"cua@chenjing-plugins": "oops"}}"#, to: home.url.appendingPathComponent(".claude/plugins/installed_plugins.json"))
-        #expect(CommandLocator(home: home.url).locate() == .pluginMissing)
+        try home.addLegacyPlugin()
+        try home.write("#!/bin/sh\nexit 0\n", to: home.url.appendingPathComponent(".claude/plugins/cache/chenjing-plugins/cua/0.7.0/setup.sh"))
+        #expect(CommandLocator(home: home.url).locate() == .engineMissing)
     }
 }

@@ -141,7 +141,7 @@ struct ReleaseRefusalTests {
         let rig = try await rig([Self.refused, Self.refused])
         await rig.model.send(.releaseConnection(Self.target))?.value
         await rig.model.confirmPending()
-        rig.engine.setStatusError(.pluginMissing)
+        rig.engine.setStatusError(.engineMissing)
         await rig.model.refresh()
         #expect(rig.model.refusedReleaseIDs.isEmpty)
     }

@@ -185,7 +185,7 @@ struct ReviewRound2Tests {
         rig.model.setPopoverOpen(true)
         await rig.model.send(.releaseConnection(Self.target))?.value
         #expect(rig.model.pending?.kind == .retryRelease)
-        rig.engine.setStatusError(.pluginMissing)
+        rig.engine.setStatusError(.engineMissing)
         await rig.model.refresh()
         #expect(rig.model.pending == nil)
     }
@@ -215,7 +215,7 @@ struct ReviewRound2Tests {
         let second = await Rig(try Fixtures.status("status-problem"))
         second.model.send(.releaseConnection(Self.target))
         #expect(second.model.pending != nil)
-        second.engine.setStatusError(.pluginMissing)
+        second.engine.setStatusError(.engineMissing)
         await second.model.refresh()
         #expect(second.model.pending == nil)
         #expect(second.actionCalls.isEmpty)
@@ -245,7 +245,7 @@ struct ReviewRound2Tests {
         let second = await Rig(try codexProblem())
         second.model.send(.restartCodex)
         #expect(second.model.pending != nil)
-        second.engine.setStatusError(.pluginMissing)
+        second.engine.setStatusError(.engineMissing)
         await second.model.refresh()
         #expect(second.model.pending == nil)
         #expect(!second.engine.calls.contains(.restartCodex))
@@ -274,7 +274,7 @@ struct ReviewRound2Tests {
         let key = try #require(rig.notifier.delivered.first?.key)
         var opened = 0
         rig.model.openPopoverHandler = { opened += 1 }
-        rig.engine.setStatusError(.pluginMissing)
+        rig.engine.setStatusError(.engineMissing)
         await rig.model.refresh()
         rig.notifier.tap(.restartCodex(key: key))
         await rig.model.waitForBackgroundWork()

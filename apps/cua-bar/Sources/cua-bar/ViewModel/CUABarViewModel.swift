@@ -99,11 +99,18 @@ final class CUABarViewModel: ObservableObject {
     /// card and the line then say there is nothing more to do, and only for these (never a guess).
     private var tabsReleasedIDs: Set<String> = []
 
+    /// What Claude Code has of CUA as of the last read: the MCP server, the skill, the old plugin if one is
+    /// still recorded. Read from files only; the 점검 tab and the card both show from it.
+    @Published private(set) var claudeSetup: ClaudeSetupState = .none
+
     /// The raw answer of the last good read, for what needs more than `content` shows.
     private(set) var lastStatus: EngineStatus?
     private(set) var isPopoverOpen = false
     /// Set by the menu bar item: shows the popover (a click on a notification).
     var openPopoverHandler: (@MainActor () -> Void)?
+    /// Runs in the background after each read (the install does what it put off for lack of Codex or Claude
+    /// Code). Set once by the app; it must return at once when there is nothing to do.
+    var afterRead: (@MainActor () async -> Void)?
     /// The automatic cleanup that is running, if any. Never two at a time.
     private(set) var automaticCleanupTask: Task<Void, Never>?
 
@@ -119,8 +126,8 @@ final class CUABarViewModel: ObservableObject {
     private let bannerDuration: Duration
     private let sleep: @Sendable (Duration) async throws -> Void
     private let setupActivity: SetupActivity
-    private let registeredPluginVersion: @Sendable () -> String?
-    private let pluginPresence: @Sendable () -> PluginPresence
+    private let claudeInspector: (@Sendable (String?) -> ClaudeSetupState)?
+    private let codexInstalled: @Sendable () -> Bool
 
     /// What the evaluator said about the last answer, before setup's own state is put over it.
     private var evaluatedSummary: StatusSummary = StatusEvaluator.loading
@@ -169,14 +176,14 @@ final class CUABarViewModel: ObservableObject {
         bannerDuration: Duration = .seconds(6),
         // Waiting is injected so tests can pass time without waiting for it.
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        // What the card says while the plugin is being set up, installed or updated.
+        // What the card says while the install runs.
         setupActivity: SetupActivity = SetupActivity(),
-        // The plugin version Claude Code registered (nil when unknown): an old plugin that cannot
-        // answer `status` is told from a broken one by comparing it with `appVersion`.
-        registeredPluginVersion: @escaping @Sendable () -> String? = { nil },
-        // Whether Claude Code lists the plugin and its folder is there: a command that fails without
-        // it is that problem, not a read problem.
-        pluginPresence: @escaping @Sendable () -> PluginPresence = { .unknown }
+        // What Claude Code has of CUA, read from its files on every read of the status (given the launcher the
+        // engine reported, which the MCP command is compared with). nil: not looked at, nothing is said about it.
+        claudeInspector: (@Sendable (String?) -> ClaudeSetupState)? = nil,
+        // Whether the Codex app is on this Mac, by the app's own look: only asked when the engine cannot
+        // answer, because the install does nothing without Codex and the card must not offer it then.
+        codexInstalled: @escaping @Sendable () -> Bool = { true }
     ) {
         self.engine = engine
         self.appVersion = appVersion
@@ -190,8 +197,8 @@ final class CUABarViewModel: ObservableObject {
         self.bannerDuration = bannerDuration
         self.sleep = sleep
         self.setupActivity = setupActivity
-        self.registeredPluginVersion = registeredPluginVersion
-        self.pluginPresence = pluginPresence
+        self.claudeInspector = claudeInspector
+        self.codexInstalled = codexInstalled
         setupActivity.onChange = { [weak self] in self?.publishSummary() }
         notifier.setResponseHandler { [weak self] response in self?.handle(response) }
     }
@@ -294,20 +301,32 @@ final class CUABarViewModel: ObservableObject {
         do {
             let status = try await engine.status()
             consecutiveFailures = 0
-            accept(status)
+            accept(status, claude: await readClaude(launcher: status.engine.launcher))
         } catch is CancellationError {
             return
         } catch let error as EngineError {
+            claudeSetup = await readClaude(launcher: nil)
             reject(error)
         } catch {
+            claudeSetup = await readClaude(launcher: nil)
             reject(.commandFailed(exitCode: -1, message: ""))
         }
+        if let afterRead { runInBackground { await afterRead() } }
     }
 
-    private func accept(_ status: EngineStatus) {
+    /// Claude Code's files are read off the main actor: `~/.claude.json` can be large.
+    private func readClaude(launcher: String?) async -> ClaudeSetupState {
+        guard let inspector = claudeInspector else { return .none }
+        return await Task.detached(priority: .utility) { inspector(launcher) }.value
+    }
+
+    private func accept(_ status: EngineStatus, claude: ClaudeSetupState) {
         let now = clock()
         lastStatus = status
-        publish(StatusEvaluator.evaluate(status, appVersion: appVersion, tabsReleased: tabsReleasedIDs))
+        claudeSetup = claude
+        publish(StatusEvaluator.evaluate(
+            status, appVersion: appVersion, tabsReleased: tabsReleasedIDs,
+            facts: LocalFacts(claude: claude, developerToolsNeeded: setupActivity.developerToolsNeeded)))
         content = PopoverContent(status: status, now: now, calendar: calendar, tabsReleased: tabsReleasedIDs)
         updatedAt = now
         forgetWhatIsGone(in: status)
@@ -352,7 +371,7 @@ final class CUABarViewModel: ObservableObject {
 
     private func reject(_ error: EngineError) {
         switch error {
-        case .pluginMissing, .setupNeeded, .unsupportedSchema:
+        case .engineMissing, .setupNeeded, .unsupportedSchema:
             // Not a hiccup: the answer will not change by asking again.
             consecutiveFailures = 0
         default:
@@ -361,7 +380,10 @@ final class CUABarViewModel: ObservableObject {
         }
         lastStatus = nil
         publish(StatusEvaluator.summary(
-            for: error, appVersion: appVersion, registeredPluginVersion: registeredPluginVersion(), plugin: pluginPresence()))
+            for: error,
+            facts: LocalFacts(
+                claude: claudeSetup, developerToolsNeeded: setupActivity.developerToolsNeeded,
+                codexMissing: error.needsEngineInstall && !codexInstalled())))
         content = nil
         updatedAt = clock()
         failedSessionIDs = []
@@ -651,16 +673,14 @@ final class CUABarViewModel: ObservableObject {
                 pasteboard.copy(text + separator + notificationPermission.diagnosisLine + "\n")
                 return ActionResult(outcome: ActionOutcome(kind: .success, message: "진단을 복사했어요"), reason: nil)
             case .runSetup:
-                // Through the shared setup slot: one setup at a time, said on the card while it runs.
-                return ActionResult(outcome: await setupActivity.run { try await self.engine.runSetup() }, reason: nil)
+                // Through the shared setup slot (inside the action): one install at a time, said on the card while it runs.
+                return ActionResult(outcome: await systemActions.setUp(), reason: nil)
+            case .installDeveloperTools:
+                return ActionResult(outcome: await systemActions.installDeveloperTools(), reason: nil)
             case .openCodex:
                 return ActionResult(outcome: await appOpener.openCodex(appPath: lastStatus?.codex.appPath), reason: nil)
             case .openCodexDownload:
                 return ActionResult(outcome: await systemActions.openCodexDownload(), reason: nil)
-            case .installPlugin:
-                return ActionResult(outcome: await systemActions.installPlugin(), reason: nil)
-            case .matchPluginVersion:
-                return ActionResult(outcome: await systemActions.matchPluginVersion(), reason: nil)
             case .refresh:
                 return ActionResult(outcome: Self.quiet, reason: nil)
             }
@@ -744,7 +764,7 @@ final class CUABarViewModel: ObservableObject {
                 }
             } catch let error as EngineError {
                 switch error {
-                case .pluginMissing, .setupNeeded, .unsupportedSchema: throw error
+                case .engineMissing, .setupNeeded, .unsupportedSchema: throw error
                 default:
                     steps.append(.failed(error.reasonCode))
                     if case .session(let id) = item {
@@ -800,7 +820,7 @@ final class CUABarViewModel: ObservableObject {
         case .copyDiagnosis: "진단을 복사하지 못했어요"
         case .runSetup: "설정하지 못했어요"
         case .openCodex: "Codex를 열지 못했어요"
-        case .openCodexDownload, .installPlugin, .matchPluginVersion, .refresh: "하지 못했어요"
+        case .openCodexDownload, .installDeveloperTools, .refresh: "하지 못했어요"
         }
     }
 

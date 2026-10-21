@@ -296,7 +296,7 @@ struct ConfirmationTests {
     @Test func anUnreadableStatusWithdrawsTheQuestion() async throws {
         let rig = try await problem()
         rig.model.send(.restartCodex)
-        rig.engine.setStatusError(.pluginMissing)
+        rig.engine.setStatusError(.engineMissing)
         await rig.model.refresh()
         #expect(rig.model.pending == nil, "restarting now would be a guess")
     }

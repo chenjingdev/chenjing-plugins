@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import cua_bar
 
-/// Stands in for the process runner of the install and update flows: records every command and
-/// answers through a handler, which may also change files the way the real command would.
+/// Stands in for the process runner of the install: records every command and answers through a handler,
+/// which may also change files the way the real command would.
 final class StepRunner: ProcessRunning, @unchecked Sendable {
     struct Call: Equatable {
         var executable: String
@@ -11,11 +11,8 @@ final class StepRunner: ProcessRunning, @unchecked Sendable {
         var timeout: Duration
 
         var isClaude: Bool { executable.hasSuffix("/claude") }
-        /// `plugin install`, `plugin marketplace add` and the like, without what follows the verb.
-        var verb: String {
-            let words = arguments.count > 1 && arguments[1] == "marketplace" ? 3 : 2
-            return arguments.prefix(words).joined(separator: " ")
-        }
+        var isDeveloperToolsCheck: Bool { executable == "/usr/bin/xcode-select" && arguments == ["-p"] }
+        var isInstallEngine: Bool { executable == "/bin/sh" && arguments.dropFirst().first == "install-engine" }
     }
 
     typealias Handler = @Sendable (Call) throws -> ProcessOutput
@@ -39,7 +36,7 @@ final class StepRunner: ProcessRunning, @unchecked Sendable {
         return try handler(call)
     }
 
-    static func ok(_ stdout: String = #"{"success": true}"#) -> ProcessOutput {
+    static func ok(_ stdout: String = "") -> ProcessOutput {
         ProcessOutput(exitCode: 0, stdout: Data(stdout.utf8), stderr: Data())
     }
 
@@ -64,62 +61,107 @@ final class FakeOpener: URLOpening, @unchecked Sendable {
     }
 }
 
+/// A thing that is there or not, which a test turns on and off between two looks.
+final class Presence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var present: Bool
+    init(_ present: Bool) { self.present = present }
+    var isThere: Bool {
+        get { lock.withLock { present } }
+        set { lock.withLock { present = newValue } }
+    }
+}
+
 @MainActor
 struct LiveSystemActionsTests {
-    /// Everything an install or update flow needs, over a throwaway home.
-    private struct Rig {
+    /// Everything the install needs, over a throwaway home and an engine in a throwaway "bundle".
+    struct Rig {
         var home: TempHome
+        var codex: Presence
+        var claudeCode: Presence
         var runner: StepRunner
         var opener: FakeOpener
         var setup: SetupActivity
+        var engine: FakeEngineClient
         var actions: LiveSystemActions
-        var claude: String
+        var claude: ClaudeIntegration
+        var bundle: BundledEngine
 
-        /// The folder Claude Code's cache gives the plugin at 0.7.0.
-        var pluginAt070: URL { home.url.appendingPathComponent(".claude/plugins/cache/chenjing-plugins/cua/0.7.0") }
+        var claudePath: String { home.claudeCLI.path }
+        var launcher: String { home.launcher }
+        var installEngineCall: StepRunner.Call {
+            .init(executable: "/bin/sh", arguments: [bundle.setupScript.path, "install-engine", "--json"], timeout: EngineTimeouts().setup)
+        }
+        var developerToolsCheck: StepRunner.Call {
+            .init(executable: "/usr/bin/xcode-select", arguments: ["-p"], timeout: .seconds(30))
+        }
+        func mcpAdd(_ command: String? = nil) -> StepRunner.Call {
+            .init(executable: claudePath, arguments: ["mcp", "add", "-s", "user", "cua", "--", command ?? launcher], timeout: .seconds(120))
+        }
+        var mcpRemove: StepRunner.Call {
+            .init(executable: claudePath, arguments: ["mcp", "remove", "-s", "user", "cua"], timeout: .seconds(120))
+        }
+        var skillSourceBody: String { (try? String(contentsOf: bundle.skillSource, encoding: .utf8)) ?? "" }
     }
 
-    /// - registered: the plugin version already in the registry (nil: not installed).
-    /// - registers: `claude plugin install` and `update` put the plugin into the registry at 0.7.0,
-    ///   in a folder per version like Claude Code's cache, as the real commands do.
-    /// - responses: what each command answers; success by default.
-    private func rig(
+    /// - engine: the status the engine answers with (an error: no engine); a current one says the app's version.
+    /// - responses: what a command answers instead of the default (the stand-ins for `claude mcp add` and
+    ///   `remove` write `~/.claude.json` the way the real ones do).
+    func rig(
         appVersion: String? = "0.7.0",
-        registered: String? = nil,
-        marketplace: Bool = false,
+        codexInstalled: Bool = true,
+        developerTools: Bool = true,
         claudeInstalled: Bool = true,
-        registers: Bool = true,
-        newest: ReleaseInfo? = nil,
+        bundled: Bool = true,
+        engine status: Result<EngineStatus, EngineError> = .failure(.engineMissing),
+        installPrints: String? = nil,
         gateFor: @escaping @Sendable (StepRunner.Call) -> AsyncGate? = { _ in nil },
-        responses: (@Sendable (StepRunner.Call) throws -> ProcessOutput)? = nil
+        responses: (@Sendable (StepRunner.Call) throws -> ProcessOutput?)? = nil
     ) throws -> Rig {
         let home = try TempHome()
-        if let registered { try home.installPlugin(version: registered) }
-        if marketplace { try home.addMarketplace() }
-        let claude = home.url.appendingPathComponent(".local/bin/claude").path
+        let bundleRoot = home.url.appendingPathComponent("Bundle/engine", isDirectory: true)
+        try home.write("#!/bin/sh\nexit 0\n", to: bundleRoot.appendingPathComponent("setup.sh"))
+        try home.write("the bundled skill\n", to: bundleRoot.appendingPathComponent("skills/cua/SKILL.md"))
+        let bundle = BundledEngine(root: bundleRoot)
+        let launcher = home.launcher
+        let claudePath = home.claudeCLI.path
+        let printed = installPrints ?? #"{"version": "0.7.0", "root": "/x/engine/0.7.0", "removed": [], "launcher": "\#(launcher)", "setup": {"command": "ready"}}"#
         let runner = StepRunner(gateFor: gateFor) { call in
-            if registers, call.isClaude, call.verb == "plugin install" || call.verb == "plugin update" {
-                try home.installPlugin(version: "0.7.0")
+            if let answer = try responses?(call) { return answer }
+            if call.isDeveloperToolsCheck { return developerTools ? StepRunner.ok("/Library/Developer/CommandLineTools\n") : StepRunner.failed(code: 2) }
+            if call.isInstallEngine { return StepRunner.ok(printed + "\n") }
+            if call.executable == claudePath, call.arguments.starts(with: ["mcp", "add"]), let command = call.arguments.last {
+                try home.addMcp(command: command)
             }
-            return try responses?(call) ?? StepRunner.ok()
+            if call.executable == claudePath, call.arguments.starts(with: ["mcp", "remove"]) {
+                try home.writeClaudeConfig(["numStartups": 7, "mcpServers": [String: Any]()])
+            }
+            return StepRunner.ok()
         }
+        let fake = FakeEngineClient()
+        switch status {
+        case .success(let value): fake.setStatus(value)
+        case .failure(let error): fake.setStatusError(error)
+        }
+        let claudeCode = Presence(claudeInstalled)
+        let codex = Presence(codexInstalled)
+        let claude = ClaudeIntegration(
+            home: home.url, claude: ClaudeCLILocator(home: home.url, isExecutableFile: { claudeCode.isThere && $0 == claudePath }), runner: runner)
         let opener = FakeOpener()
         let setup = SetupActivity()
         let actions = LiveSystemActions(
-            locator: CommandLocator(home: home.url),
-            claude: ClaudeCLILocator(home: home.url, isExecutableFile: { claudeInstalled && $0 == claude }),
-            runner: runner, opener: opener, appVersion: appVersion, setup: setup, newestAppRelease: { newest })
-        return Rig(home: home, runner: runner, opener: opener, setup: setup, actions: actions, claude: claude)
+            claude: claude, engine: fake, runner: runner, opener: opener, bundle: bundled ? bundle : nil, appVersion: appVersion, setup: setup,
+            codex: CodexLocator(home: home.url, environment: [:], isCodexBundle: { _ in codex.isThere }))
+        return Rig(
+            home: home, codex: codex, claudeCode: claudeCode, runner: runner, opener: opener, setup: setup, engine: fake, actions: actions,
+            claude: claude, bundle: bundle)
     }
 
-    private func release(_ version: String) -> ReleaseInfo {
-        ReleaseInfo(
-            version: VersionNumber(strict: version)!, tag: "cua-bar--v\(version)",
-            url: URL(string: "https://github.com/chenjingdev/chenjing-plugins/releases/tag/cua-bar--v\(version)")!)
-    }
-
-    private func setupCall(_ plugin: URL) -> StepRunner.Call {
-        .init(executable: "/bin/sh", arguments: [plugin.appendingPathComponent("setup.sh").path, "setup"], timeout: EngineTimeouts().setup)
+    /// A status of an engine that is the app's.
+    func currentEngine(_ home: TempHome, version: String = "0.7.0") -> Result<EngineStatus, EngineError> {
+        var status = EngineStatus()
+        status.engine = EngineInfo(version: version, root: "/x/engine/\(version)", launcher: home.launcher)
+        return .success(status)
     }
 
     private func waitUntil(_ timeout: Double = 30, _ condition: () -> Bool) async -> Bool {
@@ -128,333 +170,345 @@ struct LiveSystemActionsTests {
         return condition()
     }
 
-    // MARK: Install (plugin_missing)
+    // MARK: The first install
 
-    @Test func installAddsTheMarketplaceThenInstallsThenSetsUp() async throws {
+    @Test func aFirstInstallUnpacksTheEngineThenPutsTheMCPServerAndTheSkillIntoClaudeCode() async throws {
         let rig = try rig()
         defer { rig.home.remove() }
-        let outcome = await rig.actions.installPlugin()
-        let step: Duration = .seconds(300)
-        #expect(rig.runner.calls == [
-            .init(executable: rig.claude, arguments: ["plugin", "marketplace", "add", "chenjingdev/chenjing-plugins", "--json"], timeout: step),
-            .init(executable: rig.claude, arguments: ["plugin", "install", "cua@chenjing-plugins", "--scope", "user", "--json"], timeout: step),
-            setupCall(rig.pluginAt070),
-        ])
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall, rig.mcpAdd()])
+        #expect(rig.claude.mcpState(launcher: rig.launcher) == .ready)
+        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
+        #expect(try String(contentsOf: rig.home.skillFolder.appendingPathComponent("SKILL.md"), encoding: .utf8) == rig.skillSourceBody)
         #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(rig.setup.phase == .idle)
+        #expect(rig.setup.waitingFor.isEmpty && !rig.setup.developerToolsNeeded)
+    }
+
+    @Test func theEngineIsInstalledWithShNeverTheBundlesScriptDirectlyAndGetsTimeForPackages() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        _ = await rig.actions.setUp()
+        let install = try #require(rig.runner.calls.first { $0.isInstallEngine })
+        #expect(install.executable == "/bin/sh")
+        #expect(install.arguments == [rig.bundle.setupScript.path, "install-engine", "--json"])
+        #expect(install.timeout >= .seconds(15 * 60), "pip may be installing; a signal halfway leaves a broken environment")
+        #expect(install.timeout == EngineTimeouts().setup)
+        #expect(LiveSystemActions.Timeouts().engineInstall >= .seconds(15 * 60))
+        #expect(rig.runner.calls.allSatisfy { !$0.arguments.contains("-y") && !$0.arguments.contains("--yes") })
+    }
+
+    @Test func theMCPServerIsAddedForTheUserWithTheOneLauncherAndNoArguments() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        _ = await rig.actions.setUp()
+        let add = try #require(rig.runner.calls.first { $0.isClaude })
+        #expect(add.arguments == ["mcp", "add", "-s", "user", "cua", "--", rig.home.engineCopies.appendingPathComponent("current/start-mcp.sh").path])
+        #expect(!rig.runner.calls.contains { $0.isClaude && ($0.arguments.contains("list") || $0.arguments.contains("get")) }, "those start the servers")
+    }
+
+    @Test func aLauncherTheInstallDoesNotNameIsAskedOfTheStatusAndThenTheDefaultIsUsed() async throws {
+        let named = try rig(installPrints: #"{"version": "0.7.0", "root": "/x/engine/0.7.0"}"#)
+        defer { named.home.remove() }
+        try named.home.installClaudeCode()
+        var status = EngineStatus()
+        status.engine.launcher = "/custom/home/.local/share/codex-cua/engine/current/start-mcp.sh"
+        named.engine.setStatus(status)
+        // The engine is not the app's (no version), so it is installed; then the status names the launcher.
+        _ = await named.actions.setUp()
+        #expect(named.runner.calls.contains(named.mcpAdd("/custom/home/.local/share/codex-cua/engine/current/start-mcp.sh")))
+
+        let silent = try rig(installPrints: "no json at all")
+        defer { silent.home.remove() }
+        try silent.home.installClaudeCode()
+        _ = await silent.actions.setUp()
+        #expect(silent.runner.calls.contains(silent.mcpAdd(silent.home.launcher)), "nobody said: <home>/.local/share/codex-cua/engine/current/start-mcp.sh")
+    }
+
+    // MARK: Looking first, changing only what needs it
+
+    @Test func whenEverythingIsCurrentNothingIsChangedAndNothingIsSaid() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try currentEngine(rig.home).get())
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck], "only looked")
+        #expect(outcome == InstallMessages.nothingToSay)
+        #expect(outcome.message.isEmpty, "no banner at every launch")
         #expect(rig.setup.phase == .idle)
     }
 
-    @Test func installLeavesTheMarketplaceAloneWhenClaudeCodeKnowsIt() async throws {
-        let rig = try rig(marketplace: true)
+    @Test func anEngineOfAnotherVersionIsInstalledAgainButTheMCPServerIsNotRegisteredAgain() async throws {
+        let rig = try rig()
         defer { rig.home.remove() }
-        let outcome = await rig.actions.installPlugin()
-        #expect(rig.runner.calls == [
-            .init(executable: rig.claude, arguments: ["plugin", "install", "cua@chenjing-plugins", "--scope", "user", "--json"], timeout: .seconds(300)),
-            setupCall(rig.pluginAt070),
-        ])
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try currentEngine(rig.home, version: "0.6.0").get())
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall], "the launcher is the same whatever the version")
+        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+    }
+
+    @Test(arguments: [EngineError.engineMissing, .setupNeeded(installPath: "/x"), .commandFailed(exitCode: 2, message: "usage"), .invalidOutput("x"), .unsupportedSchema(2)])
+    func everyKindOfBrokenOrMissingEngineIsInstalled(error: EngineError) async throws {
+        let rig = try rig(engine: .failure(error))
+        defer { rig.home.remove() }
+        _ = await rig.actions.setUp()
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+    }
+
+    @Test(arguments: [EngineError.timeout, .launchFailed("x")])
+    func anEngineThatCannotBeAskedIsNotInstalledOverBlindly(error: EngineError) async throws {
+        let rig = try rig(engine: .failure(error))
+        defer { rig.home.remove() }
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck])
+        #expect(outcome.message.isEmpty)
+    }
+
+    @Test func anOutOfDateMCPServerOfTheAppsOwnIsRemovedAndAddedAgain() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try currentEngine(rig.home).get())
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        // The app's own, from a time the launcher was a version folder.
+        try rig.home.addMcp(command: rig.home.engineCopies.appendingPathComponent("0.6.0/start-mcp.sh").path)
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.mcpRemove, rig.mcpAdd()])
+        #expect(rig.claude.mcpState(launcher: rig.launcher) == .ready)
         #expect(outcome.kind == .success)
     }
 
-    @Test func aRecordWhoseFolderIsGoneIsTakenAwayKeepingItsDataBeforeTheInstall() async throws {
-        let rig = try rig(marketplace: true)
+    @Test func anMCPServerWithArgumentsIsOutOfDateToo() async throws {
+        let rig = try rig()
         defer { rig.home.remove() }
-        try rig.home.installPlugin(createFolder: false)
-        let outcome = await rig.actions.installPlugin()
-        let step: Duration = .seconds(300)
-        #expect(rig.runner.calls == [
-            .init(executable: rig.claude, arguments: ["plugin", "uninstall", "cua@chenjing-plugins", "--scope", "user", "--keep-data", "--json"], timeout: step),
-            .init(executable: rig.claude, arguments: ["plugin", "install", "cua@chenjing-plugins", "--scope", "user", "--json"], timeout: step),
-            setupCall(rig.pluginAt070),
-        ])
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try currentEngine(rig.home).get())
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        try rig.home.addMcp(command: rig.launcher, args: ["--debug"])
+        _ = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.mcpRemove, rig.mcpAdd()])
+    }
+
+    @Test func anMCPServerTheAppDidNotPutThereIsNeverTouchedAndIsToldAsAConflict() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try currentEngine(rig.home).get())
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        try rig.home.addMcp(command: "/Users/someone/.claude/plugins/cache/chenjing-plugins/cua/0.7.0/start-mcp.sh")
+        let before = try Data(contentsOf: rig.home.claudeConfig)
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck], "no remove, no add")
+        #expect(try Data(contentsOf: rig.home.claudeConfig) == before)
+        #expect(outcome == ActionOutcome(kind: .warning, message: InstallMessages.conflict))
+        #expect(rig.claude.mcpState(launcher: rig.launcher) == .conflict)
+        #expect(rig.setup.phase == .idle, "a conflict is not a failed install")
+    }
+
+    @Test func aSkillFolderWithoutTheAppsMarkIsNeverTouchedAndIsToldAsAConflict() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try currentEngine(rig.home).get())
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: nil, body: "someone else's skill\n")
+        let outcome = await rig.actions.setUp()
+        #expect(try String(contentsOf: rig.home.skillFolder.appendingPathComponent("SKILL.md"), encoding: .utf8) == "someone else's skill\n")
+        #expect(!FileManager.default.fileExists(atPath: rig.home.skillFolder.appendingPathComponent(".cua-bar.json").path))
+        #expect(outcome == ActionOutcome(kind: .warning, message: InstallMessages.conflict))
+    }
+
+    @Test func aMarkedSkillOfAnotherVersionIsWrittenOverAndAMissingOneIsWritten() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try currentEngine(rig.home).get())
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: "0.6.0", body: "the old skill\n")
+        let outcome = await rig.actions.setUp()
+        #expect(try String(contentsOf: rig.home.skillFolder.appendingPathComponent("SKILL.md"), encoding: .utf8) == rig.skillSourceBody)
+        let mark = try JSONSerialization.jsonObject(with: Data(contentsOf: rig.home.skillFolder.appendingPathComponent(".cua-bar.json"))) as? [String: String]
+        #expect(mark == ["version": "0.7.0"])
         #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(rig.runner.calls == [rig.developerToolsCheck], "the MCP server was fine")
+
+        // A marked folder whose skill was deleted by hand is written again.
+        try FileManager.default.removeItem(at: rig.home.skillFolder.appendingPathComponent("SKILL.md"))
+        _ = await rig.actions.setUp()
+        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
     }
 
-    @Test func aFailedRemovalOfTheBrokenRecordStopsTheInstall() async throws {
-        let rig = try rig(marketplace: true, responses: { call in
-            call.verb == "plugin uninstall" ? StepRunner.failed() : StepRunner.ok()
-        })
+    // MARK: What the install waits for
+
+    @Test func withoutCodexNothingRunsAndTheInstallWaitsForIt() async throws {
+        let rig = try rig(codexInstalled: false)
         defer { rig.home.remove() }
-        try rig.home.installPlugin(createFolder: false)
-        let outcome = await rig.actions.installPlugin()
-        #expect(outcome == ActionOutcome(kind: .failure, message: "플러그인을 설치하지 못했어요"))
-        #expect(rig.runner.calls.map(\.verb) == ["plugin uninstall"])
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls.isEmpty, "not even a look at the developer tools")
+        #expect(outcome.message.isEmpty)
+        #expect(rig.setup.waitingFor == [.codex])
+        #expect(rig.setup.phase == .idle)
+        #expect(!FileManager.default.fileExists(atPath: rig.home.claudeConfig.path))
     }
 
-    @Test func installNeedsClaudeCodeAndSaysNothingElse() async throws {
+    @Test func withoutDeveloperToolsNothingIsInstalledAndNoInstallerOpens() async throws {
+        let rig = try rig(developerTools: false)
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck], "xcode-select -p only: never python3, never --install")
+        #expect(outcome.message.isEmpty, "the card says it")
+        #expect(rig.setup.developerToolsNeeded)
+        #expect(rig.setup.phase == .idle)
+        #expect(rig.setup.waitingFor.isEmpty)
+    }
+
+    @Test func withoutClaudeCodeTheEngineIsInstalledAndTheMCPServerAndSkillWait() async throws {
         let rig = try rig(claudeInstalled: false)
         defer { rig.home.remove() }
-        let outcome = await rig.actions.installPlugin()
-        #expect(outcome == ActionOutcome(kind: .failure, message: "Claude Code가 없어요"))
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall])
+        #expect(outcome == ActionOutcome(kind: .success, message: "연결 설정을 마쳤어요"), "it cannot say a Claude conversation will have it")
+        #expect(rig.setup.waitingFor == [.claudeCode])
+        #expect(!FileManager.default.fileExists(atPath: rig.home.claudeConfig.path))
+        #expect(!FileManager.default.fileExists(atPath: rig.home.skillFolder.path))
+    }
+
+    @Test func aBuildThatDoesNotRunFromAnAppBundleInstallsNothingAndChangesNothing() async throws {
+        let rig = try rig(bundled: false)
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls.isEmpty)
+        #expect(outcome.message.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: rig.home.claudeConfig.path))
     }
 
-    @Test func installTrustsTheRegistryOverTheCommandsWord() async throws {
-        // Both commands exit 0 but the plugin never shows up: that is a failed install.
-        let rig = try rig(registers: false)
-        defer { rig.home.remove() }
-        let outcome = await rig.actions.installPlugin()
-        #expect(outcome == ActionOutcome(kind: .failure, message: "플러그인을 설치하지 못했어요"))
-        #expect(rig.runner.calls.allSatisfy { $0.isClaude }, "no setup for a plugin that is not there")
-        #expect(rig.setup.phase == .idle)
-    }
+    // MARK: Failures: one fixed line, never what a command printed
 
-    @Test func aCommandThatPrintsNoJsonIsJudgedByItsExitCode() async throws {
-        let rig = try rig(responses: { _ in StepRunner.ok("Successfully installed plugin: cua@chenjing-plugins\n") })
-        defer { rig.home.remove() }
-        #expect(await rig.actions.installPlugin().kind == .success)
-    }
-
-    @Test func theResultLineIsReadAndAFailureInItStopsTheFlow() async throws {
-        let lines = [
-            #"{"success": false, "message": "SECRET-STDERR"}"#,
-            #"{"ok": false}"#,
-            #"{"error": "SECRET-STDERR boom"}"#,
-            #"{"status": "failed"}"#,
-            "downloading...\n" + #"{"success": false}"# + "\n",
-        ]
-        for line in lines {
-            let rig = try rig(marketplace: true, responses: { call in
-                call.isClaude ? StepRunner.ok(line) : StepRunner.ok()
-            })
+    @Test func anEngineInstallThatFailsGivesItsFixedLineAndMarksSetupFailed() async throws {
+        for failure in [StepRunner.failed(code: 1), StepRunner.failed(code: 127)] {
+            let rig = try rig(responses: { call in call.isInstallEngine ? failure : nil })
             defer { rig.home.remove() }
-            let outcome = await rig.actions.installPlugin()
-            #expect(outcome == ActionOutcome(kind: .failure, message: "플러그인을 설치하지 못했어요"), "result line \(line)")
-            #expect(!outcome.message.contains("SECRET"))
-            #expect(rig.runner.calls.count == 1, "nothing runs after a failed step: \(line)")
-        }
-    }
-
-    @Test func aGoodResultLineIsReadAsSuccess() async throws {
-        for line in [#"{"success": true}"#, #"{"ok": true, "error": null}"#, #"{"error": ""}"#, #"{"status": "installed"}"#, "{}", "not json\n" + #"{"success": true}"#] {
-            let rig = try rig(marketplace: true, responses: { _ in StepRunner.ok(line) })
-            defer { rig.home.remove() }
-            #expect(await rig.actions.installPlugin().kind == .success, "result line \(line)")
-        }
-    }
-
-    // MARK: Fixed lines, never what a command printed
-
-    @Test func everyFailingStepGivesItsOneFixedLine() async throws {
-        struct Case {
-            var name: String
-            var failingVerb: String
-            var line: String
-            var run: @MainActor (LiveSystemActions) async -> ActionOutcome
-            var registered: String?
-            var marketplace: Bool
-        }
-        let cases = [
-            Case(name: "marketplace add", failingVerb: "plugin marketplace add", line: "플러그인 저장소를 추가하지 못했어요",
-                 run: { await $0.installPlugin() }, registered: nil, marketplace: false),
-            Case(name: "install", failingVerb: "plugin install", line: "플러그인을 설치하지 못했어요",
-                 run: { await $0.installPlugin() }, registered: nil, marketplace: true),
-            Case(name: "marketplace update", failingVerb: "plugin marketplace update", line: "플러그인 목록을 새로 받지 못했어요",
-                 run: { await $0.matchPluginVersion() }, registered: "0.5.0", marketplace: true),
-            Case(name: "update", failingVerb: "plugin update", line: "플러그인을 갱신하지 못했어요",
-                 run: { await $0.matchPluginVersion() }, registered: "0.5.0", marketplace: true),
-        ]
-        for testCase in cases {
-            for exit in [Int32(1), 2, 127] {
-                let rig = try rig(registered: testCase.registered, marketplace: testCase.marketplace, responses: { call in
-                    call.isClaude && call.verb == testCase.failingVerb ? StepRunner.failed(code: exit) : StepRunner.ok()
-                })
-                defer { rig.home.remove() }
-                let outcome = await testCase.run(rig.actions)
-                #expect(outcome == ActionOutcome(kind: .failure, message: testCase.line), "\(testCase.name), exit \(exit)")
-                #expect(!outcome.message.contains("SECRET") && !outcome.message.contains("token"))
-                #expect(rig.runner.calls.last?.verb == testCase.failingVerb, "\(testCase.name) was the last thing that ran")
-                #expect(rig.setup.phase == .idle, "setup was never reached")
-            }
-        }
-    }
-
-    @Test func aFailingSetupGivesItsFixedLineAndMarksSetupFailed() async throws {
-        for call in ["install", "update"] {
-            let rig = try rig(registered: call == "update" ? "0.5.0" : nil, marketplace: true, responses: { call in
-                call.executable == "/bin/sh" ? StepRunner.failed() : StepRunner.ok()
-            })
-            defer { rig.home.remove() }
-            let outcome = call == "install" ? await rig.actions.installPlugin() : await rig.actions.matchPluginVersion()
-            #expect(outcome == ActionOutcome(kind: .failure, message: "플러그인은 준비됐지만 연결 설정에 실패했어요 — 다시 하기를 눌러 주세요"))
-            #expect(!outcome.message.contains("SECRET"))
+            try rig.home.installClaudeCode()
+            let outcome = await rig.actions.setUp()
+            #expect(outcome == ActionOutcome(kind: .failure, message: "연결 엔진을 설치하지 못했어요"))
+            #expect(!outcome.message.contains("SECRET") && !outcome.message.contains("token"))
+            #expect(rig.runner.calls.allSatisfy { !$0.isClaude }, "no MCP server for an engine that is not there")
             #expect(rig.setup.phase == .failed, "the status card then offers 다시 하기")
         }
     }
 
-    @Test func aStepThatCannotStartIsTheSameFixedLine() async throws {
-        let cannotStart = try rig(responses: { _ in throw ProcessRunError.launchFailed("SECRET launch detail") })
-        defer { cannotStart.home.remove() }
-        let outcome = await cannotStart.actions.installPlugin()
-        #expect(outcome == ActionOutcome(kind: .failure, message: "플러그인 저장소를 추가하지 못했어요"))
-        let timedOut = try rig(marketplace: true, responses: { _ in throw ProcessRunError.timedOut })
-        defer { timedOut.home.remove() }
-        #expect(await timedOut.actions.installPlugin() == ActionOutcome(kind: .failure, message: "플러그인을 설치하지 못했어요"))
-    }
-
-    @Test func noFlowEverPassesAnAutoAcceptFlag() async throws {
-        let install = try rig()
-        let update = try rig(registered: "0.5.0", marketplace: true)
-        defer { install.home.remove(); update.home.remove() }
-        _ = await install.actions.installPlugin()
-        _ = await update.actions.matchPluginVersion()
-        let calls = install.runner.calls + update.runner.calls
-        #expect(calls.count == 6)
-        for call in calls {
-            for flag in ["-y", "--yes", "--accept-command"] {
-                #expect(!call.arguments.contains(flag), "\(call.arguments) passes \(flag)")
-            }
-            #expect(!call.arguments.contains { $0.hasPrefix("--accept") || $0 == "-f" || $0 == "--force" })
-        }
-    }
-
-    // MARK: Update (version_mismatch)
-
-    @Test func aPluginOlderThanTheAppIsUpdatedAndSetUp() async throws {
-        let rig = try rig(registered: "0.5.0", marketplace: true)
-        defer { rig.home.remove() }
-        let outcome = await rig.actions.matchPluginVersion()
-        let step: Duration = .seconds(300)
-        #expect(rig.runner.calls == [
-            .init(executable: rig.claude, arguments: ["plugin", "marketplace", "update", "chenjing-plugins", "--json"], timeout: step),
-            .init(executable: rig.claude, arguments: ["plugin", "update", "cua@chenjing-plugins", "--scope", "user", "--json"], timeout: step),
-            setupCall(rig.pluginAt070),
-        ], "setup runs from the folder the update registered, not from the old one")
-        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 새 판이 붙어요"))
-        #expect(rig.opener.opened.isEmpty)
-    }
-
-    @Test func aPluginNewerThanTheAppOpensTheNewestAppReleaseInsteadOfRunningAnything() async throws {
-        let rig = try rig(registered: "0.8.0", newest: release("0.8.0"))
-        defer { rig.home.remove() }
-        let outcome = await rig.actions.matchPluginVersion()
-        #expect(rig.runner.calls.isEmpty, "no claude command and no setup")
-        #expect(rig.opener.opened == [release("0.8.0").url])
-        #expect(outcome.kind == .info)
-    }
-
-    @Test func withoutAKnownNewerReleaseTheReleasesPageIsOpened() async throws {
-        for newest in [nil, release("0.7.0"), release("0.6.0")] {
-            let rig = try rig(registered: "0.8.0", newest: newest)
+    @Test func aStepThatCannotStartOrRunsOutOfTimeIsTheSameFixedLine() async throws {
+        for error: ProcessRunError in [.launchFailed("SECRET launch detail"), .timedOut] {
+            let rig = try rig(responses: { call in
+                if call.isInstallEngine { throw error }
+                return nil
+            })
             defer { rig.home.remove() }
-            _ = await rig.actions.matchPluginVersion()
-            #expect(rig.opener.opened == [ReleaseSource.releasesPage], "newest: \(String(describing: newest?.tag))")
-            #expect(rig.runner.calls.isEmpty)
+            #expect(await rig.actions.setUp() == ActionOutcome(kind: .failure, message: "연결 엔진을 설치하지 못했어요"))
         }
     }
 
-    @Test func versionsAreComparedAsNumbersWhenChoosing() async throws {
-        // As text "0.10.0" < "0.9.0", which would run an update; as numbers the plugin is newer.
-        let newer = try rig(appVersion: "0.9.0", registered: "0.10.0", newest: release("0.10.0"))
-        defer { newer.home.remove() }
-        _ = await newer.actions.matchPluginVersion()
-        #expect(newer.runner.calls.isEmpty)
-        #expect(newer.opener.opened == [release("0.10.0").url])
-
-        let older = try rig(appVersion: "0.10.0", registered: "0.9.0", marketplace: true)
-        defer { older.home.remove() }
-        _ = await older.actions.matchPluginVersion()
-        #expect(older.runner.calls.first?.verb == "plugin marketplace update")
-        #expect(older.opener.opened.isEmpty)
-    }
-
-    @Test func theSameVersionHasNothingToMatch() async throws {
-        let rig = try rig(registered: "0.7.0")
+    @Test func anMCPAddThatFailsGivesItsFixedLine() async throws {
+        let rig = try rig(responses: { call in call.isClaude ? StepRunner.failed(code: 1) : nil })
         defer { rig.home.remove() }
-        #expect(await rig.actions.matchPluginVersion() == ActionOutcome(kind: .info, message: "앱과 플러그인 판이 이미 같아요"))
-        #expect(rig.runner.calls.isEmpty)
-        #expect(rig.opener.opened.isEmpty)
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
+        #expect(outcome == ActionOutcome(kind: .failure, message: "Claude Code에 CUA를 연결하지 못했어요"))
+        #expect(!outcome.message.contains("SECRET"))
+        #expect(rig.setup.phase == .failed)
+        #expect(!FileManager.default.fileExists(atPath: rig.home.skillFolder.path), "it stopped there")
     }
 
-    @Test func anUpdateNeedsClaudeCodeButOpeningAReleasePageDoesNot() async throws {
-        let older = try rig(registered: "0.5.0", claudeInstalled: false)
-        defer { older.home.remove() }
-        #expect(await older.actions.matchPluginVersion() == ActionOutcome(kind: .failure, message: "Claude Code가 없어요"))
-        #expect(older.runner.calls.isEmpty)
-
-        let newer = try rig(registered: "0.9.0", claudeInstalled: false, newest: release("0.9.0"))
-        defer { newer.home.remove() }
-        #expect(await newer.actions.matchPluginVersion().kind == .info)
-        #expect(newer.opener.opened == [release("0.9.0").url])
-    }
-
-    @Test func anUpdateThatChangedNothingDoesNotClaimANewVersion() async throws {
-        // The marketplace has nothing newer: the registry still says 0.5.0 afterwards.
-        let rig = try rig(registered: "0.5.0", marketplace: true, registers: false)
+    @Test func anMCPAddThatSaysOkButLeavesNoServerIsAFailureBecauseTheFileIsWhatCounts() async throws {
+        let rig = try rig(responses: { call in call.isClaude ? StepRunner.ok("Added stdio MCP server cua") : nil })
         defer { rig.home.remove() }
-        let outcome = await rig.actions.matchPluginVersion()
-        #expect(outcome == ActionOutcome(kind: .warning, message: "플러그인 판이 그대로예요 — 받을 수 있는 가장 새 판이 앱과 달라요"))
-        #expect(rig.runner.calls.allSatisfy { $0.isClaude }, "and it sets nothing up")
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
+        #expect(outcome == ActionOutcome(kind: .failure, message: "Claude Code에 CUA를 연결하지 못했어요"))
     }
 
-    @Test func anUnknownAppVersionCannotBeMatched() async throws {
-        let rig = try rig(appVersion: nil, registered: "0.5.0")
+    @Test func anOutOfDateServerThatCannotBeRemovedIsNotAddedOver() async throws {
+        let rig = try rig(responses: { call in call.isClaude && call.arguments.first == "mcp" && call.arguments[1] == "remove" ? StepRunner.failed() : nil })
         defer { rig.home.remove() }
-        #expect(await rig.actions.matchPluginVersion() == ActionOutcome(kind: .failure, message: "앱 판을 알 수 없어요"))
-        #expect(rig.runner.calls.isEmpty)
-    }
-
-    @Test func aRegisteredPluginWithoutAVersionIsUpdated() async throws {
-        let rig = try rig(marketplace: true)
-        defer { rig.home.remove() }
-        try rig.home.installPlugin(version: nil)
-        let outcome = await rig.actions.matchPluginVersion()
-        #expect(rig.runner.calls.first?.verb == "plugin marketplace update")
-        #expect(outcome.kind == .success)
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try currentEngine(rig.home).get())
+        try rig.home.addMcp(command: rig.home.engineCopies.appendingPathComponent("0.6.0/start-mcp.sh").path)
+        let outcome = await rig.actions.setUp()
+        #expect(outcome.kind == .failure)
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.mcpRemove])
     }
 
     // MARK: One at a time
 
     @Test func aSecondInstallWhileOneRunsRunsNothing() async throws {
         let gate = AsyncGate()
-        let rig = try rig(marketplace: true, gateFor: { $0.verb == "plugin install" ? gate : nil })
+        let rig = try rig(gateFor: { $0.isInstallEngine ? gate : nil })
         defer { rig.home.remove(); gate.open() }
-        let first = Task { await rig.actions.installPlugin() }
-        #expect(await waitUntil { rig.runner.calls.count == 1 }) // the install is stuck in the runner
-        let second = await rig.actions.installPlugin()
-        let update = await rig.actions.matchPluginVersion()
-        #expect(second == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
-        #expect(update == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
-        #expect(rig.runner.calls.count == 1, "nothing started beside the first")
-        gate.open()
-        #expect(await first.value.kind == .success)
-        #expect(rig.runner.calls.count == 2)
-        // And the slot is free again afterwards.
-        #expect(await rig.actions.installPlugin().kind == .success)
-    }
-
-    @Test func theSetupAtTheEndOfAFlowTakesTheSharedSetupSlot() async throws {
-        let rig = try rig(marketplace: true)
-        defer { rig.home.remove() }
-        #expect(rig.setup.begin(), "some other setup is running")
-        let outcome = await rig.actions.installPlugin()
-        #expect(outcome == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
-        #expect(!rig.runner.calls.contains { $0.executable == "/bin/sh" }, "no second setup beside the first")
-        #expect(rig.setup.phase == .running, "the other setup keeps its slot")
-    }
-
-    @Test func theSetupSlotIsRunningWhileTheFlowsSetupRuns() async throws {
-        let gate = AsyncGate()
-        let rig = try rig(marketplace: true, gateFor: { $0.executable == "/bin/sh" ? gate : nil })
-        defer { rig.home.remove(); gate.open() }
-        let flow = Task { await rig.actions.installPlugin() }
-        #expect(await waitUntil { rig.runner.calls.contains { $0.executable == "/bin/sh" } })
+        let first = Task { await rig.actions.setUp() }
+        #expect(await waitUntil { rig.runner.calls.contains { $0.isInstallEngine } })
         #expect(rig.setup.phase == .running)
+        let second = await rig.actions.setUp()
+        #expect(second == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1, "nothing started beside the first")
         gate.open()
-        _ = await flow.value
+        _ = await first.value
         #expect(rig.setup.phase == .idle)
+        // And the slot is free again afterwards.
+        _ = await rig.actions.setUp()
+        #expect(rig.runner.calls.filter { $0.isDeveloperToolsCheck }.count == 2)
     }
 
-    // MARK: Time
-
-    @Test func setupGetsAtLeastFifteenMinutesAndTheOtherStepsAreBounded() async throws {
+    @Test func theSlotAnotherSetupHoldsKeepsTheInstallOut() async throws {
         let rig = try rig()
         defer { rig.home.remove() }
-        _ = await rig.actions.installPlugin()
-        let setup = try #require(rig.runner.calls.last)
-        #expect(setup.executable == "/bin/sh")
-        #expect(setup.timeout >= .seconds(15 * 60), "pip may be installing; a signal halfway leaves a broken environment")
-        #expect(setup.timeout == EngineTimeouts().setup)
-        for call in rig.runner.calls.dropLast() { #expect(call.timeout <= .seconds(600), "\(call.arguments) must not wait forever") }
+        #expect(rig.setup.begin(), "some other run is going")
+        let outcome = await rig.actions.setUp()
+        #expect(outcome == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
+        #expect(rig.runner.calls.isEmpty)
+        #expect(rig.setup.phase == .running, "the other keeps its slot")
+    }
+
+    // MARK: Developer tools button
+
+    @Test func theDeveloperToolsButtonOpensTheSystemsInstallerWhenTheToolsAreStillMissing() async throws {
+        let rig = try rig(developerTools: false)
+        defer { rig.home.remove() }
+        let outcome = await rig.actions.installDeveloperTools()
+        #expect(rig.runner.calls.map(\.arguments) == [["-p"], ["--install"]])
+        #expect(rig.runner.calls.allSatisfy { $0.executable == "/usr/bin/xcode-select" })
+        #expect(outcome == ActionOutcome(kind: .info, message: "개발자 도구 설치 창을 열었어요 — 끝나면 설치를 한 번 더 눌러 주세요"))
+    }
+
+    @Test func theDeveloperToolsButtonRunsTheWholeInstallOnceTheToolsHaveComeAndClearsTheCard() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        rig.setup.record(waitingFor: [], developerToolsNeeded: true)
+        let outcome = await rig.actions.installDeveloperTools()
+        #expect(!rig.runner.calls.contains { $0.arguments == ["--install"] })
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+        #expect(!rig.setup.developerToolsNeeded)
+        #expect(outcome.kind == .success)
+    }
+
+    @Test func anInstallerThatCannotBeOpenedIsAFixedLine() async throws {
+        let rig = try rig(responses: { call in
+            if call.isDeveloperToolsCheck { return StepRunner.failed(code: 2) }
+            if call.arguments == ["--install"] { return StepRunner.failed(code: 1) }
+            return nil
+        })
+        defer { rig.home.remove() }
+        #expect(await rig.actions.installDeveloperTools() == ActionOutcome(kind: .failure, message: "개발자 도구 설치 창을 열지 못했어요"))
     }
 
     // MARK: Codex download
@@ -470,10 +524,20 @@ struct LiveSystemActionsTests {
     }
 
     @Test func aPageThatCannotBeOpenedIsAFailureLine() async throws {
-        let rig = try rig(registered: "0.9.0", newest: release("0.9.0"))
+        let rig = try rig()
         defer { rig.home.remove() }
         rig.opener.succeeds = false
         #expect(await rig.actions.openCodexDownload() == ActionOutcome(kind: .failure, message: "받는 곳을 열지 못했어요"))
-        #expect(await rig.actions.matchPluginVersion() == ActionOutcome(kind: .failure, message: "받는 곳을 열지 못했어요"))
+    }
+
+    // MARK: The pieces
+
+    @Test func theResultLineOfTheInstallIsTheLastJsonObjectOnStdout() {
+        let out = "unpacking...\n" + #"{"version": "0.8.0", "launcher": "/h/.local/share/codex-cua/engine/current/start-mcp.sh"}"# + "\n"
+        #expect(LiveSystemActions.launcher(in: Data(out.utf8)) == "/h/.local/share/codex-cua/engine/current/start-mcp.sh")
+        #expect(LiveSystemActions.launcher(in: Data(#"{"launcher": "relative/start-mcp.sh"}"#.utf8)) == nil)
+        #expect(LiveSystemActions.launcher(in: Data(#"{"launcher": 7}"#.utf8)) == nil)
+        #expect(LiveSystemActions.launcher(in: Data("not json".utf8)) == nil)
+        #expect(LiveSystemActions.launcher(in: Data()) == nil)
     }
 }

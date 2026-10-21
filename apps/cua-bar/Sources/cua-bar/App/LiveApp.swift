@@ -1,7 +1,7 @@
 import Foundation
 
-/// The real app, assembled: the engine client, the plugin install and update, the daily release
-/// check, the login item, the remove action. Everything the tests replace with a fake is
+/// The real app, assembled: the engine client, the install (engine, Claude Code's MCP server and skill),
+/// the daily release check, the login item, the remove action. Everything the tests replace with a fake is
 /// created here with the real thing, and nowhere else.
 @MainActor
 final class LiveApp {
@@ -19,17 +19,21 @@ final class LiveApp {
         quit: @escaping @MainActor () -> Void,
         defaults: UserDefaults = .standard,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
-        appVersion: String? = AppVersion.current
+        appVersion: String? = AppVersion.current,
+        // The engine inside the app bundle; nil when this does not run from one, and then nothing is installed.
+        bundle: BundledEngine? = BundledEngine.locate()
     ) -> LiveApp {
         let locator = CommandLocator(home: home)
         let runner = SystemProcessRunner()
         let setup = SetupActivity()
         let releases = ReleaseChecker(appVersion: appVersion, fetcher: GitHubReleaseFetcher(), defaults: defaults)
         let opener = WorkspaceURLOpener()
-        let actions = LiveSystemActions(
-            locator: locator, claude: ClaudeCLILocator(home: home), runner: runner, opener: opener,
-            appVersion: appVersion, setup: setup, newestAppRelease: { await releases.newRelease })
         let engine = CodexCUAEngineClient(locator: locator, runner: runner)
+        let claude = ClaudeIntegration(home: home, runner: runner)
+        let codex = CodexLocator(home: home)
+        let actions = LiveSystemActions(
+            claude: claude, engine: engine, runner: runner, opener: opener, bundle: bundle, appVersion: appVersion,
+            setup: setup, codex: codex)
         let loginItem = LoginItemRegistrar(service: MainAppLoginItem(), defaults: defaults, home: home)
         let pasteboard = DiagnosisPasteboard(base: SystemPasteboard()) {
             "앱: CUA Bar \(appVersion ?? "개발용")\n\(loginItem.line)"
@@ -38,16 +42,20 @@ final class LiveApp {
         let notifier = SystemNotifier.makeDefault()
         let model = CUABarViewModel(
             engine: engine, appVersion: appVersion, systemActions: actions, pasteboard: pasteboard,
-            notifier: notifier, setupActivity: setup, registeredPluginVersion: { locator.installedPlugin()?.version },
-            pluginPresence: { locator.pluginPresence() })
+            notifier: notifier, setupActivity: setup,
+            claudeInspector: { claude.inspect(launcher: $0, skillSource: bundle?.skillSource, appVersion: appVersion) },
+            codexInstalled: { codex.isInstalled() })
         releases.onNewVersion = { version in
             Task { _ = await notifier.post(.newVersion(version)) }
         }
         let removal = RemovalFlow(
-            engine: engine, loginItem: loginItem, quit: quit,
+            engine: engine, loginItem: loginItem, claude: claude, quit: quit,
             isSetupRunning: { setup.isRunning || model.inFlight.contains(where: SetupOverlay.runsSetup) },
             onRemoved: { model.stop() })
-        let automaticSetup = AutomaticSetup(locate: { locator.locate() }, activity: setup) { _ = await model.perform($0) }
+        let automaticSetup = AutomaticSetup(
+            activity: setup, perform: { [weak model] in _ = await model?.perform($0) }, isBundled: bundle != nil,
+            codexInstalled: { codex.isInstalled() }, claudeCodeFound: { claude.claudeCodeFound })
+        model.afterRead = { await automaticSetup.runWhatWasPutOff() }
         return LiveApp(
             model: model,
             maintenance: Maintenance(releases: releases, removal: removal, loginItem: loginItem, opener: opener),
@@ -55,7 +63,7 @@ final class LiveApp {
     }
 
     /// Everything that starts when the app does, in the background: the login item (first launch
-    /// only), reading the status, the daily release check, and the automatic setup.
+    /// only), reading the status, the daily release check, and the automatic install.
     func start() {
         maintenance.loginItem.registerOnFirstLaunch()
         model.start()

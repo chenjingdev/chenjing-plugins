@@ -5,7 +5,7 @@ description: Use the installed CUA MCP to inspect and operate Mac desktop apps a
 
 # Mac computer use
 
-Use this plugin's MCP tools for the user's requested computer or browser task.
+Use the `cua` MCP tools for the user's requested computer or browser task.
 The tools execute in a dedicated thread on the running Codex host. Read and
 follow the live tool descriptions and the API documentation returned by the
 runtime; do not invent APIs from ordinary Node.js or Playwright examples.
@@ -35,8 +35,7 @@ runtime; do not invent APIs from ordinary Node.js or Playwright examples.
   (`status --json` and `diagnose` release and stop nothing either) and say
   which of setup, transport, tool discovery and a native call failed. Broken
   setup is fixed by CUA Bar's 고치기 or by the user running `codex-cua setup`;
-  with no `codex-cua` at all, setup never ran: point the user to CUA Bar or the
-  setup line of the plugin README. Codex running without the host needs one restart by the user
+  with no `codex-cua` at all, setup never ran: point the user to CUA Bar, which installs and repairs it. Codex running without the host needs one restart by the user
   (CUA Bar's 다시 켜기, or ⌘Q and reopen once the Codex work is done); never
   quit or force-quit Codex yourself. Retry discovery after reconnecting; do not
   replay uncertain clicks or submits.

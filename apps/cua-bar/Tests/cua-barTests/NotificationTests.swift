@@ -399,7 +399,7 @@ struct NotificationViewModelTests {
         status.connections[0].state = .ended // an ended connection is a problem, not a notification
         status.connections[0].canRelease = false
         status.setup.relay = "unavailable"
-        status.plugin.version = "0.6.0"
+        status.engine.version = "0.6.0"
         let rig = await Rig(status)
         #expect(rig.notifier.attempts == 0)
         #expect(rig.model.summary.icon == .problem)

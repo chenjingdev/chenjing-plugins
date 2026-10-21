@@ -5,10 +5,12 @@ enum RemovalMessages {
     /// The button at the bottom of 기록, and the answer that does it.
     static let buttonTitle = "앱 지우기…"
     static let confirmTitle = "앱 지우기"
-    /// Asked once, inline, before anything is touched (R3).
-    static let question = "연결 설정과 중계기를 되돌려요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜져요."
+    /// Asked once, inline, before anything is touched (R3, R15).
+    static let question = "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지워요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜져요. 열린 Claude 대화의 CUA도 끊겨요."
     static let working = "되돌리는 중…"
-    static let trashHint = "이 앱 파일은 이제 휴지통으로 옮겨도 돼요. Claude 플러그인은 그대로 남아 있어요."
+    static let trashHint = "이 앱 파일은 이제 휴지통으로 옮겨도 돼요."
+    /// Claude Code could not take the app's MCP server away (no `claude` command, or it refused).
+    static let mcpStays = " Claude Code의 CUA 연결은 `claude mcp remove -s user cua`로 직접 지워 주세요."
     static let done = "연결 설정과 중계기를 되돌렸어요. " + trashHint
     static let nothingToUndo = "되돌릴 연결 설정이 없었어요. " + trashHint
     /// The remover refuses while a Codex host runs. Codex is never quit from here.
@@ -19,10 +21,11 @@ enum RemovalMessages {
     static let loginItemStays = " 로그인 항목은 시스템 설정 > 일반 > 로그인 항목에서 직접 꺼 주세요."
 }
 
-/// 앱 지우기 at the bottom of 기록 (R3, once called 제거): asks once, runs `codex-cua uninstall` (the plugin's `setup.sh uninstall`
-/// when the command is missing or not ours), takes the login item away, shows the result and
-/// quits. If the remover refuses because a Codex host is running, it says so and changes nothing
-/// else; it never quits Codex. The Claude plugin and the app file stay.
+/// 앱 지우기 at the bottom of 기록 (R3, once called 제거): asks once, then in this order: looks for a running
+/// Codex host (which keeps everything as it is), takes away the MCP server and the skill the app put into
+/// Claude Code (only its own), runs `codex-cua uninstall` (the bound engine copy's `setup.sh uninstall` when the
+/// command is missing or not ours), takes the login item away, shows the result and quits. The remover
+/// refuses while a Codex host runs; it never quits Codex. The app file stays.
 @MainActor
 final class RemovalFlow: ObservableObject {
     enum Phase: Equatable {
@@ -40,6 +43,7 @@ final class RemovalFlow: ObservableObject {
 
     private let engine: any EngineClient
     private let loginItem: LoginItemRegistrar
+    private let claude: any ClaudeRemoving
     private let quit: @MainActor () -> Void
     private let sleep: @Sendable (Duration) async throws -> Void
     private let readingTime: Duration
@@ -49,6 +53,8 @@ final class RemovalFlow: ObservableObject {
     init(
         engine: any EngineClient,
         loginItem: LoginItemRegistrar,
+        // What the app put into Claude Code goes first; tests pass a recorder, the app the real one.
+        claude: any ClaudeRemoving = NoClaudeRemoval(),
         quit: @escaping @MainActor () -> Void,
         // Long enough to read the result before the app goes away.
         readingTime: Duration = .seconds(6),
@@ -60,6 +66,7 @@ final class RemovalFlow: ObservableObject {
     ) {
         self.engine = engine
         self.loginItem = loginItem
+        self.claude = claude
         self.quit = quit
         self.readingTime = readingTime
         self.sleep = sleep
@@ -91,13 +98,20 @@ final class RemovalFlow: ObservableObject {
             return
         }
         phase = .working
+        // Look before changing anything: with a Codex host running nothing is touched, as it always was.
+        if let status = try? await engine.status(), Self.hostMayBeRunning(in: status) {
+            phase = .refused(RemovalMessages.hostRunning)
+            return
+        }
+        // Claude Code's part first: once the engine copy is gone, the MCP server would point at nothing.
+        let claudeRemoval = await claude.removeAppOwned()
         var undone = true
         do {
             try await engine.uninstall()
         } catch let error as EngineError {
             switch error {
-            case .pluginMissing, .setupNeeded:
-                // No plugin, or the remover found nothing a setup installed: there is nothing to undo.
+            case .engineMissing, .setupNeeded:
+                // No engine, or the remover found nothing a setup installed: there is nothing to undo.
                 undone = false
             default:
                 phase = .refused(await refusal())
@@ -108,7 +122,10 @@ final class RemovalFlow: ObservableObject {
             return
         }
         let loginItemOff = loginItem.unregisterForRemoval()
-        phase = .finished((undone ? RemovalMessages.done : RemovalMessages.nothingToUndo) + (loginItemOff ? "" : RemovalMessages.loginItemStays))
+        phase = .finished(
+            (undone ? RemovalMessages.done : RemovalMessages.nothingToUndo)
+                + (claudeRemoval.mcpStays ? RemovalMessages.mcpStays : "")
+                + (loginItemOff ? "" : RemovalMessages.loginItemStays))
         onRemoved()
         try? await sleep(readingTime)
         quit()

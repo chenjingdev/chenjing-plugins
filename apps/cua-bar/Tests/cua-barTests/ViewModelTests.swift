@@ -13,8 +13,8 @@ final class RecordingSystemActions: SystemActions, @unchecked Sendable {
     private var recorded: [String] = []
     var calls: [String] { lock.withLock { recorded } }
     func openCodexDownload() async -> ActionOutcome { record("openCodexDownload") }
-    func installPlugin() async -> ActionOutcome { record("installPlugin") }
-    func matchPluginVersion() async -> ActionOutcome { record("matchPluginVersion") }
+    func setUp() async -> ActionOutcome { record("setUp") }
+    func installDeveloperTools() async -> ActionOutcome { record("installDeveloperTools") }
     private func record(_ name: String) -> ActionOutcome {
         lock.withLock { recorded.append(name) }
         return ActionOutcome(kind: .success, message: name)
@@ -69,11 +69,13 @@ struct ViewModelTests {
         #expect(engine.calls == [.status])
     }
 
-    @Test func theAppVersionIsComparedWithThePlugins() async throws {
+    @Test func theAppVersionIsComparedWithTheEnginesAndADifferentOneIsTheSetupProblem() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
         let model = makeModel(engine, appVersion: "0.8.0")
         await model.refresh()
-        #expect(model.summary.problem?.kind == .versionMismatch)
+        #expect(model.summary.problem?.kind == .setupIncomplete)
+        #expect(model.summary.problem?.title == "연결 엔진이 앱과 판이 달라요")
+        #expect(model.summary.problem?.fix == .runSetup)
     }
 
     @Test func aFirstFailureIsShownAtOnce() async {
@@ -86,13 +88,14 @@ struct ViewModelTests {
         #expect(model.content == nil)
     }
 
-    @Test func aMissingPluginAndAMissingSetupAreShownAtOnceEvenAfterAGoodAnswer() async throws {
+    @Test func aMissingEngineAndAMissingSetupAreShownAtOnceEvenAfterAGoodAnswer() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
         let model = makeModel(engine)
         await model.refresh()
-        engine.setStatusError(.pluginMissing)
+        engine.setStatusError(.engineMissing)
         await model.refresh()
-        #expect(model.summary.problem?.kind == .pluginMissing)
+        #expect(model.summary.problem?.kind == .setupIncomplete)
+        #expect(model.summary.problem?.title == "연결 엔진이 없어요")
         engine.setStatusError(.setupNeeded(installPath: "/x"))
         await model.refresh()
         #expect(model.summary.problem?.kind == .setupIncomplete)
@@ -284,7 +287,6 @@ struct ViewModelTests {
         (.releaseSession("019a-1", user: false), .releaseSession("019a-1", user: false)),
         (.restartCodex, .restartCodex),
         (.copyDiagnosis, .diagnose),
-        (.runSetup, .runSetup),
     ])
     func eachActionIsOneEngineCallFollowedByAnImmediateRefresh(action: CUAAction, call: FakeEngineClient.Call) async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
@@ -459,7 +461,7 @@ struct ViewModelTests {
 
     @Test func aFailedDiagnosisCopiesNothing() async throws {
         let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
-        engine.configure { $0.actionError = .pluginMissing }
+        engine.configure { $0.actionError = .engineMissing }
         let pasteboard = RecordingPasteboard()
         let model = makeModel(engine, pasteboard: pasteboard)
         let outcome = await model.perform(.copyDiagnosis)
@@ -508,9 +510,9 @@ struct ViewModelTests {
         let system = RecordingSystemActions()
         let model = makeModel(engine, systemActions: system)
         await model.perform(.openCodexDownload)
-        await model.perform(.installPlugin)
-        await model.perform(.matchPluginVersion)
-        #expect(system.calls == ["openCodexDownload", "installPlugin", "matchPluginVersion"])
+        await model.perform(.runSetup)
+        await model.perform(.installDeveloperTools)
+        #expect(system.calls == ["openCodexDownload", "setUp", "installDeveloperTools"])
         // They are not engine calls.
         #expect(engine.calls.filter { $0 != .status }.isEmpty)
     }
@@ -518,8 +520,8 @@ struct ViewModelTests {
     @Test func theUnwiredSystemActionsSayTheyAreNotThereYet() async {
         let actions = UnwiredSystemActions()
         #expect(await actions.openCodexDownload().kind == .info)
-        #expect(await actions.installPlugin().kind == .info)
-        #expect(await actions.matchPluginVersion().kind == .info)
+        #expect(await actions.setUp().kind == .info)
+        #expect(await actions.installDeveloperTools().kind == .info)
     }
 
     @Test func theStatusCardsFixButtonRunsItsAction() async throws {

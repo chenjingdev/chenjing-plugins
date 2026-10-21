@@ -7,8 +7,8 @@ struct StatusEvaluatorTests {
 
     private func healthy() throws -> EngineStatus { try Fixtures.status("status-ready") }
 
-    private func evaluate(_ status: EngineStatus, appVersion: String? = "0.7.0") -> StatusSummary {
-        StatusEvaluator.evaluate(status, appVersion: appVersion)
+    private func evaluate(_ status: EngineStatus, appVersion: String? = "0.7.0", facts: LocalFacts = LocalFacts()) -> StatusSummary {
+        StatusEvaluator.evaluate(status, appVersion: appVersion, facts: facts)
     }
 
     // MARK: Icon state and tooltip
@@ -168,10 +168,13 @@ struct StatusEvaluatorTests {
     static let cases: [ProblemCase] = [
         ProblemCase(name: "codex_missing", kind: .codexMissing, title: "Codex 앱이 없어요",
              nextStep: "Codex 앱을 받아 설치해 주세요", fix: .openCodexDownload, fixLabel: "받는 곳 열기"),
-        ProblemCase(name: "version_mismatch", kind: .versionMismatch, title: "앱과 플러그인 판이 달라요",
-             nextStep: "앱 0.7.0 · 플러그인 0.6.0 — 맞는 판을 받아 주세요", fix: .matchPluginVersion, fixLabel: "맞는 판 받기"),
+        ProblemCase(name: "developer_tools_needed", kind: .developerToolsNeeded, title: "개발자 도구 필요",
+             nextStep: "설치를 누르면 macOS 설치 창이 떠요. 끝나면 한 번 더 눌러 주세요", fix: .installDeveloperTools, fixLabel: "설치"),
         ProblemCase(name: "setup_incomplete", kind: .setupIncomplete, title: "Codex 연결용 래퍼가 깨졌어요",
              nextStep: "고치기를 누르면 설정을 다시 맞춰요", fix: .runSetup, fixLabel: "고치기"),
+        // Nothing the app may fix: it did not put it there. Said on the card, with where to read how.
+        ProblemCase(name: "claude_conflict", kind: .claudeConflict, title: "Claude Code에 앱이 깔지 않은 cua MCP가 있어요",
+             nextStep: "점검 탭에서 지우는 방법을 보세요", fix: nil, fixLabel: nil),
         ProblemCase(name: "codex_without_host", kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요",
              nextStep: "다시 켜면 Claude가 붙어요", fix: .restartCodex, fixLabel: "다시 켜기",
              warning: "하던 Codex 작업이 끊길 수 있어요"),
@@ -188,11 +191,9 @@ struct StatusEvaluatorTests {
         switch kind {
         case .codexMissing:
             status.codex = CodexInfo(installed: false, appPath: nil, appVersion: nil, running: false, pids: [])
-        case .pluginMissing, .engineUnreadable:
+        case .engineUnreadable, .claudeConflict:
             break
-        case .versionMismatch:
-            status.plugin.version = "0.6.0"
-        case .setupIncomplete:
+        case .developerToolsNeeded, .setupIncomplete:
             status.setup.wrapper = "broken"
         case .codexWithoutHost:
             status.host.state = .closed
@@ -204,9 +205,18 @@ struct StatusEvaluatorTests {
         return status
     }
 
+    /// What the app itself knows, for the problems that come from it and not from the engine's answer.
+    private func facts(causing kind: ProblemKind) -> LocalFacts {
+        switch kind {
+        case .developerToolsNeeded: LocalFacts(developerToolsNeeded: true)
+        case .claudeConflict: LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .conflict, skill: .ready))
+        default: LocalFacts()
+        }
+    }
+
     @Test(arguments: StatusEvaluatorTests.cases)
     func eachProblemHasItsLineAndItsFixButton(_ item: ProblemCase) throws {
-        let summary = evaluate(try status(causing: item.kind))
+        let summary = evaluate(try status(causing: item.kind), facts: facts(causing: item.kind))
         let problem = try #require(summary.problem)
         #expect(problem.kind == item.kind)
         #expect(problem.title == item.title)
@@ -225,71 +235,169 @@ struct StatusEvaluatorTests {
 
     // MARK: Priority: first match wins
 
-    @Test func priorityOrderIsCodexPluginVersionSetupHostEndedLeases() throws {
+    @Test func priorityOrderIsCodexSetupConflictHostEndedLeases() throws {
         var status = try healthy()
         status.codex = CodexInfo(installed: false, appPath: nil, appVersion: nil, running: false, pids: [])
-        status.plugin.version = "0.6.0"
         status.setup.wrapper = "broken"
         status.host.state = .closed
         status.connections[0].state = .ended
         status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-1", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
+        var facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .conflict, skill: .ready))
 
-        // codex_missing > version_mismatch > setup_incomplete > codex_without_host > ended_connections > leases_maybe_left
-        #expect(evaluate(status).problem?.kind == .codexMissing)
+        // codex_missing > setup_incomplete > claude_conflict > codex_without_host > ended_connections > leases_maybe_left
+        #expect(evaluate(status, facts: facts).problem?.kind == .codexMissing)
         status.codex = CodexInfo(installed: true, appPath: "/Applications/ChatGPT.app", appVersion: "1", running: true, pids: [1])
-        #expect(evaluate(status).problem?.kind == .versionMismatch)
-        status.plugin.version = "0.7.0"
-        #expect(evaluate(status).problem?.kind == .setupIncomplete)
+        #expect(evaluate(status, facts: facts).problem?.kind == .setupIncomplete)
         status.setup.wrapper = "ready"
-        #expect(evaluate(status).problem?.kind == .codexWithoutHost)
+        #expect(evaluate(status, facts: facts).problem?.kind == .claudeConflict)
+        facts = LocalFacts()
+        #expect(evaluate(status, facts: facts).problem?.kind == .codexWithoutHost)
         status.host.state = .ready
-        #expect(evaluate(status).problem?.kind == .endedConnections)
+        #expect(evaluate(status, facts: facts).problem?.kind == .endedConnections)
         status.connections[0].state = .active
-        #expect(evaluate(status).problem?.kind == .leasesMaybeLeft)
+        #expect(evaluate(status, facts: facts).problem?.kind == .leasesMaybeLeft)
         status.leases.maybeLeft = []
-        #expect(evaluate(status).problem == nil)
+        #expect(evaluate(status, facts: facts).problem == nil)
     }
 
-    @Test func pluginMissingOutranksEverythingElseBecauseThereIsNoStatusToRead() {
-        let summary = StatusEvaluator.summary(for: .pluginMissing)
+    @Test func aMissingEngineIsTheSetupProblemBecauseThereIsNoStatusToRead() {
+        let summary = StatusEvaluator.summary(for: .engineMissing)
         let problem = summary.problem
-        #expect(problem?.kind == .pluginMissing)
-        #expect(problem?.title == "Claude 플러그인이 없어요")
-        #expect(problem?.nextStep == "Claude 플러그인을 설치해 주세요")
-        #expect(problem?.fix == .installPlugin)
-        #expect(problem?.fixLabel == "설치")
+        #expect(problem?.kind == .setupIncomplete)
+        #expect(problem?.title == "연결 엔진이 없어요")
+        #expect(problem?.nextStep == "고치기를 누르면 엔진을 설치해요")
+        #expect(problem?.fix == .runSetup)
+        #expect(problem?.fixLabel == "고치기")
         #expect(summary.icon == .problem)
-        #expect(summary.tooltip == "CUA 문제 · Claude 플러그인이 없어요")
+        #expect(summary.tooltip == "CUA 문제 · 연결 엔진이 없어요")
     }
 
-    @Test func codexMissingIsNotMaskedByTheMissingPluginRule() throws {
-        // codex_missing is only decidable from a status document; it still comes first among those.
+    @Test func withoutCodexOrTheDeveloperToolsTheInstallCannotStartAndTheCardSaysThatInstead() {
+        let noCodex = LocalFacts(codexMissing: true)
+        let noTools = LocalFacts(developerToolsNeeded: true)
+        for error in [EngineError.engineMissing, .setupNeeded(installPath: "/x"), .commandFailed(exitCode: 2, message: ""), .invalidOutput("x"), .unsupportedSchema(2)] {
+            #expect(StatusEvaluator.summary(for: error, facts: noCodex).problem?.kind == .codexMissing, "\(error)")
+            #expect(StatusEvaluator.summary(for: error, facts: noTools).problem?.kind == .developerToolsNeeded, "\(error)")
+            // Codex first: without it nothing is installed whatever the tools say.
+            #expect(StatusEvaluator.summary(for: error, facts: LocalFacts(developerToolsNeeded: true, codexMissing: true)).problem?.kind == .codexMissing)
+        }
+        // A timeout or a command that cannot start says nothing about the engine, so the install is not asked for.
+        for error in [EngineError.timeout, .launchFailed("x")] {
+            #expect(StatusEvaluator.summary(for: error, facts: LocalFacts(developerToolsNeeded: true, codexMissing: true)).problem?.kind == .engineUnreadable)
+        }
+    }
+
+    @Test func codexMissingIsNotMaskedByAnEngineThatReportsNoVersion() throws {
         var status = try healthy()
         status.codex.installed = false
-        status.plugin.version = nil
+        status.engine.version = nil
         #expect(evaluate(status).problem?.kind == .codexMissing)
     }
 
     // MARK: Version
 
-    @Test func versionMismatchNeedsBothVersionsToBeKnown() throws {
+    @Test func anEngineOfAnotherVersionIsASetupProblemOnceBothVersionsAreKnown() throws {
         var status = try healthy()
-        status.plugin.version = "0.6.0"
+        status.engine.version = "0.6.0"
         #expect(evaluate(status, appVersion: nil).problem == nil)
-        status.plugin.version = nil
+        status.engine.version = nil
         #expect(evaluate(status, appVersion: "0.7.0").problem == nil)
-        status.plugin.version = "0.7.0"
+        status.engine.version = "0.7.0"
         #expect(evaluate(status, appVersion: "0.7.0").problem == nil)
-        status.plugin.version = "0.8.0"
-        #expect(evaluate(status, appVersion: "0.7.0").problem?.kind == .versionMismatch)
+        status.engine.version = "0.8.0"
+        let problem = try #require(evaluate(status, appVersion: "0.7.0").problem)
+        #expect(problem.kind == .setupIncomplete)
+        #expect(problem.title == "연결 엔진이 앱과 판이 달라요")
+        #expect(problem.fix == .runSetup)
+        #expect(problem.fixLabel == "고치기")
     }
 
-    @Test func aNewerSchemaIsReportedAsAVersionProblemWithoutReadingTheRest() {
+    @Test func aNewerSchemaIsReportedAsASetupProblemWithoutReadingTheRest() {
         let summary = StatusEvaluator.summary(for: .unsupportedSchema(2))
-        #expect(summary.problem?.kind == .versionMismatch)
-        #expect(summary.problem?.fix == .matchPluginVersion)
-        #expect(summary.problem?.title == "앱이 이 플러그인 판을 읽지 못해요")
+        #expect(summary.problem?.kind == .setupIncomplete)
+        #expect(summary.problem?.fix == .runSetup)
+        #expect(summary.problem?.title == "앱이 이 엔진 판을 읽지 못해요")
         #expect(summary.icon == .problem)
+    }
+
+    @Test func aCommandThatFailsOrPrintsNonsenseIsAnOldOrBrokenCommandAndTheInstallFixesIt() {
+        for error in [EngineError.commandFailed(exitCode: 2, message: "SECRET-STDERR usage"), .commandFailed(exitCode: 1, message: ""), .invalidOutput("EngineStatus")] {
+            let summary = StatusEvaluator.summary(for: error)
+            #expect(summary.problem?.kind == .setupIncomplete)
+            #expect(summary.problem?.title == "연결 명령이 옛 판이거나 깨졌어요")
+            #expect(summary.problem?.fix == .runSetup)
+            #expect(summary.problem?.fixLabel == "고치기")
+            #expect(summary.warning == nil, "nothing the command printed")
+        }
+    }
+
+    // MARK: Claude Code's MCP server and skill
+
+    private func claude(mcp: ClaudeSetupState.Part, skill: ClaudeSetupState.Part, found: Bool = true) -> LocalFacts {
+        LocalFacts(claude: ClaudeSetupState(claudeCodeFound: found, mcp: mcp, skill: skill))
+    }
+
+    @Test func aMissingOrOutOfDateMCPServerOrSkillIsTheSetupProblemWithTheFixButton() throws {
+        let status = try healthy()
+        let cases: [(LocalFacts, String)] = [
+            (claude(mcp: .missing, skill: .ready), "Claude Code에 CUA가 연결되지 않았어요"),
+            (claude(mcp: .outdated, skill: .ready), "Claude Code의 CUA 연결이 옛 판이에요"),
+            (claude(mcp: .ready, skill: .missing), "Claude Code에 CUA 스킬이 없어요"),
+            (claude(mcp: .ready, skill: .outdated), "Claude Code의 CUA 스킬이 옛 판이에요"),
+            (claude(mcp: .missing, skill: .missing), "연결 설정에 문제가 있어요 — MCP · 스킬"),
+        ]
+        for (facts, title) in cases {
+            let problem = try #require(evaluate(status, facts: facts).problem, "\(title)")
+            #expect(problem.kind == .setupIncomplete)
+            #expect(problem.title == title)
+            #expect(problem.fix == .runSetup)
+            #expect(problem.fixLabel == "고치기")
+        }
+    }
+
+    @Test func withoutClaudeCodeNothingIsSaidAboutItsMCPServerOrSkill() throws {
+        // R12: the card carries no "Claude Code 없음", and what waits for Claude Code is no problem.
+        for mcp in [ClaudeSetupState.Part.missing, .outdated, .conflict] {
+            #expect(evaluate(try healthy(), facts: claude(mcp: mcp, skill: .missing, found: false)).problem == nil)
+        }
+    }
+
+    @Test func anUnknownOrReadyPartIsNoProblem() throws {
+        for part in [ClaudeSetupState.Part.unknown, .ready] {
+            #expect(evaluate(try healthy(), facts: claude(mcp: part, skill: part)).problem == nil)
+        }
+    }
+
+    @Test func aConflictHasNoButtonAndNamesWhatIsThere() throws {
+        let status = try healthy()
+        let titles: [(ClaudeSetupState.Part, ClaudeSetupState.Part, String)] = [
+            (.conflict, .ready, "Claude Code에 앱이 깔지 않은 cua MCP가 있어요"),
+            (.ready, .conflict, "Claude Code에 앱이 깔지 않은 cua 스킬이 있어요"),
+            (.conflict, .conflict, "Claude Code에 앱이 깔지 않은 cua MCP와 스킬이 있어요"),
+        ]
+        for (mcp, skill, title) in titles {
+            let summary = evaluate(status, facts: claude(mcp: mcp, skill: skill))
+            #expect(summary.problem?.kind == .claudeConflict)
+            #expect(summary.problem?.title == title)
+            #expect(summary.nextStep == "점검 탭에서 지우는 방법을 보세요")
+            #expect(summary.fix == nil)
+            #expect(summary.icon == .problem)
+        }
+    }
+
+    @Test func theOldPluginIsNotOnTheCard() throws {
+        // It is told in the check tab (the model keeps it in `claudeSetup`), not by the icon or the card.
+        let facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .ready, skill: .ready, legacyPlugin: true))
+        #expect(evaluate(try healthy(), facts: facts).problem == nil)
+    }
+
+    @Test func theDeveloperToolsReplaceTheSetupProblemTheyBlock() throws {
+        var status = try healthy()
+        status.setup.wrapper = "broken"
+        let problem = try #require(evaluate(status, facts: LocalFacts(developerToolsNeeded: true)).problem)
+        #expect(problem.kind == .developerToolsNeeded)
+        // Nothing is set up by a missing tool when nothing needs setting up.
+        #expect(evaluate(try healthy(), facts: LocalFacts(developerToolsNeeded: true)).problem == nil)
     }
 
     // MARK: Setup
@@ -403,9 +511,9 @@ struct StatusEvaluatorTests {
     }
 
     @Test func onlyAProblemOfTheWholeAppHasAFixButton() throws {
-        for kind in ProblemKind.allCases where kind != .pluginMissing && kind != .engineUnreadable {
-            let problem = try #require(evaluate(try status(causing: kind)).problem)
-            let wholeApp: Set<ProblemKind> = [.codexMissing, .versionMismatch, .setupIncomplete, .codexWithoutHost]
+        for kind in ProblemKind.allCases where kind != .engineUnreadable {
+            let problem = try #require(evaluate(try status(causing: kind), facts: facts(causing: kind)).problem)
+            let wholeApp: Set<ProblemKind> = [.codexMissing, .developerToolsNeeded, .setupIncomplete, .codexWithoutHost]
             #expect((problem.fix != nil) == wholeApp.contains(kind), "\(kind)")
             #expect((problem.fixLabel != nil) == (problem.fix != nil), "\(kind)")
         }
@@ -530,10 +638,10 @@ struct StatusEvaluatorTests {
 
     @Test func noTooltipSaysCUATwice() throws {
         var summaries: [StatusSummary] = [StatusEvaluator.loading]
-        for kind in ProblemKind.allCases where kind != .pluginMissing && kind != .engineUnreadable {
-            summaries.append(evaluate(try status(causing: kind)))
+        for kind in ProblemKind.allCases where kind != .engineUnreadable {
+            summaries.append(evaluate(try status(causing: kind), facts: facts(causing: kind)))
         }
-        for error in [EngineError.pluginMissing, .timeout, .setupNeeded(installPath: "/x"), .unsupportedSchema(2),
+        for error in [EngineError.engineMissing, .timeout, .setupNeeded(installPath: "/x"), .unsupportedSchema(2),
                       .commandFailed(exitCode: 1, message: "x"), .launchFailed("x"), .invalidOutput("x")] {
             summaries.append(StatusEvaluator.summary(for: error))
         }

@@ -16,9 +16,13 @@ enum IconState: String, CaseIterable, Equatable, Sendable {
 /// The problems the status card can show, in the order they win (first match).
 enum ProblemKind: String, CaseIterable, Sendable {
     case codexMissing = "codex_missing"
-    case pluginMissing = "plugin_missing"
-    case versionMismatch = "version_mismatch"
+    /// The Mac has no developer tools, which the engine's launcher needs: asked for on the card, never opened by itself.
+    case developerToolsNeeded = "developer_tools_needed"
+    /// The engine, its Python environment, the wrapper, the relay, or Claude Code's MCP server or skill is
+    /// missing, broken or of another version: the card's 고치기 installs it all again.
     case setupIncomplete = "setup_incomplete"
+    /// An MCP server or a skill named cua that the app did not put into Claude Code: left alone, told.
+    case claudeConflict = "claude_conflict"
     case codexWithoutHost = "codex_without_host"
     case endedConnections = "ended_connections"
     case leasesMaybeLeft = "leases_maybe_left"
@@ -55,13 +59,25 @@ struct StatusSummary: Equatable, Sendable {
     var fixLabel: String? { problem?.fixLabel }
 }
 
+/// What the app knows by itself besides the engine's answer: what Claude Code has of CUA, whether the
+/// developer tools are missing, and whether there is no Codex app (the engine cannot say before it is installed).
+struct LocalFacts: Equatable, Sendable {
+    var claude = ClaudeSetupState.none
+    var developerToolsNeeded = false
+    var codexMissing = false
+}
+
 enum StatusEvaluator {
     // MARK: Entry points
 
     /// `tabsReleased`: the ended connections the app may only release, whose tabs it released in this run
     /// (see `problem`).
-    static func evaluate(_ status: EngineStatus, appVersion: String?, tabsReleased: Set<String> = []) -> StatusSummary {
-        if let problem = problem(in: status, appVersion: appVersion, tabsReleased: tabsReleased) { return summary(for: problem) }
+    static func evaluate(
+        _ status: EngineStatus, appVersion: String?, tabsReleased: Set<String> = [], facts: LocalFacts = LocalFacts()
+    ) -> StatusSummary {
+        if let problem = problem(in: status, appVersion: appVersion, tabsReleased: tabsReleased, facts: facts) {
+            return summary(for: problem)
+        }
         // Not a problem (nothing is broken and the icon stays ready), but nothing else would say why
         // the connections of a Codex from before the update cannot be released. Said while working
         // too, or the card would drop it each time an AI uses the screen.
@@ -101,50 +117,45 @@ enum StatusEvaluator {
 
     /// The summary when the engine gave no usable status.
     ///
-    /// A command that fails or prints something unreadable while the plugin registered with
-    /// Claude Code is a different version from the app is most likely an old plugin that does not
-    /// know `status` yet (0.5.0 exits 2), so it is the version problem, not a read problem. When the
-    /// registered version is the app's, the command itself is old or broken: setup replaces it.
-    /// Before either: a command that fails while Claude Code has no plugin, or one whose folder is
-    /// gone, is that plugin problem; the command only hands over to it.
-    static func summary(
-        for error: EngineError, appVersion: String? = nil, registeredPluginVersion: String? = nil, plugin: PluginPresence = .unknown
-    ) -> StatusSummary {
-        if error.mayComeFromAnOldCommand, plugin == .absent || plugin == .broken {
-            return summary(for: plugin == .absent ? missingPluginProblem : brokenPluginProblem)
-        }
-        if error.mayComeFromAnOldCommand, let pluginVersion = nonEmpty(registeredPluginVersion), let appVersion = nonEmpty(appVersion) {
-            return summary(for: pluginVersion == appVersion
-                ? staleCommandProblem
-                : versionMismatchProblem(appVersion: appVersion, pluginVersion: pluginVersion))
+    /// What the app's own install can repair (no engine, a command that fails or prints something unreadable
+    /// because it is old or broken, an engine too new to read) is the setup problem with 고치기, unless the
+    /// install cannot start: no Codex app, or no developer tools. Those say so instead.
+    static func summary(for error: EngineError, facts: LocalFacts = LocalFacts()) -> StatusSummary {
+        if error.needsEngineInstall {
+            if facts.codexMissing { return summary(for: codexMissingProblem) }
+            if facts.developerToolsNeeded { return summary(for: developerToolsProblem) }
         }
         switch error {
-        case .pluginMissing:
-            return summary(for: missingPluginProblem)
+        case .engineMissing:
+            return summary(for: Problem(
+                kind: .setupIncomplete, title: "연결 엔진이 없어요", nextStep: "고치기를 누르면 엔진을 설치해요",
+                warning: nil, fix: .runSetup, fixLabel: "고치기"))
         case .setupNeeded:
             return summary(for: Problem(
                 kind: .setupIncomplete, title: "연결 설정이 아직 안 됐어요", nextStep: "고치기를 누르면 연결을 설정해요",
                 warning: nil, fix: .runSetup, fixLabel: "고치기"))
+        case .commandFailed, .invalidOutput:
+            return summary(for: staleCommandProblem)
         case .unsupportedSchema:
             return summary(for: Problem(
-                kind: .versionMismatch, title: "앱이 이 플러그인 판을 읽지 못해요", nextStep: "맞는 판을 받아 주세요",
-                warning: nil, fix: .matchPluginVersion, fixLabel: "맞는 판 받기"))
-        case .timeout, .commandFailed, .launchFailed, .invalidOutput:
+                kind: .setupIncomplete, title: "앱이 이 엔진 판을 읽지 못해요", nextStep: "고치기를 누르면 앱의 엔진으로 다시 설정해요",
+                warning: nil, fix: .runSetup, fixLabel: "고치기"))
+        case .timeout, .launchFailed:
             return summary(for: Problem(
                 kind: .engineUnreadable, title: "상태를 읽지 못했어요", nextStep: "잠시 뒤 다시 읽어 보세요",
                 warning: error.message, fix: .refresh, fixLabel: "다시 읽기"))
         }
     }
 
-    static let missingPluginProblem = Problem(
-        kind: .pluginMissing, title: "Claude 플러그인이 없어요", nextStep: "Claude 플러그인을 설치해 주세요",
-        warning: nil, fix: .installPlugin, fixLabel: "설치")
+    static let codexMissingProblem = Problem(
+        kind: .codexMissing, title: "Codex 앱이 없어요", nextStep: "Codex 앱을 받아 설치해 주세요",
+        warning: nil, fix: .openCodexDownload, fixLabel: "받는 곳 열기")
 
-    /// Claude Code lists the plugin, but its folder is gone: installing again over the record does
-    /// nothing, so the fix takes the record away first (`installPlugin`).
-    static let brokenPluginProblem = Problem(
-        kind: .pluginMissing, title: "Claude 플러그인 폴더가 없어요", nextStep: "다시 설치를 누르면 플러그인을 다시 받아요",
-        warning: nil, fix: .installPlugin, fixLabel: "다시 설치")
+    /// The engine's launcher runs on the system's Python, which comes with the developer tools. The app does
+    /// not open their installer by itself (it would take the screen); the button does.
+    static let developerToolsProblem = Problem(
+        kind: .developerToolsNeeded, title: "개발자 도구 필요", nextStep: "설치를 누르면 macOS 설치 창이 떠요. 끝나면 한 번 더 눌러 주세요",
+        warning: nil, fix: .installDeveloperTools, fixLabel: "설치")
 
     static let loading = StatusSummary(
         icon: .ready, stateLabel: "확인 중", headline: "상태를 확인하는 중이에요", nextStep: "없음", warning: nil, problem: nil,
@@ -152,28 +163,25 @@ enum StatusEvaluator {
 
     // MARK: Problems
 
-    /// The first problem that applies, in the spec's order (the missing plugin comes from
-    /// `summary(for:)`, because without the command there is no status to look at):
-    /// Codex missing > version mismatch > setup incomplete > Codex without a host >
-    /// ended connections > leftover leases.
+    /// The first problem that applies:
+    /// Codex missing > setup incomplete (or the developer tools it needs) > a conflict in Claude Code >
+    /// Codex without a host > ended connections > leftover leases. (A missing engine comes from
+    /// `summary(for:)`, because without the command there is no status to look at.)
     ///
     /// The card has a fix button only for a problem of the whole app. An ended connection or a leftover
-    /// lease is one line's problem: the card says what to do and the button is on that line (F2).
+    /// lease is one line's problem: the card says what to do and the button is on that line (F2). A conflict
+    /// has no button either: the app does not touch what it did not put there.
     ///
     /// `tabsReleased` holds the ended connections the app may only release (it may not stop them) whose
     /// tabs it released in this run. Once that is all that is left, the card says so instead of sending
     /// the person to 정리 again; it never says the tabs are released when it does not know.
-    static func problem(in status: EngineStatus, appVersion: String?, tabsReleased: Set<String> = []) -> Problem? {
-        if status.codex.installed == false {
-            return Problem(
-                kind: .codexMissing, title: "Codex 앱이 없어요", nextStep: "Codex 앱을 받아 설치해 주세요",
-                warning: nil, fix: .openCodexDownload, fixLabel: "받는 곳 열기")
-        }
-        if let pluginVersion = nonEmpty(status.plugin.version), let appVersion = nonEmpty(appVersion), pluginVersion != appVersion {
-            return versionMismatchProblem(appVersion: appVersion, pluginVersion: pluginVersion)
-        }
-        let issues = setupIssues(in: status.setup)
+    static func problem(
+        in status: EngineStatus, appVersion: String?, tabsReleased: Set<String> = [], facts: LocalFacts = LocalFacts()
+    ) -> Problem? {
+        if status.codex.installed == false { return codexMissingProblem }
+        let issues = setupIssues(in: status.setup) + engineIssues(in: status.engine, appVersion: appVersion) + claudeIssues(in: facts.claude)
         if !issues.isEmpty {
+            if facts.developerToolsNeeded { return developerToolsProblem }
             let title = issues.count == 1
                 ? issues[0].sentence
                 : "연결 설정에 문제가 있어요 — " + issues.map(\.name).joined(separator: " · ")
@@ -181,6 +189,7 @@ enum StatusEvaluator {
                 kind: .setupIncomplete, title: title, nextStep: "고치기를 누르면 설정을 다시 맞춰요",
                 warning: nil, fix: .runSetup, fixLabel: "고치기")
         }
+        if let conflict = conflictProblem(in: facts.claude) { return conflict }
         if status.codex.running, status.host.state != .ready, status.host.state != .starting, status.host.state != .stopping {
             return Problem(
                 kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요", nextStep: "다시 켜면 Claude가 붙어요",
@@ -214,12 +223,42 @@ enum StatusEvaluator {
         return nil
     }
 
-    /// "앱 0.7.0 · 플러그인 0.5.0 — 맞는 판을 받아 주세요", with 맞는 판 받기.
-    private static func versionMismatchProblem(appVersion: String, pluginVersion: String) -> Problem {
-        Problem(
-            kind: .versionMismatch, title: "앱과 플러그인 판이 달라요",
-            nextStep: "앱 \(appVersion) · 플러그인 \(pluginVersion) — 맞는 판을 받아 주세요",
-            warning: nil, fix: .matchPluginVersion, fixLabel: "맞는 판 받기")
+    /// The engine that answered is not the app's (both versions known).
+    static func engineIssues(in engine: EngineInfo, appVersion: String?) -> [SetupIssue] {
+        guard let engineVersion = nonEmpty(engine.version), let appVersion = nonEmpty(appVersion), engineVersion != appVersion else { return [] }
+        return [SetupIssue(name: "엔진", sentence: "연결 엔진이 앱과 판이 달라요")]
+    }
+
+    /// The MCP server or the skill is missing or the app's own and out of date. Nothing is said without
+    /// Claude Code: it is not a problem of the Mac, and it is put off until Claude Code is there.
+    static func claudeIssues(in claude: ClaudeSetupState) -> [SetupIssue] {
+        guard claude.claudeCodeFound else { return [] }
+        var issues: [SetupIssue] = []
+        switch claude.mcp {
+        case .missing: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code에 CUA가 연결되지 않았어요"))
+        case .outdated: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code의 CUA 연결이 옛 판이에요"))
+        case .ready, .conflict, .unknown: break
+        }
+        switch claude.skill {
+        case .missing: issues.append(SetupIssue(name: "스킬", sentence: "Claude Code에 CUA 스킬이 없어요"))
+        case .outdated: issues.append(SetupIssue(name: "스킬", sentence: "Claude Code의 CUA 스킬이 옛 판이에요"))
+        case .ready, .conflict, .unknown: break
+        }
+        return issues
+    }
+
+    /// An MCP server or a skill named cua that is not the app's.
+    static func conflictProblem(in claude: ClaudeSetupState) -> Problem? {
+        guard claude.claudeCodeFound else { return nil }
+        let title: String
+        switch (claude.mcp == .conflict, claude.skill == .conflict) {
+        case (true, true): title = "Claude Code에 앱이 깔지 않은 cua MCP와 스킬이 있어요"
+        case (true, false): title = "Claude Code에 앱이 깔지 않은 cua MCP가 있어요"
+        case (false, true): title = "Claude Code에 앱이 깔지 않은 cua 스킬이 있어요"
+        case (false, false): return nil
+        }
+        return Problem(
+            kind: .claudeConflict, title: title, nextStep: "점검 탭에서 지우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
     }
 
     private static func summary(for problem: Problem) -> StatusSummary {

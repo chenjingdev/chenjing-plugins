@@ -42,15 +42,15 @@ enum CUAAction: Hashable, Sendable {
     case copyDiagnosis
 
     // Fix buttons that are more than one engine call, or not an engine call at all.
+    /// 고치기: the whole install again (engine, then Claude Code's MCP server and skill).
     case runSetup
     /// Codex 열기, after a restart whose relaunch failed. Opens the app the person just chose to open.
     case openCodex
     /// Open the page where Codex is downloaded.
     case openCodexDownload
-    /// Install the Claude plugin (`cua@chenjing-plugins`) and set it up.
-    case installPlugin
-    /// Update the plugin when it is older than the app, or open the app's release page when it is newer.
-    case matchPluginVersion
+    /// 설치 on the card that asks for the developer tools: opens the system's installer, or runs the whole
+    /// install when the tools have come since.
+    case installDeveloperTools
     /// Read the status again now.
     case refresh
 

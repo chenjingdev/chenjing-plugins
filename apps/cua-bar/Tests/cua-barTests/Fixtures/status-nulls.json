@@ -2,6 +2,7 @@
   "schema_version": 1,
   "generated_at": null,
   "plugin": {"version": null},
+  "engine": {"version": null, "root": null, "launcher": null},
   "codex": {"installed": false, "app_path": null, "app_version": null, "running": false, "pids": []},
   "host": {"state": "missing", "since": null},
   "setup": {"command": null, "dependencies": null, "login_environment": null, "wrapper": null, "relay": null},
