@@ -9,6 +9,28 @@ enum UpdateSource {
     /// The Developer ID team the app is signed by; an app of another team is never put in its place.
     static let teamIdentifier = "S3KC8R8VDL"
     static let bundleName = "CUABar.app"
+
+    /// What only a file signed by CUA Bar's own developer satisfies: a Developer ID Application certificate (the
+    /// intermediate and the leaf carry Apple's Developer ID markers) of the team, chained to Apple. The system checks
+    /// it against the signature (`codesign --verify -R`, `SecCodeCheckValidity`); nothing is read out of what a tool
+    /// prints, and an ad hoc signature, another team's, or text that only claims the team all fail it.
+    /// `identifier`: the name the code is signed as, left out for a file that is not the app.
+    static func requirement(identifier: String?) -> String {
+        var clauses = ["anchor apple generic"]
+        if let identifier { clauses.append(#"identifier "\#(identifier)""#) }
+        clauses += [
+            "certificate 1[field.1.2.840.113635.100.6.2.6] exists",
+            "certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
+            #"certificate leaf[subject.OU] = "\#(teamIdentifier)""#,
+        ]
+        return clauses.joined(separator: " and ")
+    }
+
+    /// The app: signed by the team, as CUA Bar.
+    static let appRequirement = requirement(identifier: SingleInstance.bundleIdentifier)
+    /// The disk image: signed by the team, whatever its name. Checked before it is mounted, so that an image of
+    /// someone else is never opened.
+    static let imageRequirement = requirement(identifier: nil)
     /// A disk image of the app is a few megabytes; a file larger than this is not one.
     static let fileSizeLimit = 512 * 1024 * 1024
     /// `/version` is a few hundred bytes.
@@ -19,11 +41,18 @@ enum UpdateSource {
         site.appendingPathComponent(file)
     }
 
-    /// The app bundle this process runs from; nil when it does not run from one (`swift run`), and then the app
-    /// never looks for an update or replaces anything.
+    /// The app bundle this process runs from; nil when it does not run from one (`swift run`).
     static func runningBundle(of bundle: Bundle = .main) -> URL? {
         guard bundle.bundleURL.pathExtension == "app", bundle.bundleIdentifier == SingleInstance.bundleIdentifier else { return nil }
         return bundle.bundleURL
+    }
+
+    /// The app bundle this process may replace: the one it runs from, when this process is the app CUA Bar's developer
+    /// ships (`isOfficialBuild`: signed as `appRequirement` says). A development build, a local build signed ad hoc
+    /// among them, gets nil: it looks for no update, shows no button and replaces nothing.
+    static func replaceableBundle(of bundle: Bundle = .main, isOfficialBuild: () -> Bool = OfficialBuild.runningProcessIsOfficial) -> URL? {
+        guard let url = runningBundle(of: bundle), isOfficialBuild() else { return nil }
+        return url
     }
 }
 

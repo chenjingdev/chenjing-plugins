@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 /// Where an update can stop. Each has one fixed line that says why; none carries text a command or the site printed.
@@ -12,12 +13,13 @@ enum UpdateStep: String, Equatable, Sendable {
     case checksum
     /// The disk image would not open, or has no app in it, or the app would not copy out of it.
     case image
+    /// The signature is missing or broken (`codesign` found the file altered or not signed at all).
     case signature
-    /// Signed, but by another developer.
+    /// Signed, but not by CUA Bar's developer (an ad hoc signature, another team's).
     case team
     /// The app inside is not the version that was meant, or is not CUA Bar.
     case version
-    /// The old app could not be moved away, or the new one into its place.
+    /// The new app could not be put in the old one's place.
     case replace
     /// The helper that opens the new app could not be started.
     case relaunch
@@ -29,8 +31,8 @@ enum UpdateStep: String, Equatable, Sendable {
         case .download: "새 판을 받지 못했어요"
         case .checksum: "받은 파일이 알려 준 크기·SHA-256과 달랐어요"
         case .image: "받은 파일에서 앱을 꺼내지 못했어요"
-        case .signature: "받은 앱의 서명이 맞지 않았어요"
-        case .team: "받은 앱의 개발자가 CUA Bar의 개발자가 아니었어요"
+        case .signature: "받은 파일의 서명이 맞지 않았어요"
+        case .team: "받은 파일이 CUA Bar의 개발자가 서명한 것이 아니었어요"
         case .version: "받은 앱이 받으려던 판의 CUA Bar가 아니었어요"
         case .replace: "앱을 새 판으로 바꾸지 못했어요"
         case .relaunch: "새 판을 켜는 도우미를 띄우지 못했어요"
@@ -78,15 +80,21 @@ struct DetachedProcessLauncher: DetachedLaunching {
 enum RelaunchHelper {
     static let shell = URL(fileURLWithPath: "/bin/sh")
     static let opener = "/usr/bin/open"
-    /// Gives up after a minute if the old process is still there: the new app is on disk for the next start.
+    /// How long it waits for this process to end before it gives up, in seconds: the new app is on disk for the next
+    /// start. Long, because this process may be busy ending (a stuck unmount) and a helper that gave up leaves no app.
+    static let waitLimit = 600
+    /// The pause, in seconds, between the old process being gone and the new app being opened: the system forgets the
+    /// old one in that time, so that the new one is not taken for a second copy.
+    static let settle = 1
     static let script = """
     pid="$1"; opener="$2"; app="$3"
     waited=0
     while kill -0 "$pid" 2>/dev/null; do
       waited=$((waited + 1))
-      if [ "$waited" -gt 600 ]; then exit 0; fi
+      if [ "$waited" -gt \(waitLimit * 10) ]; then exit 0; fi
       sleep 0.1
     done
+    sleep \(settle)
     exec "$opener" -g "$app"
     """
 
@@ -95,17 +103,30 @@ enum RelaunchHelper {
     }
 }
 
+/// Exchanges two paths in one step (`renamex_np` with `RENAME_SWAP`): afterwards each holds what the other held, and at no
+/// moment is either of them missing. It needs a file system that can (APFS); on another it fails and changes nothing.
+enum AtomicSwap {
+    static func exchange(_ first: URL, _ second: URL) throws {
+        guard renamex_np(first.path, second.path, UInt32(RENAME_SWAP)) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+}
+
 /// The update itself, from the file to the replaced app (F4). In this order, and any step that fails stops it with
 /// the running app as it was and the temporary things gone:
 ///
+/// 0. what a run that was cut short left behind (copies beside the app, images still mounted) is taken away
 /// 1. the app's folder can be written to
 /// 2. the disk image is fetched into a temporary folder; its size and SHA-256 are what the site said
-/// 3. it is mounted read-only (`hdiutil attach`), `CUABar.app` is copied out beside the running app into
+/// 3. the image is signed by CUA Bar's developer (`codesign --verify -R`): an image of someone else is never mounted
+/// 4. it is mounted read-only (`hdiutil attach`), `CUABar.app` is copied out beside the running app into
 ///    `.CUABar-update.XXXX` (`ditto`), and the image is unmounted
-/// 4. the copy is verified: `codesign --verify --deep --strict`, the Developer ID team, and the version in its
-///    Info.plist is the one that was meant (and it is CUA Bar)
-/// 5. the running app is moved aside and the new one into its place; if the second move fails the first is undone
-/// 6. a helper is started that opens the new app once this process has ended; if that fails everything is undone
+/// 5. the copy is verified, by the system and not by reading what a tool prints: `codesign --verify --deep --strict -R`
+///    with the requirement of the team's Developer ID and CUA Bar's identifier; and the version in its Info.plist is the
+///    one that was meant (and it is CUA Bar)
+/// 6. the new app and the old one change places in one step; a helper is started that opens the new app once this
+///    process has ended, and if that fails they change places back
 /// 7. the old app goes to `~/Library/Application Support/CUABar/Backups/<time>/`, the last one only
 ///
 /// Nothing is asked of Codex or any other app, and nothing is brought to the front.
@@ -120,6 +141,9 @@ struct UpdateInstaller: UpdateInstalling {
     static let hdiutil = URL(fileURLWithPath: "/usr/bin/hdiutil")
     static let ditto = URL(fileURLWithPath: "/usr/bin/ditto")
     static let codesign = URL(fileURLWithPath: "/usr/bin/codesign")
+    /// What the folders of one run are called, so that the next run knows which are leftovers.
+    static let stagingPrefix = ".CUABar-update."
+    static let workPrefix = "cua-bar-update-"
 
     var transport: any UpdateTransport
     var runner: any ProcessRunning
@@ -131,8 +155,8 @@ struct UpdateInstaller: UpdateInstalling {
     var home: URL
     var notice: UpdateNotice
     var now: @Sendable () -> Date = { Date() }
-    /// How a bundle is moved; tests make one of the moves fail.
-    var moveItem: @Sendable (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }
+    /// How the new app and the old one change places; tests make it fail.
+    var swapItems: @Sendable (URL, URL) throws -> Void = { try AtomicSwap.exchange($0, $1) }
     var temporaryDirectory: URL = FileManager.default.temporaryDirectory
     var timeouts = Timeouts()
 
@@ -142,17 +166,22 @@ struct UpdateInstaller: UpdateInstalling {
         var mountPoint: URL?
         var mayBeMounted = false
         var staging: URL?
-        /// The old app could not be put back: it is in the staging folder, which stays.
-        var keepStaging = false
     }
 
     func install(_ offer: UpdateOffer, canCommit: @escaping @MainActor @Sendable () -> Bool) async -> UpdateInstallResult {
         let parent = bundleURL.deletingLastPathComponent()
+        await clearLeftovers(in: parent)
         guard FileManager.default.isWritableFile(atPath: parent.path) else { return .failed(.place) }
         let session = Session()
         let result = await fetchCheckAndReplace(offer, parent: parent, canCommit: canCommit, session: session)
-        // Cleaning up does not stop because the task was cancelled.
-        await Task.detached { await self.clean(session) }.value
+        if result == .replaced {
+            // The helper is already counting. Nothing that can take time, an image that will not let go, is waited for;
+            // the next run lets go of it.
+            forget(session)
+        } else {
+            // Cleaning up does not stop because the task was cancelled.
+            await Task.detached { await self.clean(session) }.value
+        }
         return result
     }
 
@@ -163,7 +192,7 @@ struct UpdateInstaller: UpdateInstalling {
     ) async -> UpdateInstallResult {
         let fm = FileManager.default
 
-        let work = temporaryDirectory.appendingPathComponent("cua-bar-update-\(UUID().uuidString)", isDirectory: true)
+        let work = temporaryDirectory.appendingPathComponent("\(Self.workPrefix)\(UUID().uuidString)", isDirectory: true)
         do {
             try fm.createDirectory(at: work, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         } catch {
@@ -178,6 +207,9 @@ struct UpdateInstaller: UpdateInstalling {
             return Task.isCancelled ? .deferred : .failed(.download)
         }
         guard Self.size(of: image) == offer.size, Self.sha256(of: image) == offer.sha256 else { return .failed(.checksum) }
+        // The same site gave the checksum, so it proves only that the file arrived whole. Whose it is, the signature says;
+        // an image of someone else is not even mounted.
+        if let refused = await refusal(of: image, requirement: UpdateSource.imageRequirement, deep: false) { return refused }
 
         let mount = work.appendingPathComponent("mnt", isDirectory: true)
         do {
@@ -190,7 +222,7 @@ struct UpdateInstaller: UpdateInstalling {
         let attach = ["attach", "-nobrowse", "-noautoopen", "-readonly", "-mountpoint", mount.path, image.path]
         guard await ran(Self.hdiutil, attach, timeouts.attach) else { return Task.isCancelled ? .deferred : .failed(.image) }
 
-        let staging = parent.appendingPathComponent(".CUABar-update.\(Self.randomSuffix())", isDirectory: true)
+        let staging = parent.appendingPathComponent("\(Self.stagingPrefix)\(Self.randomSuffix())", isDirectory: true)
         do {
             try fm.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         } catch {
@@ -203,63 +235,69 @@ struct UpdateInstaller: UpdateInstalling {
         guard await ran(Self.ditto, [source.path, staged.path], timeouts.copy) else { return Task.isCancelled ? .deferred : .failed(.image) }
         if await detach(mount) { session.mayBeMounted = false }
 
-        guard await ran(Self.codesign, ["--verify", "--deep", "--strict", staged.path], timeouts.verify) else {
-            return Task.isCancelled ? .deferred : .failed(.signature)
-        }
-        guard
-            let described = try? await runner.run(Self.codesign, arguments: ["-dv", staged.path], timeout: timeouts.verify),
-            described.exitCode == 0, Self.teamIdentifier(in: described) == UpdateSource.teamIdentifier
-        else { return Task.isCancelled ? .deferred : .failed(.team) }
+        if let refused = await refusal(of: staged, requirement: UpdateSource.appRequirement, deep: true) { return refused }
         guard Self.isTheApp(at: staged, version: offer.version) else { return .failed(.version) }
 
-        guard !Task.isCancelled, await canCommit() else { return .deferred }
-        return replace(with: staged, staging: staging, version: offer.version, session: session)
+        guard !Task.isCancelled else { return .deferred }
+        // The moment is looked at and the replacing done in one turn of the main actor, so that nothing (the popover
+        // opening, an install starting) can come between them.
+        return await MainActor.run {
+            guard canCommit() else { return UpdateInstallResult.deferred }
+            return replace(with: staged, version: offer.version)
+        }
     }
 
-    /// Everything from the mark to the helper happens without waiting for anything, so nothing can come between.
-    private func replace(with staged: URL, staging: URL, version: VersionNumber, session: Session) -> UpdateInstallResult {
+    /// Everything from the mark to the helper happens without waiting for anything.
+    private func replace(with staged: URL, version: VersionNumber) -> UpdateInstallResult {
         // Before it is done, so that the new app, whenever it starts, finds it.
         try? notice.leave(version: version)
 
-        let previous = staging.appendingPathComponent("Previous.app", isDirectory: true)
+        // The new app takes the old one's place and the old one takes the staged place, in one step: at no moment is the
+        // app missing, and a failure changes nothing.
         do {
-            try moveItem(bundleURL, previous)
+            try swapItems(staged, bundleURL)
         } catch {
-            notice.clear()
-            return .failed(.replace)
-        }
-        do {
-            try moveItem(staged, bundleURL)
-        } catch {
-            putBack(previous, session)
             notice.clear()
             return .failed(.replace)
         }
         do {
             try launcher.launch(RelaunchHelper.shell, arguments: RelaunchHelper.arguments(waitingFor: processID, opening: bundleURL))
         } catch {
-            if (try? moveItem(bundleURL, staged)) != nil {
-                putBack(previous, session)
-            } else {
-                session.keepStaging = true
-            }
-            notice.clear()
+            // The same step back. Should that fail too, the new app, whole and checked, stays in the place, and its mark
+            // with it: it tells the person when it is started.
+            if (try? swapItems(staged, bundleURL)) != nil { notice.clear() }
             return .failed(.relaunch)
         }
-        keepBackup(of: previous)
+        keepBackup(of: staged)
         return .replaced
     }
 
-    /// The old app back where it was. If that cannot be done it stays in the staging folder, which is not removed.
-    private func putBack(_ previous: URL, _ session: Session) {
-        if (try? moveItem(previous, bundleURL)) == nil { session.keepStaging = true }
+    /// Asks the system whether the file at `target` is signed by CUA Bar's developer (`requirement`). nil when it is;
+    /// otherwise where the update stops: `codesign` exits 3 when the file is signed but does not satisfy the requirement
+    /// (an ad hoc signature, another team's), and with another status when it is not signed or has been altered.
+    private func refusal(of target: URL, requirement: String, deep: Bool) async -> UpdateInstallResult? {
+        guard
+            let output = try? await runner.run(
+                Self.codesign, arguments: Self.verification(of: target, requirement: requirement, deep: deep), timeout: timeouts.verify)
+        else { return Task.isCancelled ? .deferred : .failed(.signature) }
+        switch output.exitCode {
+        case 0: return nil
+        case 3: return .failed(.team)
+        default: return .failed(.signature)
+        }
+    }
+
+    /// The arguments of `codesign` that verify the file and test it against the requirement (`=` before the text says it is
+    /// the requirement itself and not the name of a file). `--deep` for an app, which holds more code.
+    static func verification(of target: URL, requirement: String, deep: Bool) -> [String] {
+        ["--verify"] + (deep ? ["--deep"] : []) + ["--strict", "-R", "=" + requirement, target.path]
     }
 
     // MARK: The old app
 
     /// Moves the replaced app to `Backups/<time>/CUABar.app` and drops the older backups. Best effort: the update is
     /// done by now, and an old copy that could not be kept goes with the staging folder.
-    private func keepBackup(of previous: URL) {
+    private func keepBackup(of old: URL) {
         let fm = FileManager.default
         let backups = UpdateNotice.supportFolder(home: home).appendingPathComponent("Backups", isDirectory: true)
         let stamp = Self.stamp(now())
@@ -268,7 +306,7 @@ struct UpdateInstaller: UpdateInstalling {
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
             let destination = folder.appendingPathComponent(UpdateSource.bundleName, isDirectory: true)
             try? fm.removeItem(at: destination)
-            try fm.moveItem(at: previous, to: destination)
+            try fm.moveItem(at: old, to: destination)
         } catch {
             return
         }
@@ -280,16 +318,44 @@ struct UpdateInstaller: UpdateInstalling {
 
     // MARK: Cleaning up
 
-    /// Unmounts the image if it is still mounted and takes the temporary folders away. The staging folder stays when it
-    /// holds the only copy of the old app; the work folder stays while the image is still mounted in it.
+    /// Takes away what a run that was cut short (quit, logout) left behind: the copies of the new app in the app's
+    /// folder, and images still mounted in the temporary folder. A staging folder with a `Previous.app` in it is left, for
+    /// it may hold an old app that nothing else does (a version of this update that moved the old app aside by that name
+    /// did; this one swaps, and the place is never empty).
+    private func clearLeftovers(in parent: URL) async {
+        let fm = FileManager.default
+        for entry in (try? fm.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil)) ?? []
+        where entry.lastPathComponent.hasPrefix(Self.stagingPrefix) {
+            if !fm.fileExists(atPath: entry.appendingPathComponent("Previous.app").path) { try? fm.removeItem(at: entry) }
+        }
+        for work in (try? fm.contentsOfDirectory(at: temporaryDirectory, includingPropertiesForKeys: nil)) ?? []
+        where work.lastPathComponent.hasPrefix(Self.workPrefix) {
+            let mount = work.appendingPathComponent("mnt", isDirectory: true)
+            if !((try? fm.contentsOfDirectory(atPath: mount.path)) ?? []).isEmpty {
+                // Something is in it: an image that is still mounted. Not let go of, it stays.
+                guard await detach(mount) else { continue }
+            }
+            try? fm.removeItem(at: work)
+        }
+    }
+
+    /// Unmounts the image if it is still mounted and takes the temporary folders away. The work folder stays while the
+    /// image is still mounted in it.
     private func clean(_ session: Session) async {
         let fm = FileManager.default
         var stillMounted = false
         if session.mayBeMounted, let mount = session.mountPoint {
             stillMounted = await !detach(mount)
         }
-        if let staging = session.staging, !session.keepStaging { try? fm.removeItem(at: staging) }
+        if let staging = session.staging { try? fm.removeItem(at: staging) }
         if let work = session.work, !stillMounted { try? fm.removeItem(at: work) }
+    }
+
+    /// The same without asking anything of `hdiutil`: for an update that is done and about to end.
+    private func forget(_ session: Session) {
+        let fm = FileManager.default
+        if let staging = session.staging { try? fm.removeItem(at: staging) }
+        if let work = session.work, !session.mayBeMounted { try? fm.removeItem(at: work) }
     }
 
     /// True when the image is not mounted any more (it was not, or `hdiutil detach` took it away, with force if it came
@@ -320,16 +386,6 @@ struct UpdateInstaller: UpdateInstalling {
             hasher.update(data: chunk)
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// `TeamIdentifier=<team>` of `codesign -dv`, which prints it on its error output.
-    static func teamIdentifier(in output: ProcessOutput) -> String? {
-        let text = String(decoding: output.stderr, as: UTF8.self) + "\n" + String(decoding: output.stdout, as: UTF8.self)
-        for line in text.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("TeamIdentifier=") { return String(trimmed.dropFirst("TeamIdentifier=".count)) }
-        }
-        return nil
     }
 
     /// The copy is CUA Bar of the version that was meant.

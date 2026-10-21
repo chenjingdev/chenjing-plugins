@@ -88,6 +88,8 @@ struct LiveSystemActionsTests {
         var bundle: BundledEngine
         /// Where an update leaves its mark for the app that starts after it.
         var notice: UpdateNotice
+        /// What the install posted as a notification.
+        var announcements: Announcements
 
         var claudePath: String { home.claudeCLI.path }
         var launcher: String { home.launcher }
@@ -152,12 +154,14 @@ struct LiveSystemActionsTests {
         let opener = FakeOpener()
         let setup = SetupActivity()
         let notice = UpdateNotice(home: home.url)
+        let announcements = Announcements()
         let actions = LiveSystemActions(
             claude: claude, engine: fake, runner: runner, opener: opener, bundle: bundled ? bundle : nil, appVersion: appVersion, setup: setup,
-            codex: CodexLocator(home: home.url, environment: [:], isCodexBundle: { _ in codex.isThere }), updateNotice: notice)
+            codex: CodexLocator(home: home.url, environment: [:], isCodexBundle: { _ in codex.isThere }), updateNotice: notice,
+            announce: announcements.post)
         return Rig(
             home: home, codex: codex, claudeCode: claudeCode, runner: runner, opener: opener, setup: setup, engine: fake, actions: actions,
-            claude: claude, bundle: bundle, notice: notice)
+            claude: claude, bundle: bundle, notice: notice, announcements: announcements)
     }
 
     /// A status of an engine that is the app's.

@@ -23,8 +23,9 @@ final class LiveApp {
         appVersion: String? = AppVersion.current,
         // The engine inside the app bundle; nil when this does not run from one, and then nothing is installed.
         bundle: BundledEngine? = BundledEngine.locate(),
-        // The app bundle this runs from; nil when it does not (swift run), and then no update is looked for.
-        appBundle: URL? = UpdateSource.runningBundle()
+        // The app bundle this may replace: the one it runs from, when this is the official build (signed by the team's
+        // Developer ID). nil for a development build, a local one signed ad hoc among them: no update is looked for.
+        appBundle: URL? = UpdateSource.replaceableBundle()
     ) -> LiveApp {
         let locator = CommandLocator(home: home)
         let runner = SystemProcessRunner()
@@ -42,15 +43,15 @@ final class LiveApp {
         let engine = CodexCUAEngineClient(locator: locator, runner: runner)
         let claude = ClaudeIntegration(home: home, runner: runner)
         let codex = CodexLocator(home: home)
+        // One notifier for the model, the updater and the install, so a click on any of them reaches the model.
+        let notifier = SystemNotifier.makeDefault()
         let actions = LiveSystemActions(
             claude: claude, engine: engine, runner: runner, opener: opener, bundle: bundle, appVersion: appVersion,
-            setup: setup, codex: codex, updateNotice: updateNotice)
+            setup: setup, codex: codex, updateNotice: updateNotice, announce: { await notifier.post($0) })
         let loginItem = LoginItemRegistrar(service: MainAppLoginItem(), defaults: defaults, home: home)
         let pasteboard = DiagnosisPasteboard(base: SystemPasteboard()) {
             "앱: CUA Bar \(appVersion ?? "개발용")\n\(loginItem.line)" + (updater.diagnosisLine.map { "\n" + $0 } ?? "")
         }
-        // One notifier for the model and the updater, so a click on either reaches the model.
-        let notifier = SystemNotifier.makeDefault()
         let model = CUABarViewModel(
             engine: engine, appVersion: appVersion, systemActions: actions, pasteboard: pasteboard,
             notifier: notifier, setupActivity: setup,

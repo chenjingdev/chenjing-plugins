@@ -2,9 +2,20 @@ import Foundation
 import Testing
 @testable import cua_bar
 
-/// The update from the file to the replaced app, over a throwaway home: real folders and real moves, but the
+/// The update from the file to the replaced app, over a throwaway home: real folders and real swaps, but the
 /// download, `hdiutil`, `ditto` and `codesign` are stand-ins (nothing reaches the network, mounts an image or signs).
+/// What `codesign` really says about a signature is `UpdateSignatureTests`.
 struct UpdateInstallerTests {
+    /// How the stand-in `codesign --verify -R` answers: the way the real one exits.
+    enum Signing: Sendable {
+        /// 0: signed by the developer.
+        case official
+        /// 3: signed, but not as the requirement says (ad hoc, another team's).
+        case otherDeveloper
+        /// 1: not signed at all, or altered.
+        case broken
+    }
+
     /// What the pretend commands do.
     final class Behavior: @unchecked Sendable {
         struct Values: Sendable {
@@ -12,9 +23,10 @@ struct UpdateInstallerTests {
             var appInImage = true
             var imageVersion = "0.8.0"
             var imageIdentifier = "dev.chenjing.cua-bar"
-            var verifyFails = false
-            var team = "S3KC8R8VDL"
+            var appSigning = Signing.official
+            var imageSigning = Signing.official
             var plainDetachFails = false
+            var detachFails = false
             var dittoFails = false
         }
 
@@ -35,7 +47,7 @@ struct UpdateInstallerTests {
         var behavior: Behavior
         var notice: UpdateNotice
         var offer: UpdateOffer
-        var moves: MoveScript
+        var swaps: SwapScript
         var installer: UpdateInstaller
 
         func remove() {
@@ -65,7 +77,7 @@ struct UpdateInstallerTests {
         }
     }
 
-    func world(failingMoves: Set<Int> = [], image: Data = Data("pretend disk image".utf8)) throws -> World {
+    func world(failingSwaps: Set<Int> = [], image: Data = Data("pretend disk image".utf8)) throws -> World {
         let home = try TempHome()
         let apps = home.url.appendingPathComponent("Applications", isDirectory: true)
         let bundle = apps.appendingPathComponent("CUABar.app", isDirectory: true)
@@ -93,7 +105,7 @@ struct UpdateInstallerTests {
                 try FileManager.default.copyItem(at: URL(fileURLWithPath: call.arguments[0]), to: URL(fileURLWithPath: call.arguments[1]))
                 return StepRunner.ok()
             case ("/usr/bin/hdiutil", "detach"?):
-                if values.plainDetachFails, !call.arguments.contains("-force") { return StepRunner.failed() }
+                if values.detachFails || (values.plainDetachFails && !call.arguments.contains("-force")) { return StepRunner.failed() }
                 // Unmounting: what the image showed there is gone.
                 let mount = URL(fileURLWithPath: call.arguments.last!, isDirectory: true)
                 for entry in (try? FileManager.default.contentsOfDirectory(atPath: mount.path)) ?? [] {
@@ -101,10 +113,16 @@ struct UpdateInstallerTests {
                 }
                 return StepRunner.ok()
             case ("/usr/bin/codesign", "--verify"?):
-                return values.verifyFails ? StepRunner.failed(code: 1) : StepRunner.ok()
-            case ("/usr/bin/codesign", "-dv"?):
-                let text = "Executable=/x/CUABar.app/Contents/MacOS/cua-bar\nIdentifier=dev.chenjing.cua-bar\nTeamIdentifier=\(values.team)\n"
-                return ProcessOutput(exitCode: 0, stdout: Data(), stderr: Data(text.utf8))
+                switch call.arguments.last?.hasSuffix(".dmg") == true ? values.imageSigning : values.appSigning {
+                case .official: return StepRunner.ok()
+                case .otherDeveloper: return StepRunner.failed(code: 3)
+                case .broken: return StepRunner.failed(code: 1)
+                }
+            case ("/usr/bin/codesign", _):
+                // Reading what codesign prints (the way the first version did) gets a forged team line on top. Nothing may
+                // be decided by it.
+                let forged = "Executable=/x/CUABar.app/Contents/MacOS/cua-bar\nTeamIdentifier=S3KC8R8VDL\nIdentifier=dev.chenjing.cua-bar\n"
+                return ProcessOutput(exitCode: 0, stdout: Data(), stderr: Data(forged.utf8))
             default:
                 return StepRunner.ok()
             }
@@ -112,13 +130,13 @@ struct UpdateInstallerTests {
         let transport = FakeTransport(image: image)
         let launcher = FakeLauncher()
         let notice = UpdateNotice(home: home.url)
-        let moves = MoveScript(failing: failingMoves)
+        let swaps = SwapScript(failing: failingSwaps)
         let installer = UpdateInstaller(
             transport: transport, runner: runner, launcher: launcher, bundleURL: bundle, processID: 4242, home: home.url, notice: notice,
-            now: { Date(timeIntervalSince1970: 1_792_324_800) }, moveItem: moves.move, temporaryDirectory: scratch)
+            now: { Date(timeIntervalSince1970: 1_792_324_800) }, swapItems: swaps.swap, temporaryDirectory: scratch)
         return World(
             home: home, apps: apps, bundle: bundle, scratch: scratch, transport: transport, runner: runner, launcher: launcher,
-            behavior: behavior, notice: notice, offer: offer, moves: moves, installer: installer)
+            behavior: behavior, notice: notice, offer: offer, swaps: swaps, installer: installer)
     }
 
     // MARK: The good path
@@ -138,6 +156,7 @@ struct UpdateInstallerTests {
         #expect(RelaunchHelper.script.contains("kill -0"))
         #expect(RelaunchHelper.script.contains(#"exec "$opener" -g "$app""#))
         #expect(world.nothingIsLeftBehind)
+        #expect(world.swaps.swaps == 1, "the new app and the old one change places once, in one step")
         // The mark for the app that starts next was left before the replacing.
         #expect(world.notice.pendingVersion == VersionNumber(0, 8, 0))
     }
@@ -154,24 +173,43 @@ struct UpdateInstallerTests {
         defer { world.remove() }
         _ = await world.installer.install(world.offer) { true }
         let calls = world.runner.calls
-        #expect(world.commands == ["hdiutil attach", "ditto", "hdiutil detach", "codesign --verify", "codesign -dv"])
-        let attach = try #require(calls.first)
+        #expect(world.commands == ["codesign --verify", "hdiutil attach", "ditto", "hdiutil detach", "codesign --verify"])
+
+        // The image is looked at before it is mounted: signed by the developer, whatever its name.
+        let imageCheck = calls[0]
+        #expect(imageCheck.executable == "/usr/bin/codesign")
+        #expect(imageCheck.arguments.dropLast() == ["--verify", "--strict", "-R", "=" + UpdateSource.imageRequirement])
+        let image = try #require(imageCheck.arguments.last)
+        #expect(image.hasPrefix(world.scratch.path) && image.hasSuffix("/CUABar-v0.8.0-macos-arm64.dmg"))
+
+        let attach = calls[1]
         let mount = try #require(attach.arguments.firstIndex(of: "-mountpoint").map { attach.arguments[$0 + 1] })
         #expect(attach.executable == "/usr/bin/hdiutil")
-        #expect(attach.arguments.dropLast() == ["attach", "-nobrowse", "-noautoopen", "-readonly", "-mountpoint", mount])
-        #expect(attach.arguments.last?.hasSuffix("/CUABar-v0.8.0-macos-arm64.dmg") == true)
+        #expect(attach.arguments == ["attach", "-nobrowse", "-noautoopen", "-readonly", "-mountpoint", mount, image])
         #expect(mount.hasPrefix(world.scratch.path), "the image is mounted in the temporary folder, not in /Volumes")
-        let ditto = calls[1]
+        let ditto = calls[2]
         #expect(ditto.executable == "/usr/bin/ditto")
         #expect(ditto.arguments.first == mount + "/CUABar.app")
         // Beside the running app, in a folder of its own, so that the last step is a rename on the same disk.
         let staged = try #require(ditto.arguments.last)
         #expect(staged.hasPrefix(world.apps.path + "/.CUABar-update."))
         #expect(staged.hasSuffix("/CUABar.app"))
-        #expect(calls[2].arguments == ["detach", mount])
-        #expect(calls[3].arguments == ["--verify", "--deep", "--strict", staged])
-        #expect(calls[4].executable == "/usr/bin/codesign")
-        #expect(calls[4].arguments == ["-dv", staged])
+        #expect(calls[3].arguments == ["detach", mount])
+
+        // The copy: signed by the developer as CUA Bar, deep and strict. No `-dv`, nothing read out of codesign's words.
+        let appCheck = calls[4]
+        #expect(appCheck.executable == "/usr/bin/codesign")
+        #expect(appCheck.arguments == ["--verify", "--deep", "--strict", "-R", "=" + UpdateSource.appRequirement, staged])
+        #expect(!calls.contains { $0.executable == "/usr/bin/codesign" && $0.arguments.contains { $0.hasPrefix("-d") } })
+    }
+
+    @Test func theRequirementsAreTheDeveloperIDOfTheTeamAndTheAppAddsItsIdentifier() {
+        #expect(
+            UpdateSource.appRequirement
+                == #"anchor apple generic and identifier "dev.chenjing.cua-bar" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "S3KC8R8VDL""#)
+        #expect(
+            UpdateSource.imageRequirement
+                == #"anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "S3KC8R8VDL""#)
     }
 
     @Test func theOldAppIsKeptAsTheLastBackupAndOlderBackupsGo() async throws {
@@ -241,6 +279,22 @@ struct UpdateInstallerTests {
         #expect(world.nothingIsLeftBehind)
     }
 
+    // MARK: The image is the developer's before it is mounted
+
+    @Test(arguments: [(Signing.otherDeveloper, UpdateStep.team), (.broken, .signature)])
+    func anImageThatIsNotSignedByTheDeveloperIsNeverMounted(signing: Signing, step: UpdateStep) async throws {
+        let world = try world()
+        defer { world.remove() }
+        world.behavior.set { $0.imageSigning = signing }
+        #expect(await world.installer.install(world.offer) { true } == .failed(step))
+        // Only the look at the image ran: it was not mounted, and nothing was copied.
+        #expect(world.commands == ["codesign --verify"])
+        #expect(world.oldAppIsInPlace)
+        #expect(world.nothingIsLeftBehind)
+        #expect(world.launcher.launches.isEmpty)
+        #expect(world.notice.pendingVersion == nil)
+    }
+
     // MARK: The image and the copy
 
     @Test func anImageThatWillNotMountStopsThere() async throws {
@@ -285,34 +339,35 @@ struct UpdateInstallerTests {
 
     // MARK: What the copy has to be
 
-    @Test func aSignatureThatDoesNotVerifyStopsAndLeavesTheAppAsItWas() async throws {
+    @Test(arguments: [(Signing.otherDeveloper, UpdateStep.team), (.broken, .signature)])
+    func aCopyThatIsNotSignedByTheDeveloperIsRefusedAndTheOriginalStays(signing: Signing, step: UpdateStep) async throws {
         let world = try world()
         defer { world.remove() }
-        world.behavior.set { $0.verifyFails = true }
-        #expect(await world.installer.install(world.offer) { true } == .failed(.signature))
+        world.behavior.set { $0.appSigning = signing }
+        #expect(await world.installer.install(world.offer) { true } == .failed(step))
         #expect(world.oldAppIsInPlace)
         #expect(world.nothingIsLeftBehind)
         #expect(world.launcher.launches.isEmpty)
+        #expect(world.swaps.swaps == 0, "the running app was not even touched")
         #expect(world.notice.pendingVersion == nil)
     }
 
-    @Test(arguments: ["ABCDE12345", "not set", "", "s3kc8r8vdl", "S3KC8R8VDLX"])
-    func anAppOfAnotherTeamIsRefusedAndTheOriginalStays(team: String) async throws {
+    @Test func aTeamLineForgedInWhatCodesignPrintsDecidesNothing() async throws {
+        // An app that is not the developer's, with a name that makes `codesign -dv` print a team line of its own on top. The
+        // stand-in `codesign` prints exactly that for anything but `--verify`; the verdict is the requirement's alone.
         let world = try world()
         defer { world.remove() }
-        world.behavior.set { $0.team = team }
+        world.behavior.set { $0.appSigning = .otherDeveloper }
         #expect(await world.installer.install(world.offer) { true } == .failed(.team))
         #expect(world.oldAppIsInPlace)
+        #expect(world.runner.calls.allSatisfy { $0.executable != "/usr/bin/codesign" || $0.arguments.first == "--verify" })
         #expect(world.nothingIsLeftBehind)
-        #expect(world.launcher.launches.isEmpty)
-        #expect(world.moves.moves == 0, "the running app was not even moved")
-        #expect(world.notice.pendingVersion == nil)
     }
 
     @Test func aCopyWhoseVersionIsNotTheOneMeantIsRefused() async throws {
         let world = try world()
         defer { world.remove() }
-        // An older app under the newer name: the signature and the team are right, the version is not.
+        // An older app under the newer name: the signature is right, the version is not.
         world.behavior.set { $0.imageVersion = "0.7.5" }
         #expect(await world.installer.install(world.offer) { true } == .failed(.version))
         #expect(world.oldAppIsInPlace)
@@ -330,47 +385,57 @@ struct UpdateInstallerTests {
 
     // MARK: Replacing
 
-    @Test func aSecondMoveThatFailsPutsTheOldAppBackAndTakesTheMarkAway() async throws {
-        let world = try world(failingMoves: [2])
+    @Test func aSwapThatFailsChangesNothingAndTakesTheMarkAway() async throws {
+        let world = try world(failingSwaps: [1])
         defer { world.remove() }
         #expect(await world.installer.install(world.offer) { true } == .failed(.replace))
-        #expect(world.oldAppIsInPlace, "the first move is undone")
-        #expect(world.moves.moves == 3, "the old app away, the new one in (failed), the old one back")
+        #expect(world.oldAppIsInPlace)
+        #expect(world.swaps.swaps == 1)
         #expect(world.nothingIsLeftBehind)
         #expect(world.launcher.launches.isEmpty)
         #expect(world.notice.pendingVersion == nil)
         #expect(!FileManager.default.fileExists(atPath: world.backups.path), "no backup of an app that was never replaced")
     }
 
-    @Test func aFirstMoveThatFailsChangesNothing() async throws {
-        let world = try world(failingMoves: [1])
-        defer { world.remove() }
-        #expect(await world.installer.install(world.offer) { true } == .failed(.replace))
-        #expect(world.oldAppIsInPlace)
-        #expect(world.moves.moves == 1)
-        #expect(world.nothingIsLeftBehind)
-        #expect(world.notice.pendingVersion == nil)
-    }
-
-    @Test func ifTheOldAppCannotGoBackItStaysInTheStagingFolderInsteadOfBeingDeleted() async throws {
-        let world = try world(failingMoves: [2, 3])
-        defer { world.remove() }
-        #expect(await world.installer.install(world.offer) { true } == .failed(.replace))
-        let leftovers = world.names(in: world.apps).filter { $0.hasPrefix(".CUABar-update.") }
-        let staging = try #require(leftovers.first)
-        let kept = world.apps.appendingPathComponent(staging).appendingPathComponent("Previous.app")
-        #expect(bodyOfApp(at: kept) == "old", "the only copy of the old app is not thrown away")
-    }
-
-    @Test func aHelperThatCannotBeStartedUndoesTheReplacing() async throws {
+    @Test func aHelperThatCannotBeStartedPutsTheOldAppBackTheSameWay() async throws {
         let world = try world()
         defer { world.remove() }
         world.launcher.fails = true
         #expect(await world.installer.install(world.offer) { true } == .failed(.relaunch))
         #expect(world.oldAppIsInPlace, "an app nobody would open again is not left in the old one's place")
+        #expect(world.swaps.swaps == 2, "the same step, back")
         #expect(world.nothingIsLeftBehind)
         #expect(world.notice.pendingVersion == nil)
         #expect(!FileManager.default.fileExists(atPath: world.backups.path))
+    }
+
+    @Test func ifEvenThatCannotBeUndoneTheNewAppStaysWholeInPlaceWithItsMark() async throws {
+        let world = try world(failingSwaps: [2])
+        defer { world.remove() }
+        world.launcher.fails = true
+        #expect(await world.installer.install(world.offer) { true } == .failed(.relaunch))
+        // The place is never empty: it holds the new app, whole, and the new app tells when it is started.
+        #expect(bodyOfApp(at: world.bundle) == "new")
+        #expect(versionOfApp(at: world.bundle) == "0.8.0")
+        #expect(world.notice.pendingVersion == VersionNumber(0, 8, 0))
+        #expect(world.names(in: world.apps) == ["CUABar.app"])
+    }
+
+    @Test func theTwoPlacesNeverStandEmptyInTheOneStepTheyChange() throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let first = home.url.appendingPathComponent("A.app")
+        let second = home.url.appendingPathComponent("B.app")
+        try makeApp(at: first, version: "1.0.0", body: "first")
+        try makeApp(at: second, version: "2.0.0", body: "second")
+        try AtomicSwap.exchange(first, second)
+        #expect(bodyOfApp(at: first) == "second")
+        #expect(bodyOfApp(at: second) == "first")
+        try AtomicSwap.exchange(first, second)
+        #expect(bodyOfApp(at: first) == "first")
+        // Nothing to exchange with: it fails and the one that is there is as it was.
+        #expect(throws: (any Error).self) { try AtomicSwap.exchange(first, home.url.appendingPathComponent("missing.app")) }
+        #expect(bodyOfApp(at: first) == "first")
     }
 
     // MARK: The moment
@@ -380,7 +445,7 @@ struct UpdateInstallerTests {
         defer { world.remove() }
         #expect(await world.installer.install(world.offer) { false } == .deferred)
         #expect(world.oldAppIsInPlace)
-        #expect(world.moves.moves == 0)
+        #expect(world.swaps.swaps == 0)
         #expect(world.nothingIsLeftBehind)
         #expect(world.launcher.launches.isEmpty)
         #expect(world.notice.pendingVersion == nil)
@@ -400,6 +465,59 @@ struct UpdateInstallerTests {
 
     @MainActor final class Asked { var count = 0 }
 
+    // MARK: After the update, without waiting for anything
+
+    @Test func anImageThatNeverLetGoIsNotWaitedForOnceTheAppIsReplaced() async throws {
+        let world = try world()
+        defer { world.remove() }
+        world.behavior.set { $0.detachFails = true }
+        #expect(await world.installer.install(world.offer) { true } == .replaced)
+        // The two tries before the checking were all: the end of the update does not ask `hdiutil` again.
+        #expect(world.runner.calls.filter { $0.arguments.first == "detach" }.count == 2)
+        #expect(bodyOfApp(at: world.bundle) == "new")
+    }
+
+    // MARK: What a run that was cut short left
+
+    @Test func theNextRunTakesAwayTheCopiesAndTheMountsAnEarlierRunLeft() async throws {
+        let world = try world()
+        defer { world.remove() }
+        // A copy of the new app beside the running one, from a run that was quit halfway.
+        try makeApp(
+            at: world.apps.appendingPathComponent(".CUABar-update.OLD111").appendingPathComponent("CUABar.app"), version: "0.8.0", body: "half")
+        // The folder of an update that may hold the only copy of an old app.
+        try makeApp(
+            at: world.apps.appendingPathComponent(".CUABar-update.OLD222").appendingPathComponent("Previous.app"), version: "0.6.0", body: "keep")
+        // Something else that is hidden in the folder, and an app of someone else: not ours to touch.
+        try world.home.write("x", to: world.apps.appendingPathComponent(".something-else"))
+        try makeApp(at: world.apps.appendingPathComponent("Other.app"), version: "1.0.0", body: "other")
+        // An image still mounted in the temporary folder of that run, and its folder with nothing in it.
+        let mounted = world.scratch.appendingPathComponent("cua-bar-update-OLD333/mnt")
+        try makeApp(at: mounted.appendingPathComponent("CUABar.app"), version: "0.8.0", body: "mounted")
+        try FileManager.default.createDirectory(
+            at: world.scratch.appendingPathComponent("cua-bar-update-OLD444/mnt"), withIntermediateDirectories: true)
+        // Not made by this app.
+        try world.home.write("y", to: world.scratch.appendingPathComponent("someone-elses-file"))
+
+        #expect(await world.installer.install(world.offer) { true } == .replaced)
+        #expect(world.names(in: world.apps) == [".CUABar-update.OLD222", ".something-else", "CUABar.app", "Other.app"])
+        #expect(world.names(in: world.scratch) == ["someone-elses-file"])
+        // (The folder listing may spell the temporary folder's path with /private in front.)
+        #expect(
+            world.runner.calls.contains { $0.arguments.first == "detach" && $0.arguments.last?.hasSuffix("/cua-bar-update-OLD333/mnt") == true },
+            "the image is let go of before its folder goes")
+    }
+
+    @Test func aMountThatCannotBeLetGoOfIsLeftAloneInsteadOfBeingDeletedAround() async throws {
+        let world = try world()
+        defer { world.remove() }
+        world.behavior.set { $0.detachFails = true }
+        let mounted = world.scratch.appendingPathComponent("cua-bar-update-OLD333/mnt")
+        try makeApp(at: mounted.appendingPathComponent("CUABar.app"), version: "0.8.0", body: "mounted")
+        _ = await world.installer.install(world.offer) { true }
+        #expect(bodyOfApp(at: mounted.appendingPathComponent("CUABar.app")) == "mounted")
+    }
+
     // MARK: Small things
 
     @Test func onlyAnInstalledCUABarAppIsAnAppThatCanReplaceItself() throws {
@@ -415,16 +533,6 @@ struct UpdateInstallerTests {
         let folder = home.url.appendingPathComponent("debug", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         #expect(UpdateSource.runningBundle(of: try #require(Bundle(url: folder))) == nil)
-    }
-
-    @Test func theTeamIsTheLineCodesignPrintsOnItsErrorOutput() {
-        let output = ProcessOutput(
-            exitCode: 0, stdout: Data(),
-            stderr: Data("Executable=/x\nIdentifier=dev.chenjing.cua-bar\nFormat=app bundle with Mach-O thin (arm64)\nTeamIdentifier=S3KC8R8VDL\nSealed Resources version=2\n".utf8))
-        #expect(UpdateInstaller.teamIdentifier(in: output) == "S3KC8R8VDL")
-        let adHoc = ProcessOutput(exitCode: 0, stdout: Data(), stderr: Data("Signature=adhoc\nTeamIdentifier=not set\n".utf8))
-        #expect(UpdateInstaller.teamIdentifier(in: adHoc) == "not set")
-        #expect(UpdateInstaller.teamIdentifier(in: ProcessOutput(exitCode: 0, stdout: Data(), stderr: Data("nothing\n".utf8))) == nil)
     }
 
     @Test func aBackupNameIsADateAndATimeAndNothingElse() {
@@ -445,15 +553,27 @@ struct UpdateInstallerTests {
 
     // MARK: The helper, really run
 
-    /// The helper is the one part that cannot be tried by replacing the app of this Mac: it runs, for real, with a
-    /// stand-in for `open` that writes its words down and a process that lives until the test lets it go.
-    @Test func theHelperWaitsForTheProcessToEndAndThenOpensTheAppInTheBackgroundOnce() async throws {
-        let home = try TempHome()
-        defer { home.remove() }
+    private func openStandIn(in home: TempHome) throws -> (stub: URL, log: URL) {
         let log = home.url.appendingPathComponent("opened.log")
         let stub = home.url.appendingPathComponent("open-stand-in.sh")
         try home.write("#!/bin/sh\necho \"$@\" >> \"\(log.path)\"\n", to: stub)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+        return (stub, log)
+    }
+
+    @Test func theHelperWaitsLongEnoughForTheOldProcessAndThenAPauseBeforeOpening() {
+        #expect(RelaunchHelper.waitLimit == 600, "ten minutes: a helper that gave up leaves no app")
+        #expect(RelaunchHelper.settle == 1)
+        #expect(RelaunchHelper.script.contains("-gt 6000"), "a tenth of a second at a time")
+        #expect(RelaunchHelper.script.contains("sleep 1\n"))
+    }
+
+    /// The helper is the one part that cannot be tried by replacing the app of this Mac: it runs, for real, with a
+    /// stand-in for `open` that writes its words down and a process that lives until the test lets it go.
+    @Test func theHelperWaitsForTheProcessToEndThenPausesAndOpensTheAppInTheBackgroundOnce() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let (stub, log) = try openStandIn(in: home)
 
         // `cat` lives until its input is closed.
         let input = Pipe()
@@ -473,19 +593,19 @@ struct UpdateInstallerTests {
         #expect(!FileManager.default.fileExists(atPath: log.path), "nothing is opened while the old process lives")
         try input.fileHandleForWriting.close()
         living.waitUntilExit()
+        // The old process is gone; the helper pauses before it opens anything.
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!FileManager.default.fileExists(atPath: log.path), "the system gets a moment to forget the old one")
         helper.waitUntilExit()
         #expect(helper.terminationStatus == 0)
         let written = try String(contentsOf: log, encoding: .utf8)
         #expect(written == "-g /Applications/Some App.app\n", "once, in the background, with the path as one word")
     }
 
-    @Test func theHelperOfAProcessThatIsAlreadyGoneOpensAtOnce() async throws {
+    @Test func theHelperOfAProcessThatIsAlreadyGoneOpensAfterTheSamePause() async throws {
         let home = try TempHome()
         defer { home.remove() }
-        let log = home.url.appendingPathComponent("opened.log")
-        let stub = home.url.appendingPathComponent("open-stand-in.sh")
-        try home.write("#!/bin/sh\necho \"$@\" >> \"\(log.path)\"\n", to: stub)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+        let (stub, log) = try openStandIn(in: home)
         let gone = Process()
         gone.executableURL = URL(fileURLWithPath: "/usr/bin/true")
         try gone.run()

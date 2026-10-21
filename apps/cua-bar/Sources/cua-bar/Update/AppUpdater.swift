@@ -18,7 +18,9 @@ struct UpdateFailure: Equatable, Sendable {
 /// a day, and when that is newer than this app it fetches it, checks it and replaces the running app with it (see
 /// `UpdateInstaller`), and the app ends so that the new one starts.
 ///
-/// - It does nothing for an app that does not run from a bundle (`installer` is nil) or that has no version of its own.
+/// - It does nothing for a build that cannot replace itself (`installer` is nil: it does not run from an app bundle, or it is
+///   not the official build signed by the team's Developer ID, a local build signed ad hoc for one) or that has no version
+///   of its own: no look, no button.
 /// - It replaces only while nothing is in the way (`canReplaceNow`: the popover is closed and no tidy-up, setup or
 ///   removal runs). Otherwise the offer waits; `applyIfPossible()` is called after each status read, so the update
 ///   goes ahead within seconds of the moment the way is free.
@@ -75,7 +77,8 @@ final class AppUpdater: ObservableObject {
         self.clock = clock
         self.sleep = sleep
         self.quit = quit
-        failure = storedFailure()
+        // A build that does not update (development, a local build) shows no button, whatever an installed app left behind.
+        failure = installer == nil ? nil : storedFailure()
     }
 
     /// The line the copied diagnosis adds while an update has failed.

@@ -146,24 +146,44 @@ func versionOfApp(at url: URL) -> String? {
     return info["CFBundleShortVersionString"] as? String
 }
 
-/// Makes a chosen move fail (counting from 1) and does the others for real.
-final class MoveScript: @unchecked Sendable {
+/// Makes a chosen swap fail (counting from 1) and does the others for real, with the same system call the app uses.
+final class SwapScript: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
     private let failing: Set<Int>
 
     init(failing: Set<Int> = []) { self.failing = failing }
 
-    var moves: Int { lock.withLock { count } }
+    var swaps: Int { lock.withLock { count } }
 
-    var move: @Sendable (URL, URL) throws -> Void {
-        { [self] from, destination in
+    var swap: @Sendable (URL, URL) throws -> Void {
+        { [self] first, second in
             let number = lock.withLock { () -> Int in
                 count += 1
                 return count
             }
             if failing.contains(number) { throw CocoaError(.fileWriteNoPermission) }
-            try FileManager.default.moveItem(at: from, to: destination)
+            try AtomicSwap.exchange(first, second)
+        }
+    }
+}
+
+/// Stands in for the notifier of the install: writes down what was posted, and says it went out or not.
+final class Announcements: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [AppNotification] = []
+    private var goesOut = true
+
+    var posted: [AppNotification] { lock.withLock { recorded } }
+    /// False: notifications are off, and every post comes back as not delivered.
+    func setDelivering(_ value: Bool) { lock.withLock { goesOut = value } }
+
+    var post: @Sendable (AppNotification) async -> Bool {
+        { [self] notification in
+            lock.withLock {
+                recorded.append(notification)
+                return goesOut
+            }
         }
     }
 }

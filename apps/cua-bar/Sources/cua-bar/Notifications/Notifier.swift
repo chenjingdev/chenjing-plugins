@@ -7,6 +7,8 @@ enum NotificationKind: String, Equatable, Sendable {
     case lingeringLease
     /// A newer CUA Bar is out and the app could not put it in by itself (F4); posted once per version.
     case updateFailed
+    /// The app has just replaced itself with a newer version (F4); posted once, by the new version when it starts.
+    case updated
 }
 
 enum NotificationButton: String, Equatable, Sendable {
@@ -46,6 +48,13 @@ extension AppNotification {
             key: "update-failed-\(version)", kind: .updateFailed, title: "CUA Bar 새 버전 \(version)를 저절로 올리지 못했어요",
             body: "창 아래 버튼으로 받을 수 있어요")
     }
+
+    /// The app was updated: "CUA Bar를 x.y.z로 올렸어요" and what that means for Claude conversations. Clicking it opens the
+    /// popover, like the others.
+    static func updated(_ version: VersionNumber) -> AppNotification {
+        AppNotification(
+            key: "updated-\(version)", kind: .updated, title: UpdateNotice.headline(for: version), body: UpdateNotice.consequence)
+    }
 }
 
 /// What the person did with a notification, already turned into what the app should do.
@@ -66,6 +75,7 @@ enum NotificationResponse: Equatable, Sendable {
         case (.body, .codexWithoutHost): .openPopover(nil)
         case (.body, .lingeringLease): .openPopover(.connections)
         case (.body, .updateFailed): .openPopover(nil)
+        case (.body, .updated): .openPopover(nil)
         case (.button(.restartCodex), .codexWithoutHost): .restartCodex(key: key)
         default: nil
         }

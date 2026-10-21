@@ -226,6 +226,26 @@ struct AppUpdaterTests {
         #expect(second.heard.failures.isEmpty, "that version was told about")
     }
 
+    @Test func aBuildThatDoesNotUpdateShowsNoButtonWhateverAnInstalledAppLeftBehind() async {
+        // A local build signed ad hoc has the app's identifier, so it reads the same preferences.
+        let suite = DefaultsSuite()
+        defer { suite.remove() }
+        let installed = kit(installer: FakeInstaller(.failed(.checksum)), suite: suite)
+        await installed.updater.check()
+        #expect(installed.updater.failure != nil)
+
+        let local = kit(bundled: false, suite: suite)
+        #expect(local.updater.failure == nil, "like a development build: no check and no button")
+        local.updater.start()
+        await local.updater.check()
+        #expect(local.transport.versionRequestCount == 0)
+        #expect(local.updater.failure == nil)
+
+        // What the installed app left is still there for the installed app.
+        let again = kit(installer: FakeInstaller(.replaced), suite: suite)
+        #expect(again.updater.failure == UpdateFailure(version: VersionNumber(0, 8, 0), step: .checksum, at: start))
+    }
+
     @Test func theButtonGoesWhenTheAppHasCaughtUpWithThatVersion() async {
         let suite = DefaultsSuite()
         defer { suite.remove() }
