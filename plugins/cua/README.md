@@ -38,7 +38,7 @@ Claude가 설치와 연결을 점검합니다. 이후 **“cua 써서 이 앱을
 
 CUA Bar는 연결 상태를 보고 놓아주기·종료를 하는 macOS 메뉴 막대 앱입니다. 선택 사항이라 앱 없이 이 플러그인만으로도 CUA를 쓸 수 있습니다.
 
-- **받는 곳.** https://cua.chenjing.org/download 에서 dmg를 받거나, 터미널에서 `curl -fsSL https://cua.chenjing.org/install.sh | sh`로 깝니다. 같은 파일이 이 저장소의 [GitHub Releases](https://github.com/chenjingdev/chenjing-plugins/releases) 태그 `cua-bar--v0.7.0`에도 있습니다. Apple Silicon·macOS 14 이상용이고, Developer ID로 서명해 Apple 공증을 받았습니다. 설치와 처음 여는 방법은 [앱 README](../../apps/cua-bar/README.md)를 봅니다.
+- **받는 곳.** https://cua.chenjing.org 를 맥 브라우저로 열어 dmg를 받거나, 터미널에서 `curl -fsSL https://cua.chenjing.org/install.sh | sh`로 깝니다. 같은 파일이 이 저장소의 [GitHub Releases](https://github.com/chenjingdev/chenjing-plugins/releases) 태그 `cua-bar--v0.7.0`에도 있습니다. Apple Silicon·macOS 14 이상용이고, Developer ID로 서명해 Apple 공증을 받았습니다. 설치와 처음 여는 방법은 [앱 README](../../apps/cua-bar/README.md)를 봅니다.
 - **플러그인을 설치하고 갱신합니다.** 앱이 이 플러그인(`cua@chenjing-plugins`)을 깔고 설정(`codex-cua setup`)까지 합니다. 앱과 플러그인의 판이 다르면 문제로 알리고, 맞는 판 받기를 고치는 버튼으로 둡니다. 갱신하면 새 Claude 대화부터 새 판이 붙습니다. 새 앱 버전이 나왔는지는 하루에 한 번 이 저장소의 앱 태그로 확인합니다. 새 버전이 있으면 창 아래에 **새 버전 x.y.z** 버튼이 생기고, 버전마다 한 번 알림이 옵니다.
 - **로그인할 때 자동으로 뜹니다.**
 - **끄지 않습니다.** 사용자가 누르기 전에는 Codex·Chrome·AI를 끄지 않고, 어떤 창도 앞으로 가져오지 않습니다.

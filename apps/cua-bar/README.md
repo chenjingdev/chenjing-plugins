@@ -10,7 +10,7 @@ Apple Silicon Mac, macOS 14 이상에서 돌아요. 앱 판 번호는 플러그�
 
 받는 곳은 https://cua.chenjing.org 예요. 셋 중 편한 것으로 깔아요.
 
-- **브라우저로 받기**: https://cua.chenjing.org/download 를 열면 dmg가 받아져요. dmg를 열고 `CUABar.app`을 Applications(응용 프로그램) 폴더로 끌어 놓은 뒤 열어요. 홈 폴더 안의 `~/Applications`도 돼요.
+- **브라우저로 받기**: https://cua.chenjing.org 를 맥 브라우저로 열면 dmg가 바로 받아져요. dmg를 열고 `CUABar.app`을 Applications(응용 프로그램) 폴더로 끌어 놓은 뒤 열어요. 홈 폴더 안의 `~/Applications`도 돼요.
 - **터미널 한 줄**: `curl -fsSL https://cua.chenjing.org/install.sh | sh`. 최신 dmg를 받아 SHA-256과 서명한 팀을 확인하고, `/Applications`(쓸 수 없으면 `~/Applications`)에 깐 뒤 켜요. 이미 같거나 새 판이 있으면 받지 않고 켜기만 해요. 켜져 있던 옛 판은 끄고 바꿔요.
 - **에이전트에게 맡기기**: "CUA Bar를 설치해 줘. https://cua.chenjing.org/install"이라고 말하면 돼요. 그 주소는 에이전트가 읽는 설치 안내예요.
 
@@ -100,5 +100,5 @@ CUABAR_NOTARY_PROFILE=<프로필> ./scripts/package-release.sh   # dist/에 서�
 - `build-app.sh`는 언제나 hardened runtime으로 서명해서, 손으로 깐 앱도 릴리스와 같은 규칙으로 돌아요. 예외는 Apple Events 하나예요(`scripts/CUABar.entitlements`). Codex 다시 켜기가 osascript로 Codex에 종료를 요청하기 때문이에요. `CUABAR_CODE_SIGN_IDENTITY`를 주면 그 신원으로 서명하고 보안 타임스탬프를 붙여요.
 - `--install`은 있던 앱과 설정을 `~/Library/Application Support/CUABar/Backups/<시각>/`에 백업하고, 앱이 켜져 있으면 멈추고, 복사본의 서명을 확인한 뒤에 바꿔요.
 - `package-release.sh [폴더]`는 키체인의 Developer ID Application 인증서로 앱을 만들어요(여럿이면 `CUABAR_CODE_SIGN_IDENTITY`로 골라요). `CUABAR_NOTARY_PROFILE`은 `xcrun notarytool store-credentials`로 만든 프로필 이름이에요. 앱을 공증받아 티켓을 붙이고, 그 앱을 담은 `CUABar-v<판>-macos-arm64.dmg`도 서명·공증해 티켓을 붙인 뒤 `SHA256SUMS.txt`와 함께 폴더에 써요. 기본 폴더는 `apps/cua-bar/dist/`이고 git이 보지 않아요. 합, dmg와 그 안 앱의 서명·티켓, Gatekeeper가 둘 다 받아들이는지까지 확인한 뒤, 태그 `cua-bar--v<판>`과 실행할 `gh release create ...` 명령을 **출력만** 해요. 태그를 만들거나 올리거나 `gh`를 부르지 않아요. 올리는 것은 그때그때 물어보고 직접 해요.
-- `download/`는 cua.chenjing.org를 맡는 Cloudflare Worker예요. dmg, `SHA256SUMS.txt`, `install.sh`는 정적 파일로 나가고, `worker.js`가 첫 화면, `/download`(dmg로 넘김), `/install`(에이전트가 읽는 안내), `/version`(`install.sh`가 읽는 판 정보)을 답해요. `public/`과 `release.json`은 `build-download-site.sh`가 만들고 git이 보지 않아요. 릴리스마다 `package-release.sh` → GitHub 릴리스 → `build-download-site.sh` → `wrangler deploy` 순서로 올리고, 올리는 것은 그때그때 물어봐요.
+- `download/`는 cua.chenjing.org를 맡는 Cloudflare Worker예요. dmg, `SHA256SUMS.txt`, `install.sh`는 정적 파일로 나가고, `worker.js`가 첫 주소와 `/download`(맥 브라우저는 dmg로 넘기고, 휴대폰·curl 같은 것에는 안내 두 줄), `/install`(에이전트가 읽는 안내), `/version`(`install.sh`가 읽는 판 정보)을 답해요. `public/`과 `release.json`은 `build-download-site.sh`가 만들고 git이 보지 않아요. 릴리스마다 `package-release.sh` → GitHub 릴리스 → `build-download-site.sh` → `wrangler deploy` 순서로 올리고, 올리는 것은 그때그때 물어봐요.
 - 앱 판 번호는 `plugins/cua/.claude-plugin/plugin.json`의 `version`에서 와요.
