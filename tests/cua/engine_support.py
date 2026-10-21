@@ -170,6 +170,11 @@ class Commands:
         self.bridge = '%s %s' % (home/'.local/share/codex-cua/venv/bin/python3',
                                  home/'.claude/plugins/cache/chenjing-plugins/cua/0.7.0/mcp_stdio.py')
         self.old_bridge = '/usr/bin/python3 %s' % (home/'.claude/plugins/cache/chenjing-plugins/cua/0.5.0/mcp_stdio.py')
+        # Bridges of the engine copies in ~/.local/share/codex-cua/engine/<version>/: this one and an earlier version's.
+        self.engine_bridge = '%s %s' % (home/'.local/share/codex-cua/venv/bin/python3',
+                                        home/'.local/share/codex-cua/engine/0.8.0/mcp_stdio.py')
+        self.old_engine_bridge = '%s %s' % (home/'.local/share/codex-cua/venv/bin/python3',
+                                            home/'.local/share/codex-cua/engine/0.7.9/mcp_stdio.py')
         self.claude = '%s --settings /fixture/settings.json' % (home/'.local/bin/claude')
         cmux = home/'Library/Application Support/cmux/cmux-cua/helper/com.cmuxterm.app/cmux Computer Use.app/Contents/MacOS/cmux-cua'
         self.cmux_serve = '%s serve --socket /fixture/cmux-cua.sock' % cmux

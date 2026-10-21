@@ -10,7 +10,7 @@ from engine_core import iso
 from engine_support import (APP_VERSION, ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase,
                             State, at)
 
-TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'codex', 'host', 'setup', 'connections', 'leases',
+TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'engine', 'codex', 'host', 'setup', 'connections', 'leases',
             'other_tools', 'screen', 'activity']
 CONNECTION_KEYS = ['id', 'agent', 'state', 'pid', 'owner_pid', 'owner_alive', 'cwd', 'started_at', 'memory_bytes',
                    'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop']
@@ -36,6 +36,9 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['generated_at'], iso(NOW))
         self.assertEqual(status['plugin'], {'version': json.loads(
             (self.context().plugin_root/'.claude-plugin/plugin.json').read_text())['version']})
+        manifest = json.loads((self.context().plugin_root/'.claude-plugin/plugin.json').read_text())
+        self.assertEqual(status['engine'], {'version': manifest['version'], 'root': str(self.context().plugin_root)})
+        self.assertEqual(status['engine']['version'], status['plugin']['version'])
         self.assertEqual(status['codex'], {'installed': False, 'app_path': None, 'app_version': None, 'running': False,
                                            'pids': []})
         self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False})
@@ -310,6 +313,26 @@ class AttributionTests(StatusCase):
                           connection['can_release'], connection['can_stop'], connection['memory_bytes']),
                          ('claude-4300-%d' % (NOW-700), 'claude', 501, True, '/work/old', None, None, False, True,
                           30_000*1024))
+
+    def test_a_bridge_that_runs_from_an_engine_copy_of_any_version_is_a_connection(self):
+        self.start_world()
+        self.add_claude(501)
+        self.add_bridge(4300, 501, NOW-700, command=self.commands.old_engine_bridge)
+        self.add_bridge(4301, 501, NOW-600, command=self.commands.engine_bridge)
+        self.assertEqual({item['pid']: (item['agent'], item['state']) for item in self.status()['connections']},
+                         {4300: ('claude', 'active'), 4301: ('claude', 'active')})
+
+    def test_the_engine_says_which_folder_it_runs_from(self):
+        root = self.home/'.local/share/codex-cua/engine/0.8.0'
+        (root/'.claude-plugin').mkdir(parents=True)
+        (root/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': '0.8.0'}))
+        self.machine.add(5, 1, '/bin/x')
+        status = self.status(plugin_root=root)
+        self.assertEqual(status['engine'], {'version': '0.8.0', 'root': str(root)})
+        self.assertEqual(status['plugin'], {'version': '0.8.0'})
+        (root/'.claude-plugin/plugin.json').unlink()
+        status = self.status(plugin_root=root)
+        self.assertEqual((status['engine'], status['plugin']), ({'version': None, 'root': str(root)}, {'version': None}))
 
     def test_nodes_directly_under_the_app_server_are_not_cua_runtimes(self):
         self.start_world()

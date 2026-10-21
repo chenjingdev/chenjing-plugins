@@ -23,6 +23,9 @@ _PS_LINE = re.compile(r'^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+[A-Z][a-z]{2}\s+([A-
                       r'(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})\s+(\d+)\s*(.*)$')
 _BRIDGE = re.compile(r'/(?:cua|codex-computer-use|claude-computer-use-plugin)(?:/[0-9][0-9A-Za-z.+_-]*)?'
                      r'/mcp_stdio\.py(?=\s|$)')
+# The engine copies of every version that setup unpacked: ~/.local/share/codex-cua/engine/<version>/. A bridge that
+# was started from an earlier version keeps running from its own folder after an update.
+_ENGINE_BRIDGE = re.compile(r'/codex-cua/engine/[0-9][0-9A-Za-z.+_-]*/mcp_stdio\.py(?=\s|$)')
 _CMUX = re.compile(r'^/.*/cmux-cua(?:\s+([A-Za-z][\w-]*))?\s*$')
 _CHROME = re.compile(r'^/.*?/(Google Chrome(?: Beta| Dev| Canary)?|Chromium)\.app/Contents/MacOS/\1(?:\s|$)')
 CUA_REPL_SCRIPT = '/@oai/cua-repl/bin/cua-repl.mjs'
@@ -92,8 +95,9 @@ def is_cua_repl(command):
 
 
 def is_bridge(command, plugin_root):
-    """A Claude bridge: a Python running this plugin's mcp_stdio.py (current or an older plugin name)."""
-    match = _BRIDGE.search(command)
+    """A Claude bridge: a Python running this engine's mcp_stdio.py (this folder, any engine copy of an earlier
+    version, or an older plugin's)."""
+    match = _BRIDGE.search(command) or _ENGINE_BRIDGE.search(command)
     start = match.start() if match else -1
     if match is None:
         own = str(plugin_root/'mcp_stdio.py')

@@ -1,4 +1,4 @@
-"""The stable command runs the registered plugin's setup.py; fakes only, in a temporary HOME."""
+"""The stable command runs the setup.py of the engine copy that setup bound (source.json); fakes only, in a temporary HOME."""
 import contextlib
 import io
 import json
@@ -63,6 +63,14 @@ class DelegationBase(unittest.TestCase):
         return path
 
     def register(self, path, version='0.9.0'):
+        """Bind the engine folder the way `codex-cua setup` does (source.json); the version is the folder's own."""
+        support = setup.support_root(self.home)
+        setup.private_directory(support)
+        setup.write_private(support/'source.json', json.dumps({'schema_version': 1, 'plugin_id': setup.PLUGIN_ID,
+                                                              'source_root': str(path)}))
+
+    def write_registry(self, path, version='0.9.0'):
+        """What Claude Code's registry says about a cua plugin; nothing in this module's subjects reads it."""
         registry = self.home/'.claude/plugins/installed_plugins.json'
         registry.parent.mkdir(parents=True, exist_ok=True)
         registry.write_text(json.dumps({'version': 2, 'plugins': {setup.PLUGIN_ID: [
@@ -107,6 +115,21 @@ class HandOverTests(DelegationBase):
         self.assertEqual(execute.call_args.args[1][2:], ['--control', '--root-resolved', 'ensure',
                                                          '--exec-wrapper', '--', *forwarded])
 
+    def test_a_plugin_registered_with_claude_code_does_not_take_part(self):
+        bound = self.make_plugin('bound', NEWER_SETUP)
+        self.register(bound)
+        self.write_registry(self.make_plugin('registered', NEWER_SETUP))
+        execute = self.run_main(['--control', 'doctor'])
+        self.assertEqual(execute.call_args.args[1][1], str(bound/'setup.py'))
+        # Without a binding the registry is no way in: the launcher path starts the original CLI instead.
+        (setup.support_root(self.home)/'source.json').unlink()
+        native = self.home/'codex'
+        native.write_text(FAKE_NATIVE)
+        native.chmod(0o700)
+        execute = self.run_main(['--control', 'ensure', '--exec-wrapper', '--', 'app-server'],
+                                **{setup.FALLBACK_ENV: str(native)})
+        self.assertEqual(execute.call_args.args[:2], (str(native), [str(native), 'app-server']))
+
     def test_an_older_registered_setup_is_handed_over_without_the_flag_it_does_not_know(self):
         older = self.make_plugin('0.5.0', OLDER_SETUP, '0.5.0')
         self.register(older, '0.5.0')
@@ -119,8 +142,7 @@ class HandOverTests(DelegationBase):
 
     def test_the_registered_file_itself_runs_here_without_another_exec(self):
         repository_plugin = Path(setup.__file__).resolve().parent
-        version = json.loads((repository_plugin/'.claude-plugin/plugin.json').read_text())['version']
-        self.register(repository_plugin, version)
+        self.register(repository_plugin)
         output = io.StringIO()
         with patch.dict(os.environ, {'HOME': str(self.home)}), \
              patch.object(setup.os, 'execve', side_effect=AssertionError('No hand-over to itself')), \
@@ -152,7 +174,7 @@ class HandOverTests(DelegationBase):
         native.chmod(0o700)
         arguments = ['--control', 'ensure', '--exec-wrapper', '--', 'app-server', '-c', 'x=1']
         expected = (str(native), [str(native), 'app-server', '-c', 'x=1'])
-        # Nothing registered at all.
+        # Nothing bound at all.
         execute = self.run_main(arguments, **{setup.FALLBACK_ENV: str(native)})
         self.assertEqual(execute.call_args.args[:2], expected)
         # A damaged update is never executed.
@@ -261,10 +283,10 @@ class RealProcessTests(DelegationBase):
         plugin, launcher = self.install_launcher()
         # Updated, but the new version's files are damaged.
         damaged = self.make_plugin('damaged', 'def (:\n', '0.9.0')
-        # Removed: only the setup-time source binding is left, and it points nowhere.
+        # Removed: the binding that setup left points at a folder that is gone.
         shutil.rmtree(plugin)
         for label, prepare in (('damaged', lambda: self.register(damaged, '0.9.0')),
-                               ('removed', lambda: (self.home/'.claude/plugins/installed_plugins.json').unlink())):
+                               ('removed', lambda: self.register(plugin))):
             with self.subTest(label):
                 prepare()
                 result = self.run_launcher(launcher, 'app-server', '-c', 'x=1', 'two words')

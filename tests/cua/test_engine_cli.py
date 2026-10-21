@@ -343,8 +343,9 @@ class RealProcessTests(unittest.TestCase):
         result, seconds = self.command('status', '--json')
         self.assertEqual((result.returncode, result.stderr), (0, ''))
         status = json.loads(result.stdout)
-        self.assertEqual(list(status), ['schema_version', 'generated_at', 'plugin', 'codex', 'host', 'setup',
+        self.assertEqual(list(status), ['schema_version', 'generated_at', 'plugin', 'engine', 'codex', 'host', 'setup',
                                         'connections', 'leases', 'other_tools', 'screen', 'activity'])
+        self.assertEqual(status['engine'], {'version': status['plugin']['version'], 'root': str(PLUGIN)})
         self.assertEqual(status['codex']['app_path'], str(self.app))
         self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False})
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})

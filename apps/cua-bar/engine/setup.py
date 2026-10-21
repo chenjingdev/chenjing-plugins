@@ -68,9 +68,10 @@ def write_private(path, value):
 
 
 def validated_plugin_root(path, version=None):
+    """The real path of an engine folder (the manifest of `cua`, and the files every run needs), or RuntimeError."""
     path = Path(path).expanduser()
     if not path.is_absolute():
-        raise RuntimeError('The registered plugin path must be absolute.')
+        raise RuntimeError('The engine path must be absolute.')
     path = path.resolve(strict=True)
     manifest_path = path/'.claude-plugin/plugin.json'
     manifest = json.loads(manifest_path.read_text())
@@ -79,24 +80,16 @@ def validated_plugin_root(path, version=None):
             or not isinstance(manifest.get('version'), str)
             or (version is not None and manifest['version'] != version)
             or not all((path/name).is_file() for name in ('setup.py', 'runtime_paths.py', 'start-mcp.sh'))):
-        raise RuntimeError('The registered public plugin source is invalid or unavailable.')
+        raise RuntimeError('The engine source is invalid or unavailable.')
     return path
 
 
 def resolve_plugin_root(home=None):
+    """The engine folder `codex-cua setup` bound (source.json), and nothing else.
+
+    Claude Code's plugin registry is not read: a cua plugin that is still installed does not matter here.
+    """
     home = Path.home() if home is None else Path(home)
-    registry = home/'.claude/plugins/installed_plugins.json'
-    if registry.exists():
-        data = json.loads(registry.read_text())
-        plugins = data.get('plugins') if isinstance(data, dict) else None
-        records = plugins.get(PLUGIN_ID) if isinstance(plugins, dict) else None
-        if records is not None:
-            if not isinstance(records, list):
-                raise RuntimeError('The public plugin registration is invalid.')
-            records = [item for item in records if isinstance(item, dict) and item.get('scope') == 'user']
-            if len(records) != 1 or not isinstance(records[0].get('installPath'), str):
-                raise RuntimeError('Install one user-scoped cua@chenjing-plugins plugin.')
-            return validated_plugin_root(records[0]['installPath'], records[0].get('version'))
     binding = private_json(support_root(home)/'source.json')
     if (not isinstance(binding, dict) or binding.get('schema_version') != 1
             or binding.get('plugin_id') != PLUGIN_ID or not isinstance(binding.get('source_root'), str)):
@@ -241,6 +234,18 @@ def relay_status(home=None):
         return relay_files_status(support_root(home))
     except Exception:
         return 'invalid'
+
+
+def run_setup(plugin_root, home=None, environment=None):
+    """The usual `setup` for the engine folder `plugin_root`: its command, the login environment and the relay files.
+
+    Returns the command path, the login environment (ready, conflict or failed) and the relay files state."""
+    target = install_command(plugin_root, home, environment)
+    try:
+        login = install_login_environment(home, environment)
+    except Exception:
+        login = 'failed'
+    return target, login, relay_status(home)
 
 
 def app_processes(executable):
@@ -519,13 +524,13 @@ def readable_source(path):
 
 
 def hand_over_to_registered_plugin(arguments):
-    """Make the installed plugin version decide what the stable command does.
+    """Make the engine copy that setup bound decide what the stable command does.
 
     command.py is a copy of the setup.py that was current when `codex-cua setup` last ran, so
-    after a plugin update it is stale and does not know newer commands. Resolve the registered
-    plugin and, unless this file already is its setup.py, run that setup.py with the same
+    after an update it is stale and does not know newer commands. Resolve the bound engine
+    folder (source.json) and, unless this file already is its setup.py, run that setup.py with the same
     interpreter and arguments plus ROOT_RESOLVED_FLAG, which tells it the root is settled.
-    Returns the registered root when there is nothing to hand over to.
+    Returns the bound root when there is nothing to hand over to.
 
     A setup.py older than 0.7.0 does not know the flag and would pass it on as an unrecognized
     argument, so the flag goes only to a setup.py that defines it. An older one never hands over
@@ -559,8 +564,8 @@ def main(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--control', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument(ROOT_RESOLVED_FLAG, action='store_true', help=argparse.SUPPRESS)
-    parser.add_argument('command', choices=('install', 'setup', 'ensure', 'start', 'doctor', 'uninstall',
-                                            *ENGINE_COMMANDS))
+    parser.add_argument('command', choices=('install', 'setup', 'install-engine', 'ensure', 'start', 'doctor',
+                                            'uninstall', *ENGINE_COMMANDS))
     parser.add_argument('--exec-mcp', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--exec-wrapper', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--probe', action='store_true')
@@ -604,17 +609,16 @@ def main(arguments=None):
             exec_native_fallback(forwarded)
         raise
     if args.command in ('install', 'setup'):
-        target = install_command(plugin_root)
+        target, status, relay = run_setup(plugin_root)
         print('Installed authored command: '+str(target))
-        try:
-            status = install_login_environment()
-        except Exception:
-            status = 'failed'
         print('Ordinary app launch as host: '+status)
-        print('Relay files: '+relay_status())
+        print('Relay files: '+relay)
         return 0
     if remainder:
         parser.error('unrecognized arguments')
+    if args.command == 'install-engine':
+        from engine_install import run_install_engine
+        return run_install_engine(args, plugin_root, sys.modules[__name__])
     if args.command in ENGINE_COMMANDS:
         from engine_cli import run_command
         return run_command(args, plugin_root, sys.modules[__name__], parser.error)

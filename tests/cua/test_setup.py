@@ -43,27 +43,44 @@ class SetupTests(unittest.TestCase):
         setup.write_private(self.root/'source.json', json.dumps({'schema_version': 1,
             'plugin_id': setup.PLUGIN_ID, 'source_root': str(self.plugin)}))
 
-    def registry(self, records):
-        path = self.home/'.claude/plugins/installed_plugins.json'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({'version': 2, 'plugins': records}))
-
-    def test_exact_public_registration_follows_cache_updates(self):
-        self.bind()
-        first = self.make_plugin('cache/0.4.0', '0.4.0')
-        second = self.make_plugin('cache/0.4.1', '0.4.1')
-        for path, version in ((first, '0.4.0'), (second, '0.4.1')):
-            self.registry({setup.PLUGIN_ID: [{'scope': 'user', 'installPath': str(path), 'version': version}],
-                           'cua@unrelated': [{'scope': 'user', 'installPath': '/bad'}]})
+    def test_the_binding_is_what_names_the_engine_folder_and_a_rebinding_follows(self):
+        first = self.make_plugin('engine/0.4.0', '0.4.0')
+        second = self.make_plugin('engine/0.4.1', '0.4.1')
+        for path in (first, second):
+            setup.write_private(self.root/'source.json', json.dumps({'schema_version': 1,
+                'plugin_id': setup.PLUGIN_ID, 'source_root': str(path)}))
             self.assertEqual(setup.resolve_plugin_root(self.home), path)
 
-    def test_invalid_public_registration_never_uses_source_fallback(self):
+    def test_the_plugin_registry_of_claude_code_is_never_read(self):
         self.bind()
-        for records in ([{'scope': 'user', 'installPath': str(self.plugin), 'version': 'wrong'}],
-                        [{'scope': 'project', 'installPath': str(self.plugin)}],
-                        [{'scope': 'user', 'installPath': str(self.plugin)}]*2):
-            self.registry({setup.PLUGIN_ID: records})
-            with self.assertRaises(RuntimeError):
+        registry = self.home/'.claude/plugins/installed_plugins.json'
+        registry.parent.mkdir(parents=True)
+        other = self.make_plugin('cache/0.4.1', '0.4.1')
+        valid = {'version': 2, 'plugins': {setup.PLUGIN_ID: [
+            {'scope': 'user', 'installPath': str(other), 'version': '0.4.1'}]}}
+        for label, content in (('a registered plugin', json.dumps(valid)), ('not json at all', '{{{'),
+                               ('two user records', json.dumps({'plugins': {setup.PLUGIN_ID: [
+                                   {'scope': 'user', 'installPath': str(self.plugin)}]*2}})),
+                               ('a record of another version', json.dumps({'plugins': {setup.PLUGIN_ID: [
+                                   {'scope': 'user', 'installPath': str(self.plugin), 'version': 'wrong'}]}}))):
+            with self.subTest(label):
+                registry.write_text(content)
+                self.assertEqual(setup.resolve_plugin_root(self.home), self.plugin)
+        # Without a binding a registered plugin is no help: the command needs `install-engine` first.
+        (self.root/'source.json').unlink()
+        registry.write_text(json.dumps(valid))
+        with self.assertRaises(OSError):
+            setup.resolve_plugin_root(self.home)
+
+    def test_a_binding_that_is_not_ours_or_names_no_engine_is_refused(self):
+        for binding in ({'schema_version': 2, 'plugin_id': setup.PLUGIN_ID, 'source_root': str(self.plugin)},
+                        {'schema_version': 1, 'plugin_id': 'other@x', 'source_root': str(self.plugin)},
+                        {'schema_version': 1, 'plugin_id': setup.PLUGIN_ID, 'source_root': 7},
+                        {'schema_version': 1, 'plugin_id': setup.PLUGIN_ID, 'source_root': 'relative/path'},
+                        {'schema_version': 1, 'plugin_id': setup.PLUGIN_ID, 'source_root': str(self.home/'gone')},
+                        [1]):
+            setup.write_private(self.root/'source.json', json.dumps(binding))
+            with self.assertRaises((RuntimeError, OSError)):
                 setup.resolve_plugin_root(self.home)
 
     def test_fallback_binding_is_private_and_symlink_is_rejected(self):
