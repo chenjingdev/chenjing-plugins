@@ -80,6 +80,26 @@ class ClassificationTests(EngineCase):
         self.assertTrue(inventory.is_bridge('/usr/bin/python3 /dev/checkout/mcp_stdio.py', Path('/dev/checkout')))
         self.assertFalse(inventory.is_bridge('/usr/bin/python3 /dev/checkout/mcp_stdio.pyc', Path('/dev/checkout')))
 
+    def test_claude_bridges_of_the_engine_copies_of_every_version(self):
+        root = Path('/work/engine')          # the folder this engine runs from: neither of the two below
+        for command in (self.commands.engine_bridge, self.commands.old_engine_bridge,
+                        '/usr/bin/python3 /Users/me/x y/.local/share/codex-cua/engine/0.7.0-beta.1+2/mcp_stdio.py',
+                        '/venv/bin/python3.9 /Users/me/.local/share/codex-cua/engine/12.0.1/mcp_stdio.py --x'):
+            self.assertTrue(inventory.is_bridge(command, root), command)
+        for command in ('node /Users/me/.local/share/codex-cua/engine/0.8.0/mcp_stdio.py',
+                        '/usr/bin/python3 /Users/me/.local/share/codex-cua/engine/0.8.0/mcp_stdio.py.bak',
+                        '/usr/bin/python3 /Users/me/.local/share/codex-cua/engine/0.8.0/mcp_stdio.pyc',
+                        '/usr/bin/python3 /Users/me/.local/share/codex-cua/engine/mcp_stdio.py',
+                        '/usr/bin/python3 /Users/me/.local/share/codex-cua/engine/latest/mcp_stdio.py',
+                        '/usr/bin/python3 /Users/me/.local/share/codex-cua/engine/0.8.0/sub/mcp_stdio.py',
+                        '/usr/bin/python3 /Users/me/.local/share/other/engine/0.8.0/mcp_stdio.py',
+                        '/usr/bin/python3 /Users/me/.local/share/codex-cua/engine/0.8.0/setup.py --control status',
+                        '/bin/sh -c "python3 /Users/me/.local/share/codex-cua/engine/0.8.0/mcp_stdio.py"'):
+            self.assertFalse(inventory.is_bridge(command, root), command)
+        # The folder this engine runs from is recognised by itself, as before.
+        own = Path('/Users/me/.local/share/codex-cua/engine/0.8.0')
+        self.assertTrue(inventory.is_bridge('/usr/bin/python3 %s/mcp_stdio.py' % own, own))
+
     def test_cmux_cua_is_told_apart_from_programs_that_only_mention_it(self):
         self.assertEqual(inventory.cmux_mode(self.commands.cmux_serve), 'serve')
         self.assertEqual(inventory.cmux_mode(self.commands.cmux_mcp), 'mcp')

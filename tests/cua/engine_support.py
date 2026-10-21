@@ -26,6 +26,7 @@ from test_runtime_paths import fake_app
 NOW = calendar.timegm((2026, 10, 18, 12, 0, 0))
 UID = os.getuid()
 ENGINE_PID = 999001
+ABSENT = object()          # a key of host.json that the launcher did not write at all (null is a value it did write)
 APP_VERSION = '26.1013.40934'
 SESSION_A = '019a0000-0000-7000-8000-00000000000a'
 SESSION_B = '019a0000-0000-7000-8000-00000000000b'
@@ -170,6 +171,11 @@ class Commands:
         self.bridge = '%s %s' % (home/'.local/share/codex-cua/venv/bin/python3',
                                  home/'.claude/plugins/cache/chenjing-plugins/cua/0.7.0/mcp_stdio.py')
         self.old_bridge = '/usr/bin/python3 %s' % (home/'.claude/plugins/cache/chenjing-plugins/cua/0.5.0/mcp_stdio.py')
+        # Bridges of the engine copies in ~/.local/share/codex-cua/engine/<version>/: this one and an earlier version's.
+        self.engine_bridge = '%s %s' % (home/'.local/share/codex-cua/venv/bin/python3',
+                                        home/'.local/share/codex-cua/engine/0.8.0/mcp_stdio.py')
+        self.old_engine_bridge = '%s %s' % (home/'.local/share/codex-cua/venv/bin/python3',
+                                            home/'.local/share/codex-cua/engine/0.7.9/mcp_stdio.py')
         self.claude = '%s --settings /fixture/settings.json' % (home/'.local/bin/claude')
         cmux = home/'Library/Application Support/cmux/cmux-cua/helper/com.cmuxterm.app/cmux Computer Use.app/Contents/MacOS/cmux-cua'
         self.cmux_serve = '%s serve --socket /fixture/cmux-cua.sock' % cmux
@@ -429,7 +435,7 @@ class EngineCase(unittest.TestCase):
                         clock=self.machine.clock, sleep=self.machine.sleep, kill=self.machine.kill,
                         application_roots=[self.home/'Applications'], uid=UID, pid=ENGINE_PID,
                         checks=checks or self.default_checks)
-        plugin_root = overrides.pop('plugin_root', Path(__file__).resolve().parents[2]/'plugins/cua')
+        plugin_root = overrides.pop('plugin_root', Path(__file__).resolve().parents[2]/'apps/cua-bar/engine')
         settings.update(overrides)
         return Context(plugin_root, **settings)
 
@@ -442,8 +448,13 @@ class EngineCase(unittest.TestCase):
         """Where the stable copy of the relay launcher lives for this temporary home."""
         return str(self.home/'.local/share/codex-cua/relay/node-repl-relay')
 
+    def engine_version(self):
+        """The manifest version of the engine the tests run: the `engine.version` of its status."""
+        return self.context().plugin_version()
+
     def write_host(self, status='ready', owner=1000, backend=1100, proxy=1200, relay=False, relay_reason=None,
-                   socket_path=None, age=300, relay_launcher=Ellipsis, older_launcher=False, **extra):
+                   socket_path=None, age=300, relay_launcher=Ellipsis, older_launcher=False, engine_version=Ellipsis,
+                   **extra):
         # A host that started the relay names the stable launcher; one that did not, names none.
         if relay_launcher is Ellipsis:
             relay_launcher = self.stable_launcher() if relay is True else None
@@ -452,10 +463,13 @@ class EngineCase(unittest.TestCase):
                 'native_cli': str(self.native), 'mechanism': 'original_app_server_unix_websocket',
                 'operational_readiness': 'not_checked', 'relay': relay, 'relay_launcher': relay_launcher,
                 'relay_reason': relay_reason}
-        # The launcher of this setup also writes the relay table; an older one did not.
+        # The launcher of this setup also writes the relay table and the version of its engine (the engine these tests
+        # run, unless a test names another one, ABSENT or null); an older one wrote neither.
         if not older_launcher:
             data['relay_config'] = {'command': '/x/node'} if relay is True else None
+            data['engine_version'] = self.engine_version() if engine_version is Ellipsis else engine_version
         data.update(extra)
+        data = {key: value for key, value in data.items() if value is not ABSENT}
         path = self.host_dir/'host.json'
         path.write_text(json.dumps(data))
         os.chmod(path, 0o600)

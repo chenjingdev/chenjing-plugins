@@ -1,9 +1,8 @@
 import Foundation
 
 extension StatusEvaluator {
-    /// The plugin Claude Code registered is the app's version, but `codex-cua` cannot answer
-    /// `status`: it is still an old command (0.6.0 or lower does not know `status` and does not
-    /// hand over to the registered plugin) or a broken one. The plugin's setup replaces it, so this
+    /// `codex-cua` is there but cannot answer `status`: it is an old command (one from before the app
+    /// carried the engine does not know `status`) or a broken one. The app's install replaces it, so this
     /// is a setup problem, which also lets the card say so while setup runs and after it fails.
     static let staleCommandProblem = Problem(
         kind: .setupIncomplete, title: "연결 명령이 옛 판이거나 깨졌어요", nextStep: "고치기를 누르면 연결을 다시 설정해요",
@@ -27,20 +26,9 @@ extension StatusEvaluator {
     }()
 }
 
-extension EngineError {
-    /// The command ran but failed or printed something unreadable: what an old plugin that does
-    /// not know `status` does. (A timeout or a command that cannot start says nothing about versions.)
-    var mayComeFromAnOldCommand: Bool {
-        switch self {
-        case .commandFailed, .invalidOutput: true
-        default: false
-        }
-    }
-}
-
-/// Puts setup's own state over a status card that shows the setup problem: while a setup runs
-/// (or an install or update that ends in one) the card says so instead of showing a problem,
-/// and after a failure it offers 다시 하기. Any other card is left as it is.
+/// Puts setup's own state over a status card that shows the setup problem: while an install runs
+/// the card says so instead of showing a problem, and after a failure it offers 다시 하기. Any other
+/// card is left as it is.
 enum SetupOverlay {
     static func apply(to summary: StatusSummary, setup: SetupActivity.Phase, flowRunning: Bool) -> StatusSummary {
         guard summary.problem?.kind == .setupIncomplete else { return summary }
@@ -49,8 +37,9 @@ enum SetupOverlay {
         return summary
     }
 
-    /// The actions that run a setup at some point.
+    /// The actions that run the install. (The developer tools' button only opens the system's installer, or,
+    /// once the tools are there, runs 고치기 itself.)
     static func runsSetup(_ action: CUAAction) -> Bool {
-        action == .runSetup || action == .installPlugin || action == .matchPluginVersion
+        action == .runSetup
     }
 }

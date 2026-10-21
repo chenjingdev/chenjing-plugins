@@ -30,9 +30,9 @@ struct PopoverContentTests {
         #expect(empty.connections.guidance.title == "브라우저 탭이 계속 막히면")
     }
 
-    @Test func thereAreTwoTabsAndEachKnowsItsEmptyLine() {
-        #expect(PopoverTab.allCases == [.connections, .activity])
-        #expect(PopoverTab.allCases.map(\.title) == ["연결", "기록"])
+    @Test func thereAreThreeTabsAndEachKnowsItsEmptyLine() {
+        #expect(PopoverTab.allCases == [.connections, .activity, .check])
+        #expect(PopoverTab.allCases.map(\.title) == ["연결", "기록", "점검"])
         #expect(PopoverTab.connections.emptyText == "연결 없음")
         #expect(PopoverTab.activity.emptyText == "기록 없음")
     }

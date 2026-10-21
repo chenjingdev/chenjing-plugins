@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Builds CUABar.app next to Package.swift and signs it with the hardened runtime, ad hoc by default.
-# The app's version is the cua plugin's version: they ship together and the app compares them.
+# The app's version is the engine's version (engine/.claude-plugin/plugin.json): the engine ships inside the
+# app, and the app compares the two.
 #
 #   ./scripts/build-app.sh             build only
 #   ./scripts/build-app.sh --install   build, then copy it into ~/Applications the way agent-bar does:
@@ -14,7 +15,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 package_dir=$(cd "$script_dir/.." && pwd)
-plugin_manifest="$package_dir/../../plugins/cua/.claude-plugin/plugin.json"
+plugin_manifest="$package_dir/engine/.claude-plugin/plugin.json"
 
 bundle_name="CUABar.app"
 bundle_path="$package_dir/$bundle_name"
@@ -40,12 +41,12 @@ for arg in "$@"; do
 done
 
 if [[ ! -f "$plugin_manifest" ]]; then
-  echo "Plugin manifest not found: $plugin_manifest" >&2
+  echo "Engine manifest not found: $plugin_manifest" >&2
   exit 1
 fi
 version=$(plutil -extract version raw -o - "$plugin_manifest")
 if [[ ! "$version" =~ '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' ]]; then
-  echo "Plugin version is not a plain version number: '$version'" >&2
+  echo "Engine version is not a plain version number: '$version'" >&2
   exit 1
 fi
 
@@ -119,6 +120,25 @@ PLIST
 plutil -lint "$bundle_path/Contents/Info.plist" >/dev/null
 
 printf 'APPL????' > "$bundle_path/Contents/PkgInfo"
+
+# The engine travels inside the app: on its first run (and for every new version) the app unpacks it with
+# `setup.sh install-engine` into ~/.local/share/codex-cua/engine/<version>/. Copied before signing so that the
+# signature covers it. No links (the unpacking refuses them), and nothing Python or Finder leaves around.
+engine_source="$package_dir/engine"
+engine_bundle="$bundle_path/Contents/Resources/engine"
+echo "Bundling the engine from $engine_source"
+mkdir -p "$engine_bundle"
+rsync -rtpl --exclude '__pycache__' --exclude '*.pyc' --exclude '.DS_Store' "$engine_source/" "$engine_bundle/"
+for needed in setup.sh start-mcp.sh .claude-plugin/plugin.json skills/cua/SKILL.md; do
+  if [[ ! -f "$engine_bundle/$needed" ]]; then
+    echo "The engine in the bundle lacks $needed" >&2
+    exit 1
+  fi
+done
+if [[ -n "$(find "$engine_bundle" \( -type l -o -name '__pycache__' -o -name '*.pyc' -o -name '.DS_Store' \) -print -quit)" ]]; then
+  echo "The engine in the bundle holds a link or a file that must not travel" >&2
+  exit 1
+fi
 
 # Every build runs under the hardened runtime, so what is tried here is what notarization ships. Its
 # one exception: restart-codex asks Codex to quit through osascript, an Apple event this app answers for.

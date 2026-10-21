@@ -105,7 +105,7 @@ process.on('exit', () => {
 
 // RELAY_DIR_UNDER_TEST points the tests at a modified copy of the relay (mutation checks of these tests).
 export const RELAY_DIR = process.env.RELAY_DIR_UNDER_TEST
-  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../plugins/cua/relay');
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/cua-bar/engine/relay');
 export const RELAY_MJS = path.join(RELAY_DIR, 'relay.mjs');
 export const LAUNCHER = path.join(RELAY_DIR, 'node-repl-relay');
 
@@ -276,14 +276,15 @@ export class Client {
   }
 }
 
-export function startRelay(fixture, {via = 'node', env = {}, args = [], stateDir = fixture.state, launcher = LAUNCHER} = {}) {
+export function startRelay(fixture, {via = 'node', env = {}, args = [], stateDir = fixture.state, launcher = LAUNCHER, cwd} = {}) {
   const environment = {...process.env, HOME: path.join(fixture.dir, 'home'), CODEX_CUA_NATIVE_RUNTIME: fixture.native,
     CODEX_CUA_STATE_DIR: stateDir, CODEX_CUA_RELAY_NODE: process.execPath, CUA_REPL_NODE_REPL_PATH: launcher,
     FAKE_LOG: fixture.log, FAKE_STATE: stateDir, ...env};
   for (const key of Object.keys(environment)) if (environment[key] === undefined) delete environment[key];
+  const options = {env: environment, stdio: ['pipe', 'pipe', 'pipe'], ...(cwd ? {cwd} : {})};
   const child = via === 'launcher'
-    ? spawn(launcher, args, {env: environment, stdio: ['pipe', 'pipe', 'pipe']})
-    : spawn(process.execPath, [RELAY_MJS, ...args], {env: environment, stdio: ['pipe', 'pipe', 'pipe']});
+    ? spawn(launcher, args, options)
+    : spawn(process.execPath, [RELAY_MJS, ...args], options);
   const client = new Client(child);
   fixture.clients.push(client);
   return client;

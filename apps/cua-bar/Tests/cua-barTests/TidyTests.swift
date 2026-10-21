@@ -208,10 +208,10 @@ struct TidyTests {
         status.connections.append(ended("claude-1-1", startedAgo: 10))
         status.connections.append(ended("claude-2-2", startedAgo: 20))
         let rig = await Rig(status)
-        rig.engine.configure { $0.actionError = .pluginMissing }
+        rig.engine.configure { $0.actionError = .engineMissing }
         await rig.model.send(.tidyAll)?.value
         #expect(rig.actionCalls.count == 1, "nobody to ask: the rest is not tried")
-        #expect(rig.model.placedResults[.tidyAll] == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — Claude 플러그인이 없어요"))
+        #expect(rig.model.placedResults[.tidyAll] == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — 연결 엔진이 없어요"))
     }
 
     @Test func withNothingToTidyItSaysSoAndRunsNothing() async throws {

@@ -1,0 +1,17 @@
+{
+  "name": "cua",
+  "version": "0.8.0",
+  "description": "Mac 전용 Codex CUA 연결기. Claude Code가 설치된 Codex의 브라우저·앱 제어 기능을 호출합니다. 비공식 실험 버전이며 Codex 앱이 필요합니다.",
+  "author": {
+    "name": "chenjing"
+  },
+  "homepage": "https://github.com/chenjingdev/chenjing-plugins/tree/main/apps/cua-bar/engine",
+  "repository": "https://github.com/chenjingdev/chenjing-plugins",
+  "license": "MIT",
+  "keywords": [
+    "computer-use",
+    "macos",
+    "browser",
+    "mcp"
+  ]
+}

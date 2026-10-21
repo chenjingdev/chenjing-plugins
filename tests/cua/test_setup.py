@@ -43,27 +43,44 @@ class SetupTests(unittest.TestCase):
         setup.write_private(self.root/'source.json', json.dumps({'schema_version': 1,
             'plugin_id': setup.PLUGIN_ID, 'source_root': str(self.plugin)}))
 
-    def registry(self, records):
-        path = self.home/'.claude/plugins/installed_plugins.json'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({'version': 2, 'plugins': records}))
-
-    def test_exact_public_registration_follows_cache_updates(self):
-        self.bind()
-        first = self.make_plugin('cache/0.4.0', '0.4.0')
-        second = self.make_plugin('cache/0.4.1', '0.4.1')
-        for path, version in ((first, '0.4.0'), (second, '0.4.1')):
-            self.registry({setup.PLUGIN_ID: [{'scope': 'user', 'installPath': str(path), 'version': version}],
-                           'cua@unrelated': [{'scope': 'user', 'installPath': '/bad'}]})
+    def test_the_binding_is_what_names_the_engine_folder_and_a_rebinding_follows(self):
+        first = self.make_plugin('engine/0.4.0', '0.4.0')
+        second = self.make_plugin('engine/0.4.1', '0.4.1')
+        for path in (first, second):
+            setup.write_private(self.root/'source.json', json.dumps({'schema_version': 1,
+                'plugin_id': setup.PLUGIN_ID, 'source_root': str(path)}))
             self.assertEqual(setup.resolve_plugin_root(self.home), path)
 
-    def test_invalid_public_registration_never_uses_source_fallback(self):
+    def test_the_plugin_registry_of_claude_code_is_never_read(self):
         self.bind()
-        for records in ([{'scope': 'user', 'installPath': str(self.plugin), 'version': 'wrong'}],
-                        [{'scope': 'project', 'installPath': str(self.plugin)}],
-                        [{'scope': 'user', 'installPath': str(self.plugin)}]*2):
-            self.registry({setup.PLUGIN_ID: records})
-            with self.assertRaises(RuntimeError):
+        registry = self.home/'.claude/plugins/installed_plugins.json'
+        registry.parent.mkdir(parents=True)
+        other = self.make_plugin('cache/0.4.1', '0.4.1')
+        valid = {'version': 2, 'plugins': {setup.PLUGIN_ID: [
+            {'scope': 'user', 'installPath': str(other), 'version': '0.4.1'}]}}
+        for label, content in (('a registered plugin', json.dumps(valid)), ('not json at all', '{{{'),
+                               ('two user records', json.dumps({'plugins': {setup.PLUGIN_ID: [
+                                   {'scope': 'user', 'installPath': str(self.plugin)}]*2}})),
+                               ('a record of another version', json.dumps({'plugins': {setup.PLUGIN_ID: [
+                                   {'scope': 'user', 'installPath': str(self.plugin), 'version': 'wrong'}]}}))):
+            with self.subTest(label):
+                registry.write_text(content)
+                self.assertEqual(setup.resolve_plugin_root(self.home), self.plugin)
+        # Without a binding a registered plugin is no help: the command needs `install-engine` first.
+        (self.root/'source.json').unlink()
+        registry.write_text(json.dumps(valid))
+        with self.assertRaises(OSError):
+            setup.resolve_plugin_root(self.home)
+
+    def test_a_binding_that_is_not_ours_or_names_no_engine_is_refused(self):
+        for binding in ({'schema_version': 2, 'plugin_id': setup.PLUGIN_ID, 'source_root': str(self.plugin)},
+                        {'schema_version': 1, 'plugin_id': 'other@x', 'source_root': str(self.plugin)},
+                        {'schema_version': 1, 'plugin_id': setup.PLUGIN_ID, 'source_root': 7},
+                        {'schema_version': 1, 'plugin_id': setup.PLUGIN_ID, 'source_root': 'relative/path'},
+                        {'schema_version': 1, 'plugin_id': setup.PLUGIN_ID, 'source_root': str(self.home/'gone')},
+                        [1]):
+            setup.write_private(self.root/'source.json', json.dumps(binding))
+            with self.assertRaises((RuntimeError, OSError)):
                 setup.resolve_plugin_root(self.home)
 
     def test_fallback_binding_is_private_and_symlink_is_rejected(self):
@@ -344,6 +361,56 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.check(slow=True))['status'], 'timeout')
         result = {'isError': False, 'content': [{'type': 'text', 'text': 'inventory'}]}
         self.assertEqual((await self.check(result, cleanup=False))['status'], 'cleanup_unconfirmed')
+
+    @staticmethod
+    def slow_to_leave(seconds, hang_in_call=False):
+        """A host connection whose thread takes `seconds` to leave (and, with `hang_in_call`, whose call never ends)."""
+        class SlowToLeave:
+            def __init__(self, *args, **kwargs):
+                self.emit, self.log = kwargs['emit'], kwargs['log']
+                self.tool_names = {'js', 'js_reset'}
+            async def boot(self):
+                pass
+            async def handle(self, request):
+                if hang_in_call: await asyncio.sleep(60)
+                self.emit({'id': 'doctor', 'result': {'isError': False, 'content': [{'type': 'text', 'text': 'inventory'}]}})
+            async def close(self):
+                await asyncio.sleep(seconds)
+                return {'owned_thread_unsubscribe': 'confirmed', 'connection_close': 'confirmed'}
+        return SlowToLeave
+
+    async def leave(self, seconds, cut, **options):
+        began = time.monotonic()
+        with patch('host_mcp.HostMcp', self.slow_to_leave(seconds, **options)):
+            report = await setup.probe_host({'socket_path': '/fake/socket'}, 30, cut=cut)
+        return report, time.monotonic()-began
+
+    async def test_a_test_that_is_cut_gives_the_host_one_second_to_take_the_thread_back(self):
+        # The app kills a test it gave up on two seconds after it asked it to end; the rest of --timeout is not for the cleanup.
+        cut = setup.Cut()
+        cut.set()
+        report, seconds = await self.leave(1.6, cut)
+        self.assertTrue(0.9 < seconds < 1.5, seconds)
+        self.assertEqual(report['cleanup'], {'connection_close': 'unconfirmed', 'owned_thread_unsubscribe': 'unconfirmed'})
+        self.assertEqual(report['status'], 'cleanup_unconfirmed')
+
+    async def test_a_test_nobody_cut_leaves_the_host_the_rest_of_its_time(self):
+        report, seconds = await self.leave(1.6, setup.Cut())
+        self.assertTrue(1.5 < seconds < 2.5, seconds)
+        self.assertEqual(report['status'], 'checked')
+        self.assertEqual(report['cleanup'], {'connection_close': 'confirmed', 'owned_thread_unsubscribe': 'confirmed'})
+
+    async def test_a_test_that_is_cancelled_is_cut_and_leaves_in_a_second(self):
+        cut = setup.Cut()
+        with patch('host_mcp.HostMcp', self.slow_to_leave(60, hang_in_call=True)):
+            task = asyncio.ensure_future(setup.probe_host({'socket_path': '/fake/socket'}, 30, cut=cut))
+            await asyncio.sleep(0.2)                    # the call is on its way
+            began = time.monotonic()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertTrue(cut.is_set())
+        self.assertLess(time.monotonic()-began, 2.0)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@
   "schema_version": 1,
   "generated_at": "2026-10-18T12:00:00Z",
   "plugin": {"version": "0.7.0"},
+  "engine": {"version": "0.7.0", "root": "/Users/chenjing/.local/share/codex-cua/engine/0.7.0", "launcher": "/Users/chenjing/.local/share/codex-cua/engine/current/start-mcp.sh"},
   "codex": {"installed": true, "app_path": "/Applications/ChatGPT.app", "app_version": "26.1013.40934", "running": true, "pids": [15400]},
   "host": {"state": "ready", "since": "2026-10-18T11:30:00Z"},
   "setup": {"command": "ready", "dependencies": "ready", "login_environment": "ready", "wrapper": "ready", "relay": "active"},

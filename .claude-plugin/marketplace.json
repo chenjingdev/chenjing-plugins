@@ -1,15 +1,10 @@
 {
   "name": "chenjing-plugins",
-  "description": "chenjing의 Claude Code 플러그인 모음",
+  "description": "chenjing의 Claude Code 플러그인 모음. CUA(화면 조작)는 플러그인이 아니라 CUA Bar 앱(https://cua.chenjing.org) 하나로 깐다.",
   "owner": {
     "name": "chenjing"
   },
   "plugins": [
-    {
-      "name": "cua",
-      "description": "Mac 전용 Codex CUA 연결기. Claude Code에서 설치된 Codex의 브라우저·앱 제어를 사용합니다. Codex 앱 필요 · 비공식 실험 버전.",
-      "source": "./plugins/cua"
-    },
     {
       "name": "resume",
       "description": "전문가 패널 에이전트 기반 이력서 파이프라인",

@@ -5,8 +5,10 @@ enum NotificationKind: String, Equatable, Sendable {
     case codexWithoutHost
     /// A lease the owner left behind is still listed a minute later (R16).
     case lingeringLease
-    /// A newer CUA Bar release is out (F7); posted once per version.
-    case newVersion
+    /// A newer CUA Bar is out and the app could not put it in by itself (F4); posted once per version.
+    case updateFailed
+    /// The app has just replaced itself with a newer version (F4); posted once, by the new version when it starts.
+    case updated
 }
 
 enum NotificationButton: String, Equatable, Sendable {
@@ -41,10 +43,17 @@ struct AppNotification: Equatable, Sendable {
 
 extension AppNotification {
     /// The footer shows the same news as its 새 버전 button; clicking the notification opens the popover.
-    static func newVersion(_ version: String) -> AppNotification {
+    static func updateFailed(_ version: String) -> AppNotification {
         AppNotification(
-            key: "new-version-\(version)", kind: .newVersion, title: "CUA Bar 새 버전 \(version)이 나왔어요",
-            body: "창 아래 '새 버전 \(version)'을 누르면 받는 곳이 열려요.")
+            key: "update-failed-\(version)", kind: .updateFailed, title: "CUA Bar 새 버전 \(version)를 저절로 올리지 못했어요",
+            body: "창 아래 버튼으로 받을 수 있어요")
+    }
+
+    /// The app was updated: "CUA Bar를 x.y.z로 올렸어요" and what that means for Claude conversations. Clicking it opens the
+    /// popover, like the others.
+    static func updated(_ version: VersionNumber) -> AppNotification {
+        AppNotification(
+            key: "updated-\(version)", kind: .updated, title: UpdateNotice.headline(for: version), body: UpdateNotice.consequence)
     }
 }
 
@@ -65,7 +74,8 @@ enum NotificationResponse: Equatable, Sendable {
         switch (tap, kind) {
         case (.body, .codexWithoutHost): .openPopover(nil)
         case (.body, .lingeringLease): .openPopover(.connections)
-        case (.body, .newVersion): .openPopover(nil)
+        case (.body, .updateFailed): .openPopover(nil)
+        case (.body, .updated): .openPopover(nil)
         case (.button(.restartCodex), .codexWithoutHost): .restartCodex(key: key)
         default: nil
         }
