@@ -81,11 +81,13 @@ struct ProbeClientTests {
     }
 
     @Test func aNotificationGetsTheSentenceAfterItsBodyAndNothingElseChanges() {
-        let updated = AppNotification(
-            key: "updated-0.8.0", kind: .newVersion, title: "CUA Bar 0.8.0", body: "CUA Bar를 0.8.0으로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요")
+        let updated = AppNotification.updated(VersionNumber(0, 8, 0))
         let failed = updated.appending(probe: .failed)
         #expect(failed.body == updated.body + ". 연결 시험이 실패했어요 — 점검 탭을 보세요")
-        #expect(failed.key == updated.key && failed.title == updated.title && failed.kind == updated.kind)
+        #expect(failed.key == updated.key)
+        #expect(failed.title == updated.title)
+        #expect(failed.kind == updated.kind)
+        #expect(failed.buttons == updated.buttons)
         #expect(updated.appending(probe: .checked) == updated)
         #expect(updated.appending(probe: nil) == updated)
     }

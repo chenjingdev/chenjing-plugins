@@ -979,6 +979,14 @@ final class CUABarViewModel: ObservableObject {
         return inFlight.contains(fix) || waitsForQuit(fix)
     }
 
+    /// Nothing is in the way of the app replacing itself with a newer version (F4, R8): the popover (and the verify
+    /// panel) is closed, no tidy-up, setup or other button's action runs, and no restart is waiting for Codex to quit.
+    /// So an update never takes the window from someone looking at it and never cuts off what the app was asked to do.
+    var isQuietForUpdate: Bool {
+        !isPopoverOpen && inFlight.isEmpty && !isCleaningUp && automaticCleanupTask == nil
+            && pendingRelaunch == nil && !setupActivity.isRunning && !isProbing
+    }
+
     /// What the status card's fix says on hover while it waits; nil otherwise.
     var fixHelp: String? {
         guard let fix = summary.fix, waitsForQuit(fix) else { return nil }

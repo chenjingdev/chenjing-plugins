@@ -232,8 +232,8 @@ struct NotificationPlannerTests {
         #expect(NotificationResponse.make(tap: .body, kind: .codexWithoutHost, key: "codex:1") == .openPopover(nil))
         // A lingering lease opens 연결: its line is at the top of that list.
         #expect(NotificationResponse.make(tap: .body, kind: .lingeringLease, key: "lease:a") == .openPopover(.connections))
-        #expect(NotificationResponse.make(tap: .body, kind: .newVersion, key: "new-version-0.7.1") == .openPopover(nil))
-        #expect(NotificationResponse.make(tap: .dismissed, kind: .newVersion, key: "new-version-0.7.1") == nil)
+        #expect(NotificationResponse.make(tap: .body, kind: .updateFailed, key: "update-failed-0.7.1") == .openPopover(nil))
+        #expect(NotificationResponse.make(tap: .dismissed, kind: .updateFailed, key: "update-failed-0.7.1") == nil)
         #expect(NotificationResponse.make(tap: .button(.restartCodex), kind: .codexWithoutHost, key: "codex:1") == .restartCodex(key: "codex:1"))
         #expect(NotificationResponse.make(tap: .button(.restartCodex), kind: .lingeringLease, key: "lease:a") == nil)
         #expect(NotificationResponse.make(tap: .dismissed, kind: .codexWithoutHost, key: "codex:1") == nil)
@@ -447,14 +447,30 @@ struct NotificationViewModelTests {
     }
 }
 
-@Suite struct NewVersionNotificationTests {
-    @Test func aNewReleaseIsOneNotificationPerVersionThatPointsAtTheFooter() {
-        let note = AppNotification.newVersion("0.7.1")
-        #expect(note.kind == .newVersion)
-        #expect(note.key == "new-version-0.7.1")
-        #expect(note.title.contains("0.7.1"))
-        #expect(note.body.contains("새 버전 0.7.1"))
+@Suite struct UpdateFailedNotificationTests {
+    @Test func aFailedUpdateIsOneNotificationPerVersionThatPointsAtTheFooter() {
+        let note = AppNotification.updateFailed("0.7.1")
+        #expect(note.kind == .updateFailed)
+        #expect(note.key == "update-failed-0.7.1")
+        #expect(note.title == "CUA Bar 새 버전 0.7.1를 저절로 올리지 못했어요")
+        #expect(note.body == "창 아래 버튼으로 받을 수 있어요")
         #expect(note.buttons.isEmpty)
-        #expect(AppNotification.newVersion("0.7.2").key != note.key)
+        #expect(AppNotification.updateFailed("0.7.2").key != note.key)
+    }
+}
+
+@Suite struct UpdatedNotificationTests {
+    @Test func theUpdateIsOneNotificationWithTheLineInTwoPartsThatOpensThePopover() {
+        let version = VersionNumber(0, 8, 1)
+        let note = AppNotification.updated(version)
+        #expect(note.kind == .updated)
+        #expect(note.key == "updated-0.8.1")
+        #expect(note.title == "CUA Bar를 0.8.1로 올렸어요")
+        #expect(note.body == "새 Claude 대화부터 새 판이 쓰여요")
+        #expect(note.title + ". " + note.body == UpdateNotice.line(for: version))
+        #expect(note.buttons.isEmpty)
+        #expect(NotificationResponse.make(tap: .body, kind: .updated, key: note.key) == .openPopover(nil))
+        #expect(NotificationResponse.make(tap: .dismissed, kind: .updated, key: note.key) == nil)
+        #expect(AppNotification.updated(VersionNumber(0, 8, 2)).key != note.key)
     }
 }

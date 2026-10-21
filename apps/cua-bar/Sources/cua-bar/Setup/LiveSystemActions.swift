@@ -75,6 +75,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     private let setup: SetupActivity
     private let codex: CodexLocator
     private let timeouts: Timeouts
+    private let updateNotice: UpdateNotice?
+    private let announce: (@Sendable (AppNotification) async -> Bool)?
 
     init(
         claude: ClaudeIntegration,
@@ -85,7 +87,11 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         appVersion: String?,
         setup: SetupActivity,
         codex: CodexLocator = CodexLocator(),
-        timeouts: Timeouts = Timeouts()
+        timeouts: Timeouts = Timeouts(),
+        // The mark an update leaves for the app that starts after it; nil: none is looked for (tests, previews).
+        updateNotice: UpdateNotice? = nil,
+        // Posts a notification and says whether it went out (`Notifier.post`); nil: the line goes to the banner instead.
+        announce: (@Sendable (AppNotification) async -> Bool)? = nil
     ) {
         self.claude = claude
         self.engine = engine
@@ -96,6 +102,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         self.setup = setup
         self.codex = codex
         self.timeouts = timeouts
+        self.updateNotice = updateNotice
+        self.announce = announce
     }
 
     // MARK: Codex download
@@ -161,7 +169,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     /// The install, with a banner that says what the connection test after it found when that failed.
     func setUp() async -> ActionOutcome {
         let done = await setUpAndTest()
-        return ProbeMessages.attach(done.probe, to: done.outcome)
+        return await told(done.outcome, probe: done.probe)
     }
 
     /// The install and, when it changed something and the Codex host is ready, one connection test after it. `outcome` is
@@ -177,6 +185,28 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         let hook = afterChangeLock.withLock { afterChangeHook }
         let probe = result.changed ? await hook?() : nil
         return (result.outcome, probe)
+    }
+
+    /// Right after the app replaced itself with a newer version (F4), "새 Claude 대화부터 CUA가 붙어요" is not said. The
+    /// update's own line is, "CUA Bar를 x.y.z로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요", as a notification: the popover
+    /// is closed when the new app starts, and a banner in it would pass unseen. So the person hears one thing, once, and
+    /// the update's mark is taken away. Where no notification went out (they are off), the line is the banner's.
+    /// The line of an install that had no Claude Code to tell about stays as it is, and the mark goes with it. Any other
+    /// outcome leaves the mark for the run that finishes the install.
+    /// The connection test ran before any of this; when it failed, its sentence goes after whatever is said, the
+    /// notification or the banner, and only there.
+    private func told(_ outcome: ActionOutcome, probe: ProbeOutcome?) async -> ActionOutcome {
+        let said = ProbeMessages.attach(probe, to: outcome)
+        guard let updateNotice else { return said }
+        guard outcome.message == InstallMessages.installed || outcome.message == Self.engineOnly else { return said }
+        let running = VersionNumber(appVersion)
+        guard let line = updateNotice.lineIfJustUpdated(to: running), let version = running else { return said }
+        updateNotice.clear()
+        guard outcome.message == InstallMessages.installed else { return said }
+        if let announce, await announce(AppNotification.updated(version).appending(probe: probe)) {
+            return InstallMessages.nothingToSay
+        }
+        return ProbeMessages.attach(probe, to: ActionOutcome(kind: .success, message: line))
     }
 
     private func install() async -> Run {

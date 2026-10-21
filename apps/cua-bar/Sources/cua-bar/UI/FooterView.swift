@@ -14,7 +14,7 @@ struct FooterView: View {
                 .font(Theme.captionFont)
                 .foregroundStyle(.secondary)
             if let maintenance {
-                NewVersionButton(releases: maintenance.releases, opener: maintenance.opener)
+                NewVersionButton(updater: maintenance.updater, opener: maintenance.opener)
             }
             Spacer(minLength: 4)
             Button("끝내기", action: quit)
@@ -25,18 +25,18 @@ struct FooterView: View {
     }
 }
 
-/// "새 버전 x.y.z", only when the daily check found a newer app. It opens that release's page;
-/// nothing is downloaded or replaced.
+/// "새 버전 x.y.z", only while an update to that version could not be made by itself (F4). The app updates
+/// itself; this is what is left when it could not. It opens the download site, where the person gets the app.
 struct NewVersionButton: View {
-    @ObservedObject var releases: ReleaseChecker
+    @ObservedObject var updater: AppUpdater
     var opener: any URLOpening
 
     var body: some View {
-        if let release = releases.newRelease {
+        if let failure = updater.failure {
             Button {
-                Task { _ = await opener.open(release.url) }
+                Task { _ = await opener.open(UpdateSource.site) }
             } label: {
-                Text(release.buttonTitle)
+                Text(failure.buttonTitle)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.blueText)
                     .padding(.horizontal, 7)
@@ -44,7 +44,7 @@ struct NewVersionButton: View {
                     .background(Capsule().fill(Color.blue.opacity(0.14)))
             }
             .buttonStyle(.plain)
-            .help("새 앱 판이 나왔어요. 받는 곳(GitHub Release)을 열어요")
+            .help("새 판을 저절로 올리지 못했어요. 받는 곳(cua.chenjing.org)을 열어요")
         }
     }
 }

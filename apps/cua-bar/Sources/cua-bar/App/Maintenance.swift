@@ -1,10 +1,10 @@
 import Foundation
 
 /// What the popover's bottom line and the 기록 tab need besides the status: the new-version button
-/// (bottom line), 앱 지우기 and the login item line (기록).
+/// (bottom line, while an update could not be made by itself), 앱 지우기 and the login item line (기록).
 @MainActor
 struct Maintenance {
-    var releases: ReleaseChecker
+    var updater: AppUpdater
     var removal: RemovalFlow
     var loginItem: LoginItemRegistrar
     var opener: any URLOpening
@@ -20,5 +20,13 @@ struct DiagnosisPasteboard: PasteboardWriting {
     func copy(_ text: String) {
         let separator = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
         base.copy(text + separator + appLines() + "\n")
+    }
+}
+
+extension DiagnosisPasteboard {
+    /// The lines the app adds to the diagnosis: its version, what became of the login item, and what the updates are doing
+    /// when there is something to say (`AppUpdater.diagnosisLine`).
+    static func appLines(appVersion: String?, loginItemLine: String, updateLine: String?) -> String {
+        "앱: CUA Bar \(appVersion ?? "개발용")\n\(loginItemLine)" + (updateLine.map { "\n" + $0 } ?? "")
     }
 }
