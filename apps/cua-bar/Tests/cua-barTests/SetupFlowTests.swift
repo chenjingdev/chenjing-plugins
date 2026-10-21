@@ -152,12 +152,64 @@ struct SetupFlowTests {
         #expect(rig.setup.waitingFor.isEmpty)
     }
 
+    @Test func whatWasPutOffForAnAnswerFromTheEngineRunsWithTheFirstReadThatWorksAndNotBefore() async throws {
+        let rig = try makeRig(engine: .failure(.timeout))
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
+        await auto.runAtStartup()
+        #expect(rig.setup.waitingFor == [.status])
+        #expect(!rig.runner.calls.contains { $0.isInstallEngine }, "the engine could not be asked")
+        #expect(rig.runner.calls.contains(rig.mcpAdd(rig.launcher)), "the MCP server did not wait for it")
+        let count = rig.runner.calls.count
+
+        await auto.runWhatWasPutOff(status: nil)
+        #expect(rig.runner.calls.count == count, "a read that failed is no answer")
+
+        // The first read that works shows an engine of another version.
+        rig.engine.setStatus(try LiveSystemActionsTests().currentEngine(rig.home, version: "0.6.0").get())
+        let answer = try await rig.engine.status()
+        await auto.runWhatWasPutOff(status: answer)
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1)
+        #expect(rig.setup.waitingFor.isEmpty)
+        await auto.runWhatWasPutOff(status: answer)
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1, "once")
+    }
+
+    @Test func aCodexTheEngineDoesNotAcceptDoesNotStartARunAtEveryRead() async throws {
+        // The app sees a Codex app on the disk, the engine says there is none: the engine's word counts, so what was
+        // put off for Codex waits for the engine to change its mind and does not spin.
+        let rig = try makeRig(codexInstalled: true)
+        defer { rig.home.remove() }
+        var rejecting = try LiveSystemActionsTests().currentEngine(rig.home, version: "0.6.0").get()
+        rejecting.codex.installed = false
+        rig.engine.setStatus(rejecting)
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
+        await auto.runAtStartup()
+        #expect(rig.setup.waitingFor == [.codex])
+        #expect(rig.runner.calls.isEmpty)
+        let reads = rig.engine.statusCallCount
+
+        for _ in 0..<3 { await auto.runWhatWasPutOff(status: rejecting) }
+        #expect(rig.runner.calls.isEmpty, "the disk says yes, the engine says no")
+        #expect(rig.engine.statusCallCount == reads, "and no run was started")
+
+        var accepting = rejecting
+        accepting.codex.installed = true
+        rig.engine.setStatus(accepting)
+        await auto.runWhatWasPutOff(status: accepting)
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+        #expect(rig.setup.waitingFor.isEmpty)
+    }
+
     @Test func theModelRunsWhatWasPutOffAfterAReadThatFindsItHasComeAndOnlyThen() async throws {
         let rig = try makeRig(codexInstalled: false)
         defer { rig.home.remove() }
         let model = makeModel(rig)
         let auto = automaticSetup(model, rig)
-        model.afterRead = { await auto.runWhatWasPutOff() }
+        model.afterRead = { await auto.runWhatWasPutOff(status: $0) }
         await auto.runAtStartup()
         await model.refresh()
         await model.waitForBackgroundWork()

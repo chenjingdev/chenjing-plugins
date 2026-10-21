@@ -108,9 +108,10 @@ final class CUABarViewModel: ObservableObject {
     private(set) var isPopoverOpen = false
     /// Set by the menu bar item: shows the popover (a click on a notification).
     var openPopoverHandler: (@MainActor () -> Void)?
-    /// Runs in the background after each read (the install does what it put off for lack of Codex or Claude
-    /// Code). Set once by the app; it must return at once when there is nothing to do.
-    var afterRead: (@MainActor () async -> Void)?
+    /// Runs in the background after each read, given what the read answered (nil: it failed). The install does
+    /// what it put off for lack of Codex, Claude Code or an answer. Set once by the app; it must return at once
+    /// when there is nothing to do.
+    var afterRead: (@MainActor (EngineStatus?) async -> Void)?
     /// The automatic cleanup that is running, if any. Never two at a time.
     private(set) var automaticCleanupTask: Task<Void, Never>?
 
@@ -298,10 +299,12 @@ final class CUABarViewModel: ObservableObject {
     }
 
     private func fetch() async {
+        var answered: EngineStatus?
         do {
             let status = try await engine.status()
             consecutiveFailures = 0
             accept(status, claude: await readClaude(launcher: status.engine.launcher))
+            answered = status
         } catch is CancellationError {
             return
         } catch let error as EngineError {
@@ -311,7 +314,7 @@ final class CUABarViewModel: ObservableObject {
             claudeSetup = await readClaude(launcher: nil)
             reject(.commandFailed(exitCode: -1, message: ""))
         }
-        if let afterRead { runInBackground { await afterRead() } }
+        if let afterRead { runInBackground { await afterRead(answered) } }
     }
 
     /// Claude Code's files are read off the main actor: `~/.claude.json` can be large.

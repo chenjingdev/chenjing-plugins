@@ -102,6 +102,55 @@ struct ClaudeSetupTests {
         #expect(state.mcp == .missing)
     }
 
+    // MARK: The big file is not read again when it did not change
+
+    @Test func theConfigIsParsedAgainOnlyWhenTheFileChanged() throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let (claude, _) = make(home)
+        #expect(claude.configParseCount == 0)
+        try home.addMcp(command: home.launcher)
+        for _ in 0..<5 { #expect(claude.mcpState(launcher: home.launcher) == .ready) }
+        #expect(claude.configParseCount == 1, "five looks at an unchanged file")
+
+        // The same size, written again: the file is not the same any more.
+        try home.addMcp(command: home.launcher.replacingOccurrences(of: "current", with: "curren2"))
+        #expect(claude.mcpState(launcher: home.launcher) == .outdated)
+        #expect(claude.configParseCount == 2)
+        for _ in 0..<3 { _ = claude.mcpState(launcher: home.launcher) }
+        #expect(claude.configParseCount == 2)
+
+        // Replaced by a file that cannot be read, and then taken away.
+        try home.write("{not json", to: home.claudeConfig)
+        #expect(claude.mcpState(launcher: home.launcher) == .unknown)
+        #expect(claude.configParseCount == 3)
+        try FileManager.default.removeItem(at: home.claudeConfig)
+        #expect(claude.mcpState(launcher: home.launcher) == .missing)
+    }
+
+    @Test func aCopyOfTheIntegrationSharesWhatWasRead() throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let (claude, _) = make(home)
+        let copy = claude
+        try home.addMcp(command: home.launcher)
+        _ = claude.mcpState(launcher: nil)
+        _ = copy.mcpState(launcher: nil)
+        #expect(claude.configParseCount == 1)
+        #expect(copy.configParseCount == 1)
+    }
+
+    @Test func theCachedReadStillAnswersForWhateverLauncherIsAsked() throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let (claude, _) = make(home)
+        try home.addMcp(command: home.launcher)
+        #expect(claude.mcpState(launcher: home.launcher) == .ready)
+        #expect(claude.mcpState(launcher: "/elsewhere/.local/share/codex-cua/engine/current/start-mcp.sh") == .outdated)
+        #expect(claude.mcpState(launcher: nil) == .ready)
+        #expect(claude.configParseCount == 1)
+    }
+
     // MARK: The skill folder
 
     private func source(_ home: TempHome, body: String = "the bundled skill\n") throws -> URL {
@@ -177,7 +226,7 @@ struct ClaudeSetupTests {
             return StepRunner.ok()
         }
         let removal = await claude.removeAppOwned()
-        #expect(removal == ClaudeIntegration.Removal(mcpStays: false))
+        #expect(removal == ClaudeIntegration.Removal(mcpStays: false, removedAnything: true))
         #expect(runner.calls.map(\.arguments) == [["mcp", "remove", "-s", "user", "cua"]])
         #expect(runner.calls.first?.executable == home.claudeCLI.path)
         #expect(!FileManager.default.fileExists(atPath: home.skillFolder.path))
@@ -206,9 +255,21 @@ struct ClaudeSetupTests {
             try home.addSkill(version: "0.7.0")
             let (claude, _) = make(home, found: found) { _ in StepRunner.failed() }
             let removal = await claude.removeAppOwned()
-            #expect(removal == ClaudeIntegration.Removal(mcpStays: true), "claude found: \(found)")
+            #expect(removal == ClaudeIntegration.Removal(mcpStays: true, removedAnything: true), "claude found: \(found); the skill went all the same")
             #expect(!FileManager.default.fileExists(atPath: home.skillFolder.path), "the skill goes all the same")
         }
+    }
+
+    @Test func aConfigFileThatCannotBeReadMeansTheServerMayStayAndIsToldSoWithoutAnyCommand() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        try home.write("{not json", to: home.claudeConfig)
+        try home.addSkill(version: "0.7.0")
+        let (claude, runner) = make(home)
+        let removal = await claude.removeAppOwned()
+        #expect(removal == ClaudeIntegration.Removal(mcpStays: true, removedAnything: true), "the skill is marked, so it went")
+        #expect(runner.calls.isEmpty, "nothing is asked of Claude Code about a file nobody can read")
+        #expect(try String(contentsOf: home.claudeConfig, encoding: .utf8) == "{not json", "and the file is left as it is")
     }
 
     @Test func removalWithNothingThereDoesNothing() async throws {

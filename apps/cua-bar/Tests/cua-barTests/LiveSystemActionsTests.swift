@@ -115,6 +115,7 @@ struct LiveSystemActionsTests {
         bundled: Bool = true,
         engine status: Result<EngineStatus, EngineError> = .failure(.engineMissing),
         installPrints: String? = nil,
+        installedSetup: String = #"{"command": "ready"}"#,
         gateFor: @escaping @Sendable (StepRunner.Call) -> AsyncGate? = { _ in nil },
         responses: (@Sendable (StepRunner.Call) throws -> ProcessOutput?)? = nil
     ) throws -> Rig {
@@ -125,7 +126,7 @@ struct LiveSystemActionsTests {
         let bundle = BundledEngine(root: bundleRoot)
         let launcher = home.launcher
         let claudePath = home.claudeCLI.path
-        let printed = installPrints ?? #"{"version": "0.7.0", "root": "/x/engine/0.7.0", "removed": [], "launcher": "\#(launcher)", "setup": {"command": "ready"}}"#
+        let printed = installPrints ?? #"{"version": "0.7.0", "root": "/x/engine/0.7.0", "removed": [], "launcher": "\#(launcher)", "setup": \#(installedSetup)}"#
         let runner = StepRunner(gateFor: gateFor) { call in
             if let answer = try responses?(call) { return answer }
             if call.isDeveloperToolsCheck { return developerTools ? StepRunner.ok("/Library/Developer/CommandLineTools\n") : StepRunner.failed(code: 2) }
@@ -264,12 +265,137 @@ struct LiveSystemActionsTests {
     }
 
     @Test(arguments: [EngineError.timeout, .launchFailed("x")])
-    func anEngineThatCannotBeAskedIsNotInstalledOverBlindly(error: EngineError) async throws {
-        let rig = try rig(engine: .failure(error))
+    func anEngineThatCannotBeAskedIsNotInstalledOverBlindlyAndItsStepWaitsForAnAnswer(error: EngineError) async throws {
+        let rig = try rig(claudeInstalled: false, engine: .failure(error))
         defer { rig.home.remove() }
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck])
         #expect(outcome.message.isEmpty)
+        #expect(rig.setup.waitingFor == [.status, .claudeCode])
+    }
+
+    @Test func aStatusThatRunsOutOfTimeStillPutsInTheMCPServerAndTheSkillAndOnlyTheEngineStepWaits() async throws {
+        // The launcher is one path whatever the engine's version, so Claude Code's part does not need the answer.
+        let rig = try rig(engine: .failure(.timeout))
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.mcpAdd(rig.launcher)], "no install-engine")
+        #expect(rig.claude.mcpState(launcher: nil) == .ready)
+        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
+        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(rig.setup.waitingFor == [.status], "the engine step comes back with the first read that works")
+        #expect(rig.setup.phase == .idle)
+    }
+
+    @Test func aSkillOrServerOfAnotherIsStillLeftAloneWhileTheStatusCannotBeHad() async throws {
+        let rig = try rig(engine: .failure(.timeout))
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        try rig.home.addMcp(command: "/usr/local/bin/cua")
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck])
+        #expect(outcome == ActionOutcome(kind: .warning, message: InstallMessages.conflict))
+        #expect(rig.setup.waitingFor == [.status])
+    }
+
+    // MARK: A matching engine with a broken part (the card's 고치기 has to do something)
+
+    nonisolated static let brokenParts: [(String, String)] = [
+        ("command", "missing"), ("dependencies", "missing"), ("login_environment", "missing"), ("login_environment", "stale"),
+        ("login_environment", "conflict"), ("wrapper", "missing"), ("wrapper", "broken"), ("relay", "unavailable"),
+    ]
+
+    private func engineWith(_ field: String, _ value: String, home: TempHome) throws -> EngineStatus {
+        var status = try currentEngine(home).get()
+        switch field {
+        case "command": status.setup.command = value
+        case "dependencies": status.setup.dependencies = value
+        case "login_environment": status.setup.loginEnvironment = value
+        case "wrapper": status.setup.wrapper = value
+        default: status.setup.relay = value
+        }
+        return status
+    }
+
+    @Test(arguments: LiveSystemActionsTests.brokenParts)
+    func anEngineOfTheAppsVersionWithABrokenPartHasItsSetupRunAgain(part: (String, String)) async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try engineWith(part.0, part.1, home: rig.home))
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall], "\(part): the card's 고치기 must do something")
+        // Nothing in Claude Code changed, so it is not a new conversation that has something.
+        #expect(outcome == ActionOutcome(kind: .success, message: "연결 설정을 마쳤어요"))
+        #expect(rig.setup.phase == .idle)
+    }
+
+    @Test func aSetupThatDoesNotComeRightAfterwardsIsLeftToTheCardAndSaysNothing() async throws {
+        // The login environment conflicts with another setting: running it again does not change that. No banner
+        // at every start for it.
+        let rig = try rig(installedSetup: #"{"command": "ready", "login_environment": "conflict", "relay": "ready"}"#)
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try engineWith("login_environment", "conflict", home: rig.home))
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+        #expect(outcome.message.isEmpty)
+        #expect(rig.setup.phase == .idle, "the install itself went through")
+    }
+
+    @Test func aMatchingEngineWithNothingBrokenIsNotSetUpAgain() async throws {
+        let rig = try rig()
+        defer { rig.home.remove() }
+        rig.engine.setStatus(try currentEngine(rig.home).get())
+        try rig.home.installClaudeCode()
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        _ = await rig.actions.setUp()
+        #expect(!rig.runner.calls.contains { $0.isInstallEngine })
+    }
+
+    // MARK: Codex: the engine's word first, the app's look at the disk when it cannot say
+
+    @Test func theEnginesWordThatCodexIsThereCountsMoreThanTheAppsLookAtTheDisk() async throws {
+        // Codex is somewhere the app does not look, and the engine found it.
+        let rig = try rig(codexInstalled: false)
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        var status = try currentEngine(rig.home, version: "0.6.0").get()
+        status.codex.installed = true
+        rig.engine.setStatus(status)
+        _ = await rig.actions.setUp()
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+        #expect(rig.setup.waitingFor.isEmpty)
+    }
+
+    @Test func theEnginesWordThatCodexIsNotThereCountsMoreToo() async throws {
+        let rig = try rig(codexInstalled: true)
+        defer { rig.home.remove() }
+        var status = try currentEngine(rig.home, version: "0.6.0").get()
+        status.codex.installed = false
+        rig.engine.setStatus(status)
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls.isEmpty)
+        #expect(outcome.message.isEmpty)
+        #expect(rig.setup.waitingFor == [.codex])
+    }
+
+    @Test func anEngineThatDoesNotSayAboutCodexLeavesItToTheAppsLook() async throws {
+        for there in [false, true] {
+            let rig = try rig(codexInstalled: there)
+            defer { rig.home.remove() }
+            var status = try currentEngine(rig.home, version: "0.6.0").get()
+            status.codex.installed = nil
+            rig.engine.setStatus(status)
+            _ = await rig.actions.setUp()
+            #expect(rig.runner.calls.contains(rig.installEngineCall) == there, "app sees Codex: \(there)")
+        }
     }
 
     @Test func anOutOfDateMCPServerOfTheAppsOwnIsRemovedAndAddedAgain() async throws {

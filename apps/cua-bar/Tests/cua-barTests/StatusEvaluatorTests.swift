@@ -242,22 +242,24 @@ struct StatusEvaluatorTests {
         status.host.state = .closed
         status.connections[0].state = .ended
         status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-1", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
-        var facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .conflict, skill: .ready))
+        let facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .conflict, skill: .ready))
 
-        // codex_missing > setup_incomplete > claude_conflict > codex_without_host > ended_connections > leases_maybe_left
+        // codex_missing > setup_incomplete > codex_without_host > claude_conflict > ended_connections > leases_maybe_left
+        // (the problems that have a button come first: a conflict someone left on purpose does not hide them)
         #expect(evaluate(status, facts: facts).problem?.kind == .codexMissing)
         status.codex = CodexInfo(installed: true, appPath: "/Applications/ChatGPT.app", appVersion: "1", running: true, pids: [1])
         #expect(evaluate(status, facts: facts).problem?.kind == .setupIncomplete)
         status.setup.wrapper = "ready"
-        #expect(evaluate(status, facts: facts).problem?.kind == .claudeConflict)
-        facts = LocalFacts()
         #expect(evaluate(status, facts: facts).problem?.kind == .codexWithoutHost)
         status.host.state = .ready
-        #expect(evaluate(status, facts: facts).problem?.kind == .endedConnections)
+        #expect(evaluate(status, facts: facts).problem?.kind == .claudeConflict)
+        #expect(evaluate(status, facts: LocalFacts()).problem?.kind == .endedConnections, "without the conflict")
         status.connections[0].state = .active
-        #expect(evaluate(status, facts: facts).problem?.kind == .leasesMaybeLeft)
+        #expect(evaluate(status, facts: facts).problem?.kind == .claudeConflict, "a conflict still comes before a line's problem")
+        #expect(evaluate(status, facts: LocalFacts()).problem?.kind == .leasesMaybeLeft)
         status.leases.maybeLeft = []
-        #expect(evaluate(status, facts: facts).problem == nil)
+        #expect(evaluate(status, facts: facts).problem?.kind == .claudeConflict)
+        #expect(evaluate(status, facts: LocalFacts()).problem == nil)
     }
 
     @Test func aMissingEngineIsTheSetupProblemBecauseThereIsNoStatusToRead() {
@@ -296,20 +298,30 @@ struct StatusEvaluatorTests {
 
     // MARK: Version
 
-    @Test func anEngineOfAnotherVersionIsASetupProblemOnceBothVersionsAreKnown() throws {
+    @Test func anEngineOfAnotherVersionOrOfNoneIsASetupProblemOnceTheAppsVersionIsKnown() throws {
         var status = try healthy()
         status.engine.version = "0.6.0"
-        #expect(evaluate(status, appVersion: nil).problem == nil)
-        status.engine.version = nil
-        #expect(evaluate(status, appVersion: "0.7.0").problem == nil)
+        #expect(evaluate(status, appVersion: nil).problem == nil, "a build outside the bundle has nothing to compare with")
         status.engine.version = "0.7.0"
         #expect(evaluate(status, appVersion: "0.7.0").problem == nil)
-        status.engine.version = "0.8.0"
-        let problem = try #require(evaluate(status, appVersion: "0.7.0").problem)
-        #expect(problem.kind == .setupIncomplete)
-        #expect(problem.title == "연결 엔진이 앱과 판이 달라요")
-        #expect(problem.fix == .runSetup)
-        #expect(problem.fixLabel == "고치기")
+        for version in ["0.8.0", "0.6.0", nil, "", "  "] {
+            status.engine.version = version
+            let problem = try #require(evaluate(status, appVersion: "0.7.0").problem, "engine version \(String(describing: version))")
+            #expect(problem.kind == .setupIncomplete)
+            #expect(problem.title == "연결 엔진이 앱과 판이 달라요")
+            #expect(problem.fix == .runSetup)
+            #expect(problem.fixLabel == "고치기")
+        }
+    }
+
+    @Test func anEngineThatNamesNoVersionIsOneTheInstallAlsoPutsRight() throws {
+        // An old command (from before the app carried the engine) prints `plugin.version` and no `engine`. The card
+        // must not say "ready" for what the install replaces: if the first install failed, the card shows it.
+        let data = Data(#"{"schema_version": 1, "plugin": {"version": "0.7.0"}, "codex": {"installed": true}, "host": {"state": "closed"}}"#.utf8)
+        let status = try JSONDecoder().decode(EngineStatus.self, from: data)
+        #expect(status.engine.version == nil)
+        #expect(evaluate(status, appVersion: "0.8.0").problem?.kind == .setupIncomplete)
+        #expect(evaluate(status, appVersion: "0.8.0").icon == .problem)
     }
 
     @Test func aNewerSchemaIsReportedAsASetupProblemWithoutReadingTheRest() {
@@ -673,9 +685,18 @@ struct StatusEvaluatorTests {
         #expect(evaluate(EngineStatus()).isPlaceholder == false)
     }
 
-    @Test func aStatusWithNothingInItIsReadyNotAProblem() {
-        let summary = evaluate(EngineStatus())
+    @Test func aStatusWithNothingInItIsReadyNotAProblemWhenTheAppHasNoVersionToCompareWith() {
+        let summary = evaluate(EngineStatus(), appVersion: nil)
         #expect(summary.icon == .ready)
         #expect(summary.problem == nil)
+    }
+
+    @Test func aStatusThatNamesNoEngineVersionIsAProblemForAnAppThatKnowsItsOwn() {
+        let summary = evaluate(EngineStatus())
+        #expect(summary.icon == .problem)
+        #expect(summary.problem?.kind == .setupIncomplete)
+        var named = EngineStatus()
+        named.engine.version = "0.7.0"
+        #expect(evaluate(named).problem == nil)
     }
 }

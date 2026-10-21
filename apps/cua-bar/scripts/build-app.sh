@@ -128,7 +128,7 @@ engine_source="$package_dir/engine"
 engine_bundle="$bundle_path/Contents/Resources/engine"
 echo "Bundling the engine from $engine_source"
 mkdir -p "$engine_bundle"
-rsync -rtpL --exclude '__pycache__' --exclude '*.pyc' --exclude '.DS_Store' "$engine_source/" "$engine_bundle/"
+rsync -rtpl --exclude '__pycache__' --exclude '*.pyc' --exclude '.DS_Store' "$engine_source/" "$engine_bundle/"
 for needed in setup.sh start-mcp.sh .claude-plugin/plugin.json skills/cua/SKILL.md; do
   if [[ ! -f "$engine_bundle/$needed" ]]; then
     echo "The engine in the bundle lacks $needed" >&2

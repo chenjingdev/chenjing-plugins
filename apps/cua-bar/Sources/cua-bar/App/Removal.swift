@@ -9,13 +9,20 @@ enum RemovalMessages {
     static let question = "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지워요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜져요. 열린 Claude 대화의 CUA도 끊겨요."
     static let working = "되돌리는 중…"
     static let trashHint = "이 앱 파일은 이제 휴지통으로 옮겨도 돼요."
-    /// Claude Code could not take the app's MCP server away (no `claude` command, or it refused).
+    /// Claude Code could not take the app's MCP server away (no `claude` command, it refused, or its file cannot be read).
     static let mcpStays = " Claude Code의 CUA 연결은 `claude mcp remove -s user cua`로 직접 지워 주세요."
+    /// What was taken out of Claude Code, said when the rest did not go as the question promised.
+    static let claudeRemoved = " Claude Code에 깐 CUA 연결과 스킬은 지웠어요."
     static let done = "연결 설정과 중계기를 되돌렸어요. " + trashHint
     static let nothingToUndo = "되돌릴 연결 설정이 없었어요. " + trashHint
     /// The remover refuses while a Codex host runs. Codex is never quit from here.
     static let hostRunning = "Codex를 정상 종료한 뒤 다시 해 주세요"
     static let failed = "앱을 지우지 못했어요 — 연결 설정은 그대로 남아 있을 수 있어요"
+    /// The same two, after Claude Code's part had already been taken away.
+    static let hostRunningAfterClaude = "Codex를 정상 종료한 뒤 다시 해 주세요. Claude Code에 깐 CUA 연결과 스킬은 이미 지웠어요"
+    static let failedAfterClaude = "앱을 지우지 못했어요 — Claude Code에 깐 CUA 연결과 스킬은 지웠고, 나머지 연결 설정은 그대로 남아 있을 수 있어요"
+    /// The engine could not be asked whether a Codex host runs, so nothing was changed.
+    static let statusUnreadable = "Codex 상태를 읽지 못해 아무것도 바꾸지 않았어요. 잠시 뒤 다시 해 주세요"
     /// A setup (or an install or update) writes the same files; they do not run at the same time.
     static let setupRunning = "연결을 설정하는 중이라 지금은 못 해요. 끝난 뒤에 다시 해 주세요"
     static let loginItemStays = " 로그인 항목은 시스템 설정 > 일반 > 로그인 항목에서 직접 꺼 주세요."
@@ -26,6 +33,11 @@ enum RemovalMessages {
 /// Claude Code (only its own), runs `codex-cua uninstall` (the bound engine copy's `setup.sh uninstall` when the
 /// command is missing or not ours), takes the login item away, shows the result and quits. The remover
 /// refuses while a Codex host runs; it never quits Codex. The app file stays.
+///
+/// Claude Code's part is taken away only when it is known that nothing is running: the status was read and
+/// shows no host, or there is no engine at all. A status that cannot be read changes nothing and says so.
+/// Where the command is missing but an engine copy is bound, the copy's own remover goes first: it looks at the
+/// host itself and refuses, and only after it went through is Claude Code's part taken away.
 @MainActor
 final class RemovalFlow: ObservableObject {
     enum Phase: Equatable {
@@ -99,12 +111,20 @@ final class RemovalFlow: ObservableObject {
         }
         phase = .working
         // Look before changing anything: with a Codex host running nothing is touched, as it always was.
-        if let status = try? await engine.status(), Self.hostMayBeRunning(in: status) {
+        var claudeRemoval: ClaudeIntegration.Removal?
+        switch await look() {
+        case .hostRunning:
             phase = .refused(RemovalMessages.hostRunning)
             return
+        case .unreadable:
+            phase = .refused(RemovalMessages.statusUnreadable)
+            return
+        case .clear:
+            // Claude Code's part first: once the engine copy is gone, the MCP server would point at nothing.
+            claudeRemoval = await claude.removeAppOwned()
+        case .engineFirst:
+            break
         }
-        // Claude Code's part first: once the engine copy is gone, the MCP server would point at nothing.
-        let claudeRemoval = await claude.removeAppOwned()
         var undone = true
         do {
             try await engine.uninstall()
@@ -114,30 +134,64 @@ final class RemovalFlow: ObservableObject {
                 // No engine, or the remover found nothing a setup installed: there is nothing to undo.
                 undone = false
             default:
-                phase = .refused(await refusal())
+                phase = .refused(await refusal(afterClaude: claudeRemoval?.removedAnything == true))
                 return
             }
         } catch {
-            phase = .refused(RemovalMessages.failed)
+            phase = .refused(claudeRemoval?.removedAnything == true ? RemovalMessages.failedAfterClaude : RemovalMessages.failed)
             return
+        }
+        // The engine's remover went through (it looks at the host itself): now Claude Code's part.
+        let removal: ClaudeIntegration.Removal
+        if let already = claudeRemoval {
+            removal = already
+        } else {
+            removal = await claude.removeAppOwned()
         }
         let loginItemOff = loginItem.unregisterForRemoval()
         phase = .finished(
             (undone ? RemovalMessages.done : RemovalMessages.nothingToUndo)
-                + (claudeRemoval.mcpStays ? RemovalMessages.mcpStays : "")
+                + (!undone && removal.removedAnything ? RemovalMessages.claudeRemoved : "")
+                + (removal.mcpStays ? RemovalMessages.mcpStays : "")
                 + (loginItemOff ? "" : RemovalMessages.loginItemStays))
         onRemoved()
         try? await sleep(readingTime)
         quit()
     }
 
+    /// What the engine says before anything is changed.
+    private enum Look {
+        /// Its status shows no host (or there is no engine to have one): Claude Code's part can go first.
+        case clear
+        case hostRunning
+        /// The command is missing but an engine copy is bound: its own remover looks at the host.
+        case engineFirst
+        /// The status cannot be read (no answer in time, a command that fails or prints nonsense): a host may be
+        /// running, so nothing is changed.
+        case unreadable
+    }
+
+    private func look() async -> Look {
+        do {
+            return Self.hostMayBeRunning(in: try await engine.status()) ? .hostRunning : .clear
+        } catch let error as EngineError {
+            switch error {
+            case .engineMissing: return .clear
+            case .setupNeeded: return .engineFirst
+            case .timeout, .launchFailed, .commandFailed, .invalidOutput, .unsupportedSchema: return .unreadable
+            }
+        } catch {
+            return .unreadable
+        }
+    }
+
     /// The remover exits with the same code whatever stopped it, so what refused it is read from
     /// what is running now: a Codex host (or Codex itself, when the host cannot be told).
-    private func refusal() async -> String {
+    private func refusal(afterClaude: Bool) async -> String {
         if let status = try? await engine.status(), Self.hostMayBeRunning(in: status) {
-            return RemovalMessages.hostRunning
+            return afterClaude ? RemovalMessages.hostRunningAfterClaude : RemovalMessages.hostRunning
         }
-        return RemovalMessages.failed
+        return afterClaude ? RemovalMessages.failedAfterClaude : RemovalMessages.failed
     }
 
     static func hostMayBeRunning(in status: EngineStatus) -> Bool {

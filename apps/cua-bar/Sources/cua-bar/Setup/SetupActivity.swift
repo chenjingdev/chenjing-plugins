@@ -1,10 +1,14 @@
 import Foundation
 
-/// What the install waits for before it can do its work: the Codex app, and Claude Code (where the MCP
-/// server and the skill go). The app looks again after a status read and installs once it has come.
+/// What the install waits for before it can do its work: the Codex app, Claude Code (where the MCP server and
+/// the skill go), and an answer from the engine. The app looks again after a status read and installs once
+/// what it waited for has come.
 enum SetupWait: Hashable, Sendable {
     case codex
     case claudeCode
+    /// The engine could not be asked (its status ran out of time): the engine step waits for the first read
+    /// that works. The MCP server and the skill do not wait for it.
+    case status
 }
 
 /// What the app is doing about its install right now, shared by everything that can run it (the status

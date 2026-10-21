@@ -45,9 +45,12 @@ enum InstallMessages {
 /// here. The install takes the shared setup slot (`SetupActivity`), so two never run at once. It looks
 /// before it touches anything and changes only what is missing or the app's own and out of date:
 ///
-/// 1. no Codex app: nothing (the card says so); put off until it is there
+/// 1. no Codex app (the engine's status says, else the app looks at the disk): nothing (the card says so); put off
+///    until it is there
 /// 2. no developer tools (`xcode-select -p`): nothing (the card asks for them); the installer opens only on the button
-/// 3. no engine, or one of another version than the app's: `install-engine` from the bundle
+/// 3. no engine, one of another version than the app's, or one whose status calls a part of the setup broken:
+///    `install-engine` from the bundle (a whole copy of the same version stays as it is; the setup runs again).
+///    A status that cannot be had in time puts only this step off, to the first read that works
 /// 4. Claude Code there: the MCP server and the skill, put in or replaced when the app's own, never over another's
 ///
 /// A build that does not run from an app bundle (no engine inside) installs nothing.
@@ -134,8 +137,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         var waiting: Set<SetupWait> = []
         var developerToolsNeeded = false
 
-        static func failure(_ message: String) -> Run {
-            Run(outcome: ActionOutcome(kind: .failure, message: message), succeeded: false)
+        static func failure(_ message: String, waiting: Set<SetupWait> = []) -> Run {
+            Run(outcome: ActionOutcome(kind: .failure, message: message), succeeded: false, waiting: waiting)
         }
     }
 
@@ -148,35 +151,49 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     }
 
     private func install() async -> Run {
-        guard codex.isInstalled() else { return Run(waiting: [.codex]) }
         guard let bundle else { return Run() }
+        // Looking changes nothing, and the engine's own word about Codex counts more than the app's look at the disk.
+        let read = await readEngine()
+        guard codexIsThere(read) else { return Run(waiting: [.codex]) }
         guard await developerToolsPresent() else { return Run(developerToolsNeeded: true) }
 
         var changed = false
+        var repaired = false
+        var waiting: Set<SetupWait> = []
         let launcher: String?
-        switch await engineState() {
-        case .current(let current):
-            launcher = current
-        case .unknown:
-            // It could not be asked in time; the engine may be fine. The next try is the person's.
-            return Run()
+        switch verdict(of: read) {
+        case .current(let known):
+            launcher = known
+        case .needsSetup(let known):
+            // The engine is the app's but a part of its setup is broken: `install-engine` leaves a whole copy of
+            // the same version as it is and runs the setup again.
+            guard let installed = await installEngine(from: bundle) else { return .failure(InstallMessages.engineFailed) }
+            launcher = installed.launcher ?? known
+            repaired = installed.settled
         case .needsInstall:
             guard let installed = await installEngine(from: bundle) else { return .failure(InstallMessages.engineFailed) }
             launcher = installed.launcher
             changed = true
+        case .unknown:
+            // It could not be asked in time, and the engine may be fine. The engine step waits for the first read
+            // that works; the MCP server and the skill do not depend on it (the launcher is one path).
+            launcher = nil
+            waiting.insert(.status)
         }
 
         guard claude.claudeCodeFound else {
-            return Run(outcome: changed ? ActionOutcome(kind: .success, message: Self.engineOnly) : InstallMessages.nothingToSay, waiting: [.claudeCode])
+            waiting.insert(.claudeCode)
+            let engineOnly = changed || repaired
+            return Run(outcome: engineOnly ? ActionOutcome(kind: .success, message: Self.engineOnly) : InstallMessages.nothingToSay, waiting: waiting)
         }
         var conflict = false
 
         switch claude.mcpState(launcher: launcher) {
         case .missing:
-            guard await putMCP(launcher: launcher, replacing: false) else { return .failure(InstallMessages.mcpFailed) }
+            guard await putMCP(launcher: launcher, replacing: false) else { return .failure(InstallMessages.mcpFailed, waiting: waiting) }
             changed = true
         case .outdated:
-            guard await putMCP(launcher: launcher, replacing: true) else { return .failure(InstallMessages.mcpFailed) }
+            guard await putMCP(launcher: launcher, replacing: true) else { return .failure(InstallMessages.mcpFailed, waiting: waiting) }
             changed = true
         case .conflict:
             conflict = true
@@ -187,7 +204,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         switch claude.skillState(source: bundle.skillSource, appVersion: appVersion) {
         case .missing, .outdated:
             guard claude.installSkill(from: bundle.skillSource, version: appVersion ?? "dev") else {
-                return .failure(InstallMessages.skillFailed)
+                return .failure(InstallMessages.skillFailed, waiting: waiting)
             }
             changed = true
         case .conflict:
@@ -196,30 +213,65 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
             break
         }
 
-        if conflict { return Run(outcome: ActionOutcome(kind: .warning, message: InstallMessages.conflict)) }
-        return Run(outcome: changed ? ActionOutcome(kind: .success, message: InstallMessages.installed) : InstallMessages.nothingToSay)
+        let outcome: ActionOutcome
+        if conflict {
+            outcome = ActionOutcome(kind: .warning, message: InstallMessages.conflict)
+        } else if changed {
+            outcome = ActionOutcome(kind: .success, message: InstallMessages.installed)
+        } else if repaired {
+            outcome = ActionOutcome(kind: .success, message: Self.engineOnly)
+        } else {
+            outcome = InstallMessages.nothingToSay
+        }
+        return Run(outcome: outcome, waiting: waiting)
     }
 
-    /// Said when the engine was installed but there is no Claude Code to connect it to yet.
+    /// Said when the engine was put right but nothing in Claude Code changed (or there is no Claude Code yet).
     static let engineOnly = "연결 설정을 마쳤어요"
 
-    private enum EngineState {
-        /// The engine is the app's; this is the launcher it reported (nil: it did not say).
+    private enum EngineRead {
+        case answered(EngineStatus)
+        case failed(EngineError)
+    }
+
+    /// The command's own status says which engine runs and in what state it is.
+    private func readEngine() async -> EngineRead {
+        do {
+            return .answered(try await engine.status())
+        } catch let error as EngineError {
+            return .failed(error)
+        } catch {
+            // Not an answer either way (a cancelled read): it says nothing about the engine.
+            return .failed(.launchFailed(""))
+        }
+    }
+
+    /// Codex is there when the engine says so; when it does not say (or cannot be asked), the app looks.
+    private func codexIsThere(_ read: EngineRead) -> Bool {
+        if case .answered(let status) = read, let installed = status.codex.installed { return installed }
+        return codex.isInstalled()
+    }
+
+    private enum EngineVerdict {
+        /// The engine is the app's and nothing in its setup is broken; this is the launcher it reported (nil: it did not say).
         case current(String?)
+        /// The engine is the app's but its status calls a part of the setup broken (the Python environment, the
+        /// login environment, the wrapper, the relay): the setup runs again.
+        case needsSetup(String?)
+        /// No engine, one of another version (or with none), or a command that cannot answer: the bundle's is put in.
         case needsInstall
+        /// It could not be asked in time.
         case unknown
     }
 
-    /// The command's own status says which engine runs: the app's version is what it must be.
-    private func engineState() async -> EngineState {
-        do {
-            let status = try await engine.status()
-            if versionIsTheApps(status.engine.version) { return .current(status.engine.launcher) }
-            return .needsInstall
-        } catch let error as EngineError {
+    /// What the card shows is what is acted on: the same version rule and the same list of broken parts.
+    private func verdict(of read: EngineRead) -> EngineVerdict {
+        switch read {
+        case .answered(let status):
+            guard versionIsTheApps(status.engine.version) else { return .needsInstall }
+            return StatusEvaluator.setupIssues(in: status.setup).isEmpty ? .current(status.engine.launcher) : .needsSetup(status.engine.launcher)
+        case .failed(let error):
             return error.needsEngineInstall ? .needsInstall : .unknown
-        } catch {
-            return .unknown
         }
     }
 
@@ -233,36 +285,51 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     private struct InstalledEngine {
         /// The launcher the install reported, or what the status says after it; nil when neither does.
         var launcher: String?
+        /// What the install reports of the setup it ran: the command, the login environment and the relay are all ready.
+        var settled: Bool
     }
 
     /// `/bin/sh <bundle>/setup.sh install-engine --json`: the folder it is run from is unpacked to
-    /// `~/.local/share/codex-cua/engine/<version>/` and set up from there. Through `sh`, so a copy that lost
-    /// its executable bit still runs. Nil when it failed.
+    /// `~/.local/share/codex-cua/engine/<version>/` (a whole copy of the same version stays as it is) and set up
+    /// from there. Through `sh`, so a copy that lost its executable bit still runs. Nil when it failed.
     private func installEngine(from bundle: BundledEngine) async -> InstalledEngine? {
         do {
             let output = try await runner.run(
                 URL(fileURLWithPath: "/bin/sh"), arguments: [bundle.setupScript.path, "install-engine", "--json"],
                 timeout: timeouts.engineInstall)
             guard output.exitCode == 0 else { return nil }
-            if let launcher = Self.launcher(in: output.stdout) { return InstalledEngine(launcher: launcher) }
+            let settled = Self.setupIsSettled(in: output.stdout)
+            if let launcher = Self.launcher(in: output.stdout) { return InstalledEngine(launcher: launcher, settled: settled) }
             // The install did not name it: the status of the engine it just set up may.
-            return InstalledEngine(launcher: (try? await engine.status())?.engine.launcher)
+            return InstalledEngine(launcher: (try? await engine.status())?.engine.launcher, settled: settled)
         } catch {
             return nil
         }
     }
 
-    /// `launcher` of the result line (the last line of stdout that is a JSON object): an absolute path.
-    static func launcher(in stdout: Data) -> String? {
+    /// The last line of stdout that is a JSON object: the install's result.
+    private static func resultLine(in stdout: Data) -> [String: Any]? {
         let text = String(decoding: stdout, as: UTF8.self)
         for line in text.split(whereSeparator: \.isNewline).reversed() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8),
                   let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
-            guard let launcher = object["launcher"] as? String, launcher.hasPrefix("/") else { return nil }
-            return launcher
+            return object
         }
         return nil
+    }
+
+    /// `launcher` of the result line: an absolute path.
+    static func launcher(in stdout: Data) -> String? {
+        guard let launcher = resultLine(in: stdout)?["launcher"] as? String, launcher.hasPrefix("/") else { return nil }
+        return launcher
+    }
+
+    /// `setup` of the result line says `ready` for the command, the login environment and the relay. A result that
+    /// does not say is taken as settled: the install itself went through.
+    static func setupIsSettled(in stdout: Data) -> Bool {
+        guard let setup = resultLine(in: stdout)?["setup"] as? [String: Any] else { return true }
+        return ["command", "login_environment", "relay"].allSatisfy { (setup[$0] as? String).map { $0 == "ready" } ?? true }
     }
 
     /// The server is added (after the app's out-of-date one is removed), and then read back from the file: the

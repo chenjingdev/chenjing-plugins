@@ -47,6 +47,9 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     var runner: any ProcessRunning
     /// One `claude mcp …` command.
     var commandTimeout: Duration
+    /// What was last read of `~/.claude.json`. The file can be large and is read at every status read; it is
+    /// parsed again only when it changed. A copy of this struct shares it.
+    private let configCache = ConfigCache()
 
     init(
         home: URL = FileManager.default.homeDirectoryForCurrentUser, claude: ClaudeCLILocator? = nil,
@@ -111,8 +114,66 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         case server(command: String?, hasArguments: Bool)
     }
 
+    /// Which version of a file this is: when it was last written (and changed), how big it is, and which file it is
+    /// (a write that replaces the file gives it a new number). All of it is the same: the file is the same.
+    private struct FileSignature: Equatable {
+        var modified: timespec
+        var changed: timespec
+        var size: off_t
+        var inode: ino_t
+
+        init?(path: String) {
+            var info = stat()
+            guard stat(path, &info) == 0 else { return nil }
+            modified = info.st_mtimespec
+            changed = info.st_ctimespec
+            size = info.st_size
+            inode = info.st_ino
+        }
+
+        static func == (lhs: FileSignature, rhs: FileSignature) -> Bool {
+            lhs.modified.tv_sec == rhs.modified.tv_sec && lhs.modified.tv_nsec == rhs.modified.tv_nsec
+                && lhs.changed.tv_sec == rhs.changed.tv_sec && lhs.changed.tv_nsec == rhs.changed.tv_nsec
+                && lhs.size == rhs.size && lhs.inode == rhs.inode
+        }
+    }
+
+    private final class ConfigCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var signature: FileSignature?
+        private var entry: McpEntry?
+        private var parsed = 0
+
+        func lookup(_ signature: FileSignature) -> McpEntry? {
+            lock.withLock { self.signature == signature ? entry : nil }
+        }
+
+        func store(_ entry: McpEntry, for signature: FileSignature) {
+            lock.withLock {
+                self.signature = signature
+                self.entry = entry
+                parsed += 1
+            }
+        }
+
+        var parseCount: Int { lock.withLock { parsed } }
+    }
+
+    /// How many times `~/.claude.json` was parsed. For tests.
+    var configParseCount: Int { configCache.parseCount }
+
     private func mcpEntry() -> McpEntry {
-        guard FileManager.default.fileExists(atPath: configURL.path) else { return .absent }
+        guard let signature = FileSignature(path: configURL.path) else {
+            return FileManager.default.fileExists(atPath: configURL.path) ? .unreadable : .absent
+        }
+        if let known = configCache.lookup(signature) { return known }
+        let entry = parseMcpEntry()
+        // A file that changed while it was read is looked at again next time.
+        if FileSignature(path: configURL.path) == signature { configCache.store(entry, for: signature) }
+        return entry
+    }
+
+    private func parseMcpEntry() -> McpEntry {
         guard
             let data = try? Data(contentsOf: configURL),
             let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -197,22 +258,36 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     }
 
     struct Removal: Equatable, Sendable {
-        /// The app's MCP entry is still there (Claude Code could not take it away).
+        /// The app's MCP entry may still be there: Claude Code could not take it away, or its file cannot be
+        /// read, so nobody can tell. The person is given Claude Code's own command.
         var mcpStays = false
+        /// Something of the app's was taken out of Claude Code.
+        var removedAnything = false
     }
 
     /// Takes away what the app put into Claude Code, in this order: the MCP server (only when its command is
     /// the app's), then the skill folder (only with the app's mark). Anything else is left as it is.
     func removeAppOwned() async -> Removal {
         var removal = Removal()
-        if case .server(let command?, _) = mcpEntry(), isAppOwned(command) {
+        switch mcpEntry() {
+        case .unreadable:
+            removal.mcpStays = true
+        case .server(let command?, _) where isAppOwned(command):
             _ = await removeMCP()
-            if case .server(let after?, _) = mcpEntry(), isAppOwned(after) { removal.mcpStays = true }
+            switch mcpEntry() {
+            case .server(let after?, _) where isAppOwned(after): removal.mcpStays = true
+            case .unreadable: removal.mcpStays = true
+            default: removal.removedAnything = true
+            }
+        case .server, .absent:
+            break
         }
         // Marked folders only: `missing` has nothing to take away and `conflict` is somebody else's.
         switch skillState(source: nil, appVersion: nil) {
-        case .ready, .outdated: try? FileManager.default.removeItem(at: skillFolder)
-        case .missing, .conflict, .unknown: break
+        case .ready, .outdated:
+            if (try? FileManager.default.removeItem(at: skillFolder)) != nil { removal.removedAnything = true }
+        case .missing, .conflict, .unknown:
+            break
         }
         return removal
     }

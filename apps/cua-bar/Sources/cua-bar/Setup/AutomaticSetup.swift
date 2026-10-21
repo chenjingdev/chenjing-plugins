@@ -23,11 +23,17 @@ struct AutomaticSetup {
     }
 
     /// Cheap when nothing was put off, which is almost always: it only looks at `waitingFor`.
-    func runWhatWasPutOff() async {
+    ///
+    /// `status` is what the read that just ended answered (nil: it failed). Once the engine can be read, its word
+    /// about Codex is the one that counts, so a Codex the engine does not accept does not start a run at every
+    /// read; the app's own look at the disk is for when the engine cannot answer.
+    func runWhatWasPutOff(status: EngineStatus? = nil) async {
         let waiting = activity.waitingFor
         guard isBundled, !waiting.isEmpty, !activity.isRunning else { return }
-        let arrived = (waiting.contains(.codex) && codexInstalled()) || (waiting.contains(.claudeCode) && claudeCodeFound())
-        guard arrived, activity.beginCatchUp() else { return }
+        let codexArrived = waiting.contains(.codex) && (status?.codex.installed ?? codexInstalled())
+        let claudeCodeArrived = waiting.contains(.claudeCode) && claudeCodeFound()
+        let statusArrived = waiting.contains(.status) && status != nil
+        guard codexArrived || claudeCodeArrived || statusArrived, activity.beginCatchUp() else { return }
         defer { activity.endCatchUp() }
         await perform(.runSetup)
     }

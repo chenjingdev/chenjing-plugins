@@ -55,7 +55,7 @@ final class LiveApp {
         let automaticSetup = AutomaticSetup(
             activity: setup, perform: { [weak model] in _ = await model?.perform($0) }, isBundled: bundle != nil,
             codexInstalled: { codex.isInstalled() }, claudeCodeFound: { claude.claudeCodeFound })
-        model.afterRead = { await automaticSetup.runWhatWasPutOff() }
+        model.afterRead = { await automaticSetup.runWhatWasPutOff(status: $0) }
         return LiveApp(
             model: model,
             maintenance: Maintenance(releases: releases, removal: removal, loginItem: loginItem, opener: opener),

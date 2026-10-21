@@ -404,13 +404,124 @@ struct RemovalTests {
         }
     }
 
-    @Test func aFailureWhenTheStatusCannotBeReadEitherIsTheGenericLine() async {
-        let rig = rig(uninstallError: .timeout)
+    @Test func aFailureOfTheRemoverWhenTheStatusCannotBeReadEitherIsTheGenericLine() async {
+        // The status could be read before (nothing was running), then not: the remover's failure is the generic line.
+        let engine = FakeEngineClient()
+        let log = EventLog()
+        let suite = DefaultsSuite()
+        defer { suite.remove() }
+        engine.configure {
+            $0.uninstallError = .timeout
+            $0.onUninstall = { engine.setStatusError(.timeout) }
+        }
+        let flow = RemovalFlow(
+            engine: engine, loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: log), defaults: suite.defaults),
+            quit: { log.add("quit") }, sleep: ManualSleeper().sleep)
+        flow.ask()
+        await flow.confirm()
+        #expect(flow.phase == .refused(RemovalMessages.failed))
+    }
+
+    // MARK: A status that cannot be read changes nothing (a host may be running)
+
+    @Test(arguments: [
+        EngineError.timeout, .launchFailed("x"), .commandFailed(exitCode: 2, message: "usage"), .invalidOutput("EngineStatus"), .unsupportedSchema(2),
+    ])
+    func aStatusThatCannotBeReadRefusesAndChangesNothingNotEvenClaudeCode(error: EngineError) async {
+        let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: "A Codex host is running"), claude: ClaudeIntegration.Removal(removedAnything: true))
         defer { rig.suite.remove() }
-        rig.engine.setStatusError(.timeout)
+        rig.engine.setStatusError(error)
         rig.flow.ask()
         await rig.flow.confirm()
-        #expect(rig.flow.phase == .refused(RemovalMessages.failed))
+        #expect(rig.flow.phase == .refused(RemovalMessages.statusUnreadable))
+        #expect(rig.log.events.isEmpty, "no MCP server or skill taken away, nothing uninstalled, the login item stays: \(error)")
+        #expect(rig.engine.calls == [.status])
+        #expect(rig.sleeper.requestedDurations.isEmpty)
+        #expect(!RemovalMessages.statusUnreadable.contains("SECRET"))
+        rig.flow.dismiss()
+        #expect(rig.flow.phase == .idle, "and it can be asked again")
+    }
+
+    @Test func withNoEngineAtAllClaudeCodeGoesFirstAndThereIsNothingElseToUndo() async {
+        let rig = rig(uninstallError: .engineMissing, claude: ClaudeIntegration.Removal(removedAnything: true))
+        defer { rig.suite.remove() }
+        rig.engine.setStatusError(.engineMissing)
+        rig.flow.ask()
+        let removal = Task { await rig.flow.confirm() }
+        #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
+        #expect(rig.log.events == ["remove from claude", "uninstall", "unregister login item"])
+        // What was taken out of Claude Code is said, so "nothing to undo" is not all that was done.
+        #expect(rig.flow.phase == .finished(RemovalMessages.nothingToUndo + RemovalMessages.claudeRemoved))
+        rig.sleeper.releaseAll()
+        await removal.value
+    }
+
+    @Test func nothingToUndoSaysNothingAboutClaudeCodeWhenNothingWasTakenOutOfIt() async {
+        let rig = rig(uninstallError: .engineMissing, claude: ClaudeIntegration.Removal())
+        defer { rig.suite.remove() }
+        rig.engine.setStatusError(.engineMissing)
+        rig.flow.ask()
+        let removal = Task { await rig.flow.confirm() }
+        #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
+        #expect(rig.flow.phase == .finished(RemovalMessages.nothingToUndo))
+        rig.sleeper.releaseAll()
+        await removal.value
+    }
+
+    @Test func withTheCommandMissingButACopyBoundItsOwnRemoverGoesFirstAndClaudeCodeAfterIt() async {
+        let rig = rig(claude: ClaudeIntegration.Removal(removedAnything: true))
+        defer { rig.suite.remove() }
+        rig.engine.setStatusError(.setupNeeded(installPath: "/x"))
+        rig.flow.ask()
+        let removal = Task { await rig.flow.confirm() }
+        #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
+        #expect(rig.log.events == ["uninstall", "remove from claude", "unregister login item"], "the remover looks at the host itself")
+        #expect(rig.flow.phase == .finished(RemovalMessages.done))
+        rig.sleeper.releaseAll()
+        await removal.value
+        #expect(rig.log.events.last == "quit")
+    }
+
+    @Test func thatRemoverRefusingBecauseOfARunningHostLeavesClaudeCodeAlone() async {
+        let rig = rig(
+            uninstallError: .commandFailed(exitCode: 1, message: "A Codex host is running; quit normally before uninstalling"),
+            claude: ClaudeIntegration.Removal(removedAnything: true))
+        defer { rig.suite.remove() }
+        rig.engine.setStatusError(.setupNeeded(installPath: "/x"))
+        rig.flow.ask()
+        await rig.flow.confirm()
+        #expect(rig.flow.phase == .refused(RemovalMessages.failed), "the status cannot say a host runs, so it is the generic line")
+        #expect(rig.log.events == ["uninstall"], "Claude Code's part and the login item are untouched")
+    }
+
+    @Test func aRemoverThatRefusesAfterClaudeCodeWasClearedSaysThatItWasDone() async {
+        // The host came up between the look and the remover: the MCP server and the skill are already gone.
+        for hostCameUp in [true, false] {
+            let log = EventLog()
+            let engine = FakeEngineClient()
+            let suite = DefaultsSuite()
+            defer { suite.remove() }
+            engine.configure {
+                $0.uninstallError = .commandFailed(exitCode: 1, message: "A Codex host is running")
+                $0.onUninstall = {
+                    log.add("uninstall")
+                    if hostCameUp {
+                        var status = EngineStatus()
+                        status.host.state = .ready
+                        status.codex.running = true
+                        engine.setStatus(status)
+                    }
+                }
+            }
+            let flow = RemovalFlow(
+                engine: engine, loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: log), defaults: suite.defaults),
+                claude: LoggingClaude(log: log, removal: ClaudeIntegration.Removal(removedAnything: true)),
+                quit: { log.add("quit") }, sleep: ManualSleeper().sleep)
+            flow.ask()
+            await flow.confirm()
+            #expect(flow.phase == .refused(hostCameUp ? RemovalMessages.hostRunningAfterClaude : RemovalMessages.failedAfterClaude))
+            #expect(log.events == ["remove from claude", "uninstall"])
+        }
     }
 
     @Test func noMessageEverCarriesWhatACommandPrinted() async {

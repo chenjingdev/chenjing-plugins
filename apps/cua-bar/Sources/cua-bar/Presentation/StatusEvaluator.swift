@@ -164,13 +164,14 @@ enum StatusEvaluator {
     // MARK: Problems
 
     /// The first problem that applies:
-    /// Codex missing > setup incomplete (or the developer tools it needs) > a conflict in Claude Code >
-    /// Codex without a host > ended connections > leftover leases. (A missing engine comes from
+    /// Codex missing > setup incomplete (or the developer tools it needs) > Codex without a host >
+    /// a conflict in Claude Code > ended connections > leftover leases. (A missing engine comes from
     /// `summary(for:)`, because without the command there is no status to look at.)
     ///
     /// The card has a fix button only for a problem of the whole app. An ended connection or a leftover
     /// lease is one line's problem: the card says what to do and the button is on that line (F2). A conflict
-    /// has no button either: the app does not touch what it did not put there.
+    /// has no button either: the app does not touch what it did not put there. So the problems that have a
+    /// button come first, and a conflict someone left on purpose (their own cua server) does not hide them.
     ///
     /// `tabsReleased` holds the ended connections the app may only release (it may not stop them) whose
     /// tabs it released in this run. Once that is all that is left, the card says so instead of sending
@@ -189,12 +190,12 @@ enum StatusEvaluator {
                 kind: .setupIncomplete, title: title, nextStep: "고치기를 누르면 설정을 다시 맞춰요",
                 warning: nil, fix: .runSetup, fixLabel: "고치기")
         }
-        if let conflict = conflictProblem(in: facts.claude) { return conflict }
         if status.codex.running, status.host.state != .ready, status.host.state != .starting, status.host.state != .stopping {
             return Problem(
                 kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요", nextStep: "다시 켜면 Claude가 붙어요",
                 warning: "하던 Codex 작업이 끊길 수 있어요", fix: .restartCodex, fixLabel: "다시 켜기")
         }
+        if let conflict = conflictProblem(in: facts.claude) { return conflict }
         let ended = status.connections.filter { $0.state == .ended }
         if !ended.isEmpty {
             // Still a problem for the icon, but with no button: the line itself has 정리. 정리 has
@@ -223,9 +224,11 @@ enum StatusEvaluator {
         return nil
     }
 
-    /// The engine that answered is not the app's (both versions known).
+    /// The engine that answered is not the app's: another version, or none (an engine from before the app carried
+    /// one names no version). The install judges it the same way, so what the card offers is what 고치기 does.
+    /// Without the app's own version (a build outside the bundle) there is nothing to compare with.
     static func engineIssues(in engine: EngineInfo, appVersion: String?) -> [SetupIssue] {
-        guard let engineVersion = nonEmpty(engine.version), let appVersion = nonEmpty(appVersion), engineVersion != appVersion else { return [] }
+        guard let appVersion = nonEmpty(appVersion), nonEmpty(engine.version) != appVersion else { return [] }
         return [SetupIssue(name: "엔진", sentence: "연결 엔진이 앱과 판이 달라요")]
     }
 
