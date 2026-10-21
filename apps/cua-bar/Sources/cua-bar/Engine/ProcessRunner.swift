@@ -21,6 +21,16 @@ enum ProcessRunError: Error, Equatable, Sendable {
 /// Runs one command to the end without blocking the caller's thread.
 protocol ProcessRunning: Sendable {
     func run(_ executable: URL, arguments: [String], timeout: Duration) async throws -> ProcessOutput
+    /// The same, with these folders put in front of PATH: a `claude` that npm, nvm or bun put somewhere is a
+    /// script for the `node` beside it, which the app's own PATH does not reach.
+    func run(_ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String]) async throws -> ProcessOutput
+}
+
+extension ProcessRunning {
+    /// A stand-in that does not care about PATH runs the command as it would without.
+    func run(_ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String]) async throws -> ProcessOutput {
+        try await run(executable, arguments: arguments, timeout: timeout)
+    }
 }
 
 /// Runs a real process. Output goes to files in a private temporary folder instead of pipes:
@@ -46,6 +56,19 @@ struct SystemProcessRunner: ProcessRunning {
         for extra in ["/opt/homebrew/bin", "/usr/local/bin"] where !paths.contains(extra) { paths.append(extra) }
         environment["PATH"] = paths.joined(separator: ":")
         return environment
+    }
+
+    /// `environment` with `folders` at the front of PATH, each once.
+    static func environment(_ environment: [String: String], pathFirst folders: [String]) -> [String: String] {
+        var changed = environment
+        let rest = (environment["PATH"] ?? "").split(separator: ":").map(String.init).filter { !folders.contains($0) }
+        changed["PATH"] = (folders + rest).joined(separator: ":")
+        return changed
+    }
+
+    func run(_ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String]) async throws -> ProcessOutput {
+        try await SystemProcessRunner(environment: Self.environment(environment, pathFirst: pathFirst))
+            .run(executable, arguments: arguments, timeout: timeout)
     }
 
     func run(_ executable: URL, arguments: [String], timeout: Duration) async throws -> ProcessOutput {

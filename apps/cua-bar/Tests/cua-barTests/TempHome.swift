@@ -1,6 +1,7 @@
 import Foundation
 
-/// A throwaway home folder so nothing in these tests touches the real `~/.local/bin/codex-cua`.
+/// A throwaway home folder so nothing in these tests touches the real `~/.local/bin/codex-cua`,
+/// `~/.local/share/codex-cua`, `~/.claude.json` or `~/.claude/`.
 struct TempHome {
     let url: URL
 
@@ -19,32 +20,70 @@ struct TempHome {
         return command
     }
 
-    /// Registers the plugin the way Claude Code does and creates its folder with a `setup.sh`. The
-    /// folder is named after the version, like Claude Code's cache, so an update has a new path.
+    // MARK: The engine
+
+    /// The folder the engine copies live in.
+    var engineCopies: URL { url.appendingPathComponent(".local/share/codex-cua/engine", isDirectory: true) }
+
+    /// The one launcher Claude Code's MCP server is registered with, whatever the engine's version.
+    var launcher: String { engineCopies.appendingPathComponent("current/start-mcp.sh").path }
+
+    /// An engine copy the way `install-engine` leaves one: `engine/<version>/` with its `setup.sh` and
+    /// `start-mcp.sh`, and `source.json` binding it. A folder named after the version, so an update has a new path.
     @discardableResult
-    func installPlugin(scope: String = "user", createFolder: Bool = true, version: String? = "0.7.0") throws -> URL {
-        let install = url.appendingPathComponent(".claude/plugins/cache/chenjing-plugins/cua/\(version ?? "unversioned")", isDirectory: true)
-        if createFolder { try write("#!/bin/sh\nexit 0\n", to: install.appendingPathComponent("setup.sh")) }
-        let versionField = version.map { ", \"version\": \"\($0)\"" } ?? ""
-        let registry = """
-        {"version": 2, "plugins": {"cua@chenjing-plugins": [{"scope": "\(scope)", "installPath": "\(install.path)"\(versionField)}]}}
-        """
-        try write(registry, to: url.appendingPathComponent(".claude/plugins/installed_plugins.json"))
-        return install
+    func installEngine(version: String = "0.7.0", createFolder: Bool = true, bind: Bool = true) throws -> URL {
+        let folder = engineCopies.appendingPathComponent(version, isDirectory: true)
+        if createFolder {
+            try write("#!/bin/sh\nexit 0\n", to: folder.appendingPathComponent("setup.sh"))
+            try write("#!/bin/sh\nexit 0\n", to: folder.appendingPathComponent("start-mcp.sh"))
+        }
+        if bind {
+            let binding = ["schema_version": 1, "plugin_id": "cua@chenjing-plugins", "source_root": folder.path] as [String: Any]
+            try write(String(decoding: try JSONSerialization.data(withJSONObject: binding), as: UTF8.self),
+                      to: url.appendingPathComponent(".local/share/codex-cua/source.json"))
+        }
+        return folder
     }
 
-    /// `known_marketplaces.json` with a marketplace of that name in it, the way Claude Code writes it:
-    /// an object keyed by marketplace name.
-    func addMarketplace(_ name: String = "chenjing-plugins") throws {
-        let text = """
-        {"\(name)": {"source": {"source": "github", "repo": "chenjingdev/chenjing-plugins"}, "installLocation": "/x/\(name)", "lastUpdated": "2026-10-18T00:00:00.000Z", "autoUpdate": true}}
-        """
-        try write(text, to: url.appendingPathComponent(".claude/plugins/known_marketplaces.json"))
+    // MARK: Claude Code
+
+    /// The `claude` command, where `ClaudeCLILocator` looks first.
+    var claudeCLI: URL { url.appendingPathComponent(".local/bin/claude") }
+
+    /// A `claude` that is there (never run: the tests give the process runner a stand-in).
+    func installClaudeCode() throws {
+        try write("#!/bin/sh\nexit 0\n", to: claudeCLI)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: claudeCLI.path)
     }
 
-    /// What a setup leaves behind and the plugin's remover reads first: `~/.local/share/codex-cua/source.json`.
-    func addSupportInstallation() throws {
-        try write(#"{"plugin_id": "cua@chenjing-plugins"}"#, to: url.appendingPathComponent(".local/share/codex-cua/source.json"))
+    var claudeConfig: URL { url.appendingPathComponent(".claude.json") }
+
+    /// `~/.claude.json` with other things in it, as a used Claude Code leaves it, and `cua` among the user's MCP servers.
+    func addMcp(command: String, args: [String] = [], others: [String: Any] = [:], type: String = "stdio") throws {
+        var servers = others
+        servers["cua"] = ["type": type, "command": command, "args": args, "env": [String: String]()] as [String: Any]
+        try writeClaudeConfig(["numStartups": 7, "projects": ["/x": ["history": []]], "mcpServers": servers])
+    }
+
+    func writeClaudeConfig(_ object: [String: Any]) throws {
+        let data = try JSONSerialization.data(withJSONObject: object)
+        try write(String(decoding: data, as: UTF8.self), to: claudeConfig)
+    }
+
+    var skillFolder: URL { url.appendingPathComponent(".claude/skills/cua", isDirectory: true) }
+
+    /// `~/.claude/skills/cua/` with a skill in it, and the app's mark when `version` is given.
+    func addSkill(version: String?, body: String = "the skill\n") throws {
+        try write(body, to: skillFolder.appendingPathComponent("SKILL.md"))
+        if let version { try write(#"{"version": "\#(version)"}"#, to: skillFolder.appendingPathComponent(".cua-bar.json")) }
+    }
+
+    /// The old plugin as Claude Code records it.
+    func addLegacyPlugin(scope: String = "user") throws {
+        let install = url.appendingPathComponent(".claude/plugins/cache/chenjing-plugins/cua/0.7.0").path
+        try write(
+            #"{"version": 2, "plugins": {"cua@chenjing-plugins": [{"scope": "\#(scope)", "installPath": "\#(install)", "version": "0.7.0"}]}}"#,
+            to: url.appendingPathComponent(".claude/plugins/installed_plugins.json"))
     }
 
     func write(_ text: String, to file: URL) throws {

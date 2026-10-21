@@ -40,7 +40,6 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         case stopGroup(StopGroup, force: Bool)
         case restartCodex
         case diagnose
-        case runSetup
         case uninstall
     }
 
@@ -144,10 +143,6 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
 
     func diagnose() async throws -> String {
         try await begin(.diagnose, isAction: true).diagnosis
-    }
-
-    func runSetup() async throws {
-        _ = try await begin(.runSetup, isAction: true)
     }
 
     func uninstall() async throws {

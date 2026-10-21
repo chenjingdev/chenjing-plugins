@@ -5,17 +5,76 @@ import Testing
 struct ClaudeCLILocatorTests {
     private let home = URL(fileURLWithPath: "/Users/someone", isDirectory: true)
 
-    private func locator(existing: Set<String>) -> ClaudeCLILocator {
-        ClaudeCLILocator(home: home, isExecutableFile: { existing.contains($0) })
+    /// `nodeVersions` are the folders nvm holds under `~/.nvm/versions/node`.
+    private func locator(existing: Set<String>, nodeVersions: [String] = []) -> ClaudeCLILocator {
+        ClaudeCLILocator(
+            home: home, isExecutableFile: { existing.contains($0) },
+            namesInFolder: { $0 == "/Users/someone/.nvm/versions/node" ? nodeVersions : [] })
     }
 
-    @Test func theFourPlacesAreAskedInOrder() {
+    @Test func thePlacesAreAskedInOrder() {
         #expect(locator(existing: []).candidates == [
             "/Users/someone/.local/bin/claude",
             "/opt/homebrew/bin/claude",
             "/usr/local/bin/claude",
             "/Users/someone/.claude/local/claude",
+            "/Users/someone/.bun/bin/claude",
+            "/Users/someone/.volta/bin/claude",
+            "/Users/someone/.npm-global/bin/claude",
+            "/Users/someone/Library/pnpm/claude",
         ])
+    }
+
+    @Test(arguments: [
+        "/Users/someone/.bun/bin/claude", "/Users/someone/.volta/bin/claude", "/Users/someone/.npm-global/bin/claude",
+        "/Users/someone/Library/pnpm/claude",
+    ])
+    func aClaudeThatAPackageManagerInstalledIsFound(path: String) {
+        #expect(locator(existing: [path]).locate()?.path == path)
+    }
+
+    @Test func nvmsNodeVersionsAreAskedHighestFirstAsNumbers() {
+        let versions = ["v9.0.0", "v20.11.1", "v22.1.0", "v20.9.0", "v18.20.4", "system", "v20.11.10"]
+        #expect(locator(existing: [], nodeVersions: versions).nvmCandidates.map { $0.split(separator: "/").dropLast(2).last.map(String.init) ?? "" } == [
+            "v22.1.0", "v20.11.10", "v20.11.1", "v20.9.0", "v18.20.4", "v9.0.0", "system",
+        ])
+        #expect(locator(existing: [], nodeVersions: ["v18.20.4"]).nvmCandidates == ["/Users/someone/.nvm/versions/node/v18.20.4/bin/claude"])
+        #expect(locator(existing: [], nodeVersions: []).nvmCandidates.isEmpty)
+    }
+
+    @Test func aClaudeInsideNvmIsFoundAndTheHighestNodeWinsAmongThem() {
+        let old = "/Users/someone/.nvm/versions/node/v18.20.4/bin/claude"
+        let new = "/Users/someone/.nvm/versions/node/v22.1.0/bin/claude"
+        #expect(locator(existing: [old], nodeVersions: ["v18.20.4", "v22.1.0"]).locate()?.path == old)
+        #expect(locator(existing: [old, new], nodeVersions: ["v18.20.4", "v22.1.0"]).locate()?.path == new)
+        // The fixed places come first.
+        #expect(locator(existing: [new, "/usr/local/bin/claude"], nodeVersions: ["v22.1.0"]).locate()?.path == "/usr/local/bin/claude")
+    }
+
+    @Test func theNodeFoldersAreListedOnlyWhenNothingBeforeThemIsThere() {
+        let listed = Presence(false)
+        let first = ClaudeCLILocator(
+            home: home, isExecutableFile: { $0 == "/opt/homebrew/bin/claude" }, namesInFolder: { _ in
+                listed.isThere = true
+                return []
+            })
+        #expect(first.locate()?.path == "/opt/homebrew/bin/claude")
+        #expect(!listed.isThere)
+        let none = ClaudeCLILocator(home: home, isExecutableFile: { _ in false }, namesInFolder: { _ in
+            listed.isThere = true
+            return []
+        })
+        #expect(none.locate() == nil)
+        #expect(listed.isThere)
+    }
+
+    @Test func aFolderThatIsNotThereHoldsNoVersion() throws {
+        let nowhere = FileManager.default.temporaryDirectory.appendingPathComponent("cua-bar-nowhere-\(UUID().uuidString)").path
+        #expect(ClaudeCLILocator.namesInRealFolder(nowhere).isEmpty)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("cua-bar-nvm-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("v20.1.0"), withIntermediateDirectories: true)
+        #expect(ClaudeCLILocator.namesInRealFolder(folder.path) == ["v20.1.0"])
     }
 
     @Test func theFirstExistingOneWinsWhateverIsAfterIt() {

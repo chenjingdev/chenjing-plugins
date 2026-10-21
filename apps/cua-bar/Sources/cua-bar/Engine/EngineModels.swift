@@ -9,7 +9,7 @@ struct EngineStatus: Equatable, Sendable {
 
     var schemaVersion: Int = EngineStatus.supportedSchemaVersion
     var generatedAt: Date?
-    var plugin = PluginInfo()
+    var engine = EngineInfo()
     var codex = CodexInfo()
     var host = HostInfo()
     var setup = SetupInfo()
@@ -90,8 +90,13 @@ enum HostState: Equatable, Sendable {
 
 // MARK: - Sections
 
-struct PluginInfo: Equatable, Sendable {
+/// The engine copy the command runs from: its version (the app compares it with its own), its folder, and the
+/// launcher Claude Code's MCP server is registered with. The launcher is one path whatever the version
+/// (`<home>/.local/share/codex-cua/engine/current/start-mcp.sh`), so a new version does not register it again.
+struct EngineInfo: Equatable, Sendable {
     var version: String?
+    var root: String?
+    var launcher: String?
 }
 
 struct CodexInfo: Equatable, Sendable {
@@ -218,7 +223,7 @@ struct ActivityEntry: Equatable, Sendable {
 extension EngineStatus: Decodable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version", generatedAt = "generated_at"
-        case plugin, codex, host, setup, connections, leases
+        case engine, codex, host, setup, connections, leases
         case otherTools = "other_tools", screen, activity
     }
 
@@ -226,7 +231,7 @@ extension EngineStatus: Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = c.lenientInt(.schemaVersion) ?? Self.supportedSchemaVersion
         generatedAt = c.lenientDate(.generatedAt)
-        plugin = c.lenient(PluginInfo.self, forKey: .plugin) ?? PluginInfo()
+        engine = c.lenient(EngineInfo.self, forKey: .engine) ?? EngineInfo()
         codex = c.lenient(CodexInfo.self, forKey: .codex) ?? CodexInfo()
         host = c.lenient(HostInfo.self, forKey: .host) ?? HostInfo()
         setup = c.lenient(SetupInfo.self, forKey: .setup) ?? SetupInfo()
@@ -238,11 +243,13 @@ extension EngineStatus: Decodable {
     }
 }
 
-extension PluginInfo: Decodable {
-    private enum CodingKeys: String, CodingKey { case version }
+extension EngineInfo: Decodable {
+    private enum CodingKeys: String, CodingKey { case version, root, launcher }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = c.lenientString(.version)
+        root = c.lenientString(.root)
+        launcher = c.lenientString(.launcher)
     }
 }
 

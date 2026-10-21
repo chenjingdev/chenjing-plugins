@@ -7,7 +7,9 @@ struct EngineModelsTests {
         let status = try Fixtures.status("contract-example")
         #expect(status.schemaVersion == 1)
         #expect(status.generatedAt == Date(timeIntervalSince1970: 1_792_324_800))
-        #expect(status.plugin.version == "0.7.0")
+        #expect(status.engine.version == "0.7.0")
+        #expect(status.engine.root == "/Users/chenjing/.local/share/codex-cua/engine/0.7.0")
+        #expect(status.engine.launcher == "/Users/chenjing/.local/share/codex-cua/engine/current/start-mcp.sh")
 
         #expect(status.codex.installed == true)
         #expect(status.codex.appPath == "/Applications/ChatGPT.app")
@@ -79,7 +81,9 @@ struct EngineModelsTests {
         let status = try Fixtures.status("status-minimal")
         #expect(status.schemaVersion == 1)
         #expect(status.generatedAt == nil)
-        #expect(status.plugin.version == nil)
+        #expect(status.engine.version == nil)
+        #expect(status.engine.root == nil)
+        #expect(status.engine.launcher == nil)
         #expect(status.codex.installed == nil)
         #expect(status.codex.running == false)
         #expect(status.codex.pids.isEmpty)
@@ -153,7 +157,8 @@ struct EngineModelsTests {
     @Test func nullsMeanUnknownEverywhere() throws {
         let status = try Fixtures.status("status-nulls")
         #expect(status.generatedAt == nil)
-        #expect(status.plugin.version == nil)
+        #expect(status.engine.version == nil)
+        #expect(status.engine.root == nil)
         #expect(status.codex.installed == false)
         #expect(status.codex.appPath == nil)
         #expect(status.codex.appVersion == nil)
@@ -192,11 +197,13 @@ struct EngineModelsTests {
 
     @Test func aWrongTypeInOneFieldDoesNotLoseTheRest() throws {
         let json = #"""
-        {"schema_version": 1, "plugin": {"version": 7}, "codex": {"installed": "yes", "running": true, "pids": "none"},
+        {"schema_version": 1, "engine": {"version": 7, "root": ["x"], "launcher": false}, "codex": {"installed": "yes", "running": true, "pids": "none"},
          "connections": [{"id": "claude-1-1", "agent": "claude", "memory_bytes": "lots", "busy": "no", "can_stop": true}, 5, {"agent": "codex"}]}
         """#
         let status = try JSONDecoder().decode(EngineStatus.self, from: Data(json.utf8))
-        #expect(status.plugin.version == nil)
+        #expect(status.engine.version == nil)
+        #expect(status.engine.root == nil)
+        #expect(status.engine.launcher == nil)
         #expect(status.codex.installed == nil)
         #expect(status.codex.running)
         #expect(status.codex.pids.isEmpty)

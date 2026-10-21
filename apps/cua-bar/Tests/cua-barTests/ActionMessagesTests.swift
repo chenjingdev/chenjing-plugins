@@ -129,7 +129,7 @@ struct ActionMessagesTests {
         #expect(!outcome.message.contains("브라우저 점유 탭"))
         let inFlight = ActionMessages.tidy(stopped(released: false, reason: "request_in_flight"))
         #expect(inFlight.kind == .warning)
-        #expect(inFlight.message == "정리했어요 — 도구 호출이 끝나지 않아 탭은 못 풀었어요. 플러그인이 끝날 때 한 번 더 풀고, 남으면 목록에 점유로 보여요")
+        #expect(inFlight.message == "정리했어요 — 도구 호출이 끝나지 않아 탭은 못 풀었어요. 연결이 끝날 때 한 번 더 풀고, 남으면 목록에 점유로 보여요")
         #expect(ActionMessages.tidy(stopped(ok: false))
                 == ActionOutcome(kind: .warning, message: "정리했어요 — 마무리는 확인되지 않았어요"))
         // Forced and unconfirmed: both are said.
@@ -223,7 +223,7 @@ struct ActionMessagesTests {
     // MARK: A command that could not run: one fixed line, never what it printed
 
     @Test func everyEngineErrorHasOneFixedLine() {
-        #expect(EngineError.pluginMissing.message == "Claude 플러그인이 없어요")
+        #expect(EngineError.engineMissing.message == "연결 엔진이 없어요")
         #expect(EngineError.setupNeeded(installPath: "/x").message == "연결 설정이 아직 안 됐어요")
         #expect(EngineError.timeout.message == "응답이 없어 기다리다 멈췄어요")
         #expect(EngineError.commandFailed(exitCode: 3, message: "boom").message == "명령이 오류로 끝났어요")
@@ -253,7 +253,7 @@ struct ActionMessagesTests {
 
     @Test func onlyATimeoutCountsAsTheEnginesTimeoutReason() {
         #expect(EngineError.timeout.reasonCode == "timeout")
-        #expect(EngineError.pluginMissing.reasonCode == nil)
+        #expect(EngineError.engineMissing.reasonCode == nil)
         #expect(EngineError.commandFailed(exitCode: 1, message: "").reasonCode == nil)
     }
 }

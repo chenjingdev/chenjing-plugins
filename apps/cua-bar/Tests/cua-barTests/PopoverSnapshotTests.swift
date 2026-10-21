@@ -263,8 +263,15 @@ struct PopoverSnapshotTests {
         }
     }
 
+    /// A ready engine with nothing connected: the app's version is the engine's, so the card has no problem.
+    private func emptyReadyStatus() -> EngineStatus {
+        var status = EngineStatus()
+        status.engine.version = "0.7.0"
+        return status
+    }
+
     @Test func eachTabDrawsWhenEverythingIsEmpty() async throws {
-        let engine = FakeEngineClient(status: EngineStatus())
+        let engine = FakeEngineClient(status: emptyReadyStatus())
         let model = CUABarViewModel(engine: engine, appVersion: "0.7.0", clock: { Fixtures.now }, calendar: Fixtures.utc)
         await model.refresh()
         for tab in PopoverTab.allCases {
@@ -292,7 +299,7 @@ struct PopoverSnapshotTests {
         }
         #expect(heights.count == 1, "the height changes between tabs: \(heights)")
 
-        let empty = FakeEngineClient(status: EngineStatus())
+        let empty = FakeEngineClient(status: emptyReadyStatus())
         let emptyModel = CUABarViewModel(engine: empty, appVersion: "0.7.0", clock: { Fixtures.now }, calendar: Fixtures.utc)
         let loadingHeight = height(emptyModel)
         await emptyModel.refresh()

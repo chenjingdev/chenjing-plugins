@@ -1,6 +1,6 @@
 import AppKit
 
-/// The version this app was built as (the plugin's version, written into Info.plist by
+/// The version this app was built as (the engine's version, written into Info.plist by
 /// scripts/build-app.sh). nil when run unbundled, e.g. `swift run`; then no version check happens.
 enum AppVersion {
     static var current: String? {

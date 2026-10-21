@@ -29,7 +29,8 @@ struct EngineTimeouts: Equatable, Sendable {
 }
 
 /// The real engine client: runs `~/.local/bin/codex-cua` (found as the contract describes) and
-/// decodes what it prints. Nothing here inspects processes, sockets or Codex itself.
+/// decodes what it prints. Nothing here inspects processes, sockets or Codex itself. Putting the engine
+/// in place is not its business: the app does that with the engine in its bundle (`LiveSystemActions`).
 struct CodexCUAEngineClient: EngineClient {
     var locator: CommandLocator
     var runner: any ProcessRunning
@@ -86,41 +87,21 @@ struct CodexCUAEngineClient: EngineClient {
         return String(decoding: output.stdout, as: UTF8.self)
     }
 
-    /// Runs the installer: the registered plugin's own `setup.sh` whenever its folder is there. Not
-    /// `codex-cua setup`, which may be an old command (0.6.0 or lower) that does not hand over to
-    /// the registered plugin and would keep its old launcher. The command's own `setup` is only for
-    /// when no registered plugin folder is there.
-    func runSetup() async throws {
-        if let plugin = locator.installedPlugin() {
-            _ = try await execute(Self.shell, [plugin.setupScript.path, "setup"], timeout: timeouts.setup)
-        } else if case .ready(let command) = locator.locate() {
-            _ = try await execute(command, ["setup"], timeout: timeouts.setup)
-        } else {
-            throw EngineError.pluginMissing
-        }
-    }
-
-    /// Runs the remover. When `codex-cua` is missing or not ours, the plugin's own `setup.sh
-    /// uninstall` still undoes what an earlier setup left (login environment, relay). If no setup
-    /// ever installed anything, that remover fails at once; that is `setupNeeded`, nothing to undo.
+    /// Runs the remover. When `codex-cua` is missing or not ours, the bound engine copy's own `setup.sh
+    /// uninstall` still undoes what an earlier setup left (login environment, relay). With no engine at
+    /// all there is nothing to undo: `engineMissing`.
     func uninstall() async throws {
         switch locator.locate() {
         case .ready(let command):
             _ = try await execute(command, ["uninstall"], timeout: timeouts.uninstall)
         case .installedNotSetUp(let installPath):
-            // Read before it runs: a remover that failed halfway may already have removed it.
-            let somethingInstalled = locator.hasSupportInstallation()
-            do {
-                _ = try await execute(Self.shell, [installPath.appendingPathComponent("setup.sh").path, "uninstall"], timeout: timeouts.uninstall)
-            } catch EngineError.commandFailed where !somethingInstalled {
-                throw EngineError.setupNeeded(installPath: installPath.path)
-            }
-        case .pluginMissing:
-            throw EngineError.pluginMissing
+            _ = try await execute(Self.shell, [installPath.appendingPathComponent("setup.sh").path, "uninstall"], timeout: timeouts.uninstall)
+        case .engineMissing:
+            throw EngineError.engineMissing
         }
     }
 
-    /// The plugin's scripts run through sh, so a plugin copy that lost its executable bit still runs.
+    /// The engine's scripts run through sh, so a copy that lost its executable bit still runs.
     private static let shell = URL(fileURLWithPath: "/bin/sh")
 
     // MARK: Running
@@ -129,7 +110,7 @@ struct CodexCUAEngineClient: EngineClient {
         switch locator.locate() {
         case .ready(let command): try await execute(command, arguments, timeout: timeout)
         case .installedNotSetUp(let installPath): throw EngineError.setupNeeded(installPath: installPath.path)
-        case .pluginMissing: throw EngineError.pluginMissing
+        case .engineMissing: throw EngineError.engineMissing
         }
     }
 

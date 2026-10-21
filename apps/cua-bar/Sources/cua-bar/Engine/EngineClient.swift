@@ -43,10 +43,8 @@ protocol EngineClient: Sendable {
     func restartCodex() async throws -> RestartResult
     /// `diagnose`: plain text that is safe to paste into a chat.
     func diagnose() async throws -> String
-    /// `setup`: the existing installer (command, dependencies, login environment).
-    func runSetup() async throws
     /// `uninstall`: the existing remover. It also removes the login environment, and it refuses
     /// while a Codex host is running (the command then exits non-zero and nothing is removed).
-    /// Throws `pluginMissing` when there is no plugin, and `setupNeeded` when nothing was set up to undo.
+    /// Throws `engineMissing` when there is no engine: nothing was set up to undo.
     func uninstall() async throws
 }

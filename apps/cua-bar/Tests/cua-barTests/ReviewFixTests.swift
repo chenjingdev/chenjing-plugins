@@ -110,13 +110,24 @@ struct ReviewFixTests {
     }
 
     @Test func theCardNeverShowsItEither() async throws {
-        let engine = FakeEngineClient()
-        engine.setStatusError(.commandFailed(exitCode: 70, message: "Traceback /Users/someone/secret"))
-        let rig = await Rig(EngineStatus(), engine: engine)
-        await rig.model.refresh() // a second failure in a row: now it shows
-        #expect(rig.model.summary.problem?.kind == .engineUnreadable)
-        #expect(rig.model.summary.warning == "명령이 오류로 끝났어요")
-        #expect(rig.model.summary.tooltip == "CUA 문제 · 상태를 읽지 못했어요")
+        // A command that fails is an old or broken one the install replaces (고치기), and so is one that cannot start
+        // (the install writes it again); no answer in time is a read problem.
+        let cases: [(EngineError, ProblemKind, String?)] = [
+            (.commandFailed(exitCode: 70, message: "Traceback /Users/someone/secret"), .setupIncomplete, nil),
+            (.launchFailed("/Users/someone/secret/codex-cua: permission denied"), .setupIncomplete, nil),
+            (.timeout, .engineUnreadable, "응답이 없어 기다리다 멈췄어요"),
+        ]
+        for (error, kind, warning) in cases {
+            let engine = FakeEngineClient()
+            engine.setStatusError(error)
+            let rig = await Rig(EngineStatus(), engine: engine)
+            await rig.model.refresh() // a second failure in a row: now it shows
+            let summary = rig.model.summary
+            #expect(summary.problem?.kind == kind)
+            #expect(summary.warning == warning)
+            let shown = [summary.headline, summary.nextStep, summary.warning ?? "", summary.tooltip, summary.accessibilityLabel]
+            #expect(shown.allSatisfy { !$0.contains("secret") && !$0.contains("Traceback") && !$0.contains("70") })
+        }
     }
 
     // MARK: A failed targeted release opens the guidance only when the extension reset can help
