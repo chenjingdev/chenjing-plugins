@@ -1,7 +1,9 @@
 #!/bin/zsh
-# Packages CUA Bar for a GitHub Release: builds CUABar.app (scripts/build-app.sh) with a Developer ID
+# Packages CUA Bar for release: builds CUABar.app (scripts/build-app.sh) with a Developer ID
 # identity, has Apple notarize it, puts it in a disk image that is signed and notarized as well,
-# writes the checksum file, checks all of it, and prints the tag and the command that would publish it.
+# writes the checksum file, checks all of it, and prints the tag and the command that would publish it as a
+# GitHub Release. The app and install.sh do not look at GitHub: they take the dmg from the download site,
+# which scripts/build-download-site.sh builds from the files this writes.
 #
 #   CUABAR_NOTARY_PROFILE=<profile> ./scripts/package-release.sh [output-dir]
 #                                    default output-dir: apps/cua-bar/dist/ (not tracked by git)
@@ -56,9 +58,9 @@ fi
 CUABAR_CODE_SIGN_IDENTITY="$identity" "$script_dir/build-app.sh"
 
 version=$(plutil -extract CFBundleShortVersionString raw -o - "$bundle_path/Contents/Info.plist")
-# The app's update check only recognizes tags spelled cua-bar--v<x>.<y>.<z>.
+# The app's own update only takes a file spelled CUABar-v<x>.<y>.<z>-macos-arm64.dmg (what the site's /version names).
 if [[ ! "$version" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]; then
-  echo "Version '$version' is not x.y.z; the update check would not recognize its tag. Nothing was packaged." >&2
+  echo "Version '$version' is not x.y.z; the app's update would not accept its file name. Nothing was packaged." >&2
   exit 1
 fi
 # The asset name says arm64; do not ship anything else under it.
@@ -155,7 +157,7 @@ echo "  signed by $identity_name; the app and the dmg are notarized and stapled,
 commit=""
 uncommitted=""
 if commit=$(git -C "$package_dir" rev-parse --verify HEAD 2>/dev/null); then
-  # The version comes from the plugin manifest, so an uncommitted bump there counts too.
+  # The version comes from the engine manifest (engine/.claude-plugin/plugin.json), so an uncommitted bump there counts too.
   if [[ -n "$(git -C "$package_dir" status --porcelain -- . 2>/dev/null)" ]]; then
     uncommitted=" (with uncommitted changes)"
   fi

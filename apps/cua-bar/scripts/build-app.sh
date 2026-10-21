@@ -41,12 +41,12 @@ for arg in "$@"; do
 done
 
 if [[ ! -f "$plugin_manifest" ]]; then
-  echo "Plugin manifest not found: $plugin_manifest" >&2
+  echo "Engine manifest not found: $plugin_manifest" >&2
   exit 1
 fi
 version=$(plutil -extract version raw -o - "$plugin_manifest")
 if [[ ! "$version" =~ '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' ]]; then
-  echo "Plugin version is not a plain version number: '$version'" >&2
+  echo "Engine version is not a plain version number: '$version'" >&2
   exit 1
 fi
 

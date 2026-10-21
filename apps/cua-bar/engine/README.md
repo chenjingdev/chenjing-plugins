@@ -1,68 +1,81 @@
-# CUA for Claude Code
+# CUA 연결 엔진
 
-Claude Code에서 Mac의 앱과 브라우저를 Codex CUA로 조작하는 플러그인입니다. **macOS 전용 · 비공식 실험 버전**입니다. 이 문서는 0.7.0 기준입니다.
+CUA Bar에 담겨 다니는 연결 엔진입니다. Claude Code가 Mac의 앱과 브라우저를 Codex CUA로 조작하게 이어 주는 코드(MCP 서버, Codex 래퍼, 중계기, 상태·정리 명령)입니다. **macOS 전용 · 비공식 실험 버전**입니다. 이 문서는 0.8.0 기준입니다.
+
+플러그인이 아닙니다. Claude 플러그인이나 마켓플레이스로 나누어 주지 않고, 앱 하나(CUA Bar)가 이 엔진을 번들에 담아 깔고 부립니다. 쓰는 방법과 화면은 [앱 README](../README.md)에 있고, 이 문서는 엔진이 어떻게 깔리고 무엇을 하는지 적습니다. 폴더 안의 `.claude-plugin/plugin.json`은 엔진 매니페스트(이름 `cua`와 판)로 그대로 씁니다.
 
 ## 준비
 
 - Claude Code와 Computer Use를 사용할 수 있는 Codex 데스크톱 앱이 필요합니다.
-- Python 3.9 이상이 필요합니다. 첫 설정에서 필요한 패키지를 전용 환경에 내려받습니다.
+- Python 3.9 이상이 필요합니다(`/usr/bin/python3`는 개발자 도구에 들어 있습니다). 첫 설정에서 필요한 패키지를 전용 환경에 내려받습니다.
 - macOS 접근성·화면 기록 권한은 원본 Codex 앱의 안내에 따라 설정합니다.
-- 메뉴 막대 앱 CUA Bar는 필수가 아닙니다. 쓰려면 Apple Silicon Mac과 macOS 14 이상이 필요합니다.
+- 엔진을 까는 것은 CUA Bar입니다. 앱 없이 엔진만 따로 까는 길은 제공하지 않습니다. 아래 명령은 개발과 진단에 씁니다.
 
-## 설치와 사용
+## 사본과 current 링크
 
-CUA Bar를 쓰면 앱이 이 플러그인을 깔고 설정까지 합니다(아래 CUA Bar 절). 앱 없이 쓸 때는 플러그인을 깐 뒤 설정을 한 번 실행합니다.
+원본은 앱 번들의 `Contents/Resources/engine`입니다(개발 중에는 이 폴더). 앱은 켜질 때 번들의 `setup.sh install-engine`을 불러 원본을 판마다 사본으로 풀어 씁니다. Claude 대화는 시작할 때의 엔진 파일을 계속 실행하고 Codex 호스트도 그렇기 때문에, 앱이 업데이트돼도 쓰던 파일을 치우지 않도록 판마다 폴더를 따로 둡니다.
 
-```sh
-claude plugin marketplace add chenjingdev/chenjing-plugins
-claude plugin install cua@chenjing-plugins --scope user
-sh ~/.claude/plugins/cache/chenjing-plugins/cua/0.7.0/setup.sh setup
-~/.local/bin/codex-cua doctor --probe
+```text
+~/.local/share/codex-cua/
+  engine/
+    0.8.0/                엔진 사본 (폴더 이름은 매니페스트의 version)
+    current -> 0.8.0      마지막으로 깐 판을 가리키는 상대 링크
+  venv/                   전용 파이썬 환경
+  relay/                  중계기 고정 사본
+  source.json             codex-cua가 따르는 엔진 사본
+  command.py              codex-cua 실행 파일의 사본
+  start-desktop-cli.sh    Codex가 CLI로 켜는 스크립트(래퍼)
 ```
 
-새 Claude Code 대화부터 **“cua 써서 이 앱을 확인해 줘”**처럼 요청하면 됩니다. 연결이 안 되면 CUA Bar가 메뉴 막대에 문제와 고치는 버튼을 보이고, 앱 없이는 `~/.local/bin/codex-cua doctor --probe`로 확인합니다.
+- 사본은 소유자만 쓰는 비공개 폴더입니다(폴더 0700, 파일 0600, 실행 파일 0700). 같은 판 사본이 온전하면 그대로 씁니다. 온전함은 매니페스트 판, 파일 목록과 크기, 소유자와 권한으로 보고 내용은 비교하지 않으므로, 같은 판 번호로 다시 빌드한 코드는 사본에 반영되지 않습니다. 깨졌거나 다른 사용자가 쓸 수 있게 열려 있으면 옆으로 치우고 새로 풉니다. 원본 안의 링크·특수 파일은 거절하고 `__pycache__`·`*.pyc`·`.DS_Store`는 복사하지 않습니다.
+- `engine/current`는 상대 링크이고, setup이 끝난 뒤 임시 링크를 rename으로 바꿔 놓아서 어느 순간에도 어딘가를 가리킵니다. 바꾸지 못하면 `install-engine`이 실패합니다.
+- Claude Code의 MCP는 `~/.local/share/codex-cua/engine/current/start-mcp.sh` 한 경로로 한 번만 등록합니다. `start-mcp.sh`와 `setup.sh`는 링크를 따라가 실제 판 폴더의 코드를 쓰므로, 판이 바뀌어도 등록은 그대로이고 정리가 등록된 판을 지우는 틈이 없습니다. 앱은 이 경로를 풀지 않고 그대로 등록하고 비교합니다.
+- 옛 판 사본은 어떤 프로세스의 명령 줄에도 경로가 없을 때만 지웁니다. 지금 판, `current`가 가리키는 판, 바꾸기 직전에 `current`가 가리키던 판(그 판으로 들어가는 중인 대화가 있을 수 있습니다), 숫자로 더 높거나 숫자가 같은 다른 이름의 판, 판 모양이 아닌 항목과 링크는 남깁니다. 프로세스 목록을 읽지 못하면 아무것도 지우지 않습니다. 10분 넘은 `.install-*`·`.replaced-*` 찌꺼기도 지웁니다.
+- 풀기부터 정리까지 `~/.local/share/codex-cua/.setup.lock`을 잡습니다. 다른 쪽이 잡고 있으면 기다리고(최대 320초), 계속 잡혀 있으면 한 줄로 실패합니다. 원본 루트가 root 소유면 실패합니다(dmg로 끌어 놓은 앱은 사용자 소유입니다).
+
+## 명령
+
+`setup.sh <명령>`(원본이나 사본의 `setup.sh`)으로 부르고, 설정이 끝난 뒤에는 `~/.local/bin/codex-cua <명령>`이 같은 일을 합니다. `codex-cua`는 `source.json`이 가리키는 엔진 사본의 `setup.py`로 넘기므로 늘 묶인 사본의 코드를 실행합니다. 놓아주기·끄기·다시 켜기는 사람이 직접 부르거나 CUA Bar에서 누르는 명령이고, AI는 `doctor`·`status --json`·`diagnose`만 씁니다.
+
+- `install-engine [--json]`: 위의 일을 하고, 사본 위에서 `setup`을 돌리고, `current`를 옮기고, 옛 판을 정리합니다. 앱이 켜질 때 부르는 설치입니다. 성공하면 결과를 한 덩어리로 냅니다(`--json`이면 JSON 객체 한 줄): `version`, `root`(사본 폴더), `launcher`(`engine/current/start-mcp.sh`), `removed`(지운 옛 판 이름 배열), `setup`(`command`는 `status`의 `setup.command`와 같은 낱말, `login_environment`는 `ready`·`conflict`·`failed`, `relay`는 중계기 파일 상태 `ready`·`missing`·`invalid`). 실패하면 0이 아닌 종료 코드와 stderr 한 줄이고, pip·venv가 낸 말은 싣지 않습니다.
+- `status --json`: 지금 상태를 JSON 한 덩어리로 냅니다(아래 [고급 명령](#고급-명령)). 앱이 읽는 계약입니다. 엔진 판과 관련된 칸은 아래에 있습니다.
+- `doctor [--probe] [--json] [--timeout 초]`: 설치 상태를 보고하고, `--probe`를 주면 연결 시험을 합니다(아래).
+- `setup`(`install`): 이 폴더의 엔진으로 `codex-cua` 명령, Codex 래퍼 스크립트, 로그인 항목, 중계기 사본을 설정합니다. `install-engine`이 사본 위에서 부르므로 직접 부를 일은 개발 때뿐입니다.
+- `start`: 연결 가능한 방식으로 Codex를 실행합니다(보통은 필요 없습니다).
+- `uninstall`: 아래 [제거](#제거).
+
+### status의 엔진 칸
+
+- `engine`: `version`(이 엔진의 매니페스트 판), `root`(이 엔진이 도는 폴더), `launcher`(MCP를 등록하는 경로). `plugin.version`은 `engine.version`과 같은 값을 이전 이름으로 한 번 더 냅니다.
+- `host.engine_version`, `host.started_before_setup`: 아래 [host.json의 engine_version](#hostjson의-engine_version).
+- `setup`: `command`, `dependencies`, `login_environment`, `wrapper`, `relay`.
+
+### host.json의 engine_version
+
+Codex 래퍼(`desktop_cli_wrapper.py`)는 호스트를 켤 때 상태 폴더(`~/Library/Caches/codex-host-cua`, `CODEX_HOST_CUA_STATE_DIR`로 바꿀 수 있습니다)의 `host.json`에 자기 엔진의 매니페스트 판을 `engine_version`으로 적습니다. 시작 중·준비·종료·닫힘 기록에 모두 남습니다. 매니페스트를 읽지 못하면 `null`을 적되 Codex는 그대로 켭니다.
+
+`status`는 호스트가 준비 상태일 때 이 값을 지금 엔진의 판과 문자열 그대로 비교합니다. `relay_config` 칸이 없거나, `engine_version`이 없거나 문자열이 아니거나, 지금 판과 다르면 `host.started_before_setup`이 `true`입니다(0.8.x끼리의 차이도 잡습니다). CUA Bar는 이때 Codex를 끄지 않고 카드에 "Codex를 다시 켜면 새 설정이 적용돼요"를 씁니다. `host.engine_version`은 호스트가 준비·시작 중·종료 중일 때만 내고, 닫힌 기록의 판은 낡은 정보라서 내지 않습니다. 같은 판 번호로 코드만 다시 빌드한 경우는 이 비교로 잡히지 않습니다.
+
+### 연결 시험 (doctor --probe)
+
+`doctor`는 `installation`, `dependencies`, `login_environment`, `relay`, `host`를 보고합니다. `--probe`를 주면 연결 시험을 하고, 결과가 `probe.status`와 최상위 `status`에 같은 낱말로 나옵니다: `checked`(성공), `failed`, `timeout`, `approval_required`(Codex의 승인이 필요합니다), `cleanup_unconfirmed`(됐지만 정리를 확인하지 못했습니다), `host_unavailable`, `dependencies_missing`. `--timeout`은 기본 15초, 최대 60초이고, 시험이 끝난 뒤 정리에 몇 초 더 걸릴 수 있습니다. 종료 코드는 `registered` 또는 `checked`일 때만 0입니다.
+
+- 호스트가 준비 상태가 아니면(기록 없음·시작 중·종료 중·닫힘·프로세스 없음) 아무것도 켜거나 끄거나 묻지 않고 파일도 만들지 않은 채 `host_unavailable`로 곧장 끝납니다. Codex가 꺼져 있어도 켜지 않습니다.
+- 준비된 호스트에는 `await cua.getState();` 한 번을 임시 스레드로 부릅니다. 이 스레드는 새 비공개 폴더(0700)에서 일하고, 폴더 이름이 시험의 유일한 표시입니다. 이름은 `codex-cua-probe-` 뒤에 무작위 6~32자(영문·숫자·밑줄)입니다.
+- 끝나면(호출이 실패하거나 답이 없어도 같습니다) 그 폴더에서 일하는 런타임만(호스트의 app-server 바로 아래에서 시험 뒤에 뜬 것) 끝내고 폴더를 지웁니다. 정리가 실패해도 시험 결과는 그대로입니다. 폴더를 만들지 못하면 시험 없이 `failed`입니다.
+- `status`는 작업 폴더가 이 이름인 연결·중계기 기록·활동 줄을 연결 목록, 화면 상태(작업 중), 활동 기록, 점유(끝난 연결 포함)에서 뺍니다. 중계기도 같은 이름 규칙(`engine_core.py`의 `is_probe_folder`와 `relay/relay.mjs`)으로 그 폴더에서는 활동 줄을 남기지 않습니다. 이름만 비슷한 폴더는 평소대로 연결로 칩니다.
+
+## Codex와 Claude가 붙는 방식
 
 설정이 끝나면 Codex를 따로 준비하지 않아도 됩니다.
 
-- **앱을 평소처럼 켜도 됩니다.** 설정 때 로그인 항목(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`)이 등록돼, Dock이나 Spotlight로 연 Codex도 연결 가능한 방식으로 켜집니다. 시스템 설정의 로그인 항목에는 이 항목이 실행하는 스크립트 이름 `codex-cua-login-env`로 보입니다.
-- **앱이 꺼져 있어도 됩니다.** Claude가 CUA에 연결할 때 Codex를 뒤에서 열고, 앞에 있던 앱으로 포커스를 돌려줍니다. Codex를 켜는 것은 새 Claude 대화가 CUA에 연결할 때와, 연결이 끊긴 뒤의 다음 CUA 호출뿐입니다. 대화 끝 정리(`turn_ended`)는 켜지 않습니다.
-- **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** CUA Bar는 이런 Codex를 끄지 않고 알림으로 다시 켤지 묻고, **다시 켜기**를 누르면 정상 종료한 뒤 다시 켭니다. 앱 없이 하려면 진행 중인 작업을 마치고 Codex를 정상 종료(⌘Q)한 뒤 다시 엽니다. 어느 쪽도 강제로 종료하지 않지만, 다시 켜면 하던 Codex 작업은 끊깁니다. 다시 켠 뒤에도 Claude Code에서 cua가 연결되지 않은 것으로 보이면 `/mcp`로 다시 연결합니다.
+- **Codex를 평소처럼 켜도 됩니다.** 설정 때 로그인 항목(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`)이 등록돼, Dock이나 Spotlight로 연 Codex도 연결 가능한 방식으로 켜집니다. 시스템 설정의 로그인 항목에는 이 항목이 실행하는 스크립트 이름 `codex-cua-login-env`로 보입니다.
+- **Codex가 꺼져 있어도 됩니다.** Claude가 CUA에 연결할 때 Codex를 뒤에서 열고, 앞에 있던 앱으로 포커스를 돌려줍니다. Codex를 켜는 것은 새 Claude 대화가 CUA에 연결할 때와, 연결이 끊긴 뒤의 다음 CUA 호출뿐입니다. 대화 끝 정리(`turn_ended`)는 켜지 않습니다.
+- **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** CUA Bar는 이런 Codex를 끄지 않고 알림으로 다시 켤지 묻고, **다시 켜기**를 누르면 정상 종료한 뒤 다시 켭니다. 직접 하려면 진행 중인 작업을 마치고 Codex를 정상 종료(⌘Q)한 뒤 다시 엽니다. 어느 쪽도 강제로 종료하지 않지만, 다시 켜면 하던 Codex 작업은 끊깁니다. 다시 켠 뒤에도 Claude Code에서 cua가 연결되지 않은 것으로 보이면 `/mcp`로 다시 연결합니다.
 - **Codex가 꺼졌다 켜져도(앱 갱신 포함) 열려 있던 Claude 대화는 이어집니다.** 다음 CUA 호출 때 새 호스트에 다시 붙습니다. 연결이 끊길 때 하던 조작은 다시 보내지 않으므로 그 조작이 실제로 됐는지는 알 수 없습니다. 화면을 확인한 뒤에 이어 갑니다.
 - Codex가 뒤에서 열리는 동안 로그인·권한·업데이트 창이 떠 있으면, 기다리다가 Codex를 앞으로 띄우고 안내합니다.
-- **플러그인에 문제가 있어도 Codex는 켜집니다.** 연결용 파이썬 환경이나 `command.py`가 없을 때, 환경이 아직 준비되지 않았을 때(Codex를 켜는 동안에는 복구하지도 기다리지도 않습니다), 등록된 플러그인이 없거나 필요한 파일이 빠졌거나 손상됐을 때, 연결을 시작하기 전에 상태 폴더·점유 같은 설정이 막혔을 때 Codex는 연결 없이 원래대로 켜집니다. CUA 연결만 빠지므로 CUA Bar의 **고치기**나 위의 `setup.sh setup`으로 복구합니다.
-- 다음은 이 보호 밖입니다. `~/.local/share/codex-cua` 폴더 전체를 `codex-cua uninstall` 없이 지운 경우, `command.py` 자체에 문법 오류가 있는 경우, 설정 때 Codex 실행 파일 경로를 기록하지 못했거나 기록한 경로가 앱 업데이트로 바뀐 경우(`codex-cua setup`으로 다시 기록), 연결 가능한 방식으로 시작한 뒤에 생긴 오류입니다. Claude Code에 등록된 플러그인이 0.7.0보다 낮은 판이면 Codex 시작도 그 판의 코드가 맡으므로 그 판의 보호만 받습니다.
-
-## CUA Bar (메뉴 막대 앱)
-
-CUA Bar는 연결 상태를 보고 놓아주기·종료를 하는 macOS 메뉴 막대 앱입니다. 선택 사항이라 앱 없이 이 플러그인만으로도 CUA를 쓸 수 있습니다.
-
-- **받는 곳.** https://cua.chenjing.org 를 맥 브라우저로 열어 dmg를 받거나, 터미널에서 `curl -fsSL https://cua.chenjing.org/install.sh | sh`로 깝니다. 같은 파일이 이 저장소의 [GitHub Releases](https://github.com/chenjingdev/chenjing-plugins/releases) 태그 `cua-bar--v0.7.0`에도 있습니다. Apple Silicon·macOS 14 이상용이고, Developer ID로 서명해 Apple 공증을 받았습니다. 설치와 처음 여는 방법은 [앱 README](../../apps/cua-bar/README.md)를 봅니다.
-- **플러그인을 설치하고 갱신합니다.** 앱이 이 플러그인(`cua@chenjing-plugins`)을 깔고 설정(`codex-cua setup`)까지 합니다. 앱과 플러그인의 판이 다르면 문제로 알리고, 맞는 판 받기를 고치는 버튼으로 둡니다. 갱신하면 새 Claude 대화부터 새 판이 붙습니다. 새 앱 버전이 나왔는지는 하루에 한 번 이 저장소의 앱 태그로 확인합니다. 새 버전이 있으면 창 아래에 **새 버전 x.y.z** 버튼이 생기고, 버전마다 한 번 알림이 옵니다.
-- **로그인할 때 자동으로 뜹니다.**
-- **끄지 않습니다.** 사용자가 누르기 전에는 Codex·Chrome·AI를 끄지 않고, 어떤 창도 앞으로 가져오지 않습니다.
-- **자동 정리와 알림.** AI 대화가 정리 없이 끝나면 앱이 대신 점유를 놓아줍니다. 세션 ID로 콕 집어 푸는 것은 Claude 연결의 세션만 저절로 하고, Codex 대화의 세션은 사용자가 누를 때만 합니다. 알림은 세 가지뿐입니다. 연결 없이 켜진 Codex를 다시 켤지 묻는 알림, 점유가 오래 남았다는 알림, 새 앱 버전 알림입니다.
-- **앱을 꺼도 연결은 그대로 됩니다.** 앱은 연결이 지나는 길목이 아닙니다. 앱을 끄면 상태 보기와 자동 정리만 멈춥니다.
-
-**아이콘**은 메뉴 막대에 하나뿐이고, 색이 아니라 모양으로 상태를 구분합니다. 올려 두면 한 줄 요약이 뜨고, 누르면 창이 열립니다.
-
-- 체크 표시 원은 **준비**입니다. Codex가 꺼져 있어도, Claude 대화를 열 때 켤 수 있으면 준비입니다.
-- 도는 화살표는 **작업 중**입니다. CUA 호출이 진행 중이거나 10초 안에 있었습니다.
-- 경고 삼각형은 **문제**입니다. 문제가 있으면 다른 상태보다 먼저 보입니다.
-
-창의 맨 위 상태 카드에는 문제와 다음에 할 일 한 줄, 그리고 고치는 버튼이 있습니다.
-
-- 연결 없이 켜진 Codex는 **다시 켜기**, 끝난 연결이나 주인 없는 점유는 **놓아주기**입니다. 놓아 본 뒤에도 끝난 연결이 남으면 버튼이 **끝난 연결 끄기**로 바뀌고, 끄기 전에 한 번 묻습니다.
-- 플러그인이 없거나 판이 다르면 **설치·갱신**(맞는 판 받기), 래퍼나 중계기가 깨졌으면 **고치기**입니다.
-- Codex가 없으면 **받는 곳 열기**, 상태를 읽지 못하면 **다시 읽기**입니다.
-
-그 아래에 탭이 네 개 있습니다.
-
-- **연결**: Claude와 Codex의 CUA 연결 목록입니다. 작업 폴더, 시작 시각, 메모리, 상태(사용 중, 30분 넘게 쉼, 대화는 사라졌는데 런타임이 남은 끝남, 알 수 없음)가 보이고, 줄마다 놓아주기·끄기·강제 종료가 있습니다. 아래에는 묶음 끄기(전체·Claude만·Codex만)와 끝난 연결 놓아주기가 있습니다.
-- **브라우저 점유**: 연결까지 사라졌는데 Chrome에 남았을 수 있는 점유(주인 없는 점유)와, 세션 ID로 콕 집어 풀기입니다. 안 풀리면 "막힌 탭 닫기"를 먼저 안내하고, 마지막으로 "확장 끄고 켜기"를 그때 끊길 살아 있는 연결 목록과 함께 안내합니다.
-- **다른 도구**: cmux-cua 같은 다른 도구의 상태와, 지금 어느 AI가 화면을 쓰는지입니다. cmux-cua 연결마다 **끄기**가 있고, 그 연결만 정상 종료하며 cmux-cua 본체는 끄지 않습니다.
-- **기록**: 최근 조작 기록(시각·연결·도구 이름·성공 여부·걸린 시간)과 진단 복사 버튼입니다.
-
-**제거**는 창 아래의 제거 버튼입니다. 한 번 확인하면 연결 설정과 중계기를 되돌리고(`codex-cua uninstall`과 같은 일), 로그인할 때 뜨는 등록을 지운 뒤 앱을 끝냅니다. 그다음 `CUABar.app`을 휴지통으로 옮깁니다. Codex가 켜져 있으면 정상 종료한 뒤 다시 하라고 안내만 하고 아무것도 바꾸지 않으며, Codex를 대신 끄지 않습니다. Claude 플러그인은 남으므로 지우려면 아래 [관리](#관리)의 명령을 씁니다. 제거 버튼을 쓰지 않고 앱 파일만 지워도 Codex는 원래대로 켜지고 CUA 연결도 그대로 됩니다.
+- **엔진에 문제가 있어도 Codex는 켜집니다.** 연결용 파이썬 환경이나 `command.py`가 없을 때, 환경이 아직 준비되지 않았을 때(Codex를 켜는 동안에는 복구하지도 기다리지도 않습니다), 묶인 엔진 사본(`source.json`)이 없거나 필요한 파일이 빠졌거나 손상됐을 때, 연결을 시작하기 전에 상태 폴더·점유 같은 설정이 막혔을 때 Codex는 연결 없이 원래대로 켜집니다. CUA 연결만 빠지므로 CUA Bar의 **고치기**로 복구합니다(손으로는 사본 폴더의 `setup.sh install-engine`).
+- 다음은 이 보호 밖입니다. `~/.local/share/codex-cua` 폴더 전체를 `codex-cua uninstall` 없이 지운 경우, `command.py` 자체에 문법 오류가 있는 경우, 설정 때 Codex 실행 파일 경로를 기록하지 못했거나 기록한 경로가 앱 업데이트로 바뀐 경우(CUA Bar의 **고치기**나 `codex-cua setup`으로 다시 기록), 연결 가능한 방식으로 시작한 뒤에 생긴 오류입니다.
 
 ## 중계기
 
@@ -76,41 +89,19 @@ CUA Bar는 연결 상태를 보고 놓아주기·종료를 하는 macOS 메뉴 �
 
 중계기가 없어도 Codex는 켜집니다. 원래 정의를 읽지 못하거나 중계기가 깨졌으면 Codex는 중계기 없이 원래대로 켜집니다. 그때는 Codex 대화의 연결을 끄기 전에 탭을 놓지 못하고, 작업 중·쉼·세션 ID도 알 수 없습니다. 중계기 사본이 없거나 깨졌으면 CUA Bar가 문제로 알리고 **고치기**로 고칩니다(`codex-cua setup`도 같은 일을 합니다). 원래 정의를 읽지 못해 중계기 없이 켜진 경우는 `status --json`의 `setup.relay`가 `inactive`로만 보이고 CUA Bar는 문제로 알리지 않습니다. 이유는 `codex-cua diagnose`의 `relay left out …` 줄에 나옵니다. 이번 설정보다 먼저 켜진 Codex는 `host.started_before_setup`이 `true`이고, CUA Bar 카드가 "Codex를 다시 켜면 새 설정이 적용돼요"라고 안내합니다. 그 전에는 연결 상태를 모르거나 놓아주지 못할 수 있습니다.
 
-## 관리
+## 제거
 
-이전 `codex-computer-use` 플러그인에서 옮길 때는 마켓플레이스를 갱신하고 이전 플러그인을 제거한 뒤 새 이름으로 설치합니다. 연결용 로컬 명령 `codex-cua`는 그대로 사용하며, 새 설정을 실행하면 연결 대상이 `cua`로 갱신됩니다.
-
-```sh
-claude plugin marketplace update chenjing-plugins
-claude plugin uninstall codex-computer-use@chenjing-plugins --scope user
-claude plugin install cua@chenjing-plugins --scope user
-```
-
-그다음 위 [설치와 사용](#설치와-사용)의 `setup.sh setup` 줄을 한 번 실행합니다. CUA Bar를 쓰면 앱이 합니다.
-
-설정이 설치한 명령 `codex-cua`는 직접 실행할 수도 있습니다. 놓아주기·끄기·다시 켜기는 사람이 직접 부르거나 CUA Bar에서 누르는 명령입니다. AI는 `doctor`·`status --json`·`diagnose`만 씁니다. `codex-cua`는 언제나 지금 설치된 플러그인 판의 코드를 실행하므로, 플러그인이 자동으로 갱신돼도 새 명령이 바로 나타납니다. 상태 확인·놓아주기·종료 명령은 아래 [고급 명령](#고급-명령)에 있습니다.
-
-```sh
-~/.local/bin/codex-cua doctor --probe  # 연결 확인
-~/.local/bin/codex-cua start           # 연결 가능한 방식으로 Codex 실행(보통은 필요 없음)
-```
-
-업데이트는 다음 명령으로 적용합니다. 이미 열려 있던 Claude 대화는 작업을 마친 뒤 새로 엽니다. CUA Bar를 쓰면 앱의 맞는 판 받기가 같은 일을 합니다.
-
-```sh
-claude plugin marketplace update chenjing-plugins
-claude plugin update cua@chenjing-plugins --scope user
-~/.local/bin/codex-cua setup
-```
-
-0.6.0 이하에서 올릴 때는 마지막 줄 대신 새 판 폴더의 설정(`sh ~/.claude/plugins/cache/chenjing-plugins/cua/<판>/setup.sh setup`)을 실행합니다. CUA Bar의 맞는 판 받기는 처음부터 이렇게 합니다. 이전 판의 `codex-cua`는 새 판의 설정을 모두 알지 못해서, 이 한 번만 필요합니다.
-
-제거할 때는 진행 중인 Codex 작업을 마치고 Codex 앱을 정상 종료한 다음 실행합니다. 로그인 항목, 등록한 설정값, 중계기 사본과 설치한 명령도 함께 지웁니다.
+CUA Bar의 **앱 지우기…**가 이 엔진의 제거까지 합니다([앱 README](../README.md#지우기)). 직접 하려면 진행 중인 Codex 작업을 마치고 Codex 앱을 정상 종료한 다음 실행합니다. Codex 호스트가 살아 있으면 거절하고 아무것도 바꾸지 않습니다.
 
 ```sh
 ~/.local/bin/codex-cua uninstall
-claude plugin uninstall cua@chenjing-plugins --scope user
 ```
+
+로그인 항목, 등록한 설정값, 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 앱이 Claude Code에 깐 `cua` MCP와 스킬은 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
+
+## 업데이트와 옛 플러그인
+
+엔진은 CUA Bar가 새 판으로 올라갈 때 함께 올라갑니다([앱 README](../README.md#새-판은-스스로-올라가요)). 이전에 Claude 플러그인 `cua@chenjing-plugins`(그 전에는 `codex-computer-use`)로 깔았다면 [앱 README의 옮기는 법](../README.md#옛-플러그인에서-옮기기)을 따릅니다.
 
 ## 고급 명령
 
@@ -143,8 +134,8 @@ CUA Bar가 쓰는 명령을 직접 부를 수도 있습니다. 모두 `~/.local/
 
 - Codex의 원본 CUA를 호출합니다. Codex 앱 파일과 모델 설정은 수정하지 않으며, Claude 연결마다 별도의 임시 대화를 사용합니다.
 - 원본 CUA의 접근 권한·브라우저 정책·파일 제한이 적용됩니다. 표준 form 승인만 전달하며, 지원하지 않는 승인 흐름은 실패를 알립니다.
-- 내부 Codex 인터페이스를 사용하므로 앱 업데이트 후 플러그인 업데이트나 재연결이 필요할 수 있습니다. Claude 매 턴 자동 종료와 MCP cancellation 중계는 지원하지 않습니다.
-- Codex가 `cua_repl` 서버를 번들 CUA 플러그인으로도, 이 플러그인의 중계기로도 식별하지 못하면(설정으로 바꾼 다른 중계기 등) 연결하지 않고 오류를 알립니다.
+- 내부 Codex 인터페이스를 사용하므로 Codex 앱 업데이트 뒤에 엔진 업데이트(CUA Bar의 새 판)나 재연결이 필요할 수 있습니다. Claude 매 턴 자동 종료와 MCP cancellation 중계는 지원하지 않습니다.
+- Codex가 `cua_repl` 서버를 Codex의 번들 CUA 플러그인으로도, 이 엔진의 중계기로도 식별하지 못하면(설정으로 바꾼 다른 중계기 등) 연결하지 않고 오류를 알립니다.
 - 앱이 기본 위치에 없다면 `CODEX_CUA_APP_PATH`에 원본 `.app`의 절대 경로를 지정합니다. 상태 폴더를 `CODEX_HOST_CUA_STATE_DIR`로 바꾸는 경우 호스트와 MCP에 같은 값을 지정하고, 현재 사용자 소유의 비공개 폴더를 사용합니다.
 
-연결기 코드는 [MIT](LICENSE)로 제공됩니다. 원본 Codex·CUA는 포함하지 않으며 해당 소프트웨어와 서비스에는 각 제공자의 이용 조건이 적용됩니다. OpenAI 또는 Anthropic의 공식 제품이 아닙니다.
+엔진 코드는 [MIT](LICENSE)로 제공됩니다. 원본 Codex·CUA는 포함하지 않으며 해당 소프트웨어와 서비스에는 각 제공자의 이용 조건이 적용됩니다. OpenAI 또는 Anthropic의 공식 제품이 아닙니다.

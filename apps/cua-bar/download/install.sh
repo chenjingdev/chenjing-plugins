@@ -2,14 +2,21 @@
 # CUA Bar 설치 (맥): curl -fsSL https://cua.chenjing.org/install.sh | sh
 # 받는 곳의 /version에서 최신 판과 dmg의 SHA-256을 읽고, dmg를 받아 확인한 뒤 CUABar.app을 /Applications에
 # 깐다(쓸 수 없으면 ~/Applications). 이미 같거나 새 판이 깔려 있으면 받지 않는다. 끝에 앱을 켠다.
-# 깔기 전에 앱의 서명과 팀(S3KC8R8VDL)을 확인한다: 받는 곳이 바뀌어도 다른 사람의 앱은 깔지 않는다.
+# 깔 것은 앱 하나뿐이다: 켜진 앱이 스스로 Claude Code에 cua MCP·스킬을 깔고 엔진을 준비한다. Claude 플러그인은 필요 없다.
+# 깔기 전에 받은 앱이 팀 S3KC8R8VDL의 Developer ID로 서명한 CUA Bar(dev.chenjing.cua-bar)인지 codesign의
+# 요구 사항(-R)으로 검증한다. 서명에 적힌 글자를 읽는 것이 아니라 인증서 사슬을 시스템이 확인하므로, 받는 곳이
+# 바뀌어도 다른 사람의 앱이나 ad hoc 서명 앱은 깔지 않는다. 앱 자신이 업데이트 때 쓰는 요구 사항과 같다.
 # 이 스크립트가 지우거나 덮어쓰는 것은 앱 자리(CUABar.app) 하나뿐이다. 켜져 있던 옛 판은 끄고 바꾼다.
 # 시험용: CUABAR_SITE=<주소>는 받는 곳을, CUABAR_INSTALL_DIR=<폴더>는 깔 폴더를 바꾸고, CUABAR_NO_OPEN=1은 앱을 켜지 않는다.
 set -eu
 
 SITE="${CUABAR_SITE:-https://cua.chenjing.org}"
 APP_NAME='CUABar.app'
+BUNDLE_ID='dev.chenjing.cua-bar'
 TEAM='S3KC8R8VDL'
+# 앱이 스스로 업데이트할 때 받은 앱에 거는 요구 사항과 같다: Apple이 뿌리인 Developer ID Application 인증서
+# (중간·말단에 Developer ID 표시가 있다), 그 팀, 그 앱 이름.
+REQUIREMENT="=anchor apple generic and identifier \"$BUNDLE_ID\" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"$TEAM\""
 
 WORK=
 STAGE=
@@ -105,7 +112,8 @@ main() {
     ditto "$WORK/mnt/$APP_NAME" "$STAGE/$APP_NAME" || fail "앱을 복사하지 못했습니다(${DIR}에 쓸 수 없습니다)."
     hdiutil detach -quiet "$WORK/mnt" || true
     codesign --verify --deep --strict "$STAGE/$APP_NAME" 2>/dev/null || fail "받은 앱의 서명이 맞지 않습니다."
-    codesign -dv "$STAGE/$APP_NAME" 2>&1 | grep -qx "TeamIdentifier=$TEAM" || fail "받은 앱의 개발자가 CUA Bar의 개발자($TEAM)가 아닙니다."
+    codesign --verify --deep --strict -R "$REQUIREMENT" "$STAGE/$APP_NAME" 2>/dev/null \
+      || fail "받은 앱이 개발자 ${TEAM}의 Developer ID로 서명한 CUA Bar(${BUNDLE_ID})가 아닙니다."
     if [ -e "$APP" ]; then
       if running "$APP"; then
         echo "켜져 있는 CUA Bar 판 ${INSTALLED}을 끕니다."
@@ -128,6 +136,8 @@ main() {
   fi
   open "$APP" || fail "앱을 켜지 못했습니다($APP)."
   echo "CUA Bar를 켰습니다. 메뉴 막대에 아이콘이 생깁니다."
+  echo "켜진 앱이 Claude Code에 cua MCP와 스킬을 저절로 깝니다. 새 Claude 대화부터 CUA가 붙습니다."
+  echo "잘 깔렸는지는 메뉴 막대 창의 '점검' 탭에서 항목마다 볼 수 있습니다."
 }
 
 main "$@"

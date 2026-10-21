@@ -1,6 +1,6 @@
 {
   "name": "chenjing-plugins",
-  "description": "chenjing의 Claude Code 플러그인 모음",
+  "description": "chenjing의 Claude Code 플러그인 모음. CUA(화면 조작)는 플러그인이 아니라 CUA Bar 앱(https://cua.chenjing.org) 하나로 깐다.",
   "owner": {
     "name": "chenjing"
   },
