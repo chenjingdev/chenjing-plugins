@@ -2,29 +2,35 @@ import Foundation
 import Testing
 @testable import cua_bar
 
-/// Setup as the person sees it: run by itself at start-up once, said on the status card while it
-/// runs, a fixed line and 다시 하기 after a failure, never started by a status read.
+/// The install as the person sees it: run by itself at start-up once, said on the status card while it
+/// runs, a fixed line and 다시 하기 after a failure, never started by a status read, and run once more for
+/// what it put off (no Codex, no Claude Code) when that has come.
 @MainActor
 struct SetupFlowTests {
-    private let notSetUp = EngineError.setupNeeded(installPath: "/x/cua/0.7.0")
+    private typealias Rig = LiveSystemActionsTests.Rig
 
-    private func makeModel(
-        _ engine: FakeEngineClient,
-        activity: SetupActivity = SetupActivity(),
-        appVersion: String? = "0.7.0",
-        systemActions: any SystemActions = RecordingSystemActions(),
-        registeredPluginVersion: @escaping @Sendable () -> String? = { nil }
-    ) -> CUABarViewModel {
-        CUABarViewModel(
-            engine: engine, appVersion: appVersion, systemActions: systemActions, pasteboard: RecordingPasteboard(),
-            clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: .seconds(3600), sleep: ManualSleeper().sleep,
-            setupActivity: activity, registeredPluginVersion: registeredPluginVersion)
+    private func makeRig(
+        codexInstalled: Bool = true, developerTools: Bool = true, claudeInstalled: Bool = true, bundled: Bool = true,
+        engine status: Result<EngineStatus, EngineError> = .failure(.engineMissing),
+        gateFor: @escaping @Sendable (StepRunner.Call) -> AsyncGate? = { _ in nil },
+        responses: (@Sendable (StepRunner.Call) throws -> ProcessOutput?)? = nil
+    ) throws -> Rig {
+        try LiveSystemActionsTests().rig(
+            codexInstalled: codexInstalled, developerTools: developerTools, claudeInstalled: claudeInstalled, bundled: bundled, engine: status,
+            gateFor: gateFor, responses: responses)
     }
 
-    private func automaticSetup(
-        _ model: CUABarViewModel, _ activity: SetupActivity, location: CommandLocation
-    ) -> AutomaticSetup {
-        AutomaticSetup(locate: { location }, activity: activity) { _ = await model.perform($0) }
+    private func makeModel(_ rig: Rig, appVersion: String? = "0.7.0") -> CUABarViewModel {
+        CUABarViewModel(
+            engine: rig.engine, appVersion: appVersion, systemActions: rig.actions, pasteboard: RecordingPasteboard(),
+            clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: .seconds(3600), sleep: ManualSleeper().sleep,
+            setupActivity: rig.setup, codexInstalled: { rig.codex.isThere })
+    }
+
+    private func automaticSetup(_ model: CUABarViewModel, _ rig: Rig, bundled: Bool = true) -> AutomaticSetup {
+        AutomaticSetup(
+            activity: rig.setup, perform: { _ = await model.perform($0) }, isBundled: bundled,
+            codexInstalled: { rig.codex.isThere }, claudeCodeFound: { rig.claudeCode.isThere })
     }
 
     private func waitUntil(_ timeout: Double = 30, _ condition: () -> Bool) async -> Bool {
@@ -33,69 +39,64 @@ struct SetupFlowTests {
         return condition()
     }
 
-    private var installedNotSetUp: CommandLocation { .installedNotSetUp(installPath: URL(fileURLWithPath: "/x/cua/0.7.0")) }
+    // MARK: Automatic install
 
-    // MARK: Automatic setup
-
-    @Test func setupRunsByItselfAtStartWhenThePluginIsInstalledButNotSetUp() async {
-        let engine = FakeEngineClient()
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
-        let auto = automaticSetup(model, activity, location: installedNotSetUp)
-        await auto.runAtStartup()
-        #expect(engine.calls.first == .runSetup)
-        #expect(engine.calls == [.runSetup, .status], "the setup, then a read of what it did")
+    @Test func theInstallRunsByItselfAtStartAndTheStatusIsReadAfterIt() async throws {
+        let rig = try makeRig()
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        await automaticSetup(model, rig).runAtStartup()
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+        #expect(rig.engine.calls.last == .status, "a read of what it did")
+        #expect(rig.setup.automaticRunClaimed)
     }
 
-    @Test func itRunsAtMostOncePerAppRun() async {
-        let engine = FakeEngineClient()
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
-        let auto = automaticSetup(model, activity, location: installedNotSetUp)
+    @Test func itRunsAtMostOncePerAppRun() async throws {
+        let rig = try makeRig()
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
         await auto.runAtStartup()
         await auto.runAtStartup()
-        await automaticSetup(model, activity, location: installedNotSetUp).runAtStartup()
-        #expect(engine.calls.filter { $0 == .runSetup }.count == 1)
+        await automaticSetup(model, rig).runAtStartup()
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1)
     }
 
-    @Test func itOnlyRunsWhenThePluginIsInstalledWithoutItsCommand() async {
-        let engine = FakeEngineClient()
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
-        await automaticSetup(model, activity, location: .ready(URL(fileURLWithPath: "/x/codex-cua"))).runAtStartup()
-        await automaticSetup(model, activity, location: .pluginMissing).runAtStartup()
-        #expect(engine.calls.isEmpty)
-        #expect(!activity.automaticRunClaimed, "an attempt that did not happen is not used up")
-        await automaticSetup(model, activity, location: installedNotSetUp).runAtStartup()
-        #expect(engine.calls.filter { $0 == .runSetup }.count == 1)
+    @Test func aBuildOutsideAnAppBundleNeverRunsItByItself() async throws {
+        let rig = try makeRig(bundled: false)
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        await automaticSetup(model, rig, bundled: false).runAtStartup()
+        #expect(rig.runner.calls.isEmpty)
+        #expect(rig.engine.calls.isEmpty)
+        #expect(!rig.setup.automaticRunClaimed, "an attempt that did not happen is not used up")
     }
 
-    @Test func aFailedAutomaticRunIsNotTriedAgainByItself() async {
-        let engine = FakeEngineClient()
-        engine.setStatusError(notSetUp) // still not set up afterwards
-        engine.configure { $0.actionError = .commandFailed(exitCode: 1, message: "boom") }
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
-        let auto = automaticSetup(model, activity, location: installedNotSetUp)
+    @Test func aFailedAutomaticRunIsNotTriedAgainByItself() async throws {
+        let rig = try makeRig(responses: { $0.isInstallEngine ? StepRunner.failed() : nil })
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
         await auto.runAtStartup()
         await auto.runAtStartup()
-        #expect(engine.calls.filter { $0 == .runSetup }.count == 1)
-        #expect(activity.phase == .failed)
+        await auto.runWhatWasPutOff()
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1)
+        #expect(rig.setup.phase == .failed)
         #expect(model.summary.fixLabel == "다시 하기", "only a click tries again")
     }
 
-    @Test func aStatusReadNeverStartsSetupOrAnyOtherStep() async throws {
-        let engine = FakeEngineClient()
-        let system = RecordingSystemActions()
+    @Test func aStatusReadNeverStartsTheInstallOrAnyOtherStep() async throws {
+        let rig = try makeRig()
+        defer { rig.home.remove() }
         let sleeper = ManualSleeper()
         let model = CUABarViewModel(
-            engine: engine, appVersion: "0.7.0", systemActions: system, clock: { Fixtures.now }, calendar: Fixtures.utc,
-            sleep: sleeper.sleep, registeredPluginVersion: { "0.5.0" })
+            engine: rig.engine, appVersion: "0.7.0", systemActions: rig.actions, clock: { Fixtures.now }, calendar: Fixtures.utc,
+            sleep: sleeper.sleep, setupActivity: rig.setup)
         let problems: [EngineError] = [
-            notSetUp, .pluginMissing, .unsupportedSchema(2), .timeout, .commandFailed(exitCode: 2, message: "usage"), .invalidOutput("EngineStatus"),
+            .setupNeeded(installPath: "/x"), .engineMissing, .unsupportedSchema(2), .timeout, .commandFailed(exitCode: 2, message: "usage"), .invalidOutput("EngineStatus"),
         ]
         for error in problems {
-            engine.setStatusError(error)
+            rig.engine.setStatusError(error)
             for _ in 0..<3 { await model.refresh() }
         }
         model.start()
@@ -103,26 +104,144 @@ struct SetupFlowTests {
         #expect(sleeper.releaseAll() == 1)
         #expect(await waitUntil { sleeper.requestedDurations.count == 2 })
         model.stop()
-        #expect(engine.calls.allSatisfy { $0 == .status }, "reads only: \(engine.calls)")
-        #expect(system.calls.isEmpty)
+        #expect(rig.engine.calls.allSatisfy { $0 == .status }, "reads only: \(rig.engine.calls)")
+        #expect(rig.runner.calls.isEmpty)
+    }
+
+    // MARK: What was put off
+
+    @Test func whatWasPutOffForCodexRunsOnceAfterCodexHasComeAndNotBefore() async throws {
+        let rig = try makeRig(codexInstalled: false)
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
+        await auto.runAtStartup()
+        #expect(rig.runner.calls.isEmpty, "no Codex: nothing at all")
+        #expect(rig.setup.waitingFor == [.codex])
+
+        await auto.runWhatWasPutOff()
+        #expect(rig.runner.calls.isEmpty, "still no Codex")
+
+        rig.codex.isThere = true
+        await auto.runWhatWasPutOff()
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+        #expect(rig.runner.calls.contains(rig.mcpAdd()))
+        #expect(rig.setup.waitingFor.isEmpty)
+        let count = rig.runner.calls.count
+        await auto.runWhatWasPutOff()
+        #expect(rig.runner.calls.count == count, "once, not at every read")
+    }
+
+    @Test func whatWasPutOffForClaudeCodeIsPutInOnceItHasComeAndTheEngineIsNotUnpackedAgain() async throws {
+        let rig = try makeRig(claudeInstalled: false)
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
+        await auto.runAtStartup()
+        #expect(rig.setup.waitingFor == [.claudeCode])
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1)
+
+        rig.engine.setStatus(try LiveSystemActionsTests().currentEngine(rig.home).get())
+        try rig.home.installClaudeCode()
+        rig.claudeCode.isThere = true
+        await auto.runWhatWasPutOff()
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1, "the engine was already the app's")
+        #expect(rig.runner.calls.contains(rig.mcpAdd()))
+        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
+        #expect(rig.setup.waitingFor.isEmpty)
+    }
+
+    @Test func whatWasPutOffForAnAnswerFromTheEngineRunsWithTheFirstReadThatWorksAndNotBefore() async throws {
+        let rig = try makeRig(engine: .failure(.timeout))
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        try rig.home.write("#!/bin/sh\n", to: URL(fileURLWithPath: rig.launcher)) // an engine was unpacked before
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
+        await auto.runAtStartup()
+        #expect(rig.setup.waitingFor == [.status])
+        #expect(!rig.runner.calls.contains { $0.isInstallEngine }, "the engine could not be asked")
+        #expect(rig.runner.calls.contains(rig.mcpAdd(rig.launcher)), "the MCP server did not wait for it")
+        let count = rig.runner.calls.count
+
+        await auto.runWhatWasPutOff(status: nil)
+        #expect(rig.runner.calls.count == count, "a read that failed is no answer")
+
+        // The first read that works shows an engine of another version. The run it starts uses that answer: asking
+        // again could run out of time once more.
+        rig.engine.setStatus(try LiveSystemActionsTests().currentEngine(rig.home, version: "0.6.0").get())
+        let answer = try await rig.engine.status()
+        rig.engine.setStatusError(.timeout)
+        await auto.runWhatWasPutOff(status: answer)
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1)
+        #expect(rig.setup.takeOfferedStatus() == nil, "what was offered does not outlive the catch-up")
+        #expect(rig.setup.waitingFor.isEmpty)
+        await auto.runWhatWasPutOff(status: answer)
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1, "once")
+    }
+
+    @Test func aCodexTheEngineDoesNotAcceptDoesNotStartARunAtEveryRead() async throws {
+        // The app sees a Codex app on the disk, the engine says there is none: the engine's word counts, so what was
+        // put off for Codex waits for the engine to change its mind and does not spin.
+        let rig = try makeRig(codexInstalled: true)
+        defer { rig.home.remove() }
+        var rejecting = try LiveSystemActionsTests().currentEngine(rig.home, version: "0.6.0").get()
+        rejecting.codex.installed = false
+        rig.engine.setStatus(rejecting)
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
+        await auto.runAtStartup()
+        #expect(rig.setup.waitingFor == [.codex])
+        #expect(rig.runner.calls.isEmpty)
+        let reads = rig.engine.statusCallCount
+
+        for _ in 0..<3 { await auto.runWhatWasPutOff(status: rejecting) }
+        #expect(rig.runner.calls.isEmpty, "the disk says yes, the engine says no")
+        #expect(rig.engine.statusCallCount == reads, "and no run was started")
+
+        var accepting = rejecting
+        accepting.codex.installed = true
+        rig.engine.setStatus(accepting)
+        await auto.runWhatWasPutOff(status: accepting)
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+        #expect(rig.setup.waitingFor.isEmpty)
+    }
+
+    @Test func theModelRunsWhatWasPutOffAfterAReadThatFindsItHasComeAndOnlyThen() async throws {
+        let rig = try makeRig(codexInstalled: false)
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        let auto = automaticSetup(model, rig)
+        model.afterRead = { await auto.runWhatWasPutOff(status: $0) }
+        await auto.runAtStartup()
+        await model.refresh()
+        await model.waitForBackgroundWork()
+        #expect(rig.runner.calls.isEmpty)
+
+        rig.codex.isThere = true
+        await model.refresh()
+        await model.waitForBackgroundWork()
+        #expect(rig.runner.calls.contains(rig.installEngineCall))
+        let count = rig.runner.calls.filter { $0.isInstallEngine }.count
+        await model.refresh()
+        await model.waitForBackgroundWork()
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == count)
     }
 
     // MARK: The card while it runs, and after it fails
 
-    @Test func whileSetupRunsTheCardSaysSoInsteadOfShowingAProblem() async {
-        let engine = FakeEngineClient()
-        engine.setStatusError(notSetUp)
+    @Test func whileTheInstallRunsTheCardSaysSoInsteadOfShowingAProblem() async throws {
         let gate = AsyncGate()
-        engine.configure { $0.actionGate = gate }
-        defer { gate.open() }
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
+        let rig = try makeRig(gateFor: { $0.isInstallEngine ? gate : nil })
+        defer { rig.home.remove(); gate.open() }
+        let model = makeModel(rig)
         await model.refresh()
         #expect(model.summary.problem?.kind == .setupIncomplete, "before it starts: the plain problem")
         #expect(model.summary.fixLabel == "고치기")
 
-        let running = Task { await automaticSetup(model, activity, location: installedNotSetUp).runAtStartup() }
-        #expect(await waitUntil { engine.calls.contains(.runSetup) })
+        let running = Task { await automaticSetup(model, rig).runAtStartup() }
+        #expect(await waitUntil { rig.runner.calls.contains { $0.isInstallEngine } })
         #expect(model.summary.headline == "연결을 설정하는 중")
         #expect(model.summary.problem == nil, "not a problem")
         #expect(model.summary.fix == nil)
@@ -133,21 +252,19 @@ struct SetupFlowTests {
 
         gate.open()
         await running.value
-        engine.setStatus(EngineStatus())
+        rig.engine.setStatus(try LiveSystemActionsTests().currentEngine(rig.home).get())
         await model.refresh()
         #expect(model.summary.problem == nil)
         #expect(model.summary.headline != "연결을 설정하는 중")
-        #expect(activity.phase == .idle)
+        #expect(rig.setup.phase == .idle)
     }
 
-    @Test func afterAFailureTheCardHasOneFixedLineAndATryAgainButton() async {
-        let engine = FakeEngineClient()
-        engine.setStatusError(notSetUp)
-        engine.configure { $0.actionError = .commandFailed(exitCode: 1, message: "SECRET-STDERR /Users/someone/token=abc") }
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
+    @Test func afterAFailureTheCardHasOneFixedLineAndATryAgainButton() async throws {
+        let rig = try makeRig(responses: { $0.isInstallEngine ? StepRunner.failed() : nil })
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
         await model.refresh()
-        await automaticSetup(model, activity, location: installedNotSetUp).runAtStartup()
+        await automaticSetup(model, rig).runAtStartup()
 
         let problem = model.summary.problem
         #expect(problem?.kind == .setupIncomplete)
@@ -158,134 +275,107 @@ struct SetupFlowTests {
         #expect(model.summary.tooltip == "CUA 문제 · 연결 설정에 실패했어요")
         let shown = [model.summary.headline, model.summary.nextStep, model.summary.warning ?? "", model.banner?.outcome.message ?? ""]
         #expect(shown.allSatisfy { !$0.contains("SECRET") && !$0.contains("token") }, "never what the command printed")
-        #expect(model.banner?.outcome == ActionOutcome(kind: .failure, message: "연결 설정에 실패했어요"))
+        #expect(model.banner?.outcome == ActionOutcome(kind: .failure, message: "연결 엔진을 설치하지 못했어요"))
     }
 
     @Test func pressingTryAgainRunsItOnceMoreAndASuccessClearsTheFailure() async throws {
-        let engine = FakeEngineClient()
-        engine.setStatusError(notSetUp)
-        engine.configure { $0.actionError = .commandFailed(exitCode: 1, message: "boom") }
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
+        let failing = Presence(true)
+        let rig = try makeRig(responses: { failing.isThere && $0.isInstallEngine ? StepRunner.failed() : nil })
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
         await model.refresh()
-        await automaticSetup(model, activity, location: installedNotSetUp).runAtStartup()
+        await automaticSetup(model, rig).runAtStartup()
         let retry = try #require(model.summary.fix)
 
-        engine.configure { $0.actionError = nil }
-        engine.setStatus(EngineStatus())
+        failing.isThere = false
         let outcome = await model.perform(retry)
-        #expect(outcome == ActionOutcome(kind: .success, message: "연결 설정을 마쳤어요"))
-        #expect(engine.calls.filter { $0 == .runSetup }.count == 2, "the click is a second run, allowed")
-        #expect(activity.phase == .idle)
-        #expect(model.summary.problem == nil)
+        #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 2, "the click is a second run, allowed")
+        #expect(outcome.kind == .success)
+        #expect(rig.setup.phase == .idle)
     }
 
-    @Test func aFailureIsForgottenOnceTheSetupProblemIsGone() async {
-        let engine = FakeEngineClient()
-        engine.setStatusError(notSetUp)
-        engine.configure { $0.actionError = .commandFailed(exitCode: 1, message: "boom") }
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
+    @Test func aFailureIsForgottenOnceTheSetupProblemIsGone() async throws {
+        let rig = try makeRig(responses: { $0.isInstallEngine ? StepRunner.failed() : nil })
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
         await model.refresh()
-        await automaticSetup(model, activity, location: installedNotSetUp).runAtStartup()
+        await automaticSetup(model, rig).runAtStartup()
         #expect(model.summary.fixLabel == "다시 하기")
 
-        engine.setStatus(EngineStatus()) // someone fixed it by hand
+        rig.engine.setStatus(try LiveSystemActionsTests().currentEngine(rig.home).get()) // someone fixed it by hand
         await model.refresh()
-        #expect(activity.phase == .idle)
-        engine.setStatusError(notSetUp) // and later it breaks again
+        #expect(rig.setup.phase == .idle)
+        rig.engine.setStatusError(.setupNeeded(installPath: "/x")) // and later it breaks again
         await model.refresh()
         #expect(model.summary.fixLabel == "고치기", "a new problem, not the old failure")
         #expect(model.summary.headline == "연결 설정이 아직 안 됐어요")
     }
 
     @Test func theOverlayLeavesEveryOtherCardAlone() async throws {
-        let engine = FakeEngineClient(status: try Fixtures.status("status-problem"))
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
+        let rig = try makeRig(engine: .success(try Fixtures.status("status-problem")))
+        defer { rig.home.remove() }
+        let model = makeModel(rig, appVersion: nil)
         await model.refresh()
         let before = model.summary
         #expect(before.problem?.kind == .codexWithoutHost)
-        _ = activity.begin()
-        #expect(model.summary == before, "a running setup is no reason to hide an unrelated problem")
-        activity.end(succeeded: false)
+        _ = rig.setup.begin()
+        #expect(model.summary == before, "a running install is no reason to hide an unrelated problem")
+        rig.setup.end(succeeded: false)
         #expect(model.summary == before)
     }
 
-    @Test func aSetupFixButtonShownByAWorkingStatusIsAlsoCoveredWhileItRuns() async throws {
-        // The command exists but the wrapper is broken: the card says "고치기" and, once pressed, that it is setting up.
-        var status = try Fixtures.status("status-ready")
-        status.setup.wrapper = "broken"
-        let engine = FakeEngineClient(status: status)
-        let gate = AsyncGate()
-        engine.configure { $0.actionGate = gate }
-        defer { gate.open() }
-        let model = makeModel(engine)
+    // MARK: Developer tools, Codex
+
+    @Test func withoutDeveloperToolsTheCardAsksForThemAndItsButtonOpensTheInstaller() async throws {
+        let rig = try makeRig(developerTools: false)
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        await automaticSetup(model, rig).runAtStartup()
+        let problem = try #require(model.summary.problem)
+        #expect(problem.kind == .developerToolsNeeded)
+        #expect(problem.title == "개발자 도구 필요")
+        #expect(problem.fix == .installDeveloperTools)
+        #expect(problem.fixLabel == "설치")
+        #expect(model.summary.icon == .problem)
+        #expect(rig.runner.calls.allSatisfy { $0.executable == "/usr/bin/xcode-select" && $0.arguments == ["-p"] }, "nothing opened by itself")
+
+        let outcome = await model.perform(try #require(model.summary.fix))
+        #expect(rig.runner.calls.last?.arguments == ["--install"])
+        #expect(outcome.kind == .info)
+    }
+
+    @Test func withoutCodexTheCardSaysCodexIsMissingAndOffersNoInstall() async throws {
+        let rig = try makeRig(codexInstalled: false)
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        await automaticSetup(model, rig).runAtStartup()
         await model.refresh()
-        #expect(model.summary.fixLabel == "고치기")
-        let running = Task { await model.perform(.runSetup) }
-        #expect(await waitUntil { engine.calls.contains(.runSetup) })
-        #expect(model.summary.headline == "연결을 설정하는 중")
-        gate.open()
-        _ = await running.value
+        #expect(model.summary.problem?.kind == .codexMissing)
+        #expect(model.summary.fix == .openCodexDownload)
+        #expect(rig.runner.calls.isEmpty)
     }
 
     // MARK: One at a time
 
-    @Test func aSetupAlreadyRunningElsewhereTakesTheSlotSoThePressDoesNothing() async {
-        let engine = FakeEngineClient()
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
-        #expect(activity.begin(), "an install's own setup step is running")
+    @Test func anInstallAlreadyRunningElsewhereTakesTheSlotSoThePressDoesNothing() async throws {
+        let rig = try makeRig()
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
+        #expect(rig.setup.begin(), "some other run is going")
         let outcome = await model.perform(.runSetup)
         #expect(outcome == ActionOutcome(kind: .info, message: "이미 하는 중이에요"))
-        #expect(!engine.calls.contains(.runSetup))
-        #expect(activity.phase == .running, "and the other keeps its slot")
+        #expect(rig.runner.calls.isEmpty)
+        #expect(rig.setup.phase == .running, "and the other keeps its slot")
     }
 
-    @Test func theSlotIsFreeAgainAfterEveryRun() async {
-        let engine = FakeEngineClient()
-        let activity = SetupActivity()
-        let model = makeModel(engine, activity: activity)
+    @Test func theSlotIsFreeAgainAfterEveryRun() async throws {
+        let rig = try makeRig()
+        defer { rig.home.remove() }
+        let model = makeModel(rig)
         await model.perform(.runSetup)
         await model.perform(.runSetup)
-        #expect(engine.calls.filter { $0 == .runSetup }.count == 2)
-        #expect(activity.phase == .idle)
-    }
-
-    // MARK: An install or update shows the same card
-
-    @Test func whileAnInstallsSetupRunsTheCardSaysSettingUp() async throws {
-        let home = try TempHome()
-        defer { home.remove() }
-        let gate = AsyncGate()
-        let runner = StepRunner(gateFor: { $0.executable == "/bin/sh" ? gate : nil }) { call in
-            if call.isClaude, call.arguments.contains("install") { try home.installPlugin(version: "0.7.0") }
-            return StepRunner.ok()
-        }
-        defer { gate.open() }
-        let activity = SetupActivity()
-        let claude = home.url.appendingPathComponent(".local/bin/claude").path
-        let actions = LiveSystemActions(
-            locator: CommandLocator(home: home.url), claude: ClaudeCLILocator(home: home.url, isExecutableFile: { $0 == claude }),
-            runner: runner, opener: FakeOpener(), appVersion: "0.7.0", setup: activity)
-        let engine = FakeEngineClient()
-        engine.setStatusError(.pluginMissing)
-        let model = makeModel(engine, activity: activity, systemActions: actions)
-        await model.refresh()
-        #expect(model.summary.problem?.kind == .pluginMissing)
-        #expect(model.summary.fixLabel == "설치")
-
-        let installing = Task { await model.perform(.installPlugin) }
-        #expect(await waitUntil { runner.calls.contains { $0.executable == "/bin/sh" } })
-        engine.setStatusError(notSetUp) // the plugin is registered now, the command is not there yet
-        await model.refresh()
-        #expect(model.summary.headline == "연결을 설정하는 중")
-        #expect(model.summary.problem == nil)
-        gate.open()
-        let outcome = await installing.value
-        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
-        #expect(model.banner?.outcome == outcome)
+        #expect(rig.runner.calls.filter { $0.isDeveloperToolsCheck }.count == 2)
+        #expect(rig.setup.phase == .idle)
     }
 
     // MARK: A card says what is happening, from the tooltip to the label
@@ -301,6 +391,6 @@ struct SetupFlowTests {
 
     @Test func setupGetsAtLeastFifteenMinutesBeforeAnyTimeout() {
         #expect(EngineTimeouts().setup >= .seconds(15 * 60))
-        #expect(LiveSystemActions.Timeouts().setup >= .seconds(15 * 60))
+        #expect(LiveSystemActions.Timeouts().engineInstall >= .seconds(15 * 60))
     }
 }

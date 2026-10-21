@@ -3,6 +3,7 @@
   "generated_at": "2026-10-18T12:00:00.250Z",
   "future_top_level": {"anything": [1, 2, 3]},
   "plugin": {"version": "0.7.0", "channel": "beta"},
+  "engine": {"version": "0.7.0", "root": "/Users/chenjing/.local/share/codex-cua/engine/0.7.0", "launcher": "/Users/chenjing/.local/share/codex-cua/engine/current/start-mcp.sh", "channel": "beta"},
   "codex": {
     "installed": true,
     "app_path": "/Applications/ChatGPT.app",

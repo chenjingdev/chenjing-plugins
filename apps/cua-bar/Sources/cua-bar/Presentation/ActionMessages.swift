@@ -87,7 +87,7 @@ struct TidyStep: Equatable, Sendable {
         // Nothing to release is not "not released" (P4).
         if result.reason == "no_trusted_scope" { return nil }
         if result.reason == "request_in_flight" {
-            return "도구 호출이 끝나지 않아 탭은 못 풀었어요. 플러그인이 끝날 때 한 번 더 풀고, 남으면 목록에 점유로 보여요"
+            return "도구 호출이 끝나지 않아 탭은 못 풀었어요. 연결이 끝날 때 한 번 더 풀고, 남으면 목록에 점유로 보여요"
         }
         return "탭을 풀었는지는 확인되지 않았어요. 남았으면 목록에 점유로 보여요"
     }

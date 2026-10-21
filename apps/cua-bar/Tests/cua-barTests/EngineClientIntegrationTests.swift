@@ -126,7 +126,7 @@ struct EngineClientIntegrationTests {
         let home = try TempHome()
         defer { home.remove() }
         let client = CodexCUAEngineClient(locator: CommandLocator(home: home.url))
-        await #expect(throws: EngineError.pluginMissing) { try await client.status() }
+        await #expect(throws: EngineError.engineMissing) { try await client.status() }
         let log = home.url.appendingPathComponent("arguments.log")
         try home.writeCommand("""
         #!/bin/sh

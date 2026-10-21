@@ -17,6 +17,8 @@ enum ResultPlace: Hashable, Sendable {
     case tidyAll
     /// At the bottom of 기록, right above its buttons: 진단 복사.
     case diagnosis
+    /// A line of 점검: 연결 시험 or the copy button of a command.
+    case check(CheckItem)
 }
 
 /// Everything a button in the popover can ask for. A row has one button for its state: 탭 풀기 on a
@@ -42,17 +44,21 @@ enum CUAAction: Hashable, Sendable {
     case copyDiagnosis
 
     // Fix buttons that are more than one engine call, or not an engine call at all.
+    /// 고치기: the whole install again (engine, then Claude Code's MCP server and skill).
     case runSetup
     /// Codex 열기, after a restart whose relaunch failed. Opens the app the person just chose to open.
     case openCodex
     /// Open the page where Codex is downloaded.
     case openCodexDownload
-    /// Install the Claude plugin (`cua@chenjing-plugins`) and set it up.
-    case installPlugin
-    /// Update the plugin when it is older than the app, or open the app's release page when it is newer.
-    case matchPluginVersion
+    /// 설치 on the card that asks for the developer tools: opens the system's installer, or runs the whole
+    /// install when the tools have come since.
+    case installDeveloperTools
     /// Read the status again now.
     case refresh
+    /// 연결 시험 on the 점검 tab: one `cua.getState()` against a Codex host that is ready, on a thread of its own.
+    case runProbe
+    /// 복사 on a command of the 점검 tab. The app hands the command over and never runs it.
+    case copyCommand(String, on: CheckItem)
 
     /// Where its answer is told; nil for the actions that answer under the status card, whose buttons are there.
     var resultPlace: ResultPlace? {
@@ -61,6 +67,8 @@ enum CUAAction: Hashable, Sendable {
         case .releaseSession(let id, _): .session(id)
         case .tidyAll: .tidyAll
         case .copyDiagnosis: .diagnosis
+        case .runProbe: .check(.host)
+        case .copyCommand(_, let item): .check(item)
         default: nil
         }
     }

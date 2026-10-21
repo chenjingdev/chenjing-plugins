@@ -263,8 +263,15 @@ struct PopoverSnapshotTests {
         }
     }
 
+    /// A ready engine with nothing connected: the app's version is the engine's, so the card has no problem.
+    private func emptyReadyStatus() -> EngineStatus {
+        var status = EngineStatus()
+        status.engine.version = "0.7.0"
+        return status
+    }
+
     @Test func eachTabDrawsWhenEverythingIsEmpty() async throws {
-        let engine = FakeEngineClient(status: EngineStatus())
+        let engine = FakeEngineClient(status: emptyReadyStatus())
         let model = CUABarViewModel(engine: engine, appVersion: "0.7.0", clock: { Fixtures.now }, calendar: Fixtures.utc)
         await model.refresh()
         for tab in PopoverTab.allCases {
@@ -292,7 +299,7 @@ struct PopoverSnapshotTests {
         }
         #expect(heights.count == 1, "the height changes between tabs: \(heights)")
 
-        let empty = FakeEngineClient(status: EngineStatus())
+        let empty = FakeEngineClient(status: emptyReadyStatus())
         let emptyModel = CUABarViewModel(engine: empty, appVersion: "0.7.0", clock: { Fixtures.now }, calendar: Fixtures.utc)
         let loadingHeight = height(emptyModel)
         await emptyModel.refresh()
@@ -369,5 +376,105 @@ struct ButtonLineTests {
         let free = try #require(Snapshot.bitmap(of: SpecButton(spec: spec) { _ in }))
         let narrow = try #require(Snapshot.bitmap(of: SpecButton(spec: spec) { _ in }.frame(width: 24)))
         #expect(narrow.size.height == free.size.height)
+    }
+}
+
+/// The 점검 tab drawn in the states it has, and the popover's height with it (the list area is one height in every tab).
+@MainActor
+struct CheckTabSnapshotTests {
+    private var environment: [String: String] { ProcessInfo.processInfo.environment }
+    private var dark: Bool { environment["CUABAR_SNAPSHOT_APPEARANCE"] == "dark" }
+
+    private func fine() throws -> EngineStatus {
+        var status = try Fixtures.status("status-ready")
+        status.engine.version = "0.7.0"
+        return status
+    }
+
+    /// A model for a state of the 점검 tab: what Claude Code has, the developer tools, the login environment.
+    private func model(
+        _ status: EngineStatus, claude: ClaudeSetupState = CheckFixtures.claudeReady(), developerTools: Bool = false,
+        login: LoginEnvironmentReading? = nil, probe: ProbeOutcome? = nil, tab: PopoverTab = .check
+    ) async -> CUABarViewModel {
+        let setup = SetupActivity()
+        if developerTools { setup.record(waitingFor: [], developerToolsNeeded: true) }
+        let engine = FakeEngineClient(status: status)
+        if let probe { engine.configure { $0.probe = .success(probe) } }
+        let model = CUABarViewModel(
+            engine: engine, appVersion: "0.7.0", policy: RefreshPolicy(closed: .seconds(3600), open: .seconds(3600)),
+            clock: { Fixtures.now }, calendar: Fixtures.utc, bannerDuration: .seconds(3600), setupActivity: setup,
+            claudeInspector: { _ in claude }, loginItemReading: { LoginItemReading(.enabled, "켜짐") },
+            loginEnvironmentReader: { login ?? LoginEnvironmentReading(agentLabel: nil, launchdValue: nil) },
+            appLauncherValue: "/Users/x/.local/share/codex-cua/start-desktop-cli.sh")
+        await model.refresh()
+        await model.waitForBackgroundWork()
+        if probe != nil { await model.perform(.runProbe) }
+        model.selectedTab = tab
+        return model
+    }
+
+    private func states() async throws -> [(String, CUABarViewModel)] {
+        var conflictClaude = CheckFixtures.claudeReady()
+        conflictClaude.mcp = .conflict
+        conflictClaude.skill = .conflict
+        conflictClaude.legacyPlugin = true
+        var brokenOnCard = try fine()
+        brokenOnCard.engine.version = "0.6.0"
+        brokenOnCard.setup.relay = "unavailable"
+        var loginConflict = try fine()
+        loginConflict.setup.loginEnvironment = "conflict"
+        var off = try fine()
+        off.codex.running = false
+        off.codex.pids = []
+        off.host.state = .closed
+        var unusable = CheckFixtures.claudeReady()
+        unusable.claudeCodeUnusable = true
+        return [
+            ("all-fine", await model(try fine())),
+            ("probe-passed", await model(try fine(), probe: .checked)),
+            ("probe-failed", await model(try fine(), probe: .failed)),
+            ("broken-on-the-card", await model(brokenOnCard, claude: { var c = CheckFixtures.claudeReady(); c.mcp = .missing; return c }())),
+            ("conflicts-and-old-plugin", await model(try fine(), claude: conflictClaude)),
+            ("login-environment-conflict", await model(loginConflict, login: LoginEnvironmentReading(agentLabel: nil, launchdValue: "/opt/other/codex-wrapper.sh"))),
+            ("developer-tools", await model(try fine(), developerTools: true)),
+            ("no-claude-code", await model(try fine(), claude: .none)),
+            ("claude-code-cannot-start", await model(try fine(), claude: unusable)),
+            ("codex-off", await model(off)),
+        ]
+    }
+
+    @Test func theCheckTabDrawsInEachOfItsStates() async throws {
+        for (name, model) in try await states() {
+            let bitmap = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark), Comment(rawValue: name))
+            #expect(NSApplication.shared.windows.allSatisfy { !$0.isVisible })
+            #expect(Snapshot.inkRatio(bitmap) > 0.1, "\(name) looks blank")
+            if let directory = environment["CUABAR_SNAPSHOT_EXTRA_DIR"] {
+                try Snapshot.write(bitmap, named: "check-\(name)", to: directory)
+            }
+        }
+    }
+
+    /// The popover does not jump when the person goes to 점검, whatever that tab has to say: the list area is one height.
+    @Test func theCheckTabKeepsTheHeightOfTheOtherTabsInEveryState() async throws {
+        func height(_ model: CUABarViewModel) -> CGFloat {
+            _ = NSApplication.shared
+            return NSHostingView(rootView: PopoverView(model: model, quit: {})).fittingSize.height
+        }
+        for (name, model) in try await states() {
+            var heights: Set<CGFloat> = []
+            for tab in PopoverTab.allCases {
+                model.selectedTab = tab
+                heights.insert(height(model))
+            }
+            #expect(heights.count == 1, "\(name): the height changes between tabs: \(heights)")
+        }
+    }
+
+    @Test func theTabIsInThePickerAndTheCheckLinesAreInTheTabArea() async throws {
+        let model = try #require(try await states().first { $0.0 == "conflicts-and-old-plugin" }?.1)
+        let content = model.checkContent
+        #expect(content.problemCount == 2 + 0, "the MCP line (conflict and old plugin) and the skill line")
+        #expect(content.lines.count == 9)
+        #expect(PopoverTab.allCases.map(\.title).contains("점검"))
     }
 }

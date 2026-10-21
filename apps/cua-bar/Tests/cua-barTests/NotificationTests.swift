@@ -281,7 +281,8 @@ struct NotificationViewModelTests {
         let rig = await Rig(try codexProblem(), notifier: FakeNotifier(allowed: false))
         rig.engine.configure { $0.diagnosis = "codex-cua diagnose\n" }
         await rig.model.perform(.copyDiagnosis)
-        #expect(rig.pasteboard.copied.last == "codex-cua diagnose\n알림: 꺼짐\n")
+        // The lines of the 점검 tab sit between the engine's text and this line (see CheckDiagnosisTests).
+        #expect(rig.pasteboard.copied.last.map(CheckFixtures.withoutCheckLines) == "codex-cua diagnose\n알림: 꺼짐\n")
     }
 
     @Test func eachSettingHasItsLineAndOnlyOffOrUnansweredOffersTurningThemOn() {
@@ -399,7 +400,7 @@ struct NotificationViewModelTests {
         status.connections[0].state = .ended // an ended connection is a problem, not a notification
         status.connections[0].canRelease = false
         status.setup.relay = "unavailable"
-        status.plugin.version = "0.6.0"
+        status.engine.version = "0.6.0"
         let rig = await Rig(status)
         #expect(rig.notifier.attempts == 0)
         #expect(rig.model.summary.icon == .problem)
