@@ -449,6 +449,15 @@ class CurrentLinkTests(InstallCase):
         self.assertEqual(engine_install.prune(self.context(), self.engines, '0.8.0'), [])
         self.assertTrue((self.engines/'0.7.5').is_dir())
 
+    def test_what_current_pointed_to_before_the_switch_stays_until_the_next_install(self):
+        # A conversation that started just before the switch may still be on its way into that copy.
+        self.old_copy('0.7.0')
+        (self.engines/'current').symlink_to('0.7.0')
+        self.assertEqual(self.installed()['removed'], [])
+        self.assertEqual(self.names(), ['0.7.0', '0.8.0', 'current'])
+        self.assertEqual(self.installed()['removed'], ['0.7.0'])
+        self.assertEqual(self.names(), ['0.8.0', 'current'])
+
     def test_the_launcher_does_not_depend_on_the_version(self):
         first = self.installed()['launcher']
         self.assertEqual(self.installed(root=self.newer())['launcher'], first)

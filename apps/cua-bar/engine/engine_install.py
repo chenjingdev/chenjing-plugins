@@ -8,7 +8,8 @@ whole folder or none. A copy of the same version that is already whole is not to
 
 engine/current is a relative link to the version installed last. The MCP is registered once with
 engine/current/start-mcp.sh, which resolves the link, so a registration never names a folder that cleaning can remove:
-the link is switched with one rename after the setup succeeded, and the cleaning keeps what it points to, every
+the link is switched with one rename after the setup succeeded, and the cleaning keeps what it points to, what it
+pointed to before (a conversation that started just before the switch may still be on its way into that copy), every
 higher version and every copy a process runs from. Everything from unpacking to cleaning happens under .setup.lock.
 
 Success prints the result (one JSON object with --json). A failure prints one line to stderr and exits 1; what pip and
@@ -204,9 +205,10 @@ def sweep(ctx, engines):
             discard(engines/name)
 
 
-def prune(ctx, engines, current):
+def prune(ctx, engines, current, previous=None):
     """Remove the copies that nothing needs; returns their names. Kept are `current`, what engines/current points
-    to, every version that is not surely lower than `current`, and every copy a process runs from.
+    to, `previous` (what it pointed to before this install switched it), every version that is not surely lower than
+    `current`, and every copy a process runs from.
 
     A process counts whoever it belongs to. Without a process list no copy is removed."""
     sweep(ctx, engines)
@@ -216,7 +218,7 @@ def prune(ctx, engines, current):
         names = sorted(os.listdir(engines))
     except Exception:
         return removed
-    kept = {current, linked_version(engines)}
+    kept = {current, previous, linked_version(engines)}
     real = engines.resolve()
     for name in names:
         if name in kept or not VERSION.match(name) or not surely_lower(name, current):
@@ -251,9 +253,10 @@ def install_engine(ctx, source_root):
         setup.private_directory(folder)
         root = setup.validated_plugin_root(folder, version)
         _, login, relay = setup.run_setup(root, ctx.home, ctx.environment)
+        previous = linked_version(engines)
         point_current(engines, version)
         state = {'command': command_state(ctx, support), 'login_environment': login, 'relay': relay}
-        removed = prune(ctx, engines, version)
+        removed = prune(ctx, engines, version, previous)
     return {'version': version, 'root': str(root), 'launcher': ctx.engine_launcher(), 'removed': removed,
             'setup': state}
 
