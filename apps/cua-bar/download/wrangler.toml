@@ -1,0 +1,12 @@
+# cua.chenjing.org: CUA Bar's download site, the way the unified login hub hands out its app (README "받아서
+# 켜기"). scripts/build-download-site.sh puts the release's files in public/ and writes release.json; then
+# `wrangler deploy` from this folder publishes them (ask first: R22).
+name = "cua-bar-download"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = false
+routes = [{ pattern = "cua.chenjing.org", custom_domain = true }]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"

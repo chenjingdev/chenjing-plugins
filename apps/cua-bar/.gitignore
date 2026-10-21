@@ -1,3 +1,7 @@
 CUABar.app/
 .build/
 dist/
+download/public/
+download/release.json
+download/.wrangler/
+download/node_modules/
