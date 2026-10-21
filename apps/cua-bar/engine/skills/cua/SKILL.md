@@ -1,5 +1,5 @@
 ---
-name: computer-use
+name: cua
 description: Use the installed CUA MCP to inspect and operate Mac desktop apps and browsers from Claude Code. Use when the user asks to use CUA, including requests like "cua 써서", requests GUI work through Codex CUA, or asks why CUA does not connect.
 ---
 

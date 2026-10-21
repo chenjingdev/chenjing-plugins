@@ -429,7 +429,7 @@ class EngineCase(unittest.TestCase):
                         clock=self.machine.clock, sleep=self.machine.sleep, kill=self.machine.kill,
                         application_roots=[self.home/'Applications'], uid=UID, pid=ENGINE_PID,
                         checks=checks or self.default_checks)
-        plugin_root = overrides.pop('plugin_root', Path(__file__).resolve().parents[2]/'plugins/cua')
+        plugin_root = overrides.pop('plugin_root', Path(__file__).resolve().parents[2]/'apps/cua-bar/engine')
         settings.update(overrides)
         return Context(plugin_root, **settings)
 

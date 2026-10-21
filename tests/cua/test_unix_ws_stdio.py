@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import unix_ws_stdio
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'plugins/cua'
+PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'apps/cua-bar/engine'
 NODE = '/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node'
 NODE_REPL = '/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl'
 SCRIPT = '/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'

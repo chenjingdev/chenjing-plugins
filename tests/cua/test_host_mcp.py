@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2] / 'plugins/cua'
+PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'apps/cua-bar/engine'
 spec = importlib.util.spec_from_file_location('host_mcp', PLUGIN_ROOT / 'host_mcp.py')
 bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)

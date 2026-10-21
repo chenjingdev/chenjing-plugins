@@ -5,7 +5,7 @@
   "author": {
     "name": "chenjing"
   },
-  "homepage": "https://github.com/chenjingdev/chenjing-plugins/tree/main/plugins/cua",
+  "homepage": "https://github.com/chenjingdev/chenjing-plugins/tree/main/apps/cua-bar/engine",
   "repository": "https://github.com/chenjingdev/chenjing-plugins",
   "license": "MIT",
   "keywords": [

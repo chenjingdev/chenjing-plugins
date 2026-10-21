@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "cua": {
-      "type": "stdio",
-      "command": "${CLAUDE_PLUGIN_ROOT}/start-mcp.sh",
-      "args": []
-    }
-  }
-}

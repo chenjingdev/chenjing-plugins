@@ -14,7 +14,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 package_dir=$(cd "$script_dir/.." && pwd)
-plugin_manifest="$package_dir/../../plugins/cua/.claude-plugin/plugin.json"
+plugin_manifest="$package_dir/engine/.claude-plugin/plugin.json"
 
 bundle_name="CUABar.app"
 bundle_path="$package_dir/$bundle_name"

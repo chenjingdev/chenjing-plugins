@@ -22,7 +22,7 @@ from relay_install import RelayRefused
 from test_runtime_paths import fake_app
 from toml_subset import parse_override, parse_value
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'plugins/cua'
+PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'apps/cua-bar/engine'
 APP_ARGUMENTS = ['-c', 'features.code_mode_host=true', 'app-server', '--analytics-default-enabled',
                  '-c', 'plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true']
 

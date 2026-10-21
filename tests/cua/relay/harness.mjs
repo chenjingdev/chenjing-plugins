@@ -105,7 +105,7 @@ process.on('exit', () => {
 
 // RELAY_DIR_UNDER_TEST points the tests at a modified copy of the relay (mutation checks of these tests).
 export const RELAY_DIR = process.env.RELAY_DIR_UNDER_TEST
-  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../plugins/cua/relay');
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/cua-bar/engine/relay');
 export const RELAY_MJS = path.join(RELAY_DIR, 'relay.mjs');
 export const LAUNCHER = path.join(RELAY_DIR, 'node-repl-relay');
 

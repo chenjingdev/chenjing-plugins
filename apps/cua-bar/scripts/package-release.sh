@@ -156,7 +156,7 @@ commit=""
 uncommitted=""
 if commit=$(git -C "$package_dir" rev-parse --verify HEAD 2>/dev/null); then
   # The version comes from the plugin manifest, so an uncommitted bump there counts too.
-  if [[ -n "$(git -C "$package_dir" status --porcelain -- . ../../plugins/cua/.claude-plugin/plugin.json 2>/dev/null)" ]]; then
+  if [[ -n "$(git -C "$package_dir" status --porcelain -- . 2>/dev/null)" ]]; then
     uncommitted=" (with uncommitted changes)"
   fi
   echo "  built from commit $commit$uncommitted"
