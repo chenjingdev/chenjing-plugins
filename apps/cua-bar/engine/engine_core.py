@@ -17,6 +17,11 @@ SCHEMA_VERSION = 1
 # relative link to the version unpacked last, and the MCP is registered with the start script behind it.
 ENGINE_DIRECTORY = 'engine'
 CURRENT_ENGINE = 'current'
+# The connection test (`doctor --probe`) opens a short-lived thread of its own and lets it work in a new folder named like
+# this one. The runtime Codex starts for the thread then works there too: that is how the test finds it to end it, and
+# how the status tells it is no connection (the relay of such a runtime does the same for its own records).
+PROBE_FOLDER_PREFIX = 'codex-cua-probe-'
+_PROBE_FOLDER = re.compile(r'^codex-cua-probe-[A-Za-z0-9_]{6,32}$')
 IDLE_SECONDS = 30*60       # R16: an idle connection has had no CUA call for more than 30 minutes
 ACTIVE_SECONDS = 10        # R13: a CUA call in the last 10 seconds means the screen is in use
 ACTIVITY_LIMIT = 200       # R18: the newest 200 operations
@@ -53,6 +58,11 @@ def parse_iso(value):
         digits = zone[1:].replace(':', '')
         stamp -= (1 if zone[0] == '+' else -1)*(int(digits[:2])*3600+int(digits[2:])*60)
     return stamp
+
+
+def is_probe_folder(path):
+    """Whether `path` is the working folder of a connection test's thread: named like the folders the test makes."""
+    return isinstance(path, str) and _PROBE_FOLDER.match(os.path.basename(path.rstrip('/'))) is not None
 
 
 def connection_id(agent, pid, started):

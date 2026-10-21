@@ -371,6 +371,44 @@ test('a runtime nobody named, or named by something that is not a bridge, writes
   }
 });
 
+const PROBE_TITLE = 'Read-only Codex CUA inventory check';
+
+test('a runtime that works in the folder of a connection test leaves no line and no last call, and is relayed as ever', async t => {
+  // `codex-cua doctor --probe` opens a thread of its own in a new folder named like this; nobody made its calls.
+  const folder = fs.mkdtempSync('/tmp/codex-cua-probe-');
+  t.after(() => fs.rmSync(folder, {recursive: true, force: true}));
+  const {fixture, client} = await boot(t, {cwd: folder});
+  const answer = await client.call('await cua.getState();', turn('s-probe', 't1'),
+    {arguments: {code: 'await cua.getState();', title: PROBE_TITLE}});
+  assert.equal(answer.result.content[0].text, 'echo:await cua.getState();');
+  assert.equal(fixture.events('call').length, 1, 'the runtime got the call');
+  let record = await readRecord(fixture, r => r.scopes.length === 1 && r.busy === false);
+  assert.equal(record.cwd, fs.realpathSync(folder));
+  assert.equal(record.last_call_at, null);
+  const ended = await client.request('tools/call', {name: 'turn_ended', arguments: {hook_event_name: 'Stop', session_id: 's-probe', turn_id: 't1'}});
+  assert.equal(ended.result.isError, undefined);
+  record = await readRecord(fixture, r => r.scopes.length === 0);
+  assert.equal(record.last_call_at, null);
+  assert.equal(record.cleanup, 'none');
+  assert.equal(fs.existsSync(path.join(fixture.state, 'activity.jsonl')), false, 'no line, not even for the end of its turn');
+  assert.equal(client.stderr, '');
+});
+
+test('a folder that only looks like the one of a connection test is a conversation\'s, and its calls are written down', async t => {
+  const base = fs.mkdtempSync('/tmp/crp-');
+  t.after(() => fs.rmSync(base, {recursive: true, force: true}));
+  for (const name of ['codex-cua-probe', 'codex-cua-probe-ab', 'my-codex-cua-probe-abcdef', 'codex-cua-release-abcdef', 'codex-cua-probe-abcdef.old']) {
+    const folder = path.join(base, name);
+    fs.mkdirSync(folder);
+    const {fixture, client} = await boot(t, {cwd: folder});
+    await client.call('one', turn('s-chat', 't1'), {arguments: {code: 'one', title: PROBE_TITLE}});
+    const [line, ...others] = activityLines(fixture);
+    assert.deepEqual(others, [], name);
+    assert.deepEqual([line.tool, line.session_id, line.ok], ['js', 's-chat', true], name);
+    assert.match((await readRecord(fixture)).last_call_at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/, name);
+  }
+});
+
 test('a big activity file is cut to the newest 200 lines, unless somebody else is already cutting', async t => {
   const {fixture, client} = await boot(t);
   const file = path.join(fixture.state, 'activity.jsonl');

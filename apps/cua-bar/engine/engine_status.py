@@ -10,11 +10,13 @@ cmux-cua is none of these; it is listed under other_tools. Each of its `cmux-cua
 conversation) is a CmuxConnection that can be stopped on its own.
 A runtime that Codex itself started again for the thread of a bridge that was gone, and that nobody has used, is none
 of these either: it is a RevivedRuntime, left out of the connections and only counted in the diagnosis.
+The same goes for a runtime that works in the folder of a connection test's thread (`doctor --probe`, engine_core.
+is_probe_folder): it is the test's, lives for seconds, and is in no list, no lease and no judgment of the screen.
 """
 import re
 
 from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, HOST_STOP_GRACE, IDLE_SECONDS, SCHEMA_VERSION, connection_id,
-                         iso)
+                         iso, is_probe_folder)
 from engine_inventory import (collect, is_app_server, is_cua_repl, mark_live, working_folders)
 from engine_records import (WRITER, bridge_name, control_socket, forget_released, load_records, prune, read_activity,
                             read_released)
@@ -135,6 +137,11 @@ def _bridge_expects_relay(bridge):
 def relay_owner(relay):
     """The name (`bridge-<pid>-<started_at>`) of the bridge that started the relay's runtime, or None."""
     return bridge_name(relay.text('owner'))
+
+
+def of_a_connection_test(record):
+    """Whether a record is the relay's of a runtime that works in the folder of a connection test's thread."""
+    return record.kind == 'relay' and is_probe_folder(record.path('cwd'))
 
 
 def claude_record(record):
@@ -422,6 +429,19 @@ class View:
                 conn.cwd = conn.cwd or self.folders.get(conn.pid)
             for conn in self.cmux:
                 conn.cwd = self.folders.get(conn.client_pid)       # None without a client: nothing is looked up for it
+        self._leave_out_connection_tests()
+
+    def _leave_out_connection_tests(self):
+        """Take out the runtimes of connection tests, and the lines of the activity log that name them.
+
+        A test lives for seconds and holds nothing, but while it lives its runtime is a process like any other, and a
+        relay in front of it (a host may give the thread one) has a record, a call in flight and, in an older version, a
+        line per call. None of it is a conversation, a busy screen or a connection that has ended. What is known of the
+        runtime is where it works: only the connections whose folder is known can be told, which the status looks up."""
+        gone = {conn.id for conn in self.connections if is_probe_folder(conn.cwd)}
+        if gone:
+            self.connections = [conn for conn in self.connections if conn.id not in gone]
+            self.activity = [item for item in self.activity if item[1] not in gone]
 
     @staticmethod
     def _newest_session(relay):
@@ -457,6 +477,8 @@ class View:
             entry['records'].append(record)
             entry['last'] = _later(entry['last'], record.last_scope_time(session))
         for record in self.dead:
+            if of_a_connection_test(record):
+                continue            # a test holds no lease of a conversation: it only looked at the screen
             for session in record.open_sessions:
                 note(record, session)
         for record in self.live_bridges:
@@ -493,7 +515,8 @@ class View:
         self.maybe_left = entries
         for record in self.dead:
             sessions = set(record.open_sessions)
-            gone = {session for session in sessions if session in stale or (record.writer, session) in released}
+            gone = sessions if of_a_connection_test(record) else {
+                session for session in sessions if session in stale or (record.writer, session) in released}
             if sessions <= gone:
                 self.prunable.append((record, gone))
 
@@ -536,12 +559,28 @@ class View:
                 return 'stopping'
         return inv.host.state
 
-    def started_before_setup(self):
-        """True when a launcher older than this setup started the running host: a restart of Codex applies it.
-
-        Every launcher since the relay reaches Claude's threads writes `relay_config` (null without a relay)."""
+    def host_engine_version(self):
+        """The version of the engine whose launcher started the host that runs (or is starting or quitting), as the
+        launcher wrote it into the host record. None when there is no such host or the record names no version."""
         host = self.inv.host
-        return host.state == 'ready' and isinstance(host.registry, dict) and 'relay_config' not in host.registry
+        if host.state not in ('ready', 'starting', 'stopping') or not isinstance(host.registry, dict):
+            return None
+        version = host.registry.get('engine_version')
+        return version if isinstance(version, str) and version else None
+
+    def started_before_setup(self):
+        """True when the running host was started by a launcher that is not the one of this setup: a restart of Codex
+        applies the setup.
+
+        Every launcher since the relay reaches Claude's threads writes `relay_config` (null without a relay), and every
+        launcher since the engine copies writes `engine_version`, the manifest version of its engine. A host without
+        either, or whose version is not the version of the engine that runs now, was started by an older one, which
+        also tells two versions of one line (0.8.x) apart."""
+        host = self.inv.host
+        if host.state != 'ready' or not isinstance(host.registry, dict):
+            return False
+        version = self.host_engine_version()
+        return 'relay_config' not in host.registry or version is None or version != self.ctx.plugin_version()
 
     def _codex(self):
         inv = self.inv
@@ -600,7 +639,8 @@ class View:
                            'launcher': self.ctx.engine_launcher()},
                 'codex': self._codex(),
                 'host': {'state': self.host_state(), 'since': iso(host.since),
-                         'started_before_setup': self.started_before_setup()},
+                         'started_before_setup': self.started_before_setup(),
+                         'engine_version': self.host_engine_version()},
                 'setup': self._setup(),
                 'connections': [conn.to_json() for conn in self.connections],
                 'leases': {'readable': False, 'items': [], 'maybe_left': self.maybe_left_json()},

@@ -381,7 +381,11 @@ def start_host(plugin_root, environment=None, home=None):
     return subprocess.run(command, env=environment, timeout=15).returncode
 
 
-async def probe_host(registry, timeout):
+async def probe_host(registry, timeout, folder=None):
+    """One call of cua.getState() on a thread of its own, for the host `registry` describes; what was found, as data.
+
+    The thread works in `folder` (run_probe makes it). The host never starts anything for this: HostMcp only connects
+    to the endpoint of a host that is ready, and it asks nothing of an app that is closed."""
     from host_mcp import HostMcp
     from runtime_paths import installation_from_native_cli, InstallationError
     observed = {'status': 'failed', 'tool_names': [], 'response_count': 0,
@@ -397,6 +401,8 @@ async def probe_host(registry, timeout):
     replies = []
     adapter = HostMcp(None, Path(registry['socket_path']), native_cua_root=cua_root,
                       emit=replies.append, log=event, startup_timeout=max(0.1, timeout-3), cleanup_timeout=1)
+    if folder is not None:
+        adapter.thread_cwd = str(folder)
     deadline = asyncio.get_running_loop().time()+timeout
     try:
         await asyncio.wait_for(adapter.boot(), max(0.1, timeout-3))
@@ -440,7 +446,34 @@ async def probe_host(registry, timeout):
     return observed
 
 
-def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None):
+def run_probe(registry, timeout, context):
+    """The connection test of a host that is ready, leaving nothing of itself behind.
+
+    The test thread works in a new private folder (engine_core.is_probe_folder tells it from any other): the status
+    leaves the runtime Codex starts there out of its lists while it lives, and this ends that runtime and removes the
+    folder as soon as the test is over, however it went. Codex would keep the thread and its runtime for about half an
+    hour otherwise, and the runtime would stay in the connection list all that time. `context` is the engine's
+    (engine_core.Context): the process list, the clock and the signals the cleanup uses.
+    Without a folder there is no test, because a test that cannot be told apart would only add noise."""
+    from engine_core import PROBE_FOLDER_PREFIX
+    try:
+        folder = tempfile.mkdtemp(prefix=PROBE_FOLDER_PREFIX)
+    except OSError:
+        return {'status': 'failed', 'tool_names': [], 'response_count': 0,
+                'approval_required': False, 'operational_readiness': 'not_checked'}
+    since = context.clock()
+    try:
+        return asyncio.run(probe_host(registry, timeout, folder))
+    finally:
+        try:
+            from engine_release import end_thread_runtimes
+            end_thread_runtimes(context, folder, registry.get('backend_pid'), since)
+        except Exception:
+            pass        # the result of the test stands; at worst Codex keeps the runtime a while
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None, context=None):
     from runtime_paths import discover_installation, InstallationError
     from mcp_stdio import read_host_registry
     environment = os.environ if environment is None else environment
@@ -473,12 +506,16 @@ def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None):
     except Exception:
         registry = None
     if probe:
+        # A host that is not ready is never started or asked: the test only looks at a Codex that is up.
         if registry is None:
             report['probe'] = {'status': 'host_unavailable'}
         elif report['dependencies'] != 'ready':
             report['probe'] = {'status': 'dependencies_missing'}
         else:
-            report['probe'] = asyncio.run(probe_host(registry, timeout))
+            if context is None:
+                from engine_core import Context
+                context = Context(plugin_root, setup=sys.modules[__name__], home=home, environment=environment)
+            report['probe'] = run_probe(registry, timeout, context)
         report['status'] = report['probe']['status']
         if report['status'] == 'checked':
             report['cua'] = 'inventory_checked'

@@ -11,7 +11,9 @@
 //     that starts its thread with this relay names itself in CODEX_CUA_OWNER. The record carries that name, and so
 //     does every activity line: it still says whose call it was when the conversation, this relay and the bridge's
 //     own record are gone. The record also says whether that bridge was running when this relay came up
-//     (owner_running): a runtime that Codex starts again for a conversation that has ended finds it gone.
+//     (owner_running): a runtime that Codex starts again for a conversation that has ended finds it gone,
+//   - leaves out of the activity log, and out of last_call_at, the calls of a runtime that works in the folder of a
+//     connection test's thread (`codex-cua doctor --probe`, see PROBE_FOLDER): a test is no conversation's call.
 // The format of those files is documented in the engine records description of the plugin.
 //
 // Nothing the user did is written down: no tool arguments or results, no code, titles, URLs, page text or
@@ -34,6 +36,8 @@ const ENV_STATE = 'CODEX_CUA_STATE_DIR';
 const ENV_RUNTIME_PATH = 'CUA_REPL_NODE_REPL_PATH';
 const ENV_OWNER = 'CODEX_CUA_OWNER';
 const OWNER = /^bridge-[0-9]{1,10}-[0-9]{1,12}$/;
+// The folder a connection test's thread works in, named like the engine's is_probe_folder (engine_core.py) names it.
+const PROBE_FOLDER = /^codex-cua-probe-[A-Za-z0-9_]{6,32}$/;
 
 const IN_FLIGHT_WAIT_MS = 2500;      // how long a release waits for running tool calls
 const OWNED_TIMEOUT_MS = 4000;       // one turn_ended of our own
@@ -130,6 +134,10 @@ if (runtime) relay(runtime);
 function relay(child) {
   const me = process.pid;
   const rootPid = process.ppid;
+  // Looked at once, as the relay comes up: the folder may be removed while the test is still ending its thread.
+  let startFolder = null;
+  try {startFolder = process.cwd();} catch {/* removed directory */}
+  const probe = startFolder !== null && PROBE_FOLDER.test(path.basename(startFolder));
   const scopes = new Map();      // "session\0turn" -> {session_id, turn_id, first_at, last_at, subagent}
   const pending = new Map();     // JSON id -> client request waiting for its response
   const owned = new Map();       // our own request ids -> {resolve, reject, timer}
@@ -393,7 +401,8 @@ function relay(child) {
       const pair = isEnd ? pairOf(message.params?.arguments) : null;
       // The Codex app ends every turn of its chats with turn_ended, CUA or not. Only the end of a pair that a call
       // opened here is the AI's own: the others are neither a call nor a line in the activity log.
-      const routine = isEnd && !(pair && scopes.has(pairKey(pair.session_id, pair.turn_id)));
+      // The same goes for every call of a connection test: it opens its scope like any call, but nobody made it.
+      const routine = probe || (isEnd && !(pair && scopes.has(pairKey(pair.session_id, pair.turn_id))));
       if (!routine) lastCallAt = iso();
       if (key !== null) {
         callsInFlight += 1;

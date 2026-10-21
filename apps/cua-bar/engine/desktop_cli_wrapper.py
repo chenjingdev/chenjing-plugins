@@ -163,6 +163,20 @@ def _stop_owned(children, timeout):
     return clean and all(child is None or child.returncode is not None for child in children)
 
 
+def _engine_version():
+    """The manifest version of the engine this launcher runs from, or None.
+
+    Setup starts the launcher from the engine folder it bound, so the manifest next to this file is the one of the
+    engine that sets this host up. The version goes into the host record; `status` compares it with the engine that
+    runs later, which is how a Codex that an update has not reached is told. A manifest that cannot be read must never
+    cost Codex its start: the record then says null and the comparison takes it for an older launcher."""
+    try:
+        version = json.loads((Path(__file__).resolve().parent/'.claude-plugin/plugin.json').read_text()).get('version')
+    except (OSError, ValueError, AttributeError, RuntimeError):
+        return None
+    return version if isinstance(version, str) and version else None
+
+
 def _relay_plan(native, arguments, environment):
     """Decide whether the relay goes in front of the CUA runtime for this start: (plan, reason).
 
@@ -224,7 +238,9 @@ def _launch(native, arguments, environment, state_dir, progress):
               "relay_reason": relay_reason,
               # The verified relay table: the desktop app drops the -c override from the host's configuration, so a
               # Claude bridge gives this table to its own thread (relay_install.relay_thread_server).
-              "relay_config": relay.table if relay else None}
+              "relay_config": relay.table if relay else None,
+              # The engine whose launcher this is: `status` tells a host that started under another one.
+              "engine_version": _engine_version()}
     try:
         # Still before anything is started: a state directory that cannot be written
         # must not cost Codex its backend.

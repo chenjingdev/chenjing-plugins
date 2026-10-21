@@ -2,13 +2,15 @@
 import json
 import re
 import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
 import engine_records
 import engine_status
 from engine_core import iso
-from engine_support import (APP_VERSION, ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID, EngineCase,
-                            State, at)
+from engine_support import (ABSENT, APP_VERSION, ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID,
+                            EngineCase, State, at)
 
 TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'engine', 'codex', 'host', 'setup', 'connections', 'leases',
             'other_tools', 'screen', 'activity']
@@ -42,7 +44,8 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['engine']['version'], status['plugin']['version'])
         self.assertEqual(status['codex'], {'installed': False, 'app_path': None, 'app_version': None, 'running': False,
                                            'pids': []})
-        self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False})
+        self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False,
+                                          'engine_version': None})
         self.assertEqual(list(status['setup']), ['command', 'dependencies', 'login_environment', 'wrapper', 'relay'])
         self.assertEqual(status['connections'], [])
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})
@@ -62,7 +65,8 @@ class ShapeTests(StatusCase):
         status = self.status()
         self.assertEqual(status['codex'], {'installed': True, 'app_path': str(self.app), 'app_version': APP_VERSION,
                                            'running': True, 'pids': [1000]})
-        self.assertEqual(status['host'], {'state': 'ready', 'since': iso(NOW-300), 'started_before_setup': False})
+        self.assertEqual(status['host'], {'state': 'ready', 'since': iso(NOW-300), 'started_before_setup': False,
+                                          'engine_version': self.engine_version()})
         self.assertEqual(status['setup'], {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready',
                                            'wrapper': 'ready', 'relay': 'active'})
         for connection in status['connections']:
@@ -167,7 +171,8 @@ class HostStopTests(StatusCase):
         self.long_connected_codex()
         self.assertEqual(self.status()['host']['state'], 'ready')
         self.machine.remove(1200)                       # the app let go of its proxy: Codex is quitting
-        self.assertEqual(self.status()['host'], {'state': 'stopping', 'since': None, 'started_before_setup': False})
+        self.assertEqual(self.status()['host'], {'state': 'stopping', 'since': None, 'started_before_setup': False,
+                                                 'engine_version': self.engine_version()})
         self.machine.remove(1100)                       # the wrapper ended the app-server
         self.assertEqual(self.status()['host']['state'], 'stopping')
         self.machine.remove(1001)                       # the wrapper wrote `closed` and ended; Codex is still quitting
@@ -181,7 +186,8 @@ class HostStopTests(StatusCase):
         for pid in (1100, 1200):
             self.machine.remove(pid)
         self.write_host(status='stopping', owner=1001, stopping_at=iso(NOW-5), age=5)
-        self.assertEqual(self.status()['host'], {'state': 'stopping', 'since': iso(NOW-5), 'started_before_setup': False})
+        self.assertEqual(self.status()['host'], {'state': 'stopping', 'since': iso(NOW-5), 'started_before_setup': False,
+                                                 'engine_version': self.engine_version()})
         self.machine.now = NOW+30                       # 35 s after it began, and the wrapper is still there
         self.assertEqual(self.status()['host']['state'], 'closed')
 
@@ -212,6 +218,59 @@ class StartedBeforeSetupTests(StatusCase):
         self.assertIs(self.status()['host']['started_before_setup'], False, 'a restart would not change it')
         self.write_host(status='closed', older_launcher=True)
         self.assertIs(self.status()['host']['started_before_setup'], False)
+        self.write_host(status='closed', engine_version='0.0.1')
+        self.assertIs(self.status()['host']['started_before_setup'], False, 'only a ready host is running anything')
+
+    def test_a_host_whose_launcher_did_not_write_its_engine_version_says_a_restart_applies_the_setup(self):
+        # The launcher of 0.7.0 already wrote the relay table (relay_config) but not the version of its engine.
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world()
+        for label, version in (('no such key', ABSENT), ('null: the launcher could not read its manifest', None),
+                               ('empty', ''), ('not a version', 7), ('not text either', ['0.8.0'])):
+            with self.subTest(label):
+                self.write_host(relay=True, engine_version=version)
+                host = self.status()['host']
+                self.assertIs(host['started_before_setup'], True)
+                self.assertIsNone(host['engine_version'], 'a value that is no version is not passed on')
+
+    def test_a_host_started_by_another_version_of_the_engine_says_a_restart_applies_the_setup(self):
+        # Versions of one line (0.8.x) differ in what the launcher does, so the version is compared as a whole.
+        engine = self.root/'engine-0.8.1'
+        (engine/'.claude-plugin').mkdir(parents=True)
+        (engine/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': '0.8.1'}))
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world()
+        for version, expected in (('0.8.0', True), ('0.8.1', False), ('0.8.10', True), ('0.8.1-beta', True),
+                                  ('0.9.0', True), ('0.7.0', True), ('0.8.1 ', True)):
+            with self.subTest(version):
+                self.write_host(relay=True, engine_version=version)
+                host = self.status(plugin_root=engine)['host']
+                self.assertIs(host['started_before_setup'], expected)
+                self.assertEqual(host['engine_version'], version)
+
+    def test_a_relay_less_host_of_this_engine_says_nothing_and_a_missing_table_still_says_it(self):
+        # The table and the version are two reasons; each alone is enough, and neither is when both are in order.
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world()
+        self.write_host(relay=False)
+        self.assertIs(self.status()['host']['started_before_setup'], False)
+        self.write_host(relay=False, relay_config=ABSENT)
+        self.assertIs(self.status()['host']['started_before_setup'], True)
+        self.write_host(relay=False, relay_config=ABSENT, engine_version='0.0.1')
+        self.assertIs(self.status()['host']['started_before_setup'], True)
+
+    def test_the_engine_version_of_the_host_is_told_only_while_a_host_runs(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.assertIsNone(self.status()['host']['engine_version'], 'no host record at all')
+        self.start_world()
+        for state in ('ready', 'starting'):
+            with self.subTest(state):
+                self.write_host(status=state, engine_version='0.8.0')
+                self.assertEqual(self.status()['host']['engine_version'], '0.8.0')
+        self.write_host(status='closed', engine_version='0.8.0')
+        self.assertIsNone(self.status()['host']['engine_version'], 'a host that is gone has no version to tell')
+        (self.host_dir/'host.json').write_text('{"schema_version": 1}')
+        self.assertIsNone(self.status()['host']['engine_version'])
 
 
 class RelaySetupTests(StatusCase):

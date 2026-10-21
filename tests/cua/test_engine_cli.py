@@ -348,7 +348,8 @@ class RealProcessTests(unittest.TestCase):
         self.assertEqual(status['engine'], {'version': status['plugin']['version'], 'root': str(PLUGIN),
                                             'launcher': str(self.home/'.local/share/codex-cua/engine/current/start-mcp.sh')})
         self.assertEqual(status['codex']['app_path'], str(self.app))
-        self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False})
+        self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False,
+                                          'engine_version': None})
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})
         self.assertEqual(status['setup']['command'], 'missing')         # nothing is installed in the temporary home
         for connection in status['connections']:
@@ -375,6 +376,17 @@ class RealProcessTests(unittest.TestCase):
         result, _ = self.command('doctor', '--json')
         report = json.loads(result.stdout)
         self.assertEqual((report['plugin_id'], report['installation']), (setup.PLUGIN_ID, 'verified_assets'))
+
+    def test_a_connection_test_without_a_host_ends_at_once_and_starts_and_writes_nothing(self):
+        result, seconds = self.command('doctor', '--probe', '--json')
+        report = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual((report['probe'], report['status']), ({'status': 'host_unavailable'}, 'host_unavailable'))
+        self.assertLess(seconds, 10)
+        self.assertEqual(sorted(item.name for item in self.home.rglob('*') if item.name != 'Applications'
+                                and 'Applications' not in item.parts), [])      # nothing was written into the home
+        self.assertEqual(sorted(item.name for item in (self.root/'state').iterdir()), [])
+        self.assertEqual(sorted(item.name for item in (self.root/'host').iterdir()), [])
 
 
 if __name__ == '__main__':

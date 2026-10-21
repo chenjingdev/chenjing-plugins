@@ -340,6 +340,39 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(child.returncode,143)
         self.assert_reaped(metadata['backend_pid']);self.assert_reaped(metadata['desktop_proxy_pid'])
 
+    def write_manifest(self, content):
+        """The manifest of the engine this launcher belongs to: it sits next to the launcher, as it does in an engine copy."""
+        folder=self.root/'.claude-plugin';folder.mkdir(exist_ok=True)
+        (folder/'plugin.json').write_text(content if isinstance(content,str) else json.dumps(content))
+
+    def test_the_registry_says_which_version_of_the_engine_started_the_host(self):
+        # `status` compares it with the engine that runs now, which is how a Codex that an update has not reached is
+        # told, also between two versions of one line.
+        self.write_manifest({'name':'cua','version':'0.8.3'})
+        child=self.start();ready=self.ready()
+        self.assertEqual(ready['engine_version'],'0.8.3')
+        child.stdin.close();child.wait(timeout=3)
+        self.assertEqual(child.returncode,0,child.stderr.read().decode())
+        final=json.loads((self.state/'host.json').read_text())
+        self.assertEqual((final['status'],final['engine_version']),('closed','0.8.3'))
+
+    def test_a_manifest_that_cannot_be_read_costs_the_registry_its_version_and_codex_nothing(self):
+        for label,content in (('no manifest',None),('not JSON','{{{'),('no version','{"name":"cua"}'),
+                              ('a version that is no text','{"name":"cua","version":8}'),('an empty version','{"version":""}'),
+                              ('not an object','[1]'),('not even text',b'\xff\xfe')):
+            with self.subTest(label):
+                shutil.rmtree(self.root/'.claude-plugin',ignore_errors=True)
+                if isinstance(content,bytes):
+                    (self.root/'.claude-plugin').mkdir();(self.root/'.claude-plugin/plugin.json').write_bytes(content)
+                elif content is not None:
+                    self.write_manifest(content)
+                child=self.start();ready=self.ready()
+                self.assertIn('engine_version',ready)
+                self.assertIsNone(ready['engine_version'])
+                self.assertEqual(ready['status'],'ready')
+                child.stdin.close();child.wait(timeout=3)
+                self.assertEqual(child.returncode,0,child.stderr.read().decode())
+
     def test_the_launcher_says_it_is_stopping_and_since_when_before_it_stops_the_backend(self):
         environment=dict(self.environment,FIXTURE_MODE='witness',FIXTURE_HOST_FILE=str(self.state/'host.json'))
         child=self.start(environment=environment);ready=self.ready();asked=time.time()
@@ -350,7 +383,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(seen['status'],'stopping')
         named=calendar.timegm(time.strptime(seen['stopping_at'],'%Y-%m-%dT%H:%M:%SZ'))
         self.assertTrue(asked-1<=named<=time.time()+1,(asked,named))
-        for key in ('owner_pid','backend_pid','desktop_proxy_pid','socket_path','relay','relay_config'):
+        for key in ('owner_pid','backend_pid','desktop_proxy_pid','socket_path','relay','relay_config','engine_version'):
             self.assertEqual(seen[key],ready[key],key)
         self.assertEqual(json.loads((self.state/'host.json').read_text())['status'],'closed')
 
