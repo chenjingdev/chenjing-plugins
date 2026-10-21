@@ -40,6 +40,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         case stopGroup(StopGroup, force: Bool)
         case restartCodex
         case diagnose
+        case probe(seconds: Int)
         case uninstall
     }
 
@@ -61,6 +62,10 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var stopGroup = GroupStopResult(ok: true, stopped: 0, failed: 0, results: [])
         var restartCodex = RestartResult(ok: true, reason: nil)
         var diagnosis = "CUA diagnosis (fake)\n"
+        /// What the connection test answers (or throws).
+        var probe: Result<ProbeOutcome, EngineError> = .success(.checked)
+        /// While shut, `probe` calls wait here after being recorded.
+        var probeGate: AsyncGate?
         /// When set, every action (not `status`) throws this instead of answering.
         var actionError: EngineError?
         /// Per-session answers for `releaseSession`, before falling back to `releaseSession`.
@@ -143,6 +148,12 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
 
     func diagnose() async throws -> String {
         try await begin(.diagnose, isAction: true).diagnosis
+    }
+
+    func probe(seconds: Int) async throws -> ProbeOutcome {
+        let script = try await begin(.probe(seconds: seconds))
+        await script.probeGate?.wait()
+        return try script.probe.get()
     }
 
     func uninstall() async throws {

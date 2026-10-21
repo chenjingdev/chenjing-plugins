@@ -16,6 +16,8 @@ struct ClaudeSetupState: Equatable, Sendable {
 
     /// The `claude` command was found. Without it MCP and skill are put off, and nothing is said about them.
     var claudeCodeFound = false
+    /// Where it was found (the check tab names it when it cannot start).
+    var claudeCodePath: String?
     /// The `claude` that was found could not start (exit 127: an npm-installed one with no `node` it can find). The
     /// card says nothing about MCP and skill then, the same as without Claude Code; the check tab says why.
     var claudeCodeUnusable = false
@@ -79,8 +81,10 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     /// Everything the card and the check need, from files only. `launcher` is the one the engine reported
     /// (status or install result); the MCP command is compared with it.
     func inspect(launcher: String?, skillSource: URL?, appVersion: String?) -> ClaudeSetupState {
-        ClaudeSetupState(
-            claudeCodeFound: claudeCodeFound,
+        let found = claude.locate()
+        return ClaudeSetupState(
+            claudeCodeFound: found != nil,
+            claudeCodePath: found?.path,
             mcp: mcpState(launcher: launcher),
             skill: skillState(source: skillSource, appVersion: appVersion),
             legacyPlugin: legacyPluginRecorded())

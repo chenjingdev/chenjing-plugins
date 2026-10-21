@@ -113,6 +113,9 @@ struct HostInfo: Equatable, Sendable {
     var since: Date?
     /// A launcher older than this setup started the running host: restarting Codex applies the setup (S8).
     var startedBeforeSetup = false
+    /// The version of the engine whose launcher started the host that runs (or is starting or quitting); nil when
+    /// there is no such host or its record names none.
+    var engineVersion: String?
 }
 
 /// Raw states as the contract lists them (`ready`, `missing`, `broken`, ...); nil is unknown.
@@ -268,12 +271,15 @@ extension CodexInfo: Decodable {
 }
 
 extension HostInfo: Decodable {
-    private enum CodingKeys: String, CodingKey { case state, since, startedBeforeSetup = "started_before_setup" }
+    private enum CodingKeys: String, CodingKey {
+        case state, since, startedBeforeSetup = "started_before_setup", engineVersion = "engine_version"
+    }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         state = HostState(raw: c.lenientString(.state))
         since = c.lenientDate(.since)
         startedBeforeSetup = c.lenientBool(.startedBeforeSetup) ?? false
+        engineVersion = c.lenientString(.engineVersion)
     }
 }
 

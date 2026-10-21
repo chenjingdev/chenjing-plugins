@@ -103,8 +103,18 @@ final class CUABarViewModel: ObservableObject {
     /// still recorded. Read from files only; the 점검 tab and the card both show from it.
     @Published private(set) var claudeSetup: ClaudeSetupState = .none
 
+    /// The login environment as read from launchd and the agent file, while the engine calls it a conflict or stale.
+    /// Only read then; the 점검 tab says what the conflict is made of from it.
+    @Published private(set) var loginEnvironment: LoginEnvironmentReading?
+    /// The last connection test of this run: how it ended and when. Never kept across runs.
+    @Published private(set) var lastProbe: ProbeRecord?
+    /// A connection test is running (from the button or right after an install): none starts beside it.
+    @Published private(set) var isProbing = false
+
     /// The raw answer of the last good read, for what needs more than `content` shows.
     private(set) var lastStatus: EngineStatus?
+    /// Why the last read gave no answer, while it gives none (the 점검 tab says what is wrong with the engine).
+    private(set) var lastError: EngineError?
     private(set) var isPopoverOpen = false
     /// Set by the menu bar item: shows the popover (a click on a notification).
     var openPopoverHandler: (@MainActor () -> Void)?
@@ -129,6 +139,9 @@ final class CUABarViewModel: ObservableObject {
     private let setupActivity: SetupActivity
     private let claudeInspector: (@Sendable (String?) -> ClaudeSetupState)?
     private let codexInstalled: @Sendable () -> Bool
+    private let loginItemReading: (@MainActor () -> LoginItemReading?)?
+    private let loginEnvironmentReader: (@Sendable () async -> LoginEnvironmentReading)?
+    private let appLauncherValue: String
 
     /// What the evaluator said about the last answer, before setup's own state is put over it.
     private var evaluatedSummary: StatusSummary = StatusEvaluator.loading
@@ -184,7 +197,13 @@ final class CUABarViewModel: ObservableObject {
         claudeInspector: (@Sendable (String?) -> ClaudeSetupState)? = nil,
         // Whether the Codex app is on this Mac, by the app's own look: only asked when the engine cannot
         // answer, because the install does nothing without Codex and the card must not offer it then.
-        codexInstalled: @escaping @Sendable () -> Bool = { true }
+        codexInstalled: @escaping @Sendable () -> Bool = { true },
+        // What became of the app's own login item, for the 점검 tab and the copied diagnosis.
+        loginItemReading: (@MainActor () -> LoginItemReading?)? = nil,
+        // Reads launchd's `CODEX_CLI_PATH` and the agent file; asked only while the login environment is a conflict or stale.
+        loginEnvironmentReader: (@Sendable () async -> LoginEnvironmentReading)? = nil,
+        // The value the app's setup puts into `CODEX_CLI_PATH`; another value in launchd is somebody else's.
+        appLauncherValue: String = ""
     ) {
         self.engine = engine
         self.appVersion = appVersion
@@ -200,6 +219,9 @@ final class CUABarViewModel: ObservableObject {
         self.setupActivity = setupActivity
         self.claudeInspector = claudeInspector
         self.codexInstalled = codexInstalled
+        self.loginItemReading = loginItemReading
+        self.loginEnvironmentReader = loginEnvironmentReader
+        self.appLauncherValue = appLauncherValue
         setupActivity.onChange = { [weak self] in self?.publishSummary() }
         notifier.setResponseHandler { [weak self] response in self?.handle(response) }
     }
@@ -234,6 +256,64 @@ final class CUABarViewModel: ObservableObject {
             to: evaluatedSummary, setup: setupActivity.phase, flowRunning: inFlight.contains(where: SetupOverlay.runsSetup))
         if pendingRelaunch != nil { next.nextStep = Self.quitWaitStep }
         if next != summary { summary = next }
+    }
+
+    // MARK: 점검
+
+    /// The 점검 tab: judged from what the model already read (the engine's status, Claude Code's files, the login
+    /// item), so opening it runs nothing.
+    var checkContent: CheckContent {
+        CheckContent(CheckInput(
+            status: lastStatus, error: lastError, appVersion: appVersion, claude: claudeSetup,
+            developerToolsNeeded: setupActivity.developerToolsNeeded, card: evaluatedSummary.problem,
+            loginItem: loginItemReading?(), login: loginEnvironment, fixTried: setupActivity.finishedRuns > 0,
+            probe: lastProbe, probing: isProbing, now: clock(), calendar: calendar, appLauncherValue: appLauncherValue))
+    }
+
+    /// The connection test waits this long for the host; the app gives the command ten seconds more.
+    static let probeSeconds = 15
+    /// What a press on 연결 시험 says when there is no Codex host to test.
+    static let probeNeedsHost = "Codex가 꺼져 있어 시험하지 않았어요 — Claude 대화를 열면 켜져요"
+    static let probeBusy = "이미 시험하는 중이에요"
+
+    /// One connection test, only against a host that is ready. Nothing is started for it: a Codex that is off, or
+    /// still starting, is not tested (nil). A test already running is not joined or repeated (nil). `hostState` is the
+    /// state the caller just looked at.
+    private func runProbe(hostState: HostState?) async -> ProbeOutcome? {
+        guard hostState == .ready, !isProbing else { return nil }
+        isProbing = true
+        defer { isProbing = false }
+        let outcome: ProbeOutcome
+        do {
+            outcome = try await engine.probe(seconds: Self.probeSeconds)
+        } catch EngineError.timeout {
+            outcome = .timeout
+        } catch {
+            outcome = .couldNotRun
+        }
+        lastProbe = ProbeRecord(outcome: outcome, at: clock())
+        return outcome
+    }
+
+    /// After an install that changed something: one connection test, when the host is ready. The status is asked again
+    /// first, because the install may have changed it. What the install says comes after this (`ProbeMessages`). nil: no test
+    /// was run.
+    func probeAfterInstall() async -> ProbeOutcome? {
+        guard !isProbing, let status = try? await engine.status() else { return nil }
+        return await runProbe(hostState: status.host.state)
+    }
+
+    /// The button's answer, in one line.
+    private func probeAnswer(_ outcome: ProbeOutcome?) -> ActionOutcome {
+        guard let outcome else {
+            return ActionOutcome(kind: .info, message: isProbing ? Self.probeBusy : Self.probeNeedsHost)
+        }
+        switch outcome {
+        case .checked: return ActionOutcome(kind: .success, message: outcome.summary)
+        case .hostUnavailable: return ActionOutcome(kind: .info, message: outcome.summary)
+        case .approvalRequired, .cleanupUnconfirmed: return ActionOutcome(kind: .warning, message: outcome.summary)
+        default: return ActionOutcome(kind: .failure, message: outcome.summary)
+        }
     }
 
     // MARK: Refresh loop
@@ -303,7 +383,8 @@ final class CUABarViewModel: ObservableObject {
         do {
             let status = try await engine.status()
             consecutiveFailures = 0
-            accept(status, claude: await readClaude(launcher: status.engine.launcher))
+            let claude = await readClaude(launcher: status.engine.launcher)
+            accept(status, claude: claude, login: await readLoginEnvironment(for: status))
             answered = status
         } catch is CancellationError {
             return
@@ -326,9 +407,18 @@ final class CUABarViewModel: ObservableObject {
         return state
     }
 
-    private func accept(_ status: EngineStatus, claude: ClaudeSetupState) {
+    /// Asked only while the engine calls the login environment a conflict or stale: it runs `launchctl getenv`, and
+    /// the tab needs the answer only then. Read off the main actor.
+    private func readLoginEnvironment(for status: EngineStatus) async -> LoginEnvironmentReading? {
+        guard let reader = loginEnvironmentReader, ["conflict", "stale"].contains(status.setup.loginEnvironment) else { return nil }
+        return await Task.detached(priority: .utility) { await reader() }.value
+    }
+
+    private func accept(_ status: EngineStatus, claude: ClaudeSetupState, login: LoginEnvironmentReading? = nil) {
         let now = clock()
         lastStatus = status
+        lastError = nil
+        loginEnvironment = login
         claudeSetup = claude
         publish(StatusEvaluator.evaluate(
             status, appVersion: appVersion, tabsReleased: tabsReleasedIDs,
@@ -385,6 +475,8 @@ final class CUABarViewModel: ObservableObject {
             if lastStatus != nil, consecutiveFailures < Self.failuresBeforeProblem { return }
         }
         lastStatus = nil
+        lastError = error
+        loginEnvironment = nil
         publish(StatusEvaluator.summary(
             for: error,
             facts: LocalFacts(
@@ -676,7 +768,8 @@ final class CUABarViewModel: ObservableObject {
                 let text = try await engine.diagnose()
                 notificationPermission = await notifier.permission()
                 let separator = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
-                pasteboard.copy(text + separator + notificationPermission.diagnosisLine + "\n")
+                let check = checkContent.diagnosisLines.joined(separator: "\n")
+                pasteboard.copy(text + separator + check + "\n" + notificationPermission.diagnosisLine + "\n")
                 return ActionResult(outcome: ActionOutcome(kind: .success, message: "진단을 복사했어요"), reason: nil)
             case .runSetup:
                 // Through the shared setup slot (inside the action): one install at a time, said on the card while it runs.
@@ -687,6 +780,13 @@ final class CUABarViewModel: ObservableObject {
                 return ActionResult(outcome: await appOpener.openCodex(appPath: lastStatus?.codex.appPath), reason: nil)
             case .openCodexDownload:
                 return ActionResult(outcome: await systemActions.openCodexDownload(), reason: nil)
+            case .runProbe:
+                if isProbing { return ActionResult(outcome: ActionOutcome(kind: .info, message: Self.probeBusy), reason: nil) }
+                let outcome = await runProbe(hostState: lastStatus?.host.state)
+                return ActionResult(outcome: probeAnswer(outcome), reason: nil)
+            case .copyCommand(let command, _):
+                pasteboard.copy(command)
+                return ActionResult(outcome: ActionOutcome(kind: .success, message: "명령을 복사했어요"), reason: nil)
             case .refresh:
                 return ActionResult(outcome: Self.quiet, reason: nil)
             }
@@ -826,6 +926,8 @@ final class CUABarViewModel: ObservableObject {
         case .copyDiagnosis: "진단을 복사하지 못했어요"
         case .runSetup: "설정하지 못했어요"
         case .openCodex: "Codex를 열지 못했어요"
+        case .runProbe: "연결 시험을 하지 못했어요"
+        case .copyCommand: "복사하지 못했어요"
         case .openCodexDownload, .installDeveloperTools, .refresh: "하지 못했어요"
         }
     }
@@ -1018,6 +1120,7 @@ final class CUABarViewModel: ObservableObject {
             selectedTab == .connections && content?.connections.tidy?.rows.contains { $0.leaseRow?.sessionID == id } == true
         case .tidyAll: selectedTab == .connections && content?.connections.tidy != nil
         case .diagnosis: selectedTab == .activity
+        case .check: selectedTab == .check
         }
     }
 

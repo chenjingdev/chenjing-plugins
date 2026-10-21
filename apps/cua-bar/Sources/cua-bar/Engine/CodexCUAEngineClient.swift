@@ -22,6 +22,9 @@ struct EngineTimeouts: Equatable, Sendable {
     var groupStop: Duration = .seconds(180)
     var restartCodex: Duration = .seconds(120)
     var diagnose: Duration = .seconds(30)
+    /// `doctor --probe --timeout <n>`: the engine ends its own test after `n` seconds and then cleans up for up to
+    /// about 6 s more, so the app waits that long and 10 s over.
+    var probeMargin: Duration = .seconds(10)
     /// Setup may be installing packages, and stopping that halfway leaves a broken environment,
     /// so it gets well over 15 minutes before anyone gives up on it.
     var setup: Duration = .seconds(20 * 60)
@@ -87,6 +90,18 @@ struct CodexCUAEngineClient: EngineClient {
         return String(decoding: output.stdout, as: UTF8.self)
     }
 
+    /// The command prints its report and exits 1 when the test did not pass, so both 0 and 1 are read; any other
+    /// exit code is a command that could not run.
+    func probe(seconds: Int) async throws -> ProbeOutcome {
+        let output = try await run(
+            ["doctor", "--probe", "--json", "--timeout", String(seconds)], timeout: .seconds(seconds) + timeouts.probeMargin,
+            accepting: [0, 1])
+        guard let outcome = ProbeParsing.outcome(in: output.stdout) else {
+            throw EngineError.invalidOutput("doctor --probe")
+        }
+        return outcome
+    }
+
     /// Runs the remover. When `codex-cua` is missing or not ours, the bound engine copy's own `setup.sh
     /// uninstall` still undoes what an earlier setup left (login environment, relay). With no engine at
     /// all there is nothing to undo: `engineMissing`.
@@ -106,9 +121,9 @@ struct CodexCUAEngineClient: EngineClient {
 
     // MARK: Running
 
-    private func run(_ arguments: [String], timeout: Duration) async throws -> ProcessOutput {
+    private func run(_ arguments: [String], timeout: Duration, accepting codes: Set<Int32> = [0]) async throws -> ProcessOutput {
         switch locator.locate() {
-        case .ready(let command): try await execute(command, arguments, timeout: timeout)
+        case .ready(let command): try await execute(command, arguments, timeout: timeout, accepting: codes)
         case .installedNotSetUp(let installPath): throw EngineError.setupNeeded(installPath: installPath.path)
         case .engineMissing: throw EngineError.engineMissing
         }
@@ -123,7 +138,9 @@ struct CodexCUAEngineClient: EngineClient {
         }
     }
 
-    private func execute(_ command: URL, _ arguments: [String], timeout: Duration) async throws -> ProcessOutput {
+    private func execute(
+        _ command: URL, _ arguments: [String], timeout: Duration, accepting codes: Set<Int32> = [0]
+    ) async throws -> ProcessOutput {
         let output: ProcessOutput
         do {
             output = try await runner.run(command, arguments: arguments, timeout: timeout)
@@ -134,7 +151,7 @@ struct CodexCUAEngineClient: EngineClient {
             }
         }
         // The contract: exit 0 even when the action failed, so anything else means it could not run.
-        guard output.exitCode == 0 else {
+        guard codes.contains(output.exitCode) else {
             throw EngineError.commandFailed(exitCode: output.exitCode, message: output.errorSummary)
         }
         return output

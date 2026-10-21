@@ -33,6 +33,47 @@ struct MainAppLoginItem: LoginItemService {
     func unregister() throws { try SMAppService.mainApp.unregister() }
 }
 
+/// What became of the login item, as the check tab reads it.
+struct LoginItemReading: Equatable, Sendable {
+    enum Health: String, Equatable, Sendable {
+        case enabled
+        /// Registered, but the person has to allow it in System Settings.
+        case requiresApproval
+        case failed
+        case notFound
+        /// Never registered (the app does not sit in an Applications folder).
+        case notRegistered
+        /// Registered once and turned off since by the person, which is respected.
+        case turnedOff
+
+        /// For the copied diagnosis.
+        var word: String {
+            switch self {
+            case .enabled: "켜짐"
+            case .requiresApproval: "승인 필요"
+            case .failed: "등록 실패"
+            case .notFound: "찾지 못함"
+            case .notRegistered: "등록 안 함"
+            case .turnedOff: "꺼짐"
+            }
+        }
+    }
+
+    var health: Health
+    /// The sentence after the label.
+    var detail: String
+    /// The whole line of the 기록 tab and the copied diagnosis.
+    var line: String
+
+    static let label = "로그인 때 자동 실행: "
+
+    init(_ health: Health, _ detail: String) {
+        self.health = health
+        self.detail = detail
+        line = Self.label + detail
+    }
+}
+
 /// Registers the login item once, the first time the app is opened from `/Applications` or
 /// `~/Applications`, and never again: if the person turns it off in System Settings, that is
 /// respected. There is no switch in the app. Nothing here asks or prompts; what happened is a
@@ -47,8 +88,11 @@ final class LoginItemRegistrar {
     private let home: URL
     private var registrationFailed = false
 
-    /// One line about the login item, kept up to date by `refresh()`.
-    private(set) var line = ""
+    /// What became of the login item, kept up to date by `refresh()`.
+    private(set) var reading = LoginItemReading(.notRegistered, "")
+
+    /// One line about the login item.
+    var line: String { reading.line }
 
     init(
         service: any LoginItemService,
@@ -108,23 +152,24 @@ final class LoginItemRegistrar {
     }
 
     func refresh() {
-        line = describe()
+        reading = describe()
     }
 
-    private func describe() -> String {
-        let label = "로그인 때 자동 실행: "
-        if registrationFailed { return label + "등록하지 못했어요" }
+    private func describe() -> LoginItemReading {
+        if registrationFailed { return LoginItemReading(.failed, "등록하지 못했어요") }
         let status = service.status
         switch status {
         case .enabled:
-            return label + "켜짐"
+            return LoginItemReading(.enabled, "켜짐")
         case .requiresApproval:
-            return label + "승인이 필요해요 (시스템 설정 > 일반 > 로그인 항목)"
+            return LoginItemReading(.requiresApproval, "승인이 필요해요 (시스템 설정 > 일반 > 로그인 항목)")
         case .notRegistered, .notFound:
             if defaults.bool(forKey: Self.doneKey) {
-                return label + (status == .notFound ? "찾지 못했어요" : "꺼짐 (시스템 설정 > 일반 > 로그인 항목에서 켤 수 있어요)")
+                return status == .notFound
+                    ? LoginItemReading(.notFound, "찾지 못했어요")
+                    : LoginItemReading(.turnedOff, "꺼짐 (시스템 설정 > 일반 > 로그인 항목에서 켤 수 있어요)")
             }
-            return label + "등록 안 함 (앱을 Applications 폴더에 옮겨 켜면 등록돼요)"
+            return LoginItemReading(.notRegistered, "등록 안 함 (앱을 Applications 폴더에 옮겨 켜면 등록돼요)")
         }
     }
 }

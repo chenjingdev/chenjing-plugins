@@ -35,6 +35,7 @@ final class LiveApp {
             claude: claude, engine: engine, runner: runner, opener: opener, bundle: bundle, appVersion: appVersion,
             setup: setup, codex: codex)
         let loginItem = LoginItemRegistrar(service: MainAppLoginItem(), defaults: defaults, home: home)
+        let loginEnvironment = LoginEnvironmentReader(home: home, runner: runner)
         let pasteboard = DiagnosisPasteboard(base: SystemPasteboard()) {
             "앱: CUA Bar \(appVersion ?? "개발용")\n\(loginItem.line)"
         }
@@ -44,7 +45,12 @@ final class LiveApp {
             engine: engine, appVersion: appVersion, systemActions: actions, pasteboard: pasteboard,
             notifier: notifier, setupActivity: setup,
             claudeInspector: { claude.inspect(launcher: $0, skillSource: bundle?.skillSource, appVersion: appVersion) },
-            codexInstalled: { codex.isInstalled() })
+            codexInstalled: { codex.isInstalled() },
+            loginItemReading: { loginItem.reading },
+            loginEnvironmentReader: { await loginEnvironment.read() },
+            appLauncherValue: loginEnvironment.appLauncherValue)
+        // An install that changed something is followed by one connection test, when the Codex host is ready.
+        actions.setAfterChange { [weak model] in await model?.probeAfterInstall() }
         releases.onNewVersion = { version in
             Task { _ = await notifier.post(.newVersion(version)) }
         }

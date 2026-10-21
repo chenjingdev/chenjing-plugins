@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The popover (structure B): a status card on top, two tabs below, one button on every row.
+/// The popover (structure B): a status card on top, three tabs below (연결, 기록, 점검), one button on every row.
 struct PopoverView: View {
     @ObservedObject var model: CUABarViewModel
     /// What the bottom line and the 기록 tab add: new version, 앱 지우기, login item. nil leaves them out.
@@ -46,7 +46,10 @@ struct PopoverView: View {
     }
 
     @ViewBuilder private var tabContent: some View {
-        if model.selectedTab == .activity {
+        if model.selectedTab == .check {
+            // Judged from what the model already read: opening the tab runs nothing.
+            CheckTabView(content: model.checkContent, result: { model.placedResults[.check($0)] }) { model.send($0) }
+        } else if model.selectedTab == .activity {
             // Also without a status: 진단 복사 is most needed exactly then.
             ActivityTabView(
                 content: model.activityContent, copying: model.inFlight.contains(.copyDiagnosis),

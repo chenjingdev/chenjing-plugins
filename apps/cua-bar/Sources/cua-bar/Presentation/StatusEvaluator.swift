@@ -238,7 +238,7 @@ enum StatusEvaluator {
     /// Without the app's own version (a build outside the bundle) there is nothing to compare with.
     static func engineIssues(in engine: EngineInfo, appVersion: String?) -> [SetupIssue] {
         guard let appVersion = nonEmpty(appVersion), nonEmpty(engine.version) != appVersion else { return [] }
-        return [SetupIssue(name: "엔진", sentence: "연결 엔진이 앱과 판이 달라요")]
+        return [SetupIssue(name: "엔진", sentence: "연결 엔진이 앱과 판이 달라요", item: .engine)]
     }
 
     /// The MCP server or the skill is missing or the app's own and out of date. Nothing is said without
@@ -247,13 +247,13 @@ enum StatusEvaluator {
         guard claude.claudeCodeFound, !claude.claudeCodeUnusable else { return [] }
         var issues: [SetupIssue] = []
         switch claude.mcp {
-        case .missing: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code에 CUA가 연결되지 않았어요"))
-        case .outdated: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code의 CUA 연결이 옛 판이에요"))
+        case .missing: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code에 CUA가 연결되지 않았어요", item: .mcp))
+        case .outdated: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code의 CUA 연결이 옛 판이에요", item: .mcp))
         case .ready, .conflict, .unknown: break
         }
         switch claude.skill {
-        case .missing: issues.append(SetupIssue(name: "스킬", sentence: "Claude Code에 CUA 스킬이 없어요"))
-        case .outdated: issues.append(SetupIssue(name: "스킬", sentence: "Claude Code의 CUA 스킬이 옛 판이에요"))
+        case .missing: issues.append(SetupIssue(name: "스킬", sentence: "Claude Code에 CUA 스킬이 없어요", item: .skill))
+        case .outdated: issues.append(SetupIssue(name: "스킬", sentence: "Claude Code의 CUA 스킬이 옛 판이에요", item: .skill))
         case .ready, .conflict, .unknown: break
         }
         return issues
@@ -291,26 +291,28 @@ enum StatusEvaluator {
         /// Short name used when several things are wrong at once.
         var name: String
         var sentence: String
+        /// The line of the check tab this belongs to: the card and the tab judge from the same list.
+        var item: CheckItem
     }
 
     /// Fields the contract marks as failing. `unknown` and `inactive` are not failures: the
     /// engine could not tell, or Codex is simply off.
     static func setupIssues(in setup: SetupInfo) -> [SetupIssue] {
         var issues: [SetupIssue] = []
-        if setup.command == "missing" { issues.append(SetupIssue(name: "명령", sentence: "연결 명령이 없어요")) }
-        if setup.dependencies == "missing" { issues.append(SetupIssue(name: "구성 요소", sentence: "필요한 구성 요소가 없어요")) }
+        if setup.command == "missing" { issues.append(SetupIssue(name: "명령", sentence: "연결 명령이 없어요", item: .engine)) }
+        if setup.dependencies == "missing" { issues.append(SetupIssue(name: "구성 요소", sentence: "필요한 구성 요소가 없어요", item: .python)) }
         // `conflict` is not one: the setup does not overwrite somebody else's value, so it has a card of its own.
         switch setup.loginEnvironment {
-        case "missing": issues.append(SetupIssue(name: "로그인 환경", sentence: "로그인 환경이 설정되지 않았어요"))
-        case "stale": issues.append(SetupIssue(name: "로그인 환경", sentence: "로그인 환경이 옛 설정이에요"))
+        case "missing": issues.append(SetupIssue(name: "로그인 환경", sentence: "로그인 환경이 설정되지 않았어요", item: .wrapper))
+        case "stale": issues.append(SetupIssue(name: "로그인 환경", sentence: "로그인 환경이 옛 설정이에요", item: .wrapper))
         default: break
         }
         switch setup.wrapper {
-        case "missing": issues.append(SetupIssue(name: "래퍼", sentence: "Codex 연결용 래퍼가 없어요"))
-        case "broken": issues.append(SetupIssue(name: "래퍼", sentence: "Codex 연결용 래퍼가 깨졌어요"))
+        case "missing": issues.append(SetupIssue(name: "래퍼", sentence: "Codex 연결용 래퍼가 없어요", item: .wrapper))
+        case "broken": issues.append(SetupIssue(name: "래퍼", sentence: "Codex 연결용 래퍼가 깨졌어요", item: .wrapper))
         default: break
         }
-        if setup.relay == "unavailable" { issues.append(SetupIssue(name: "중계기", sentence: "중계기를 쓸 수 없어요")) }
+        if setup.relay == "unavailable" { issues.append(SetupIssue(name: "중계기", sentence: "중계기를 쓸 수 없어요", item: .relay)) }
         return issues
     }
 

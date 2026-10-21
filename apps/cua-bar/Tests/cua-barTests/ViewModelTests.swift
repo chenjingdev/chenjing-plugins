@@ -455,7 +455,7 @@ struct ViewModelTests {
         let model = makeModel(engine, pasteboard: pasteboard)
         let outcome = await model.perform(.copyDiagnosis)
         // Outside the app bundle there is no notification setting.
-        #expect(pasteboard.copied == ["CUA diagnosis\nhost: ready\n알림: 쓸 수 없음\n"])
+        #expect(pasteboard.copied.map(CheckFixtures.withoutCheckLines) == ["CUA diagnosis\nhost: ready\n알림: 쓸 수 없음\n"])
         #expect(outcome == ActionOutcome(kind: .success, message: "진단을 복사했어요"))
     }
 

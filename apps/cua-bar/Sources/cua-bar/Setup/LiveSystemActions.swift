@@ -141,19 +141,42 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         var waiting: Set<SetupWait> = []
         var developerToolsNeeded = false
         var claudeCodeUnusable = false
+        /// The run changed something: put the engine in, repaired its setup, or changed Claude Code's MCP server or skill.
+        var changed = false
 
-        static func failure(_ message: String, waiting: Set<SetupWait> = []) -> Run {
-            Run(outcome: ActionOutcome(kind: .failure, message: message), succeeded: false, waiting: waiting)
+        static func failure(_ message: String, waiting: Set<SetupWait> = [], changed: Bool = false) -> Run {
+            Run(outcome: ActionOutcome(kind: .failure, message: message), succeeded: false, waiting: waiting, changed: changed)
         }
     }
 
+    /// Runs after an install that changed something, with the connection test: it tests the Codex host when that is
+    /// ready (and only then) and says how it ended; nil when no test was run. Set by the app once the model exists.
+    private let afterChangeLock = NSLock()
+    private var afterChangeHook: (@Sendable () async -> ProbeOutcome?)?
+
+    func setAfterChange(_ hook: (@Sendable () async -> ProbeOutcome?)?) {
+        afterChangeLock.withLock { afterChangeHook = hook }
+    }
+
+    /// The install, with a banner that says what the connection test after it found when that failed.
     func setUp() async -> ActionOutcome {
-        guard await setup.begin() else { return ActionOutcome(kind: .info, message: InstallMessages.busy) }
+        let done = await setUpAndTest()
+        return ProbeMessages.attach(done.probe, to: done.outcome)
+    }
+
+    /// The install and, when it changed something and the Codex host is ready, one connection test after it. `outcome` is
+    /// what the install itself says; `probe` is how the test ended (nil: none was run). What is said (a banner, or the
+    /// notification that says an update is done) comes after the test, so the caller adds the failure sentence to it
+    /// (`ProbeMessages`, `AppNotification.appending(probe:)`). A run that changed nothing (almost every start) tests nothing.
+    func setUpAndTest() async -> (outcome: ActionOutcome, probe: ProbeOutcome?) {
+        guard await setup.begin() else { return (ActionOutcome(kind: .info, message: InstallMessages.busy), nil) }
         let result = await install()
         await setup.record(
             waitingFor: result.waiting, developerToolsNeeded: result.developerToolsNeeded, claudeCodeUnusable: result.claudeCodeUnusable)
         await setup.end(succeeded: result.succeeded)
-        return result.outcome
+        let hook = afterChangeLock.withLock { afterChangeHook }
+        let probe = result.changed ? await hook?() : nil
+        return (result.outcome, probe)
     }
 
     private func install() async -> Run {
@@ -204,7 +227,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
 
         guard claude.claudeCodeFound else {
             waiting.insert(.claudeCode)
-            return Run(outcome: engineOutcome(), waiting: waiting)
+            return Run(outcome: engineOutcome(), waiting: waiting, changed: changed || repaired)
         }
         var conflict = false
 
@@ -221,9 +244,9 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
                 changed = true
             case .cannotStart:
                 // Not something another try fixes by itself: it is said in the check tab, and the next start tries again.
-                return Run(outcome: engineOutcome(), waiting: waiting, claudeCodeUnusable: true)
+                return Run(outcome: engineOutcome(), waiting: waiting, claudeCodeUnusable: true, changed: changed || repaired)
             case .failed:
-                return .failure(InstallMessages.mcpFailed, waiting: waiting)
+                return .failure(InstallMessages.mcpFailed, waiting: waiting, changed: changed || repaired)
             }
         case .conflict:
             conflict = true
@@ -234,7 +257,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         switch claude.skillState(source: bundle.skillSource, appVersion: appVersion) {
         case .missing, .outdated:
             guard claude.installSkill(from: bundle.skillSource, version: appVersion ?? "dev") else {
-                return .failure(InstallMessages.skillFailed, waiting: waiting)
+                return .failure(InstallMessages.skillFailed, waiting: waiting, changed: changed || repaired)
             }
             changed = true
         case .conflict:
@@ -251,7 +274,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         } else {
             outcome = engineOutcome()
         }
-        return Run(outcome: outcome, waiting: waiting)
+        return Run(outcome: outcome, waiting: waiting, changed: changed || repaired)
     }
 
     /// Said when the engine was put right but nothing in Claude Code changed (or there is no Claude Code yet).

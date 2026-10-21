@@ -1,7 +1,7 @@
 import Foundation
 
 enum PopoverTab: String, CaseIterable, Identifiable, Sendable {
-    case connections, activity
+    case connections, activity, check
 
     var id: String { rawValue }
 
@@ -9,6 +9,7 @@ enum PopoverTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .connections: "연결"
         case .activity: "기록"
+        case .check: "점검"
         }
     }
 
@@ -17,6 +18,7 @@ enum PopoverTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .connections: "연결 없음"
         case .activity: "기록 없음"
+        case .check: "점검 없음"
         }
     }
 }

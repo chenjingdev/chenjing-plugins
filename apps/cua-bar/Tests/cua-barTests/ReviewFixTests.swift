@@ -57,7 +57,7 @@ struct ReviewFixTests {
         // And it works: the engine's own `diagnose` is what lands on the pasteboard, with the notification line.
         engine.configure { $0.diagnosis = "CUA diagnosis\nhost: unknown\n" }
         await rig.model.send(activity.copyButton.action)?.value
-        #expect(rig.pasteboard.copied == ["CUA diagnosis\nhost: unknown\n알림: 켜짐\n"])
+        #expect(rig.pasteboard.copied.map(CheckFixtures.withoutCheckLines) == ["CUA diagnosis\nhost: unknown\n알림: 켜짐\n"])
     }
 
     @Test func theActivityTabKeepsTheButtonWhileTheFirstReadIsStillPending() async throws {

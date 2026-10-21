@@ -29,6 +29,10 @@ final class SetupActivity {
         didSet { if oldValue != phase { onChange?() } }
     }
 
+    /// How many installs have ended in this run of the app, whatever came of them: the check tab reads a login
+    /// environment that is still stale after one as something the install could not mend.
+    private(set) var finishedRuns = 0
+
     /// The automatic run at start-up happens at most once per app run, whatever came of it.
     private(set) var automaticRunClaimed = false
 
@@ -65,6 +69,7 @@ final class SetupActivity {
     }
 
     func end(succeeded: Bool) {
+        finishedRuns += 1
         phase = succeeded ? .idle : .failed
     }
 

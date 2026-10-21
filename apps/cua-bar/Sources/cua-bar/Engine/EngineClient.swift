@@ -43,6 +43,10 @@ protocol EngineClient: Sendable {
     func restartCodex() async throws -> RestartResult
     /// `diagnose`: plain text that is safe to paste into a chat.
     func diagnose() async throws -> String
+    /// `doctor --probe --json --timeout <seconds>`: one `cua.getState()` on a thread of its own against a Codex
+    /// host that is ready; how that ended. A host that is not ready ends it at once (`hostUnavailable`) and the
+    /// engine starts nothing for it. Throws only when the command could not be run or read.
+    func probe(seconds: Int) async throws -> ProbeOutcome
     /// `uninstall`: the existing remover. It also removes the login environment, and it refuses
     /// while a Codex host is running (the command then exits non-zero and nothing is removed).
     /// Throws `engineMissing` when there is no engine: nothing was set up to undo.
