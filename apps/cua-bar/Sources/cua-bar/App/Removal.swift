@@ -41,6 +41,14 @@ final class RemovalFlow: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
 
+    /// It is undoing things, or has and is about to quit: the app does not replace itself meanwhile.
+    var isRunning: Bool {
+        switch phase {
+        case .working, .finished: true
+        case .idle, .confirming, .refused: false
+        }
+    }
+
     private let engine: any EngineClient
     private let loginItem: LoginItemRegistrar
     private let claude: any ClaudeRemoving

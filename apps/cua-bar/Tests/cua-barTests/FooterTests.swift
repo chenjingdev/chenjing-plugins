@@ -9,24 +9,28 @@ import Testing
 struct FooterTests {
     private struct Kit {
         var maintenance: Maintenance
-        var releases: ReleaseChecker
+        var updater: AppUpdater
         var removal: RemovalFlow
         var opener: FakeOpener
         var suite: DefaultsSuite
         var log: EventLog
     }
 
-    private func kit(latest: String? = "0.8.0", app: String = "0.7.0", loginItem: LoginItemStatus = .enabled) -> Kit {
+    /// The site names 0.8.0 and this app is 0.7.0. `failing`: the update to it fails (the installer that stands in for
+    /// the real one says so), which is what puts the button there; otherwise it simply has not been made yet.
+    private func kit(failing: Bool = true, app: String = "0.7.0", loginItem: LoginItemStatus = .enabled) -> Kit {
         let suite = DefaultsSuite()
         let log = EventLog()
-        let fetcher = latest.map { FakeFetcher(json: FakeFetcher.list($0)) } ?? FakeFetcher(failing: ReleaseFetchError.badResponse)
-        let releases = ReleaseChecker(appVersion: app, fetcher: fetcher, defaults: suite.defaults)
+        let updater = AppUpdater(
+            appVersion: app, transport: FakeTransport(document: versionDocument("0.8.0")),
+            installer: FakeInstaller(failing ? .failed(.checksum) : .deferred), defaults: suite.defaults, quit: {})
+        updater.canReplaceNow = { true }
         let registrar = LoginItemRegistrar(service: FakeLoginItem(status: loginItem), defaults: suite.defaults)
         let removal = RemovalFlow(engine: FakeEngineClient(), loginItem: registrar, quit: { log.add("quit") }, sleep: ManualSleeper().sleep)
         let opener = FakeOpener()
         return Kit(
-            maintenance: Maintenance(releases: releases, removal: removal, loginItem: registrar, opener: opener),
-            releases: releases, removal: removal, opener: opener, suite: suite, log: log)
+            maintenance: Maintenance(updater: updater, removal: removal, loginItem: registrar, opener: opener),
+            updater: updater, removal: removal, opener: opener, suite: suite, log: log)
     }
 
     private func model() async throws -> CUABarViewModel {
@@ -50,42 +54,48 @@ struct FooterTests {
 
     // MARK: New version
 
-    @Test func theButtonAppearsOnlyWhenTheCheckFoundANewerAppAndOpensItsPage() async throws {
+    @Test func theButtonAppearsOnlyWhenAnUpdateFailedAndOpensTheDownloadSite() async throws {
         let kit = kit()
         defer { kit.suite.remove() }
-        #expect(kit.releases.newRelease == nil, "no button before there is a result")
-        await kit.releases.checkIfDue()
-        let release = try #require(kit.releases.newRelease)
-        #expect(release.buttonTitle == "새 버전 0.8.0")
-        // What the button does: open that release's page, nothing more.
-        _ = await kit.maintenance.opener.open(release.url)
-        #expect(kit.opener.opened == [URL(string: "https://github.com/chenjingdev/chenjing-plugins/releases/tag/cua-bar--v0.8.0")!])
+        #expect(kit.updater.failure == nil, "no button before there is a failure")
+        await kit.updater.check()
+        let failure = try #require(kit.updater.failure)
+        #expect(failure.buttonTitle == "새 버전 0.8.0")
+        // What the button does: open the download site, nothing more.
+        _ = await kit.maintenance.opener.open(UpdateSource.site)
+        #expect(kit.opener.opened == [URL(string: "https://cua.chenjing.org")!])
     }
 
-    @Test func noButtonWhenTheAppIsAlreadyTheNewest() async {
-        let kit = kit(latest: "0.7.0")
+    @Test func noButtonWhenTheUpdateHasNotFailed() async {
+        // Newer, but not failed: it is waiting for the way to be free, or it is on its way.
+        let kit = kit(failing: false)
         defer { kit.suite.remove() }
-        await kit.releases.checkIfDue()
-        #expect(kit.releases.newRelease == nil)
+        await kit.updater.check()
+        #expect(kit.updater.failure == nil)
+        // Or the app is already the newest.
+        let newest = self.kit(failing: true, app: "0.8.0")
+        defer { newest.suite.remove() }
+        await newest.updater.check()
+        #expect(newest.updater.failure == nil)
     }
 
-    @Test func theFooterDrawsTheButtonOnlyWhenThereIsANewerRelease() async {
-        let newer = kit(latest: "0.8.0")
-        let same = kit(latest: "0.7.0")
-        defer { newer.suite.remove(); same.suite.remove() }
-        await newer.releases.checkIfDue()
-        await same.releases.checkIfDue()
+    @Test func theFooterDrawsTheButtonOnlyWhileAnUpdateHasFailed() async {
+        let failed = kit(failing: true)
+        let waiting = kit(failing: false)
+        defer { failed.suite.remove(); waiting.suite.remove() }
+        await failed.updater.check()
+        await waiting.updater.check()
         func width(_ kit: Kit) -> CGFloat {
             fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {})).width
         }
         // Its natural width grows by the button and its spacing, nothing else.
-        #expect(width(newer) > width(same) + 60, "newer \(width(newer)) vs same \(width(same))")
+        #expect(width(failed) > width(waiting) + 60, "failed \(width(failed)) vs waiting \(width(waiting))")
     }
 
     @Test func theBottomLineIsOneLineOfTheTimeTheNewVersionAndQuitAndNothingElse() async {
         let kit = kit()
         defer { kit.suite.remove() }
-        await kit.releases.checkIfDue() // the new-version button too: the fullest line
+        await kit.updater.check() // the new-version button too: the fullest line
         let row = Theme.popoverWidth - 2 * Theme.padding
         let full = fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}))
         #expect(full.width <= row, "everything fits the line side by side")
@@ -157,7 +167,7 @@ struct FooterTests {
     @Test func thePopoverKeepsItsSizeWhenTheRemoveQuestionOpensInActivity() async throws {
         let kit = kit()
         defer { kit.suite.remove() }
-        await kit.releases.checkIfDue()
+        await kit.updater.check()
         let model = try await model()
         model.selectedTab = .activity
         func popover(_ maintenance: Maintenance?) -> CGSize { fittingSize(PopoverView(model: model, maintenance: maintenance, quit: {})) }
@@ -253,7 +263,7 @@ struct FooterTests {
     @Test func thePopoverWithTheFooterRendersToPictures() async throws {
         let kit = kit()
         defer { kit.suite.remove() }
-        await kit.releases.checkIfDue()
+        await kit.updater.check()
         let model = try await model()
         let directory = ProcessInfo.processInfo.environment["CUABAR_SNAPSHOT_DIR"]
         func picture(_ name: String, dark: Bool = false) throws {

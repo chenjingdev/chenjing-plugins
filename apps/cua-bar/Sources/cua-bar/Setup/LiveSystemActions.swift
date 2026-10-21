@@ -68,6 +68,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     private let setup: SetupActivity
     private let codex: CodexLocator
     private let timeouts: Timeouts
+    private let updateNotice: UpdateNotice?
 
     init(
         claude: ClaudeIntegration,
@@ -78,7 +79,9 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         appVersion: String?,
         setup: SetupActivity,
         codex: CodexLocator = CodexLocator(),
-        timeouts: Timeouts = Timeouts()
+        timeouts: Timeouts = Timeouts(),
+        // The mark an update leaves for the app that starts after it; nil: none is looked for (tests, previews).
+        updateNotice: UpdateNotice? = nil
     ) {
         self.claude = claude
         self.engine = engine
@@ -89,6 +92,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         self.setup = setup
         self.codex = codex
         self.timeouts = timeouts
+        self.updateNotice = updateNotice
     }
 
     // MARK: Codex download
@@ -144,7 +148,19 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         let result = await install()
         await setup.record(waitingFor: result.waiting, developerToolsNeeded: result.developerToolsNeeded)
         await setup.end(succeeded: result.succeeded)
-        return result.outcome
+        return told(result.outcome)
+    }
+
+    /// Right after the app replaced itself with a newer version (F4), "새 Claude 대화부터 CUA가 붙어요" is said as the
+    /// update's own line, "CUA Bar를 x.y.z로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요": the person hears one thing, once,
+    /// and the update's mark is taken away. The line of an install that had no Claude Code to tell about stays as it is,
+    /// and the mark goes with it. Any other outcome leaves the mark for the run that finishes the install.
+    private func told(_ outcome: ActionOutcome) -> ActionOutcome {
+        guard let updateNotice else { return outcome }
+        guard outcome.message == InstallMessages.installed || outcome.message == Self.engineOnly else { return outcome }
+        guard let line = updateNotice.lineIfJustUpdated(to: VersionNumber(appVersion)) else { return outcome }
+        updateNotice.clear()
+        return outcome.message == InstallMessages.installed ? ActionOutcome(kind: .success, message: line) : outcome
     }
 
     private func install() async -> Run {

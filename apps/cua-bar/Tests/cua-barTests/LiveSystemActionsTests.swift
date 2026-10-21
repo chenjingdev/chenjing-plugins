@@ -86,6 +86,8 @@ struct LiveSystemActionsTests {
         var actions: LiveSystemActions
         var claude: ClaudeIntegration
         var bundle: BundledEngine
+        /// Where an update leaves its mark for the app that starts after it.
+        var notice: UpdateNotice
 
         var claudePath: String { home.claudeCLI.path }
         var launcher: String { home.launcher }
@@ -149,12 +151,13 @@ struct LiveSystemActionsTests {
             home: home.url, claude: ClaudeCLILocator(home: home.url, isExecutableFile: { claudeCode.isThere && $0 == claudePath }), runner: runner)
         let opener = FakeOpener()
         let setup = SetupActivity()
+        let notice = UpdateNotice(home: home.url)
         let actions = LiveSystemActions(
             claude: claude, engine: fake, runner: runner, opener: opener, bundle: bundled ? bundle : nil, appVersion: appVersion, setup: setup,
-            codex: CodexLocator(home: home.url, environment: [:], isCodexBundle: { _ in codex.isThere }))
+            codex: CodexLocator(home: home.url, environment: [:], isCodexBundle: { _ in codex.isThere }), updateNotice: notice)
         return Rig(
             home: home, codex: codex, claudeCode: claudeCode, runner: runner, opener: opener, setup: setup, engine: fake, actions: actions,
-            claude: claude, bundle: bundle)
+            claude: claude, bundle: bundle, notice: notice)
     }
 
     /// A status of an engine that is the app's.
