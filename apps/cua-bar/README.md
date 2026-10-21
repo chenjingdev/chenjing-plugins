@@ -8,27 +8,21 @@ Apple Silicon Mac, macOS 14 이상에서 돌아요. 앱 판 번호는 플러그�
 
 ## 받아서 켜기
 
-1. [GitHub Releases](https://github.com/chenjingdev/chenjing-plugins/releases)에서 `CUABar-v<판>-macos-arm64.zip`을 받아요. 이 저장소에는 다른 것의 릴리스도 있으니, 앱은 태그가 `cua-bar--v<판>`인 것을 찾으세요.
-2. 압축을 풀면 `CUABar.app`이 나와요. 이것을 Applications(응용 프로그램) 폴더로 옮겨요. 홈 폴더 안의 `~/Applications`도 돼요.
+1. [GitHub Releases](https://github.com/chenjingdev/chenjing-plugins/releases)에서 `CUABar-v<판>-macos-arm64.dmg`를 받아요. 이 저장소에는 다른 것의 릴리스도 있으니, 앱은 태그가 `cua-bar--v<판>`인 것을 찾으세요.
+2. dmg를 열면 `CUABar.app`과 Applications(응용 프로그램) 폴더 바로가기가 보여요. 앱을 Applications로 끌어 놓아요. 홈 폴더 안의 `~/Applications`도 돼요.
 3. (선택) 파일이 온전한지 보려면, 받은 폴더에서 `shasum -a 256 -c SHA256SUMS.txt`를 실행해요. `OK`가 나오면 돼요.
 4. `CUABar.app`을 열어요. 메뉴 막대에 아이콘이 하나 생겨요.
 
-### 처음 열 때: 공증 안 된 앱
+### 처음 열 때
 
-이 앱은 ad-hoc 서명만 했고 Apple 공증은 받지 않았어요. agent-bar와 같아요. 그래서 처음 열 때 macOS가 "확인되지 않은 개발자의 앱"이라며 막을 수 있어요.
-
-- 앱을 한 번 열어 보고 막히면 닫아요.
-- 시스템 설정 → 개인정보 보호 및 보안으로 가요. 아래쪽에 CUABar가 막혔다는 줄이 있어요. 그 옆의 **그래도 열기**를 누르고, 암호나 Touch ID로 확인해요.
-- 터미널이 편하면 이렇게 해도 돼요: `xattr -dr com.apple.quarantine /Applications/CUABar.app`
-
-한 번 열고 나면 다음부터는 묻지 않아요.
+앱과 dmg는 Developer ID로 서명했고 Apple 공증을 받았어요. 그래서 처음 열 때 macOS가 "인터넷에서 다운로드한 앱"이라며 한 번 물어요. **열기**를 누르면 되고, 다음부터는 묻지 않아요.
 
 ## 처음 켜면 일어나는 일
 
 1. **연결을 저절로 설정해요.** Claude 플러그인은 깔려 있는데 `~/.local/bin/codex-cua`가 없거나 이 플러그인 것이 아니면, 앱을 켤 때 한 번 플러그인의 `setup.sh setup`을 저절로 돌려요. 파이썬 구성 요소를 받느라 몇 분 걸릴 수 있고, 그동안 상태 카드가 "연결을 설정하는 중"이라고 말해요. 실패하면 카드에 "연결 설정에 실패했어요"와 **다시 하기** 버튼이 떠요. 저절로 하는 것은 앱을 켠 한 번뿐이고, 그 뒤는 버튼을 누를 때만 해요.
 2. **플러그인이 없으면** 카드의 **설치** 버튼으로 깔아요. 앱이 Claude Code의 `claude plugin` 명령으로 저장소를 더하고, 플러그인을 사용자 범위로 깔고, 이어서 연결을 설정해요. 끝나면 "새 Claude 대화부터 CUA가 붙어요"라고 알려요. 이미 열려 있는 Claude 대화에는 붙지 않아요. Claude Code가 없으면 "Claude Code가 없어요"라고만 말해요.
 3. **로그인할 때 저절로 떠요.** Applications나 `~/Applications`에서 처음 열 때 한 번만 로그인 항목으로 등록해요. 그 뒤로는 다시 등록하지 않아요. 끄고 싶으면 시스템 설정 → 일반 → 로그인 항목에서 끄면 되고, 앱이 그것을 존중해요. 앱 안에는 스위치가 없어요. 지금 상태는 기록 탭 아래쪽, 진단 복사 버튼 줄 바로 위에 적혀요.
-4. **Codex를 한 번 다시 켜야 해요.** 이미 켜져 있던 Codex는 연결 없이 켜진 것이라, 카드가 "Codex가 연결 없이 켜져 있어요"라고 하고 **다시 켜기**를 보여요. 앱은 누르기 전에는 Codex를 끄지 않아요. 누르면 "하던 Codex 작업이 끊겨요"라고 한 번 묻고, 정상 종료(강제 종료 없음)한 뒤 다시 켜요. Codex가 종료를 한 번 더 물으면(예약 작업이 있으면 Codex가 물어요) Codex 창에서 **종료**를 눌러 주세요. 그동안 카드가 꺼지기를 기다린다고 말하고, 10분 안에 꺼지면 앱이 Codex를 다시 켜요. 그 뒤로는 Dock이나 Spotlight로 켜도 Claude가 바로 붙고, Codex가 꺼져 있으면 Claude 대화를 열 때 뒤에서 켜져요.
+4. **Codex를 한 번 다시 켜야 해요.** 이미 켜져 있던 Codex는 연결 없이 켜진 것이라, 카드가 "Codex가 연결 없이 켜져 있어요"라고 하고 **다시 켜기**를 보여요. 앱은 누르기 전에는 Codex를 끄지 않아요. 누르면 "하던 Codex 작업이 끊겨요"라고 한 번 묻고, 정상 종료(강제 종료 없음)한 뒤 다시 켜요. macOS가 CUA Bar가 Codex를 제어하려 한다고 물으면 **허용**을 눌러요. 종료 요청이 그 권한으로 가요. Codex가 종료를 한 번 더 물으면(예약 작업이 있으면 Codex가 물어요) Codex 창에서 **종료**를 눌러 주세요. 그동안 카드가 꺼지기를 기다린다고 말하고, 10분 안에 꺼지면 앱이 Codex를 다시 켜요. 그 뒤로는 Dock이나 Spotlight로 켜도 Claude가 바로 붙고, Codex가 꺼져 있으면 Claude 대화를 열 때 뒤에서 켜져요.
 
 ## 화면
 
@@ -95,9 +89,10 @@ cd apps/cua-bar
 swift build && swift test          # 화면이 있는 로그인 세션이 필요해요
 ./scripts/build-app.sh             # CUABar.app을 만들고 ad-hoc 서명해요
 ./scripts/build-app.sh --install   # ~/Applications에 넣어요
-./scripts/package-release.sh       # dist/에 zip과 SHA256SUMS.txt를 만들어요
+CUABAR_NOTARY_PROFILE=<프로필> ./scripts/package-release.sh   # dist/에 서명·공증한 dmg와 SHA256SUMS.txt를 만들어요
 ```
 
+- `build-app.sh`는 언제나 hardened runtime으로 서명해서, 손으로 깐 앱도 릴리스와 같은 규칙으로 돌아요. 예외는 Apple Events 하나예요(`scripts/CUABar.entitlements`). Codex 다시 켜기가 osascript로 Codex에 종료를 요청하기 때문이에요. `CUABAR_CODE_SIGN_IDENTITY`를 주면 그 신원으로 서명하고 보안 타임스탬프를 붙여요.
 - `--install`은 있던 앱과 설정을 `~/Library/Application Support/CUABar/Backups/<시각>/`에 백업하고, 앱이 켜져 있으면 멈추고, 복사본의 서명을 확인한 뒤에 바꿔요.
-- `package-release.sh [폴더]`는 `build-app.sh`로 앱을 만들고 `CUABar-v<판>-macos-arm64.zip`(`ditto -c -k --keepParent`)과 `SHA256SUMS.txt`를 폴더에 써요. 기본 폴더는 `apps/cua-bar/dist/`이고 git이 보지 않아요. 합이 맞는지, 압축을 푼 앱의 서명이 맞는지까지 확인한 뒤, 태그 `cua-bar--v<판>`과 실행할 `gh release create ...` 명령을 **출력만** 해요. 태그를 만들거나 올리거나 `gh`를 부르지 않아요. 올리는 것은 그때그때 물어보고 직접 해요.
+- `package-release.sh [폴더]`는 키체인의 Developer ID Application 인증서로 앱을 만들어요(여럿이면 `CUABAR_CODE_SIGN_IDENTITY`로 골라요). `CUABAR_NOTARY_PROFILE`은 `xcrun notarytool store-credentials`로 만든 프로필 이름이에요. 앱을 공증받아 티켓을 붙이고, 그 앱을 담은 `CUABar-v<판>-macos-arm64.dmg`도 서명·공증해 티켓을 붙인 뒤 `SHA256SUMS.txt`와 함께 폴더에 써요. 기본 폴더는 `apps/cua-bar/dist/`이고 git이 보지 않아요. 합, dmg와 그 안 앱의 서명·티켓, Gatekeeper가 둘 다 받아들이는지까지 확인한 뒤, 태그 `cua-bar--v<판>`과 실행할 `gh release create ...` 명령을 **출력만** 해요. 태그를 만들거나 올리거나 `gh`를 부르지 않아요. 올리는 것은 그때그때 물어보고 직접 해요.
 - 앱 판 번호는 `plugins/cua/.claude-plugin/plugin.json`의 `version`에서 와요.

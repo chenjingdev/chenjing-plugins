@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Builds CUABar.app next to Package.swift and signs it ad hoc (no notarization, like agent-bar).
+# Builds CUABar.app next to Package.swift and signs it with the hardened runtime, ad hoc by default.
 # The app's version is the cua plugin's version: they ship together and the app compares them.
 #
 #   ./scripts/build-app.sh             build only
@@ -7,7 +7,8 @@
 #                                      back up what is there, refuse while the app runs, verify the
 #                                      signature of the copy before it replaces anything
 #
-# CUABAR_CODE_SIGN_IDENTITY picks another signing identity; the default is ad hoc ("-").
+# CUABAR_CODE_SIGN_IDENTITY picks another signing identity (a release uses its Developer ID one,
+# which also gets a secure timestamp); the default is ad hoc ("-").
 
 set -euo pipefail
 
@@ -108,6 +109,8 @@ cat > "$bundle_path/Contents/Info.plist" <<PLIST
   <string>14.0</string>
   <key>LSUIElement</key>
   <true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Codex를 다시 켤 때 Codex에 정상 종료를 요청해요.</string>
   <key>NSHighResolutionCapable</key>
   <true/>
 </dict>
@@ -117,8 +120,14 @@ plutil -lint "$bundle_path/Contents/Info.plist" >/dev/null
 
 printf 'APPL????' > "$bundle_path/Contents/PkgInfo"
 
+# Every build runs under the hardened runtime, so what is tried here is what notarization ships. Its
+# one exception: restart-codex asks Codex to quit through osascript, an Apple event this app answers for.
+sign_options=(--force --deep --options runtime --entitlements "$script_dir/CUABar.entitlements")
+if [[ "$signing_identity" != "-" ]]; then
+  sign_options+=(--timestamp)
+fi
 echo "Signing with: $([[ "$signing_identity" == "-" ]] && echo "ad hoc" || echo "$signing_identity")"
-codesign --force --deep -s "$signing_identity" "$bundle_path" >/dev/null
+codesign "${sign_options[@]}" -s "$signing_identity" "$bundle_path" >/dev/null
 codesign --verify --deep --strict "$bundle_path"
 
 if [[ "$should_install" -eq 1 ]]; then
