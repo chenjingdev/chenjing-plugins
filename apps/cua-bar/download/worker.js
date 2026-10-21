@@ -43,9 +43,10 @@ body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 -apple
 main { max-width: 600px; margin: 0 auto; padding: 56px 16px; }
 h1 { font-size: 32px; margin: 0 0 8px; }
 h2 { font-size: 17px; margin: 32px 0 8px; }
-p { margin: 0 0 16px; color: var(--muted); }
+p { margin: 0 0 16px; color: var(--muted); word-break: keep-all; }
 .button { display: inline-block; background: var(--accent); color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 10px; font-weight: 600; }
-pre { background: var(--card); padding: 12px 14px; border-radius: 10px; overflow-x: auto; font-size: 14px; margin: 0; }
+pre { background: var(--card); padding: 12px 14px; border-radius: 10px; font-size: 14px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.hash { overflow-wrap: anywhere; }
 small, small a { color: var(--muted); }
 </style>
 </head>
@@ -59,7 +60,7 @@ small, small a { color: var(--muted); }
 <pre>curl -fsSL ${origin}/install.sh | sh</pre>
 <h2>에이전트에게 맡기기</h2>
 <pre>CUA Bar를 설치해 줘. ${origin}/install</pre>
-<p style="margin-top: 32px"><small>SHA-256 ${release.sha256} · <a href="/SHA256SUMS.txt">SHA256SUMS.txt</a> · <a href="${release.release}">GitHub 릴리스</a></small></p>
+<p style="margin-top: 32px"><small class="hash">SHA-256 ${release.sha256} · <a href="/SHA256SUMS.txt">SHA256SUMS.txt</a> · <a href="${release.release}">GitHub 릴리스</a></small></p>
 </main>
 </body>
 </html>
