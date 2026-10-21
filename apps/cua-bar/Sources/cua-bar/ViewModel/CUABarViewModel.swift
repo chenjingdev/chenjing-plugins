@@ -267,7 +267,14 @@ final class CUABarViewModel: ObservableObject {
             status: lastStatus, error: lastError, appVersion: appVersion, claude: claudeSetup,
             developerToolsNeeded: setupActivity.developerToolsNeeded, card: evaluatedSummary.problem,
             loginItem: loginItemReading?(), login: loginEnvironment, fixTried: setupActivity.finishedRuns > 0,
-            probe: lastProbe, probing: isProbing, now: clock(), calendar: calendar, appLauncherValue: appLauncherValue))
+            probe: lastProbe, probing: isProbing, installing: installIsRunning, now: clock(), calendar: calendar,
+            appLauncherValue: appLauncherValue))
+    }
+
+    /// An install is running (from the card, at start-up, or what was put off): the 연결 시험 button waits for it. The test
+    /// right after an install is the install's own and runs inside it (`probeAfterInstall`), so this does not stop that one.
+    private var installIsRunning: Bool {
+        setupActivity.isRunning || inFlight.contains(where: SetupOverlay.runsSetup)
     }
 
     /// The connection test waits this long for the host; the app gives the command ten seconds more.
@@ -275,6 +282,8 @@ final class CUABarViewModel: ObservableObject {
     /// What a press on 연결 시험 says when there is no Codex host to test.
     static let probeNeedsHost = "Codex가 꺼져 있어 시험하지 않았어요 — Claude 대화를 열면 켜져요"
     static let probeBusy = "이미 시험하는 중이에요"
+    /// What a press on 연결 시험 says while the install runs: the test is the install's last step, or the person's after it.
+    static let probeWaitsForInstall = "설정하는 중이라 시험하지 않았어요. 끝나면 다시 눌러 주세요"
 
     /// One connection test, only against a host that is ready. Nothing is started for it: a Codex that is off, or
     /// still starting, is not tested (nil). A test already running is not joined or repeated (nil). `hostState` is the
@@ -769,7 +778,7 @@ final class CUABarViewModel: ObservableObject {
                 notificationPermission = await notifier.permission()
                 let separator = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
                 let check = checkContent.diagnosisLines.joined(separator: "\n")
-                pasteboard.copy(text + separator + check + "\n" + notificationPermission.diagnosisLine + "\n")
+                pasteboard.copyDiagnosis(text + separator + check + "\n" + notificationPermission.diagnosisLine + "\n")
                 return ActionResult(outcome: ActionOutcome(kind: .success, message: "진단을 복사했어요"), reason: nil)
             case .runSetup:
                 // Through the shared setup slot (inside the action): one install at a time, said on the card while it runs.
@@ -782,6 +791,10 @@ final class CUABarViewModel: ObservableObject {
                 return ActionResult(outcome: await systemActions.openCodexDownload(), reason: nil)
             case .runProbe:
                 if isProbing { return ActionResult(outcome: ActionOutcome(kind: .info, message: Self.probeBusy), reason: nil) }
+                // Not beside an install. (The test an install ends with does not come through here.)
+                if installIsRunning {
+                    return ActionResult(outcome: ActionOutcome(kind: .info, message: Self.probeWaitsForInstall), reason: nil)
+                }
                 let outcome = await runProbe(hostState: lastStatus?.host.state)
                 return ActionResult(outcome: probeAnswer(outcome), reason: nil)
             case .copyCommand(let command, _):

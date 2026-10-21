@@ -28,7 +28,7 @@ enum InstallMessages {
     static let mcpFailed = "Claude Code에 CUA를 연결하지 못했어요"
     static let skillFailed = "Claude Code에 CUA 스킬을 깔지 못했어요"
     /// An MCP server or a skill named cua that the app did not put there: left as it is.
-    static let conflict = "Claude Code에 앱이 깔지 않은 cua가 있어서 그대로 뒀어요 — 점검 탭에서 지우는 방법을 보세요"
+    static let conflict = "Claude Code에 앱이 깔지 않은 cua가 있어서 그대로 뒀어요 — 점검 탭에서 치우는 방법을 보세요"
     /// A new Claude conversation is where the connection shows up.
     static let installed = "새 Claude 대화부터 CUA가 붙어요"
     /// The engine's setup ran again and still reports a part that is not ready.
