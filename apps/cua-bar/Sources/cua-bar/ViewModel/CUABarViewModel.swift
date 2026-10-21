@@ -317,10 +317,13 @@ final class CUABarViewModel: ObservableObject {
         if let afterRead { runInBackground { await afterRead(answered) } }
     }
 
-    /// Claude Code's files are read off the main actor: `~/.claude.json` can be large.
+    /// Claude Code's files are read off the main actor: `~/.claude.json` can be large. A `claude` the last install
+    /// could not start is said with it.
     private func readClaude(launcher: String?) async -> ClaudeSetupState {
         guard let inspector = claudeInspector else { return .none }
-        return await Task.detached(priority: .utility) { inspector(launcher) }.value
+        var state = await Task.detached(priority: .utility) { inspector(launcher) }.value
+        state.claudeCodeUnusable = state.claudeCodeFound && setupActivity.claudeCodeUnusable
+        return state
     }
 
     private func accept(_ status: EngineStatus, claude: ClaudeSetupState) {

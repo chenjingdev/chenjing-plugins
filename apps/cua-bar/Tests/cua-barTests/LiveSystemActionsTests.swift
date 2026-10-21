@@ -19,6 +19,8 @@ final class StepRunner: ProcessRunning, @unchecked Sendable {
 
     private let lock = NSLock()
     private var recorded: [Call] = []
+    /// What each call that asked for folders in front of PATH asked for, with its executable.
+    private var recordedPathFirst: [(String, [String])] = []
     private let gateFor: @Sendable (Call) -> AsyncGate?
     private let handler: Handler
 
@@ -29,11 +31,18 @@ final class StepRunner: ProcessRunning, @unchecked Sendable {
 
     var calls: [Call] { lock.withLock { recorded } }
 
+    var pathFirst: [(String, [String])] { lock.withLock { recordedPathFirst } }
+
     func run(_ executable: URL, arguments: [String], timeout: Duration) async throws -> ProcessOutput {
         let call = Call(executable: executable.path, arguments: arguments, timeout: timeout)
         lock.withLock { recorded.append(call) }
         await gateFor(call)?.wait()
         return try handler(call)
+    }
+
+    func run(_ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String]) async throws -> ProcessOutput {
+        lock.withLock { recordedPathFirst.append((executable.path, pathFirst)) }
+        return try await run(executable, arguments: arguments, timeout: timeout)
     }
 
     static func ok(_ stdout: String = "") -> ProcessOutput {
@@ -256,7 +265,8 @@ struct LiveSystemActionsTests {
         #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
     }
 
-    @Test(arguments: [EngineError.engineMissing, .setupNeeded(installPath: "/x"), .commandFailed(exitCode: 2, message: "usage"), .invalidOutput("x"), .unsupportedSchema(2)])
+    @Test(arguments: [EngineError.engineMissing, .setupNeeded(installPath: "/x"), .commandFailed(exitCode: 2, message: "usage"), .launchFailed("x"),
+                      .invalidOutput("x"), .unsupportedSchema(2)])
     func everyKindOfBrokenOrMissingEngineIsInstalled(error: EngineError) async throws {
         let rig = try rig(engine: .failure(error))
         defer { rig.home.remove() }
@@ -264,9 +274,8 @@ struct LiveSystemActionsTests {
         #expect(rig.runner.calls.contains(rig.installEngineCall))
     }
 
-    @Test(arguments: [EngineError.timeout, .launchFailed("x")])
-    func anEngineThatCannotBeAskedIsNotInstalledOverBlindlyAndItsStepWaitsForAnAnswer(error: EngineError) async throws {
-        let rig = try rig(claudeInstalled: false, engine: .failure(error))
+    @Test func anEngineThatCannotBeAskedIsNotInstalledOverBlindlyAndItsStepWaitsForAnAnswer() async throws {
+        let rig = try rig(claudeInstalled: false, engine: .failure(.timeout))
         defer { rig.home.remove() }
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck])
@@ -279,6 +288,7 @@ struct LiveSystemActionsTests {
         let rig = try rig(engine: .failure(.timeout))
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
+        try rig.home.write("#!/bin/sh\n", to: URL(fileURLWithPath: rig.launcher)) // an engine was unpacked before
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.mcpAdd(rig.launcher)], "no install-engine")
         #expect(rig.claude.mcpState(launcher: nil) == .ready)
@@ -286,6 +296,20 @@ struct LiveSystemActionsTests {
         #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
         #expect(rig.setup.waitingFor == [.status], "the engine step comes back with the first read that works")
         #expect(rig.setup.phase == .idle)
+    }
+
+    @Test func withoutTheEnginesAnswerOrItsLauncherTheMCPServerWaitsWithTheEngineStep() async throws {
+        // An app engine was never unpacked here (an old command answers slowly): a server pointing at nothing would
+        // fail in every new conversation. The skill does not depend on it.
+        let rig = try rig(engine: .failure(.timeout))
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck], "no install-engine and no MCP server yet")
+        #expect(rig.claude.mcpState(launcher: nil) == .missing)
+        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
+        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(rig.setup.waitingFor == [.status])
     }
 
     @Test func aSkillOrServerOfAnotherIsStillLeftAloneWhileTheStatusCannotBeHad() async throws {
@@ -303,7 +327,7 @@ struct LiveSystemActionsTests {
 
     nonisolated static let brokenParts: [(String, String)] = [
         ("command", "missing"), ("dependencies", "missing"), ("login_environment", "missing"), ("login_environment", "stale"),
-        ("login_environment", "conflict"), ("wrapper", "missing"), ("wrapper", "broken"), ("relay", "unavailable"),
+        ("wrapper", "missing"), ("wrapper", "broken"), ("relay", "unavailable"),
     ]
 
     private func engineWith(_ field: String, _ value: String, home: TempHome) throws -> EngineStatus {
@@ -333,19 +357,88 @@ struct LiveSystemActionsTests {
         #expect(rig.setup.phase == .idle)
     }
 
-    @Test func aSetupThatDoesNotComeRightAfterwardsIsLeftToTheCardAndSaysNothing() async throws {
-        // The login environment conflicts with another setting: running it again does not change that. No banner
-        // at every start for it.
-        let rig = try rig(installedSetup: #"{"command": "ready", "login_environment": "conflict", "relay": "ready"}"#)
+    @Test func aLoginEnvironmentSomebodyElseSetIsNotSetUpAgainAtEveryStart() async throws {
+        // The setup never overwrites that value, so running it again cannot change it: it has a card of its own.
+        let rig = try rig()
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try engineWith("login_environment", "conflict", home: rig.home))
         try rig.home.addMcp(command: rig.launcher)
         try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck])
+        #expect(outcome == InstallMessages.nothingToSay)
+        #expect(rig.setup.phase == .idle)
+    }
+
+    @Test func aSetupThatLeavesAPartNotReadySaysSoOnce() async throws {
+        // The relay could not be set up this time either: not silence, a fixed line that points at the check tab.
+        let rig = try rig(installedSetup: #"{"command": "ready", "login_environment": "ready", "relay": "missing"}"#)
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try engineWith("relay", "unavailable", home: rig.home))
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls.contains(rig.installEngineCall))
-        #expect(outcome.message.isEmpty)
+        #expect(outcome == ActionOutcome(kind: .warning, message: "다시 설정했지만 고쳐지지 않은 곳이 있어요 — 점검 탭에서 보세요"))
         #expect(rig.setup.phase == .idle, "the install itself went through")
+    }
+
+    @Test func aLoginEnvironmentConflictLeftAfterARepairDoesNotCountAgainstIt() async throws {
+        // The repair was for the Python environment; the clash it reports again has its own card.
+        let rig = try rig(installedSetup: #"{"command": "ready", "login_environment": "conflict", "relay": "ready"}"#)
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        rig.engine.setStatus(try engineWith("dependencies", "missing", home: rig.home))
+        try rig.home.addMcp(command: rig.launcher)
+        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
+        #expect(await rig.actions.setUp() == ActionOutcome(kind: .success, message: "연결 설정을 마쳤어요"))
+        #expect(LiveSystemActions.setupIsSettled(in: Data(#"{"setup": {"command": "ready", "login_environment": "conflict", "relay": "ready"}}"#.utf8)))
+        #expect(!LiveSystemActions.setupIsSettled(in: Data(#"{"setup": {"command": "ready", "login_environment": "failed", "relay": "ready"}}"#.utf8)))
+    }
+
+    // MARK: A claude that cannot start
+
+    @Test func theClaudeFoundRunsWithItsOwnFolderFirstInPath() async throws {
+        // npm, nvm and bun put a script there for the node beside it.
+        let rig = try rig()
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        _ = await rig.actions.setUp()
+        let folder = rig.home.claudeCLI.deletingLastPathComponent().path
+        let claudeRuns = rig.runner.pathFirst.filter { $0.0 == rig.claudePath }
+        #expect(claudeRuns.count == 1)
+        #expect(claudeRuns.allSatisfy { $0.1 == [folder] })
+    }
+
+    @Test func aClaudeThatCannotStartIsTreatedLikeNoClaudeCodeAndNotAsAFailure() async throws {
+        // Exit 127: the node an npm-installed claude needs is nowhere. Another try would not help, so no 다시 하기 and
+        // nothing waits for it (the next start of the app tries again); the check tab says why.
+        let rig = try rig(responses: { call in call.isClaude ? StepRunner.failed(code: 127) : nil })
+        defer { rig.home.remove() }
+        try rig.home.installClaudeCode()
+        let outcome = await rig.actions.setUp()
+        #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall, rig.mcpAdd()])
+        #expect(outcome == ActionOutcome(kind: .success, message: "연결 설정을 마쳤어요"), "the engine was put in")
+        #expect(rig.setup.phase == .idle)
+        #expect(rig.setup.claudeCodeUnusable)
+        #expect(!rig.setup.waitingFor.contains(.claudeCode), "a catch-up would run it again at every read")
+        #expect(!FileManager.default.fileExists(atPath: rig.home.skillFolder.path))
+
+        // A later run that can start it puts it right and forgets.
+        let fixed = try self.rig()
+        defer { fixed.home.remove() }
+        try fixed.home.installClaudeCode()
+        fixed.setup.record(waitingFor: [], developerToolsNeeded: false, claudeCodeUnusable: true)
+        _ = await fixed.actions.setUp()
+        #expect(!fixed.setup.claudeCodeUnusable)
+    }
+
+    @Test func theCardSaysNothingAboutMCPAndSkillForAClaudeThatCannotStart() {
+        let unusable = ClaudeSetupState(claudeCodeFound: true, claudeCodeUnusable: true, mcp: .missing, skill: .conflict)
+        #expect(StatusEvaluator.claudeIssues(in: unusable).isEmpty)
+        #expect(StatusEvaluator.conflictProblem(in: unusable) == nil)
     }
 
     @Test func aMatchingEngineWithNothingBrokenIsNotSetUpAgain() async throws {

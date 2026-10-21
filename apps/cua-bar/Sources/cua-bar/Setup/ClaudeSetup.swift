@@ -16,6 +16,9 @@ struct ClaudeSetupState: Equatable, Sendable {
 
     /// The `claude` command was found. Without it MCP and skill are put off, and nothing is said about them.
     var claudeCodeFound = false
+    /// The `claude` that was found could not start (exit 127: an npm-installed one with no `node` it can find). The
+    /// card says nothing about MCP and skill then, the same as without Claude Code; the check tab says why.
+    var claudeCodeUnusable = false
     var mcp: Part = .unknown
     var skill: Part = .unknown
     /// The old plugin `cua@chenjing-plugins` is still recorded: two CUAs would attach to a new conversation.
@@ -88,6 +91,9 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     var defaultLauncher: String {
         home.appendingPathComponent(".local/share/codex-cua/engine/current/start-mcp.sh").path
     }
+
+    /// The start script behind `current` is there (a link is followed: a dangling one is not there).
+    var defaultLauncherExists: Bool { FileManager.default.fileExists(atPath: defaultLauncher) }
 
     /// What `mcpServers.cua` at the top of `~/.claude.json` is, compared with what the app installs: the
     /// launcher the engine reported, else `defaultLauncher`, with no arguments.
@@ -224,22 +230,43 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
 
     // MARK: Changing
 
+    /// How one `claude` command ended.
+    enum CommandResult: Equatable, Sendable {
+        case succeeded
+        case failed
+        /// It could not start: no `claude`, or exit 127 (the `node` an npm-installed one needs was not found).
+        case cannotStart
+    }
+
     /// `claude mcp add -s user cua -- <command>`.
-    func addMCP(command: String) async -> Bool {
+    func addMCP(command: String) async -> CommandResult {
         await runClaude(["mcp", "add", "-s", "user", Self.serverName, "--", command])
     }
 
     /// `claude mcp remove -s user cua`.
-    func removeMCP() async -> Bool {
+    func removeMCP() async -> CommandResult {
         await runClaude(["mcp", "remove", "-s", "user", Self.serverName])
     }
 
-    private func runClaude(_ arguments: [String]) async -> Bool {
-        guard let cli = claude.locate() else { return false }
+    /// Exit code of `/usr/bin/env` when the interpreter of a script (here `node`) cannot be found.
+    static let cannotStartExitCode: Int32 = 127
+
+    /// The folder of the `claude` found goes first in PATH: npm, nvm and bun put a script there that runs the
+    /// `node` beside it.
+    private func runClaude(_ arguments: [String]) async -> CommandResult {
+        guard let cli = claude.locate() else { return .cannotStart }
         do {
-            return try await runner.run(cli, arguments: arguments, timeout: commandTimeout).exitCode == 0
+            let output = try await runner.run(
+                cli, arguments: arguments, timeout: commandTimeout, pathFirst: [cli.deletingLastPathComponent().path])
+            switch output.exitCode {
+            case 0: return .succeeded
+            case Self.cannotStartExitCode: return .cannotStart
+            default: return .failed
+            }
+        } catch ProcessRunError.launchFailed {
+            return .cannotStart
         } catch {
-            return false
+            return .failed
         }
     }
 

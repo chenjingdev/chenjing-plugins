@@ -31,6 +31,8 @@ enum InstallMessages {
     static let conflict = "Claude Code에 앱이 깔지 않은 cua가 있어서 그대로 뒀어요 — 점검 탭에서 지우는 방법을 보세요"
     /// A new Claude conversation is where the connection shows up.
     static let installed = "새 Claude 대화부터 CUA가 붙어요"
+    /// The engine's setup ran again and still reports a part that is not ready.
+    static let notAllRepaired = "다시 설정했지만 고쳐지지 않은 곳이 있어요 — 점검 탭에서 보세요"
     static let developerToolsOpened = "개발자 도구 설치 창을 열었어요 — 끝나면 설치를 한 번 더 눌러 주세요"
     static let developerToolsFailed = "개발자 도구 설치 창을 열지 못했어요"
     static let openedCodexDownload = "Codex 받는 곳을 열었어요"
@@ -48,10 +50,12 @@ enum InstallMessages {
 /// 1. no Codex app (the engine's status says, else the app looks at the disk): nothing (the card says so); put off
 ///    until it is there
 /// 2. no developer tools (`xcode-select -p`): nothing (the card asks for them); the installer opens only on the button
-/// 3. no engine, one of another version than the app's, or one whose status calls a part of the setup broken:
-///    `install-engine` from the bundle (a whole copy of the same version stays as it is; the setup runs again).
-///    A status that cannot be had in time puts only this step off, to the first read that works
-/// 4. Claude Code there: the MCP server and the skill, put in or replaced when the app's own, never over another's
+/// 3. no engine, one of another version than the app's, a command that cannot answer or start, or one whose status
+///    calls a part of the setup broken: `install-engine` from the bundle (a whole copy of the same version stays as it
+///    is; the setup runs again). A status that cannot be had in time puts only this step off, to the first read that
+///    works; the MCP server then goes in only when the launcher is already there
+/// 4. Claude Code there: the MCP server and the skill, put in or replaced when the app's own, never over another's.
+///    A `claude` that cannot start (exit 127) is treated like no Claude Code for this run
 ///
 /// A build that does not run from an app bundle (no engine inside) installs nothing.
 final class LiveSystemActions: SystemActions, @unchecked Sendable {
@@ -136,6 +140,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         var succeeded = true
         var waiting: Set<SetupWait> = []
         var developerToolsNeeded = false
+        var claudeCodeUnusable = false
 
         static func failure(_ message: String, waiting: Set<SetupWait> = []) -> Run {
             Run(outcome: ActionOutcome(kind: .failure, message: message), succeeded: false, waiting: waiting)
@@ -145,7 +150,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     func setUp() async -> ActionOutcome {
         guard await setup.begin() else { return ActionOutcome(kind: .info, message: InstallMessages.busy) }
         let result = await install()
-        await setup.record(waitingFor: result.waiting, developerToolsNeeded: result.developerToolsNeeded)
+        await setup.record(
+            waitingFor: result.waiting, developerToolsNeeded: result.developerToolsNeeded, claudeCodeUnusable: result.claudeCodeUnusable)
         await setup.end(succeeded: result.succeeded)
         return result.outcome
     }
@@ -153,12 +159,19 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     private func install() async -> Run {
         guard let bundle else { return Run() }
         // Looking changes nothing, and the engine's own word about Codex counts more than the app's look at the disk.
-        let read = await readEngine()
+        // The run that follows a read is handed that read's answer instead of asking again.
+        let read: EngineRead
+        if let offered = await setup.takeOfferedStatus() {
+            read = .answered(offered)
+        } else {
+            read = await readEngine()
+        }
         guard codexIsThere(read) else { return Run(waiting: [.codex]) }
         guard await developerToolsPresent() else { return Run(developerToolsNeeded: true) }
 
         var changed = false
         var repaired = false
+        var unsettled = false
         var waiting: Set<SetupWait> = []
         let launcher: String?
         switch verdict(of: read) {
@@ -170,6 +183,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
             guard let installed = await installEngine(from: bundle) else { return .failure(InstallMessages.engineFailed) }
             launcher = installed.launcher ?? known
             repaired = installed.settled
+            unsettled = !installed.settled
         case .needsInstall:
             guard let installed = await installEngine(from: bundle) else { return .failure(InstallMessages.engineFailed) }
             launcher = installed.launcher
@@ -181,20 +195,36 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
             waiting.insert(.status)
         }
 
+        /// What the engine's part alone has to say, when Claude Code's part is not done.
+        func engineOutcome() -> ActionOutcome {
+            if changed || repaired { return ActionOutcome(kind: .success, message: Self.engineOnly) }
+            if unsettled { return ActionOutcome(kind: .warning, message: InstallMessages.notAllRepaired) }
+            return InstallMessages.nothingToSay
+        }
+
         guard claude.claudeCodeFound else {
             waiting.insert(.claudeCode)
-            let engineOnly = changed || repaired
-            return Run(outcome: engineOnly ? ActionOutcome(kind: .success, message: Self.engineOnly) : InstallMessages.nothingToSay, waiting: waiting)
+            return Run(outcome: engineOutcome(), waiting: waiting)
         }
         var conflict = false
 
-        switch claude.mcpState(launcher: launcher) {
-        case .missing:
-            guard await putMCP(launcher: launcher, replacing: false) else { return .failure(InstallMessages.mcpFailed, waiting: waiting) }
-            changed = true
-        case .outdated:
-            guard await putMCP(launcher: launcher, replacing: true) else { return .failure(InstallMessages.mcpFailed, waiting: waiting) }
-            changed = true
+        // Without the engine's answer the launcher is the one path `current` gives, and it goes in only when it is
+        // there: on a Mac where the app's engine was never unpacked, a new conversation would get a server that
+        // cannot start. It then waits with the engine step.
+        let mcpCanGoIn = !waiting.contains(.status) || claude.defaultLauncherExists
+        let mcp = claude.mcpState(launcher: launcher)
+        switch mcp {
+        case .missing, .outdated:
+            guard mcpCanGoIn else { break }
+            switch await putMCP(launcher: launcher, replacing: mcp == .outdated) {
+            case .succeeded:
+                changed = true
+            case .cannotStart:
+                // Not something another try fixes by itself: it is said in the check tab, and the next start tries again.
+                return Run(outcome: engineOutcome(), waiting: waiting, claudeCodeUnusable: true)
+            case .failed:
+                return .failure(InstallMessages.mcpFailed, waiting: waiting)
+            }
         case .conflict:
             conflict = true
         case .ready, .unknown:
@@ -218,10 +248,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
             outcome = ActionOutcome(kind: .warning, message: InstallMessages.conflict)
         } else if changed {
             outcome = ActionOutcome(kind: .success, message: InstallMessages.installed)
-        } else if repaired {
-            outcome = ActionOutcome(kind: .success, message: Self.engineOnly)
         } else {
-            outcome = InstallMessages.nothingToSay
+            outcome = engineOutcome()
         }
         return Run(outcome: outcome, waiting: waiting)
     }
@@ -242,7 +270,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
             return .failed(error)
         } catch {
             // Not an answer either way (a cancelled read): it says nothing about the engine.
-            return .failed(.launchFailed(""))
+            return .failed(.timeout)
         }
     }
 
@@ -258,7 +286,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         /// The engine is the app's but its status calls a part of the setup broken (the Python environment, the
         /// login environment, the wrapper, the relay): the setup runs again.
         case needsSetup(String?)
-        /// No engine, one of another version (or with none), or a command that cannot answer: the bundle's is put in.
+        /// No engine, one of another version (or with none), or a command that cannot answer or start: the bundle's
+        /// is put in.
         case needsInstall
         /// It could not be asked in time.
         case unknown
@@ -325,18 +354,25 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         return launcher
     }
 
-    /// `setup` of the result line says `ready` for the command, the login environment and the relay. A result that
-    /// does not say is taken as settled: the install itself went through.
+    /// `setup` of the result line says `ready` for the command, the login environment and the relay. A login
+    /// environment that clashes with a value somebody else set (`conflict`) counts as settled: setting up again cannot
+    /// change it, and it has a card of its own. A result that does not say is taken as settled: the install itself
+    /// went through.
     static func setupIsSettled(in stdout: Data) -> Bool {
         guard let setup = resultLine(in: stdout)?["setup"] as? [String: Any] else { return true }
-        return ["command", "login_environment", "relay"].allSatisfy { (setup[$0] as? String).map { $0 == "ready" } ?? true }
+        let settled: [String: Set<String>] = ["command": ["ready"], "login_environment": ["ready", "conflict"], "relay": ["ready"]]
+        return settled.allSatisfy { key, words in (setup[key] as? String).map { words.contains($0) } ?? true }
     }
 
     /// The server is added (after the app's out-of-date one is removed), and then read back from the file: the
     /// command's word is not enough.
-    private func putMCP(launcher: String?, replacing: Bool) async -> Bool {
-        if replacing, !(await claude.removeMCP()) { return false }
-        guard await claude.addMCP(command: claude.expectedLauncher(launcher)) else { return false }
-        return claude.mcpState(launcher: launcher) == .ready
+    private func putMCP(launcher: String?, replacing: Bool) async -> ClaudeIntegration.CommandResult {
+        if replacing {
+            let removed = await claude.removeMCP()
+            guard removed == .succeeded else { return removed }
+        }
+        let added = await claude.addMCP(command: claude.expectedLauncher(launcher))
+        guard added == .succeeded else { return added }
+        return claude.mcpState(launcher: launcher) == .ready ? .succeeded : .failed
     }
 }

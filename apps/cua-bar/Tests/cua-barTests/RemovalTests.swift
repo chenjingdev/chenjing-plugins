@@ -422,11 +422,9 @@ struct RemovalTests {
         #expect(flow.phase == .refused(RemovalMessages.failed))
     }
 
-    // MARK: A status that cannot be read changes nothing (a host may be running)
+    // MARK: No answer at all changes nothing (a host may be running)
 
-    @Test(arguments: [
-        EngineError.timeout, .launchFailed("x"), .commandFailed(exitCode: 2, message: "usage"), .invalidOutput("EngineStatus"), .unsupportedSchema(2),
-    ])
+    @Test(arguments: [EngineError.timeout, .launchFailed("x")])
     func aStatusThatCannotBeReadRefusesAndChangesNothingNotEvenClaudeCode(error: EngineError) async {
         let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: "A Codex host is running"), claude: ClaudeIntegration.Removal(removedAnything: true))
         defer { rig.suite.remove() }
@@ -480,6 +478,36 @@ struct RemovalTests {
         rig.sleeper.releaseAll()
         await removal.value
         #expect(rig.log.events.last == "quit")
+    }
+
+    /// A command that runs but cannot answer `status` (it fails, prints what the app cannot read, or speaks a newer
+    /// schema) still has a remover that looks at host.json itself: it goes first, as with a missing command, so
+    /// waiting would never be the answer.
+    @Test(arguments: [EngineError.commandFailed(exitCode: 2, message: "usage"), .invalidOutput("EngineStatus"), .unsupportedSchema(2)])
+    func aCommandThatRunsButCannotSayGoesThroughItsOwnRemoverFirst(error: EngineError) async {
+        let rig = rig(claude: ClaudeIntegration.Removal(removedAnything: true))
+        defer { rig.suite.remove() }
+        rig.engine.setStatusError(error)
+        rig.flow.ask()
+        let removal = Task { await rig.flow.confirm() }
+        #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
+        #expect(rig.log.events == ["uninstall", "remove from claude", "unregister login item"], "\(error)")
+        #expect(rig.flow.phase == .finished(RemovalMessages.done))
+        rig.sleeper.releaseAll()
+        await removal.value
+    }
+
+    @Test(arguments: [EngineError.commandFailed(exitCode: 2, message: "usage"), .invalidOutput("EngineStatus"), .unsupportedSchema(2)])
+    func andWhenThatRemoverRefusesClaudeCodeIsLeftAlone(error: EngineError) async {
+        let rig = rig(
+            uninstallError: .commandFailed(exitCode: 1, message: "A Codex host is running; quit normally before uninstalling"),
+            claude: ClaudeIntegration.Removal(removedAnything: true))
+        defer { rig.suite.remove() }
+        rig.engine.setStatusError(error)
+        rig.flow.ask()
+        await rig.flow.confirm()
+        #expect(rig.flow.phase == .refused(RemovalMessages.failed))
+        #expect(rig.log.events == ["uninstall"], "Claude Code's part and the login item are untouched: \(error)")
     }
 
     @Test func thatRemoverRefusingBecauseOfARunningHostLeavesClaudeCodeAlone() async {

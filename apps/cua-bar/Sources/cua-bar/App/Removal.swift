@@ -35,9 +35,10 @@ enum RemovalMessages {
 /// refuses while a Codex host runs; it never quits Codex. The app file stays.
 ///
 /// Claude Code's part is taken away only when it is known that nothing is running: the status was read and
-/// shows no host, or there is no engine at all. A status that cannot be read changes nothing and says so.
-/// Where the command is missing but an engine copy is bound, the copy's own remover goes first: it looks at the
-/// host itself and refuses, and only after it went through is Claude Code's part taken away.
+/// shows no host, or there is no engine at all. Where the status cannot tell but the engine's remover runs (the
+/// command is missing and a copy is bound, or it fails or prints what the app cannot read), the remover goes first:
+/// it looks at the host itself and refuses, and only after it went through is Claude Code's part taken away. With
+/// no answer at all (none in time, or a command that does not start) nothing is changed, and it says so.
 @MainActor
 final class RemovalFlow: ObservableObject {
     enum Phase: Equatable {
@@ -164,10 +165,11 @@ final class RemovalFlow: ObservableObject {
         /// Its status shows no host (or there is no engine to have one): Claude Code's part can go first.
         case clear
         case hostRunning
-        /// The command is missing but an engine copy is bound: its own remover looks at the host.
+        /// The status cannot tell, but the remover can: the command is missing and an engine copy is bound, or the
+        /// command runs and fails, prints nonsense or speaks a newer schema. The engine's remover looks at host.json
+        /// itself and refuses with a host, so it goes first and Claude Code's part only after it went through.
         case engineFirst
-        /// The status cannot be read (no answer in time, a command that fails or prints nonsense): a host may be
-        /// running, so nothing is changed.
+        /// No answer at all (none in time, or the command does not start): a host may be running, so nothing is changed.
         case unreadable
     }
 
@@ -177,8 +179,8 @@ final class RemovalFlow: ObservableObject {
         } catch let error as EngineError {
             switch error {
             case .engineMissing: return .clear
-            case .setupNeeded: return .engineFirst
-            case .timeout, .launchFailed, .commandFailed, .invalidOutput, .unsupportedSchema: return .unreadable
+            case .setupNeeded, .commandFailed, .invalidOutput, .unsupportedSchema: return .engineFirst
+            case .timeout, .launchFailed: return .unreadable
             }
         } catch {
             return .unreadable

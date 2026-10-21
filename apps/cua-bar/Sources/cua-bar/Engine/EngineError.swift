@@ -34,12 +34,12 @@ enum EngineError: Error, Equatable, Sendable {
     var reasonCode: String? { self == .timeout ? "timeout" : nil }
 
     /// What the app's own install can repair: no engine, a command that cannot answer `status` (an old or
-    /// broken one), or an answer from an engine this app cannot read. A timeout or a command that cannot
-    /// even start says nothing about the engine's version.
+    /// broken one) or cannot even start (it lost its executable bit: the setup writes it again), or an answer
+    /// from an engine this app cannot read. A timeout says nothing about the engine.
     var needsEngineInstall: Bool {
         switch self {
-        case .engineMissing, .setupNeeded, .commandFailed, .invalidOutput, .unsupportedSchema: true
-        case .timeout, .launchFailed: false
+        case .engineMissing, .setupNeeded, .commandFailed, .launchFailed, .invalidOutput, .unsupportedSchema: true
+        case .timeout: false
         }
     }
 }

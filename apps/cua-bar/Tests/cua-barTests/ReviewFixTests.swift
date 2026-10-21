@@ -110,10 +110,12 @@ struct ReviewFixTests {
     }
 
     @Test func theCardNeverShowsItEither() async throws {
-        // A command that fails is an old or broken one the install replaces (고치기); one that cannot start is a read problem.
+        // A command that fails is an old or broken one the install replaces (고치기), and so is one that cannot start
+        // (the install writes it again); no answer in time is a read problem.
         let cases: [(EngineError, ProblemKind, String?)] = [
             (.commandFailed(exitCode: 70, message: "Traceback /Users/someone/secret"), .setupIncomplete, nil),
-            (.launchFailed("/Users/someone/secret/codex-cua: permission denied"), .engineUnreadable, "명령을 실행하지 못했어요"),
+            (.launchFailed("/Users/someone/secret/codex-cua: permission denied"), .setupIncomplete, nil),
+            (.timeout, .engineUnreadable, "응답이 없어 기다리다 멈췄어요"),
         ]
         for (error, kind, warning) in cases {
             let engine = FakeEngineClient()

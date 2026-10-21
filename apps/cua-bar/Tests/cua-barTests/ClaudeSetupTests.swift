@@ -321,3 +321,54 @@ struct ClaudeSetupTests {
         #expect(!wrongChoice.isInstalled())
     }
 }
+
+/// `claude` run for real (a script in a throwaway home): an npm-style one needs the `node` beside it, and one whose
+/// interpreter is nowhere cannot start.
+struct ClaudeCommandStartTests {
+    private func integration(_ home: TempHome) -> ClaudeIntegration {
+        let path = home.claudeCLI.path
+        return ClaudeIntegration(
+            home: home.url, claude: ClaudeCLILocator(home: home.url, isExecutableFile: { $0 == path }), runner: SystemProcessRunner(),
+            commandTimeout: .seconds(20))
+    }
+
+    private func executable(_ text: String, at url: URL, in home: TempHome) throws {
+        try home.write(text, to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+
+    @Test func anNpmStyleClaudeFindsTheNodeBesideIt() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let folder = home.claudeCLI.deletingLastPathComponent()
+        let ran = home.url.appendingPathComponent("node-ran")
+        // The stand-in for node notes that it ran the script with the arguments.
+        try executable("#!/bin/sh\necho \"$@\" > '\(ran.path)'\nexit 0\n", at: folder.appendingPathComponent("node"), in: home)
+        try executable("#!/usr/bin/env node\n", at: home.claudeCLI, in: home)
+        #expect(await integration(home).addMCP(command: "/x/start-mcp.sh") == .succeeded)
+        let line = try String(contentsOf: ran, encoding: .utf8)
+        #expect(line.hasPrefix(home.claudeCLI.path + " mcp add -s user cua -- /x/start-mcp.sh"))
+    }
+
+    @Test func aClaudeWhoseInterpreterIsNowhereCannotStart() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        try executable("#!/usr/bin/env cua-bar-test-no-such-interpreter\n", at: home.claudeCLI, in: home)
+        #expect(await integration(home).addMCP(command: "/x/start-mcp.sh") == .cannotStart)
+        #expect(await integration(home).removeMCP() == .cannotStart)
+    }
+
+    @Test func aClaudeThatRunsAndFailsIsAFailureNotACannotStart() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        try executable("#!/bin/sh\nexit 1\n", at: home.claudeCLI, in: home)
+        #expect(await integration(home).addMCP(command: "/x/start-mcp.sh") == .failed)
+    }
+
+    @Test func pathFirstPutsTheFoldersInFrontOnce() {
+        let changed = SystemProcessRunner.environment(["PATH": "/usr/bin:/n:/bin", "HOME": "/h"], pathFirst: ["/n", "/m"])
+        #expect(changed["PATH"] == "/n:/m:/usr/bin:/bin")
+        #expect(changed["HOME"] == "/h")
+        #expect(SystemProcessRunner.environment([:], pathFirst: ["/n"])["PATH"] == "/n")
+    }
+}

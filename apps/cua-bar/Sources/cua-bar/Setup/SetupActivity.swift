@@ -41,9 +41,18 @@ final class SetupActivity {
         didSet { if oldValue != developerToolsNeeded { onChange?() } }
     }
 
+    /// The last run found a `claude` that cannot start (exit 127). It is not waited for (nothing tells when it
+    /// changes), so the next start of the app tries again; until then the card says nothing about MCP and skill.
+    private(set) var claudeCodeUnusable = false {
+        didSet { if oldValue != claudeCodeUnusable { onChange?() } }
+    }
+
     private var catchingUp = false
 
-    /// Called when `phase` or `developerToolsNeeded` changes, so the view model can say it on the card.
+    /// The answer of the read a catch-up follows, for that run to use instead of asking the engine again.
+    private var offeredStatus: EngineStatus?
+
+    /// Called when `phase`, `developerToolsNeeded` or `claudeCodeUnusable` changes, so the view model can say it on the card.
     var onChange: (() -> Void)?
 
     var isRunning: Bool { phase == .running }
@@ -72,9 +81,21 @@ final class SetupActivity {
     }
 
     /// What a finished run found that it cannot go on without.
-    func record(waitingFor waiting: Set<SetupWait>, developerToolsNeeded needed: Bool) {
+    func record(waitingFor waiting: Set<SetupWait>, developerToolsNeeded needed: Bool, claudeCodeUnusable unusable: Bool = false) {
         waitingFor = waiting
         developerToolsNeeded = needed
+        claudeCodeUnusable = unusable
+    }
+
+    /// Hands the next run the status a read just answered with.
+    func offer(_ status: EngineStatus) {
+        offeredStatus = status
+    }
+
+    /// The offered status, once; nil when none was offered or it was taken or withdrawn.
+    func takeOfferedStatus() -> EngineStatus? {
+        defer { offeredStatus = nil }
+        return offeredStatus
     }
 
     /// One run for what was put off at a time; false while one is already on its way.
@@ -84,8 +105,10 @@ final class SetupActivity {
         return true
     }
 
+    /// The catch-up is over: what it offered and no run took is withdrawn, so a later run asks afresh.
     func endCatchUp() {
         catchingUp = false
+        offeredStatus = nil
     }
 }
 

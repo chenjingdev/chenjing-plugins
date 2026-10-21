@@ -35,6 +35,8 @@ struct AutomaticSetup {
         let statusArrived = waiting.contains(.status) && status != nil
         guard codexArrived || claudeCodeArrived || statusArrived, activity.beginCatchUp() else { return }
         defer { activity.endCatchUp() }
+        // The run uses this answer: asking again could run out of time once more and put the engine step off again.
+        if let status { activity.offer(status) }
         await perform(.runSetup)
     }
 }

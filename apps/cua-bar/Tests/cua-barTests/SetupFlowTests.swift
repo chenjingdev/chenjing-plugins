@@ -156,6 +156,7 @@ struct SetupFlowTests {
         let rig = try makeRig(engine: .failure(.timeout))
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
+        try rig.home.write("#!/bin/sh\n", to: URL(fileURLWithPath: rig.launcher)) // an engine was unpacked before
         let model = makeModel(rig)
         let auto = automaticSetup(model, rig)
         await auto.runAtStartup()
@@ -167,11 +168,14 @@ struct SetupFlowTests {
         await auto.runWhatWasPutOff(status: nil)
         #expect(rig.runner.calls.count == count, "a read that failed is no answer")
 
-        // The first read that works shows an engine of another version.
+        // The first read that works shows an engine of another version. The run it starts uses that answer: asking
+        // again could run out of time once more.
         rig.engine.setStatus(try LiveSystemActionsTests().currentEngine(rig.home, version: "0.6.0").get())
         let answer = try await rig.engine.status()
+        rig.engine.setStatusError(.timeout)
         await auto.runWhatWasPutOff(status: answer)
         #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1)
+        #expect(rig.setup.takeOfferedStatus() == nil, "what was offered does not outlive the catch-up")
         #expect(rig.setup.waitingFor.isEmpty)
         await auto.runWhatWasPutOff(status: answer)
         #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1, "once")

@@ -24,6 +24,9 @@ enum ProblemKind: String, CaseIterable, Sendable {
     /// An MCP server or a skill named cua that the app did not put into Claude Code: left alone, told.
     case claudeConflict = "claude_conflict"
     case codexWithoutHost = "codex_without_host"
+    /// The login environment value the wrapper needs is set to somebody else's: the setup leaves it alone, so only
+    /// the person can clear it (the check tab says how).
+    case loginEnvironmentConflict = "login_environment_conflict"
     case endedConnections = "ended_connections"
     case leasesMaybeLeft = "leases_maybe_left"
     /// Not in the spec's list: the app could not read the engine's answer at all.
@@ -140,7 +143,12 @@ enum StatusEvaluator {
             return summary(for: Problem(
                 kind: .setupIncomplete, title: "앱이 이 엔진 판을 읽지 못해요", nextStep: "고치기를 누르면 앱의 엔진으로 다시 설정해요",
                 warning: nil, fix: .runSetup, fixLabel: "고치기"))
-        case .timeout, .launchFailed:
+        case .launchFailed:
+            // The command is there but does not start (it lost its executable bit, say): the install writes it again.
+            return summary(for: Problem(
+                kind: .setupIncomplete, title: "연결 명령을 실행하지 못했어요", nextStep: "고치기를 누르면 연결을 다시 설정해요",
+                warning: nil, fix: .runSetup, fixLabel: "고치기"))
+        case .timeout:
             return summary(for: Problem(
                 kind: .engineUnreadable, title: "상태를 읽지 못했어요", nextStep: "잠시 뒤 다시 읽어 보세요",
                 warning: error.message, fix: .refresh, fixLabel: "다시 읽기"))
@@ -165,7 +173,7 @@ enum StatusEvaluator {
 
     /// The first problem that applies:
     /// Codex missing > setup incomplete (or the developer tools it needs) > Codex without a host >
-    /// a conflict in Claude Code > ended connections > leftover leases. (A missing engine comes from
+    /// a login environment someone else set > a conflict in Claude Code > ended connections > leftover leases. (A missing engine comes from
     /// `summary(for:)`, because without the command there is no status to look at.)
     ///
     /// The card has a fix button only for a problem of the whole app. An ended connection or a leftover
@@ -195,6 +203,7 @@ enum StatusEvaluator {
                 kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요", nextStep: "다시 켜면 Claude가 붙어요",
                 warning: "하던 Codex 작업이 끊길 수 있어요", fix: .restartCodex, fixLabel: "다시 켜기")
         }
+        if status.setup.loginEnvironment == "conflict" { return loginEnvironmentConflictProblem }
         if let conflict = conflictProblem(in: facts.claude) { return conflict }
         let ended = status.connections.filter { $0.state == .ended }
         if !ended.isEmpty {
@@ -235,7 +244,7 @@ enum StatusEvaluator {
     /// The MCP server or the skill is missing or the app's own and out of date. Nothing is said without
     /// Claude Code: it is not a problem of the Mac, and it is put off until Claude Code is there.
     static func claudeIssues(in claude: ClaudeSetupState) -> [SetupIssue] {
-        guard claude.claudeCodeFound else { return [] }
+        guard claude.claudeCodeFound, !claude.claudeCodeUnusable else { return [] }
         var issues: [SetupIssue] = []
         switch claude.mcp {
         case .missing: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code에 CUA가 연결되지 않았어요"))
@@ -252,7 +261,7 @@ enum StatusEvaluator {
 
     /// An MCP server or a skill named cua that is not the app's.
     static func conflictProblem(in claude: ClaudeSetupState) -> Problem? {
-        guard claude.claudeCodeFound else { return nil }
+        guard claude.claudeCodeFound, !claude.claudeCodeUnusable else { return nil }
         let title: String
         switch (claude.mcp == .conflict, claude.skill == .conflict) {
         case (true, true): title = "Claude Code에 앱이 깔지 않은 cua MCP와 스킬이 있어요"
@@ -263,6 +272,12 @@ enum StatusEvaluator {
         return Problem(
             kind: .claudeConflict, title: title, nextStep: "점검 탭에서 지우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
     }
+
+    /// The setup leaves a launchd value somebody else set as it is (`login_environment: conflict`), so 고치기 could not
+    /// change it: no button, and the check tab shows the value and how to clear it.
+    static let loginEnvironmentConflictProblem = Problem(
+        kind: .loginEnvironmentConflict, title: "Codex 로그인 설정이 다른 값과 겹쳐요",
+        nextStep: "점검 탭에서 겹치는 값과 지우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
 
     private static func summary(for problem: Problem) -> StatusSummary {
         StatusSummary(
@@ -284,10 +299,10 @@ enum StatusEvaluator {
         var issues: [SetupIssue] = []
         if setup.command == "missing" { issues.append(SetupIssue(name: "명령", sentence: "연결 명령이 없어요")) }
         if setup.dependencies == "missing" { issues.append(SetupIssue(name: "구성 요소", sentence: "필요한 구성 요소가 없어요")) }
+        // `conflict` is not one: the setup does not overwrite somebody else's value, so it has a card of its own.
         switch setup.loginEnvironment {
         case "missing": issues.append(SetupIssue(name: "로그인 환경", sentence: "로그인 환경이 설정되지 않았어요"))
         case "stale": issues.append(SetupIssue(name: "로그인 환경", sentence: "로그인 환경이 옛 설정이에요"))
-        case "conflict": issues.append(SetupIssue(name: "로그인 환경", sentence: "로그인 환경이 다른 설정과 겹쳐요"))
         default: break
         }
         switch setup.wrapper {

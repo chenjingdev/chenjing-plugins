@@ -178,6 +178,9 @@ struct StatusEvaluatorTests {
         ProblemCase(name: "codex_without_host", kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요",
              nextStep: "다시 켜면 Claude가 붙어요", fix: .restartCodex, fixLabel: "다시 켜기",
              warning: "하던 Codex 작업이 끊길 수 있어요"),
+        // The setup leaves somebody else's launchd value alone, so 고치기 could not change it: no button.
+        ProblemCase(name: "login_environment_conflict", kind: .loginEnvironmentConflict, title: "Codex 로그인 설정이 다른 값과 겹쳐요",
+             nextStep: "점검 탭에서 겹치는 값과 지우는 방법을 보세요", fix: nil, fixLabel: nil),
         // One line's problem: the card says what to do, the button is on that line.
         ProblemCase(name: "ended_connections", kind: .endedConnections, title: "끝난 연결이 1개 남아 있어요",
              nextStep: "목록 맨 위의 정리를 눌러 주세요", fix: nil, fixLabel: nil),
@@ -197,6 +200,8 @@ struct StatusEvaluatorTests {
             status.setup.wrapper = "broken"
         case .codexWithoutHost:
             status.host.state = .closed
+        case .loginEnvironmentConflict:
+            status.setup.loginEnvironment = "conflict"
         case .endedConnections:
             status.connections[0].state = .ended
         case .leasesMaybeLeft:
@@ -252,6 +257,9 @@ struct StatusEvaluatorTests {
         status.setup.wrapper = "ready"
         #expect(evaluate(status, facts: facts).problem?.kind == .codexWithoutHost)
         status.host.state = .ready
+        status.setup.loginEnvironment = "conflict"
+        #expect(evaluate(status, facts: facts).problem?.kind == .loginEnvironmentConflict, "after Codex without a host")
+        status.setup.loginEnvironment = "ready"
         #expect(evaluate(status, facts: facts).problem?.kind == .claudeConflict)
         #expect(evaluate(status, facts: LocalFacts()).problem?.kind == .endedConnections, "without the conflict")
         status.connections[0].state = .active
@@ -277,16 +285,27 @@ struct StatusEvaluatorTests {
     @Test func withoutCodexOrTheDeveloperToolsTheInstallCannotStartAndTheCardSaysThatInstead() {
         let noCodex = LocalFacts(codexMissing: true)
         let noTools = LocalFacts(developerToolsNeeded: true)
-        for error in [EngineError.engineMissing, .setupNeeded(installPath: "/x"), .commandFailed(exitCode: 2, message: ""), .invalidOutput("x"), .unsupportedSchema(2)] {
+        for error in [EngineError.engineMissing, .setupNeeded(installPath: "/x"), .commandFailed(exitCode: 2, message: ""), .launchFailed("x"),
+                      .invalidOutput("x"), .unsupportedSchema(2)] {
             #expect(StatusEvaluator.summary(for: error, facts: noCodex).problem?.kind == .codexMissing, "\(error)")
             #expect(StatusEvaluator.summary(for: error, facts: noTools).problem?.kind == .developerToolsNeeded, "\(error)")
             // Codex first: without it nothing is installed whatever the tools say.
             #expect(StatusEvaluator.summary(for: error, facts: LocalFacts(developerToolsNeeded: true, codexMissing: true)).problem?.kind == .codexMissing)
         }
-        // A timeout or a command that cannot start says nothing about the engine, so the install is not asked for.
-        for error in [EngineError.timeout, .launchFailed("x")] {
-            #expect(StatusEvaluator.summary(for: error, facts: LocalFacts(developerToolsNeeded: true, codexMissing: true)).problem?.kind == .engineUnreadable)
-        }
+        // A timeout says nothing about the engine, so the install is not asked for.
+        #expect(StatusEvaluator.summary(for: .timeout, facts: LocalFacts(developerToolsNeeded: true, codexMissing: true)).problem?.kind == .engineUnreadable)
+    }
+
+    @Test func aCommandThatDoesNotStartIsOneTheInstallWritesAgain() {
+        // It lost its executable bit, say: reading again would never help, 고치기 does.
+        let problem = StatusEvaluator.summary(for: .launchFailed("/Users/someone/secret: permission denied")).problem
+        #expect(problem?.kind == .setupIncomplete)
+        #expect(problem?.title == "연결 명령을 실행하지 못했어요")
+        #expect(problem?.fix == .runSetup)
+        #expect(problem?.fixLabel == "고치기")
+        #expect(problem?.warning == nil)
+        #expect(EngineError.launchFailed("x").needsEngineInstall)
+        #expect(!EngineError.timeout.needsEngineInstall)
     }
 
     @Test func codexMissingIsNotMaskedByAnEngineThatReportsNoVersion() throws {
@@ -419,7 +438,6 @@ struct StatusEvaluatorTests {
         ("dependencies", "missing", "필요한 구성 요소가 없어요"),
         ("login_environment", "missing", "로그인 환경이 설정되지 않았어요"),
         ("login_environment", "stale", "로그인 환경이 옛 설정이에요"),
-        ("login_environment", "conflict", "로그인 환경이 다른 설정과 겹쳐요"),
         ("wrapper", "missing", "Codex 연결용 래퍼가 없어요"),
         ("wrapper", "broken", "Codex 연결용 래퍼가 깨졌어요"),
         ("relay", "unavailable", "중계기를 쓸 수 없어요"),
