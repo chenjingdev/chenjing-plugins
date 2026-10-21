@@ -2,6 +2,7 @@
 """Private dependency bootstrap and stable user command; never auto-restart apps."""
 import argparse
 import asyncio
+import contextlib
 import fcntl
 import json
 import math
@@ -14,6 +15,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 sys.dont_write_bytecode = True
@@ -110,16 +112,23 @@ def venv_ready(root):
         return False
 
 
-def ensure_dependencies(home=None, repair=True):
-    """The private interpreter, prepared if needed. With repair=False it only reports readiness."""
-    if sys.version_info < (3, 9):
-        raise RuntimeError('Python 3.9 or newer is required; no package manager was installed.')
-    root = support_root(home)
-    private_directory(root)
-    if venv_ready(root):
-        return root/'venv/bin/python3'
-    if not repair:
-        raise RuntimeError('The private Python runtime is not ready; run codex-cua setup.')
+# The lock files this thread holds (by support folder): asking for one again would make it wait for itself.
+_held_locks = threading.local()
+
+
+@contextlib.contextmanager
+def setup_lock(root):
+    """Hold <support>/.setup.lock: one dependency bootstrap or engine install at a time.
+
+    A thread that holds it passes through (an engine install runs the dependency bootstrap inside its own hold);
+    any other thread or process waits for it, up to 320 seconds."""
+    held = getattr(_held_locks, 'paths', None)
+    if held is None:
+        held = _held_locks.paths = set()
+    key = str(root)
+    if key in held:
+        yield
+        return
     flags = os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0)
     descriptor = os.open(root/'.setup.lock', flags, 0o600)
     lock_info = os.fstat(descriptor)
@@ -135,8 +144,26 @@ def ensure_dependencies(home=None, repair=True):
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    raise RuntimeError('Another dependency bootstrap did not finish before the deadline.') from None
+                    raise RuntimeError('Another setup did not finish before the deadline.') from None
                 time.sleep(0.1)
+        held.add(key)
+        try:
+            yield
+        finally:
+            held.discard(key)
+
+
+def ensure_dependencies(home=None, repair=True):
+    """The private interpreter, prepared if needed. With repair=False it only reports readiness."""
+    if sys.version_info < (3, 9):
+        raise RuntimeError('Python 3.9 or newer is required; no package manager was installed.')
+    root = support_root(home)
+    private_directory(root)
+    if venv_ready(root):
+        return root/'venv/bin/python3'
+    if not repair:
+        raise RuntimeError('The private Python runtime is not ready; run codex-cua setup.')
+    with setup_lock(root):
         if venv_ready(root):
             return root/'venv/bin/python3'
         venv = root/'venv'

@@ -13,6 +13,10 @@ import subprocess
 import time
 
 SCHEMA_VERSION = 1
+# <support folder>/engine/<version>/ holds the engine of every version that was unpacked; engine/current is a
+# relative link to the version unpacked last, and the MCP is registered with the start script behind it.
+ENGINE_DIRECTORY = 'engine'
+CURRENT_ENGINE = 'current'
 IDLE_SECONDS = 30*60       # R16: an idle connection has had no CUA call for more than 30 minutes
 ACTIVE_SECONDS = 10        # R13: a CUA call in the last 10 seconds means the screen is in use
 ACTIVITY_LIMIT = 200       # R18: the newest 200 operations
@@ -104,6 +108,10 @@ class Context:
         except (OSError, ValueError, AttributeError):
             return None
         return version if isinstance(version, str) else None
+
+    def engine_launcher(self):
+        """What the MCP is registered with: the start script behind the `current` link of the engine copies."""
+        return str(self.setup.support_root(self.home)/ENGINE_DIRECTORY/CURRENT_ENGINE/'start-mcp.sh')
 
     def call_environment(self):
         """Environment of the system tools: C locale, so that ps prints start times in a fixed language."""

@@ -37,7 +37,8 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['plugin'], {'version': json.loads(
             (self.context().plugin_root/'.claude-plugin/plugin.json').read_text())['version']})
         manifest = json.loads((self.context().plugin_root/'.claude-plugin/plugin.json').read_text())
-        self.assertEqual(status['engine'], {'version': manifest['version'], 'root': str(self.context().plugin_root)})
+        self.assertEqual(status['engine'], {'version': manifest['version'], 'root': str(self.context().plugin_root),
+                                            'launcher': str(self.home/'.local/share/codex-cua/engine/current/start-mcp.sh')})
         self.assertEqual(status['engine']['version'], status['plugin']['version'])
         self.assertEqual(status['codex'], {'installed': False, 'app_path': None, 'app_version': None, 'running': False,
                                            'pids': []})
@@ -328,11 +329,13 @@ class AttributionTests(StatusCase):
         (root/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': '0.8.0'}))
         self.machine.add(5, 1, '/bin/x')
         status = self.status(plugin_root=root)
-        self.assertEqual(status['engine'], {'version': '0.8.0', 'root': str(root)})
+        launcher = str(self.home/'.local/share/codex-cua/engine/current/start-mcp.sh')
+        self.assertEqual(status['engine'], {'version': '0.8.0', 'root': str(root), 'launcher': launcher})
         self.assertEqual(status['plugin'], {'version': '0.8.0'})
         (root/'.claude-plugin/plugin.json').unlink()
         status = self.status(plugin_root=root)
-        self.assertEqual((status['engine'], status['plugin']), ({'version': None, 'root': str(root)}, {'version': None}))
+        self.assertEqual((status['engine'], status['plugin']),
+                         ({'version': None, 'root': str(root), 'launcher': launcher}, {'version': None}))
 
     def test_nodes_directly_under_the_app_server_are_not_cua_runtimes(self):
         self.start_world()

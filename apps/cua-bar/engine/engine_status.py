@@ -596,7 +596,8 @@ class View:
         host = self.inv.host
         return {'schema_version': SCHEMA_VERSION, 'generated_at': iso(self.now),
                 'plugin': {'version': self.ctx.plugin_version()},
-                'engine': {'version': self.ctx.plugin_version(), 'root': str(self.ctx.plugin_root)},
+                'engine': {'version': self.ctx.plugin_version(), 'root': str(self.ctx.plugin_root),
+                           'launcher': self.ctx.engine_launcher()},
                 'codex': self._codex(),
                 'host': {'state': self.host_state(), 'since': iso(host.since),
                          'started_before_setup': self.started_before_setup()},

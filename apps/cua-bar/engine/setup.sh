@@ -10,7 +10,7 @@ while [ -L "$self" ]; do
     *) self=$(dirname -- "$self")/$link ;;
   esac
 done
-plugin_root=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd -P)
+plugin_root=$(CDPATH= cd -P -- "$(dirname -- "$self")" && pwd -P)
 bootstrap_python=/usr/bin/python3
 if ! "$bootstrap_python" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
   bootstrap_python=$(command -v python3 || true)

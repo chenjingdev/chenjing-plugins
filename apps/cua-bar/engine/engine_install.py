@@ -6,6 +6,11 @@ app must not take those files away, so every version gets a folder of its own an
 runs from it any more. The copy is built in a temporary folder next to its place and renamed in, so a reader sees the
 whole folder or none. A copy of the same version that is already whole is not touched: a conversation may be using it.
 
+engine/current is a relative link to the version installed last. The MCP is registered once with
+engine/current/start-mcp.sh, which resolves the link, so a registration never names a folder that cleaning can remove:
+the link is switched with one rename after the setup succeeded, and the cleaning keeps what it points to, every
+higher version and every copy a process runs from. Everything from unpacking to cleaning happens under .setup.lock.
+
 Success prints the result (one JSON object with --json). A failure prints one line to stderr and exits 1; what pip and
 venv say while the dependencies are prepared is kept out of that line.
 """
@@ -19,14 +24,18 @@ import stat
 import sys
 import tempfile
 
-from engine_core import Context
+from engine_core import CURRENT_ENGINE, ENGINE_DIRECTORY, Context
 from engine_inventory import command_state, snapshot
 
-ENGINE_DIRECTORY = 'engine'
 # What a folder may be named after: the shape engine_inventory accepts in `.../codex-cua/engine/<version>/mcp_stdio.py`.
 VERSION = re.compile(r'^[0-9][0-9A-Za-z.+_-]{0,63}$')
 # What Python and Finder leave around; never part of a copy.
 SKIPPED = ('__pycache__', '.DS_Store')
+# What an install that died leaves in engine/: its temporary folder or link, an old copy it moved aside. Younger than
+# this it may belong to an install that is still going on.
+LEFTOVERS = ('.install-', '.replaced-')
+LEFTOVER_SECONDS = 10*60
+_NUMBERS = re.compile(r'^[0-9]+(?:\.[0-9]+)*')
 
 
 def manifest_version(root):
@@ -113,7 +122,7 @@ def place(setup, engines, source, items, version, uid):
             raise RuntimeError('The engine copy could not be checked.')
         if os.path.lexists(folder):
             # Not whole (damaged, or open to others): it goes aside first, so that the new one can take its name.
-            replaced = engines/('.replaced-%d-%s' % (os.getpid(), os.urandom(4).hex()))
+            replaced = engines/leftover_name('replaced')
             os.rename(folder, replaced)
         try:
             os.rename(temporary, folder)
@@ -131,25 +140,86 @@ def place(setup, engines, source, items, version, uid):
         discard(temporary)                  # gone after the rename; what a failed copy left otherwise
 
 
+def numbers(version):
+    """The leading dotted numbers of a version: 0.10.2-beta is (0, 10, 2)."""
+    return tuple(int(part) for part in _NUMBERS.match(version).group().split('.'))
+
+
+def surely_lower(name, current):
+    """True only when `name` has lower numbers than `current`. The same numbers under another name (0.8.0-beta next
+    to 0.8.0) and every higher version are not lower, so cleaning leaves them alone."""
+    found, wanted = numbers(name), numbers(current)
+    width = max(len(found), len(wanted))
+    return found+(0,)*(width-len(found)) < wanted+(0,)*(width-len(wanted))
+
+
+def leftover_name(kind):
+    return '.%s-%d-%s' % (kind, os.getpid(), os.urandom(4).hex())
+
+
+def point_current(engines, version):
+    """engines/current → <version>: a relative link made beside it and renamed over it, so that it points somewhere at
+    every moment. Something that is no link and stands in its place is moved aside first."""
+    link = engines/CURRENT_ENGINE
+    temporary = engines/leftover_name('install-link')
+    os.symlink(version, temporary)
+    try:
+        if os.path.lexists(link) and not os.path.islink(link):
+            os.rename(link, engines/leftover_name('replaced'))
+        os.rename(temporary, link)
+    except BaseException:
+        discard(temporary)
+        raise
+
+
+def linked_version(engines):
+    """The version engines/current points to, or None."""
+    try:
+        name = os.path.basename(os.readlink(engines/CURRENT_ENGINE))
+    except OSError:
+        return None
+    return name if VERSION.match(name) else None
+
+
 def runs_from(commands, folders):
     """True when a command line holds one of the folders as a path (and not as the start of a longer name)."""
     pattern = re.compile('(?:%s)(?![0-9A-Za-z.+_-])' % '|'.join(re.escape(str(folder)) for folder in folders))
     return any(pattern.search(command) for command in commands)
 
 
-def prune(ctx, engines, current):
-    """Remove the copies other than `current` that no process runs from; returns their names.
+def sweep(ctx, engines):
+    """Remove the leftovers of installs that died: .install-* and .replaced-* older than ten minutes."""
+    try:
+        names = os.listdir(engines)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(LEFTOVERS):
+            continue
+        try:
+            info = os.lstat(engines/name)
+        except OSError:
+            continue
+        if info.st_uid == ctx.uid and ctx.clock()-info.st_mtime > LEFTOVER_SECONDS:
+            discard(engines/name)
 
-    A process counts whoever it belongs to. Without a process list nothing is removed."""
+
+def prune(ctx, engines, current):
+    """Remove the copies that nothing needs; returns their names. Kept are `current`, what engines/current points
+    to, every version that is not surely lower than `current`, and every copy a process runs from.
+
+    A process counts whoever it belongs to. Without a process list no copy is removed."""
+    sweep(ctx, engines)
     removed = []
     try:
         commands = [proc.command for proc in snapshot(ctx).values()]
         names = sorted(os.listdir(engines))
     except Exception:
         return removed
+    kept = {current, linked_version(engines)}
     real = engines.resolve()
     for name in names:
-        if name == current or not VERSION.match(name):
+        if name in kept or not VERSION.match(name) or not surely_lower(name, current):
             continue
         folder = engines/name
         try:
@@ -167,21 +237,25 @@ def prune(ctx, engines, current):
 
 
 def install_engine(ctx, source_root):
-    """Unpack, set up and prune. Returns the result the command prints."""
+    """Unpack, set up, point `current` at the copy and clean. Returns the result the command prints."""
     setup = ctx.setup
     source = setup.validated_plugin_root(source_root)
     version = manifest_version(source)
     items = listing(source)
     support = setup.support_root(ctx.home)
     setup.private_directory(support)
-    engines = support/ENGINE_DIRECTORY
-    setup.private_directory(engines)
-    folder = place(setup, engines, source, items, version, ctx.uid)
-    setup.private_directory(folder)
-    root = setup.validated_plugin_root(folder, version)
-    _, login, relay = setup.run_setup(root, ctx.home, ctx.environment)
-    state = {'command': command_state(ctx, support), 'login_environment': login, 'relay': relay}
-    return {'version': version, 'root': str(root), 'removed': prune(ctx, engines, version), 'setup': state}
+    with setup.setup_lock(support):
+        engines = support/ENGINE_DIRECTORY
+        setup.private_directory(engines)
+        folder = place(setup, engines, source, items, version, ctx.uid)
+        setup.private_directory(folder)
+        root = setup.validated_plugin_root(folder, version)
+        _, login, relay = setup.run_setup(root, ctx.home, ctx.environment)
+        point_current(engines, version)
+        state = {'command': command_state(ctx, support), 'login_environment': login, 'relay': relay}
+        removed = prune(ctx, engines, version)
+    return {'version': version, 'root': str(root), 'launcher': ctx.engine_launcher(), 'removed': removed,
+            'setup': state}
 
 
 def reason(error):
@@ -207,7 +281,8 @@ def run_install_engine(args, plugin_root, setup_module=None, context=None, stdou
     if args.json:
         out.write(json.dumps(result)+'\n')
     else:
-        lines = ['Installed engine %s: %s' % (result['version'], result['root'])]
+        lines = ['Installed engine %s: %s' % (result['version'], result['root']),
+                 'MCP launcher: ' + result['launcher']]
         if result['removed']:
             lines.append('Removed older engines: ' + ', '.join(result['removed']))
         state = result['setup']
