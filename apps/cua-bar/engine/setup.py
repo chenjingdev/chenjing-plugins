@@ -11,6 +11,7 @@ from pathlib import Path
 import plistlib
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -30,6 +31,11 @@ FALLBACK_ENV = 'CODEX_CUA_FALLBACK_NATIVE'
 ROOT_RESOLVED_FLAG = '--root-resolved'
 # Commands of the menu bar app's engine (engine_cli.py): one JSON object on stdout.
 ENGINE_COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'diagnose')
+# The app ends a connection test it gives up on (its time ran out, or the person left) with SIGTERM and, two seconds
+# later, SIGKILL. A test that is cut short has that long for its cleanup: the host gets this long to take the thread
+# back, ps and lsof have this long between them, and the runtime is not waited for.
+CUT_CLOSE_SECONDS = 1.0
+CUT_TOOLS_SECONDS = 0.6
 
 
 def support_root(home=None):
@@ -381,11 +387,13 @@ def start_host(plugin_root, environment=None, home=None):
     return subprocess.run(command, env=environment, timeout=15).returncode
 
 
-async def probe_host(registry, timeout, folder=None):
+async def probe_host(registry, timeout, folder=None, cut=None):
     """One call of cua.getState() on a thread of its own, for the host `registry` describes; what was found, as data.
 
     The thread works in `folder` (run_probe makes it). The host never starts anything for this: HostMcp only connects
-    to the endpoint of a host that is ready, and it asks nothing of an app that is closed."""
+    to the endpoint of a host that is ready, and it asks nothing of an app that is closed.
+    `cut` is a Cut that says the test is being ended before it is done (run_probe sets it on SIGTERM; a test that is
+    cancelled sets it here): the host is then given CUT_CLOSE_SECONDS to take the thread back, not the rest of `timeout`."""
     from host_mcp import HostMcp
     from runtime_paths import installation_from_native_cli, InstallationError
     observed = {'status': 'failed', 'tool_names': [], 'response_count': 0,
@@ -429,6 +437,10 @@ async def probe_host(registry, timeout, folder=None):
         observed['text_error_marker'] = text_failure
         observed['status'] = ('approval_required' if observed['approval_required'] else
                               'checked' if isinstance(result, dict) and not observed['is_error'] and not text_failure and observed['response_count'] else 'failed')
+    except asyncio.CancelledError:
+        if cut is not None:
+            cut.set()
+        raise
     except asyncio.TimeoutError:
         observed['status'] = 'timeout'
     except Exception:
@@ -437,6 +449,8 @@ async def probe_host(registry, timeout, folder=None):
         replies.clear()
         try:
             remaining = max(0.1, deadline-asyncio.get_running_loop().time())
+            if cut is not None and cut.is_set():
+                remaining = min(remaining, CUT_CLOSE_SECONDS)
             observed['cleanup'] = await asyncio.wait_for(adapter.close(), remaining)
         except Exception:
             observed['cleanup'] = {'connection_close': 'unconfirmed', 'owned_thread_unsubscribe': 'unconfirmed'}
@@ -444,6 +458,60 @@ async def probe_host(registry, timeout, folder=None):
                 or observed['cleanup'].get('owned_thread_unsubscribe') not in ('confirmed', 'already_unloaded'))):
             observed['status'] = 'cleanup_unconfirmed'
     return observed
+
+
+class Cut:
+    """Says that a connection test is being ended before it is done.
+
+    A plain flag, not a threading.Event: a signal handler sets it, and the lock of an Event may be held by the very code
+    that the handler interrupted."""
+
+    def __init__(self):
+        self.cut = False
+
+    def set(self):
+        self.cut = True
+
+    def is_set(self):
+        return self.cut
+
+
+_UNCHANGED = object()
+
+
+def arm_sigterm(handler):
+    """Hand SIGTERM to `handler` and return what disarm_sigterm puts back; _UNCHANGED when nothing was changed.
+
+    A process that ignores SIGTERM (as its parent started it) is left ignoring it, and signals can only be set from the
+    main thread: a caller that is on another one gets the test without the handler."""
+    try:
+        previous = signal.getsignal(signal.SIGTERM)
+        if previous == signal.SIG_IGN:
+            return _UNCHANGED
+        signal.signal(signal.SIGTERM, handler)
+    except ValueError:
+        return _UNCHANGED
+    return previous
+
+
+def disarm_sigterm(previous):
+    if previous is not _UNCHANGED:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL if previous is None else previous)
+
+
+def clean_up_probe(registry, context, folder, since, cut):
+    """The cleanup of a test, however it went: the runtime that works in its folder is ended and the folder is removed.
+
+    A test that is being cut short signals the runtime and goes on at once, and its tools have little time (see
+    CUT_TOOLS_SECONDS). A failure of any of it never changes what the test found; the folder goes whatever happened."""
+    try:
+        from engine_release import end_thread_runtimes
+        end_thread_runtimes(context.within(CUT_TOOLS_SECONDS) if cut.is_set() else context, folder,
+                            registry.get('backend_pid'), since, wait=lambda: not cut.is_set())
+    except Exception:
+        pass        # at worst Codex keeps the runtime for a while
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def run_probe(registry, timeout, context):
@@ -454,23 +522,45 @@ def run_probe(registry, timeout, context):
     folder as soon as the test is over, however it went. Codex would keep the thread and its runtime for about half an
     hour otherwise, and the runtime would stay in the connection list all that time. `context` is the engine's
     (engine_core.Context): the process list, the clock and the signals the cleanup uses.
-    Without a folder there is no test, because a test that cannot be told apart would only add noise."""
+    Without a folder there is no test, because a test that cannot be told apart would only add noise.
+
+    The app ends a test that takes too long, or that the person left, with SIGTERM, and with SIGKILL two seconds
+    later; Python ends on SIGTERM without running a single `finally`. So for as long as the test runs, the first SIGTERM
+    stops it like Ctrl-C would (KeyboardInterrupt, which goes on to the caller after the cleanup), and the cleanup then
+    has CUT_CLOSE_SECONDS + CUT_TOOLS_SECONDS and a folder to remove. Any other SIGTERM only says "hurry" to the cleanup."""
     from engine_core import PROBE_FOLDER_PREFIX
-    try:
-        folder = tempfile.mkdtemp(prefix=PROBE_FOLDER_PREFIX)
-    except OSError:
-        return {'status': 'failed', 'tool_names': [], 'response_count': 0,
-                'approval_required': False, 'operational_readiness': 'not_checked'}
+    cut = Cut()                         # the test is being ended before it is done
+    running = [True]                    # the test itself is still going; after it only the cleanup is left
+
+    def terminate(signum, frame):
+        cut.set()
+        if running[0]:
+            running[0] = False
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)       # no second SIGTERM cuts the cleanup that follows
+            raise KeyboardInterrupt
+
     since = context.clock()
+    previous = arm_sigterm(terminate)
+    folder = None
     try:
-        return asyncio.run(probe_host(registry, timeout, folder))
+        try:
+            folder = tempfile.mkdtemp(prefix=PROBE_FOLDER_PREFIX)
+        except OSError:
+            return {'status': 'failed', 'tool_names': [], 'response_count': 0,
+                    'approval_required': False, 'operational_readiness': 'not_checked'}
+        try:
+            return asyncio.run(probe_host(registry, timeout, folder, cut))
+        except BaseException:
+            cut.set()
+            raise
+        finally:
+            running[0] = False
     finally:
         try:
-            from engine_release import end_thread_runtimes
-            end_thread_runtimes(context, folder, registry.get('backend_pid'), since)
-        except Exception:
-            pass        # the result of the test stands; at worst Codex keeps the runtime a while
-        shutil.rmtree(folder, ignore_errors=True)
+            if folder is not None:
+                clean_up_probe(registry, context, folder, since, cut)
+        finally:
+            disarm_sigterm(previous)
 
 
 def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None, context=None):

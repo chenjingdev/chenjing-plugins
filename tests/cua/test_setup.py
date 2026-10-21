@@ -362,6 +362,56 @@ class ProbeTests(unittest.IsolatedAsyncioTestCase):
         result = {'isError': False, 'content': [{'type': 'text', 'text': 'inventory'}]}
         self.assertEqual((await self.check(result, cleanup=False))['status'], 'cleanup_unconfirmed')
 
+    @staticmethod
+    def slow_to_leave(seconds, hang_in_call=False):
+        """A host connection whose thread takes `seconds` to leave (and, with `hang_in_call`, whose call never ends)."""
+        class SlowToLeave:
+            def __init__(self, *args, **kwargs):
+                self.emit, self.log = kwargs['emit'], kwargs['log']
+                self.tool_names = {'js', 'js_reset'}
+            async def boot(self):
+                pass
+            async def handle(self, request):
+                if hang_in_call: await asyncio.sleep(60)
+                self.emit({'id': 'doctor', 'result': {'isError': False, 'content': [{'type': 'text', 'text': 'inventory'}]}})
+            async def close(self):
+                await asyncio.sleep(seconds)
+                return {'owned_thread_unsubscribe': 'confirmed', 'connection_close': 'confirmed'}
+        return SlowToLeave
+
+    async def leave(self, seconds, cut, **options):
+        began = time.monotonic()
+        with patch('host_mcp.HostMcp', self.slow_to_leave(seconds, **options)):
+            report = await setup.probe_host({'socket_path': '/fake/socket'}, 30, cut=cut)
+        return report, time.monotonic()-began
+
+    async def test_a_test_that_is_cut_gives_the_host_one_second_to_take_the_thread_back(self):
+        # The app kills a test it gave up on two seconds after it asked it to end; the rest of --timeout is not for the cleanup.
+        cut = setup.Cut()
+        cut.set()
+        report, seconds = await self.leave(1.6, cut)
+        self.assertTrue(0.9 < seconds < 1.5, seconds)
+        self.assertEqual(report['cleanup'], {'connection_close': 'unconfirmed', 'owned_thread_unsubscribe': 'unconfirmed'})
+        self.assertEqual(report['status'], 'cleanup_unconfirmed')
+
+    async def test_a_test_nobody_cut_leaves_the_host_the_rest_of_its_time(self):
+        report, seconds = await self.leave(1.6, setup.Cut())
+        self.assertTrue(1.5 < seconds < 2.5, seconds)
+        self.assertEqual(report['status'], 'checked')
+        self.assertEqual(report['cleanup'], {'connection_close': 'confirmed', 'owned_thread_unsubscribe': 'confirmed'})
+
+    async def test_a_test_that_is_cancelled_is_cut_and_leaves_in_a_second(self):
+        cut = setup.Cut()
+        with patch('host_mcp.HostMcp', self.slow_to_leave(60, hang_in_call=True)):
+            task = asyncio.ensure_future(setup.probe_host({'socket_path': '/fake/socket'}, 30, cut=cut))
+            await asyncio.sleep(0.2)                    # the call is on its way
+            began = time.monotonic()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertTrue(cut.is_set())
+        self.assertLess(time.monotonic()-began, 2.0)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -4,6 +4,7 @@ Every engine command works on a Context. It holds the home folder, the environme
 the machine is touched (running ps/lsof/osascript/open, the clock, sleeping, signals), so tests replace them
 and never touch real processes, apps or folders.
 """
+import copy
 import datetime
 import json
 import os
@@ -126,3 +127,18 @@ class Context:
     def call_environment(self):
         """Environment of the system tools: C locale, so that ps prints start times in a fixed language."""
         return dict(os.environ, LC_ALL='C')
+
+    def within(self, seconds):
+        """A copy of this context whose system tools (ps, lsof) have `seconds` between them: each call gets at most what
+        is left of them, and a call after that is a timeout. For a cleanup that has to be over before it is killed."""
+        bounded = copy.copy(self)
+        end = time.monotonic()+seconds
+        run = self.run
+
+        def limited(argv, timeout=5.0, environment=None):
+            left = end-time.monotonic()
+            if left <= 0:
+                raise subprocess.TimeoutExpired(argv, seconds)
+            return run(argv, timeout=min(timeout, left), environment=environment)
+        bounded.run = limited
+        return bounded

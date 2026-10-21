@@ -232,7 +232,9 @@ function relay(child) {
   }
 
   function snapshot() {
-    let cwd = null;
+    // A folder that can no longer be read (it was removed under the relay) is still the one the relay started in; the
+    // record of a connection test's relay is told by it after the test has removed its folder.
+    let cwd = startFolder;
     try {cwd = process.cwd();} catch {/* removed directory */}
     return {
       schema_version: 1, kind: 'relay', pid: me, started_at: records.startedAt,

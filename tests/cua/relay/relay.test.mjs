@@ -394,6 +394,34 @@ test('a runtime that works in the folder of a connection test leaves no line and
   assert.equal(client.stderr, '');
 });
 
+test('a relay that can no longer read its folder still records the one it started in', async t => {
+  // The test removes its folder as soon as it is done, while its relay may still be ending. Where reading the working
+  // folder of a removed folder fails, the dead record would lose the name that tells it is a test's; the preload below
+  // makes that happen here, from the moment the flag file is there.
+  const folder = fs.mkdtempSync('/tmp/codex-cua-probe-');
+  const base = fs.mkdtempSync('/tmp/crp-');
+  t.after(() => {fs.rmSync(folder, {recursive: true, force: true}); fs.rmSync(base, {recursive: true, force: true});});
+  const flag = path.join(base, 'folder-is-gone');
+  fs.writeFileSync(path.join(base, 'preload.mjs'), `import fs from 'node:fs';
+const read = process.cwd;
+process.cwd = () => {
+  if (fs.existsSync(${JSON.stringify(flag)})) throw Object.assign(new Error('ENOENT: no such file or directory, uv_cwd'), {code: 'ENOENT'});
+  return read.call(process);
+};
+`);
+  const {fixture, client} = await boot(t, {cwd: folder, env: {NODE_OPTIONS: '--import=' + path.join(base, 'preload.mjs')}});
+  await client.call('await cua.getState();', turn('s-probe', 't1'), {arguments: {code: 'await cua.getState();', title: PROBE_TITLE}});
+  const open = await readRecord(fixture, r => r.scopes.length === 1 && r.busy === false);
+  assert.equal(open.cwd, fs.realpathSync(folder));
+  fs.writeFileSync(flag, '');
+  process.kill(fixture.events('start')[0].pid, 'SIGKILL');          // the runtime goes while a scope is open
+  await client.exit;
+  const [dir] = relayDirs(fixture);
+  const dead = JSON.parse(fs.readFileSync(path.join(dir, 'relay.json'), 'utf8'));
+  assert.equal(dead.cleanup, 'not_confirmed');
+  assert.equal(dead.cwd, open.cwd, 'the folder it started in, not null');
+});
+
 test('a folder that only looks like the one of a connection test is a conversation\'s, and its calls are written down', async t => {
   const base = fs.mkdtempSync('/tmp/crp-');
   t.after(() => fs.rmSync(base, {recursive: true, force: true}));

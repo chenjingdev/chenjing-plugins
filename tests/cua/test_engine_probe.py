@@ -6,12 +6,15 @@ Mac and temporary folders only: no Codex, no process, no signal of the machine t
 """
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 import re
 import signal
 import stat
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -94,6 +97,18 @@ class LeftOutOfTheStatusTests(StatusCase):
         self.assertEqual(status['activity'], [])
         self.assertEqual(status['screen'], {'active_connection_id': None, 'last_call_at': None})
 
+    def test_lines_an_older_relay_of_the_test_wrote_stay_out_also_when_its_record_is_dead(self):
+        # The relay died with a scope open, so its record stays; an older relay logged every call it relayed.
+        self.state.relay('probe', 3101, NOW-30, cwd=FOLDER, scopes=[State.scope(SESSION_C, first=at(8), last=at(5))],
+                         cleanup='not_confirmed')
+        self.state.activity([State.line('relay-3101-%d' % (NOW-30), 5, SESSION_C, ms=40),
+                             State.line('relay-3101-%d' % (NOW-30), 4, SESSION_C, tool='turn_ended', ms=3),
+                             State.line('relay-3201-%d' % (NOW-3000), 20, SESSION_A, ms=900)])
+        status = self.status()
+        self.assertEqual([(item['tool'], item['connection_id']) for item in status['activity']],
+                         [('js', 'codex-3201-%d' % (NOW-3000))], 'the line of anybody else is still there')
+        self.assertEqual(status['screen'], {'active_connection_id': None, 'last_call_at': iso(at(20))})
+
     def test_a_record_that_the_test_left_dead_with_an_open_scope_is_no_lease_and_goes(self):
         self.state.relay('probe', 3101, NOW-300, root_pid=3100, runtime_pid=3102, cwd=FOLDER,
                          scopes=[State.scope(SESSION_C, first=at(300), last=at(299))], cleanup='not_confirmed')
@@ -129,6 +144,7 @@ class ProbeCase(EngineCase):
         self.hosts = []
         self.calls = []                 # the params of every js call the host got
         self.hooks = {}                 # method (or 'js') -> callable run when the host gets it
+        self.hang = set()               # methods the host never answers
         self.js_result = {'content': [{'type': 'text', 'text': 'PRIVATE_INVENTORY'}]}
         self.js_delay = 0
 
@@ -144,6 +160,7 @@ class ProbeCase(EngineCase):
         async def connect(**kwargs):
             host = FakeHost(self.tools)
             host.hooks.update({key: value for key, value in self.hooks.items() if key != 'js'})
+            host.hang.update(self.hang)
             self.hosts.append(host)
             return host
         patcher = patch.object(host_mcp, 'unix_connect', AsyncMock(side_effect=connect))
@@ -268,6 +285,145 @@ class ProbeRunTests(ProbeCase):
             report = self.run_probe()
         self.assertEqual(report['status'], 'checked')
         self.assertFalse(os.path.exists(self.seen_folder), 'the folder goes whatever else happened')
+
+
+class InterruptionTests(ProbeCase):
+    """The app ends a test it gives up on (its time ran out, or the person went away) with SIGTERM and, two seconds
+    later, SIGKILL. Python ends on SIGTERM without running a single `finally`, so the test arms it for the time it runs.
+    A SIGTERM is delivered to this very process here (signal.raise_signal), where a handler that is not there would end
+    the whole run: the guard below stands in for the default and records what reaches it."""
+
+    def setUp(self):
+        super().setUp()
+        self.unhandled = []
+
+        def guard(signum, frame):
+            self.unhandled.append(signum)
+        self.guard = guard
+        previous = signal.signal(signal.SIGTERM, guard)
+        self.addCleanup(signal.signal, signal.SIGTERM, previous)
+        # The task that took the interruption is reported as one whose exception nobody retrieved: that is the test.
+        asyncio_log = logging.getLogger('asyncio')
+        self.addCleanup(setattr, asyncio_log, 'disabled', asyncio_log.disabled)
+        asyncio_log.disabled = True
+
+    def host_that_answers_nothing(self):
+        """A host that never answers the call, nor the end of the turn, nor the leaving of the thread."""
+        async def silent(params):
+            await asyncio.sleep(3600)
+        self.tools['turn_ended'] = silent
+        self.hang.add('thread/unsubscribe')
+        self.js_delay = 3600
+
+    def processes(self, flag='-axww'):
+        return [argv for argv in self.machine.commands if argv[0] == '/bin/ps' and flag in argv]
+
+    def cut_off(self, *, hook=None):
+        """A SIGTERM while the call runs (or whatever `hook` does there), and the seconds the cleanup took."""
+        self.spawn_runtime(3100)
+        self.hooks['js'] = hook or (lambda: signal.raise_signal(signal.SIGTERM))
+        began = time.monotonic()
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_probe()
+        return time.monotonic()-began
+
+    def test_a_sigterm_while_the_call_runs_ends_the_runtime_and_removes_the_folder_before_the_kill_that_follows(self):
+        self.host_that_answers_nothing()
+        seconds = self.cut_off()
+        self.assertLess(seconds, 2.0)
+        self.assertEqual(self.machine.signals, [(3100, signal.SIGTERM)])
+        self.assertNotIn(3100, self.machine.procs)
+        self.assertFalse(os.path.exists(self.seen_folder))
+        self.assertEqual(self.unhandled, [], 'the test took the signal itself')
+        self.assertIs(signal.getsignal(signal.SIGTERM), self.guard, 'and gave the old handler back')
+
+    def test_one_sigterm_cuts_the_test_and_no_second_one_cuts_the_cleanup(self):
+        self.host_that_answers_nothing()
+        self.machine.on_signal[3100] = lambda number: signal.raise_signal(signal.SIGTERM)   # when the runtime is told
+        self.cut_off()
+        self.assertEqual(self.machine.signals, [(3100, signal.SIGTERM)])
+        self.assertNotIn(3100, self.machine.procs)
+        self.assertFalse(os.path.exists(self.seen_folder))
+        self.assertEqual(self.unhandled, [])
+
+    def test_a_cut_test_does_not_wait_for_the_runtime_to_go(self):
+        self.machine.ignore_term.add(3100)              # a runtime that does not leave when it is told to
+        self.host_that_answers_nothing()
+        self.cut_off()
+        self.assertEqual(self.machine.signals, [(3100, signal.SIGTERM)])
+        self.assertIn(3100, self.machine.procs)
+        self.assertEqual(len(self.processes()), 1, 'one look at the process list, no waiting for the end')
+        self.assertFalse(os.path.exists(self.seen_folder), 'the folder goes all the same')
+
+    def test_a_test_that_is_not_cut_does_wait_for_the_runtime(self):
+        self.machine.ignore_term.add(3100)
+        self.spawn_runtime(3100)
+        self.assertEqual(self.run_probe()['status'], 'checked')
+        self.assertGreater(len(self.processes()), 1)
+
+    def test_what_a_cut_test_asks_the_system_it_asks_in_little_time(self):
+        timeouts = []
+
+        def run(argv, timeout=None, environment=None):
+            timeouts.append(timeout)
+            return self.machine.run(argv, timeout, environment)
+        self.spawn_runtime(3100)
+        self.hooks['js'] = lambda: signal.raise_signal(signal.SIGTERM)
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_probe(run=run)
+        self.assertGreaterEqual(len(timeouts), 3, 'the process list, the folders, the runtime asked once more')
+        self.assertLessEqual(max(timeouts), 0.6)
+        timeouts.clear()
+        del self.hooks['js']
+        self.assertEqual(self.run_probe(run=run)['status'], 'checked')
+        self.assertEqual(max(timeouts), 5, 'a test that is not cut asks as it always did')
+
+    def test_a_sigterm_during_the_cleanup_of_a_finished_test_is_noted_and_the_cleanup_goes_on(self):
+        self.machine.ignore_term.add(3100)
+        self.machine.on_signal[3100] = lambda number: signal.raise_signal(signal.SIGTERM)
+        self.spawn_runtime(3100)
+        report = self.run_probe()                       # no KeyboardInterrupt: there is nothing left to cut
+        self.assertEqual(report['status'], 'checked')
+        self.assertEqual(self.machine.signals, [(3100, signal.SIGTERM)])
+        self.assertEqual(len(self.processes()), 1, 'the wait for the runtime was given up')
+        self.assertFalse(os.path.exists(self.seen_folder))
+        self.assertEqual(self.unhandled, [])
+        self.assertIs(signal.getsignal(signal.SIGTERM), self.guard)
+
+    def test_ctrl_c_is_a_cut_too(self):
+        def interrupt():
+            raise KeyboardInterrupt
+        self.host_that_answers_nothing()
+        seconds = self.cut_off(hook=interrupt)
+        self.assertLess(seconds, 2.0)
+        self.assertEqual(self.machine.signals, [(3100, signal.SIGTERM)])
+        self.assertFalse(os.path.exists(self.seen_folder))
+
+    def test_the_handler_is_there_while_the_test_runs_and_only_then(self):
+        seen = []
+        self.hooks['js'] = lambda: seen.append(signal.getsignal(signal.SIGTERM))
+        self.assertEqual(self.run_probe()['status'], 'checked')
+        [during] = seen
+        self.assertTrue(callable(during))
+        self.assertIsNot(during, self.guard)
+        self.assertIs(signal.getsignal(signal.SIGTERM), self.guard)
+
+    def test_a_process_that_ignores_sigterm_is_left_ignoring_it(self):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)       # as its parent started it
+        seen = []
+        self.hooks['js'] = lambda: seen.append(signal.getsignal(signal.SIGTERM))
+        self.assertEqual(self.run_probe()['status'], 'checked')
+        self.assertEqual(seen, [signal.SIG_IGN])
+        self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_IGN)
+
+    def test_a_test_run_off_the_main_thread_leaves_the_signals_alone(self):
+        # Python sets a handler only from the main thread; a caller that is not on it still gets its test.
+        reports = []
+        thread = threading.Thread(target=lambda: reports.append(self.run_probe()))
+        thread.start()
+        thread.join(30)
+        self.assertEqual([report['status'] for report in reports], ['checked'])
+        self.assertIs(signal.getsignal(signal.SIGTERM), self.guard)
 
 
 class TracesTests(ProbeCase):

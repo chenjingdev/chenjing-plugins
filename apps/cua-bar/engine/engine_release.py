@@ -186,9 +186,12 @@ async def _release_batch(ctx, view, sessions, script, options, user, folder=None
     return results
 
 
-def end_thread_runtimes(ctx, folder, host_pid, since):
+def end_thread_runtimes(ctx, folder, host_pid, since, wait=lambda: True):
     """End the runtime that Codex started for the short-lived thread: a cua-repl of this user right under the host's
-    app-server, started since the thread was asked for, that works in the thread's own folder. Returns how many."""
+    app-server, started since the thread was asked for, that works in the thread's own folder. Returns how many.
+
+    The runtimes are waited for until they are gone, a few seconds at most; `wait()` is asked before every look and
+    says whether to go on waiting. A cleanup that is being cut short signals them and does not wait."""
     try:
         found = [proc for proc in snapshot(ctx).values()
                  if proc.uid == ctx.uid and proc.ppid == host_pid and proc.start >= since-1 and is_cua_repl(proc.command)]
@@ -210,7 +213,7 @@ def end_thread_runtimes(ctx, folder, host_pid, since):
             continue
     deadline = ctx.clock()+RUNTIME_WAIT
     left = list(ended)
-    while left and ctx.clock() < deadline:          # its folder is removed once it is gone
+    while left and ctx.clock() < deadline and wait():          # its folder is removed once it is gone
         ctx.sleep(POLL)
         try:
             procs = snapshot(ctx)

@@ -198,6 +198,10 @@ class View:
         self.ctx = ctx
         self.inv = inv
         self.records = records
+        # What the relay of a connection test wrote (an older relay logs every call it relays) is nobody's operation, for
+        # as long as its record is there, alive or dead.
+        tests = {record.writer for record in records if of_a_connection_test(record)}
+        activity = [line for line in activity if line['writer'] not in tests]
         self.now = ctx.clock()
         self.connections = []
         self.cmux = []                 # CmuxConnection, one per `cmux-cua mcp` process; not in `connections`
@@ -432,16 +436,14 @@ class View:
         self._leave_out_connection_tests()
 
     def _leave_out_connection_tests(self):
-        """Take out the runtimes of connection tests, and the lines of the activity log that name them.
+        """Take out the runtimes of connection tests.
 
         A test lives for seconds and holds nothing, but while it lives its runtime is a process like any other, and a
-        relay in front of it (a host may give the thread one) has a record, a call in flight and, in an older version, a
-        line per call. None of it is a conversation, a busy screen or a connection that has ended. What is known of the
-        runtime is where it works: only the connections whose folder is known can be told, which the status looks up."""
-        gone = {conn.id for conn in self.connections if is_probe_folder(conn.cwd)}
-        if gone:
-            self.connections = [conn for conn in self.connections if conn.id not in gone]
-            self.activity = [item for item in self.activity if item[1] not in gone]
+        relay in front of it (a host may give the thread one) has a record and a call in flight. None of it is a
+        conversation, a busy screen or a connection that has ended (its lines in the activity log are left out at the
+        start, by the writer of the record). What is known of the runtime is where it works: only the connections whose
+        folder is known can be told, which the status looks up."""
+        self.connections = [conn for conn in self.connections if not is_probe_folder(conn.cwd)]
 
     @staticmethod
     def _newest_session(relay):
