@@ -185,6 +185,39 @@ struct CheckContentTests {
         #expect(withPlugin.problemCount == 2)
     }
 
+    @Test func withoutCodexACuaTheAppDidNotPutThereIsStillToldWithItsCommand() throws {
+        // F1: someone else's cua MCP server or skill is left as it is, Codex or not, so waiting for Codex would not put it
+        // right. The line says it, with the command, and what comes after the command is Codex, not the card's fix.
+        var claude = CheckFixtures.claudeReady()
+        claude.mcp = .conflict
+        claude.skill = .conflict
+        let noCodex = try status { $0.codex.installed = false; $0.codex.running = false; $0.host.state = .missing }
+        let inputs = [
+            CheckFixtures.input(nil, error: .engineMissing, claude: claude, codexMissing: true),
+            CheckFixtures.input(noCodex, claude: claude),
+        ]
+        for input in inputs {
+            #expect(input.card?.kind == .codexMissing)
+            let content = CheckContent(input)
+            let mcp = try #require(content.line(.mcp))
+            #expect(mcp.status == .problem && mcp.detail == "앱이 깔지 않은 cua MCP가 있어요 — 그대로 뒀어요")
+            #expect(mcp.commands.map(\.text) == [CheckContent.removeMCPCommand])
+            #expect(mcp.steps.last == "지운 뒤 Codex를 깔면 앱이 연결해요")
+            let skill = try #require(content.line(.skill))
+            #expect(skill.status == .problem && skill.detail == "앱이 깔지 않은 cua 스킬이 있어요 — 그대로 뒀어요")
+            #expect(skill.commands.map(\.text) == [CheckContent.moveSkillCommand])
+            #expect(skill.steps.last == "옮긴 뒤 Codex를 깔면 앱이 스킬을 깔아요")
+            for item in [CheckItem.engine, .python, .wrapper, .relay] {
+                #expect(content.line(item)?.status == .waiting && content.line(item)?.detail == "Codex가 생기면 맞춰요", "\(item)")
+            }
+            #expect(content.problemCount == 3, "Codex, and the two of someone else")
+        }
+        // With Codex, what comes after the command is the card's fix, as before.
+        let withCodex = CheckFixtures.content(try status { _ in }, claude: claude)
+        #expect(withCodex.line(.mcp)?.steps.last == "지운 뒤 위 카드의 고치기를 누르면 앱이 연결해요")
+        #expect(withCodex.line(.skill)?.steps.last == "옮긴 뒤 위 카드의 고치기를 누르면 앱이 스킬을 깔아요")
+    }
+
     // MARK: When there is no status, the card still carries what its button does
 
     @Test func theLinesOfClaudeCodesPartsAreFixedOnTheCardWhenTheEngineIsMissingAndTheCardInstallsEverything() throws {

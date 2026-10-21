@@ -156,7 +156,9 @@ private struct Judge {
     private var loading: Bool { input.status == nil && input.error == nil }
 
     func line(for item: CheckItem) -> CheckLine {
-        if codexMissing, let waiting = codexWaiting(item) { return item == .mcp ? withLegacyPlugin(waiting) : waiting }
+        if codexMissing, !showsConflict(item), let waiting = codexWaiting(item) {
+            return item == .mcp ? withLegacyPlugin(waiting) : waiting
+        }
         return switch item {
         case .claudeCode: claudeCodeLine()
         case .mcp: mcpLine()
@@ -179,6 +181,23 @@ private struct Judge {
         case .claudeCode, .loginItem, .host:
             return nil
         }
+    }
+
+    /// A cua MCP server or skill the app did not put there is told, Codex or not (F1): the install leaves it as it is
+    /// either way, so waiting for Codex would not put it right, and the line has the command that does.
+    private func showsConflict(_ item: CheckItem) -> Bool {
+        guard claudeWaiting(item) == nil else { return false }
+        switch item {
+        case .mcp: return claude.mcp == .conflict
+        case .skill: return claude.skill == .conflict
+        default: return false
+        }
+    }
+
+    /// What follows the command on a conflict line: the card's fix, or, while the card is the one that says there is
+    /// no Codex (it has no fix), the install that comes once Codex is there.
+    private func afterConflict(_ done: String, _ result: String) -> String {
+        codexMissing ? "\(done) Codex를 깔면 \(result)" : "\(done) 위 카드의 고치기를 누르면 \(result)"
     }
 
     /// A broken line: the card's, or its own.
@@ -241,7 +260,7 @@ private struct Judge {
                     item: item, status: .problem, detail: "앱이 깔지 않은 cua MCP가 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cua MCP",
                     steps: [
                         "지우려면 터미널에서 아래 명령을 실행해 주세요. 앱은 남이 둔 설정을 지우지 않아요",
-                        "지운 뒤 위 카드의 고치기를 누르면 앱이 연결해요",
+                        afterConflict("지운 뒤", "앱이 연결해요"),
                     ],
                     commands: [CheckCommand(CheckContent.removeMCPCommand, on: item)])
             case .unknown: line = undecided(item, "~/.claude.json을 읽지 못했어요")
@@ -280,7 +299,7 @@ private struct Judge {
                 item: item, status: .problem, detail: "앱이 깔지 않은 cua 스킬이 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cua 스킬",
                 steps: [
                     "~/.claude/skills/cua는 앱이 깐 것이 아니에요. 아래 명령으로 skills 폴더 밖으로 옮겨 두세요. 앱은 옮기거나 지우지 않아요",
-                    "옮긴 뒤 위 카드의 고치기를 누르면 앱이 스킬을 깔아요",
+                    afterConflict("옮긴 뒤", "앱이 스킬을 깔아요"),
                 ],
                 commands: [CheckCommand(CheckContent.moveSkillCommand, on: item)])
         case .unknown: return undecided(item, "스킬 폴더를 읽지 못했어요")
