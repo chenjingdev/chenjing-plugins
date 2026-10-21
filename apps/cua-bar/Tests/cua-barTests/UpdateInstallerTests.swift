@@ -419,6 +419,11 @@ struct UpdateInstallerTests {
         #expect(versionOfApp(at: world.bundle) == "0.8.0")
         #expect(world.notice.pendingVersion == VersionNumber(0, 8, 0))
         #expect(world.names(in: world.apps) == ["CUABar.app"])
+        // The old app is in the staging folder and nowhere else, which goes: it is put away as the backup first.
+        let stamp = UpdateInstaller.stamp(Date(timeIntervalSince1970: 1_792_324_800))
+        let kept = world.backups.appendingPathComponent(stamp).appendingPathComponent("CUABar.app")
+        #expect(bodyOfApp(at: kept) == "old")
+        #expect(versionOfApp(at: kept) == "0.7.0")
     }
 
     @Test func theTwoPlacesNeverStandEmptyInTheOneStepTheyChange() throws {
@@ -465,6 +470,29 @@ struct UpdateInstallerTests {
 
     @MainActor final class Asked { var count = 0 }
 
+    @MainActor @Test func theReplacingIsOnTheMainActorAndTheOldAppIsPutAwayOffIt() async throws {
+        let world = try world()
+        defer { world.remove() }
+        let swaps = ThreadLog()
+        let backup = ThreadLog()
+        var installer = world.installer
+        installer.swapItems = { first, second in
+            swaps.record()
+            try AtomicSwap.exchange(first, second)
+        }
+        // Reading the clock is the first thing that is done to put the old app away.
+        installer.now = {
+            backup.record()
+            return Date(timeIntervalSince1970: 1_792_324_800)
+        }
+        #expect(await installer.install(world.offer) { true } == .replaced)
+        #expect(swaps.onTheMainThread == [true], "the swap is in the turn that asked whether the moment was right")
+        #expect(world.launcher.launchedOnTheMainThread == [true], "and so is the helper")
+        #expect(backup.onTheMainThread == [false], "the backup, and the older backups going, are not: the menu bar would stand still")
+        let stamp = UpdateInstaller.stamp(Date(timeIntervalSince1970: 1_792_324_800))
+        #expect(bodyOfApp(at: world.backups.appendingPathComponent(stamp).appendingPathComponent("CUABar.app")) == "old")
+    }
+
     // MARK: After the update, without waiting for anything
 
     @Test func anImageThatNeverLetGoIsNotWaitedForOnceTheAppIsReplaced() async throws {
@@ -479,10 +507,9 @@ struct UpdateInstallerTests {
 
     // MARK: What a run that was cut short left
 
-    @Test func theNextRunTakesAwayTheCopiesAndTheMountsAnEarlierRunLeft() async throws {
-        let world = try world()
-        defer { world.remove() }
-        // A copy of the new app beside the running one, from a run that was quit halfway.
+    /// What an earlier run that was quit halfway leaves.
+    private func leaveLeftovers(_ world: World) throws -> (mounted: URL, apps: [String], scratch: [String]) {
+        // A copy of the new app beside the running one.
         try makeApp(
             at: world.apps.appendingPathComponent(".CUABar-update.OLD111").appendingPathComponent("CUABar.app"), version: "0.8.0", body: "half")
         // The folder of an update that may hold the only copy of an old app.
@@ -498,14 +525,36 @@ struct UpdateInstallerTests {
             at: world.scratch.appendingPathComponent("cua-bar-update-OLD444/mnt"), withIntermediateDirectories: true)
         // Not made by this app.
         try world.home.write("y", to: world.scratch.appendingPathComponent("someone-elses-file"))
+        return (mounted, [".CUABar-update.OLD222", ".something-else", "CUABar.app", "Other.app"], ["someone-elses-file"])
+    }
 
+    @Test func theNextRunTakesAwayTheCopiesAndTheMountsAnEarlierRunLeft() async throws {
+        let world = try world()
+        defer { world.remove() }
+        let left = try leaveLeftovers(world)
         #expect(await world.installer.install(world.offer) { true } == .replaced)
-        #expect(world.names(in: world.apps) == [".CUABar-update.OLD222", ".something-else", "CUABar.app", "Other.app"])
-        #expect(world.names(in: world.scratch) == ["someone-elses-file"])
+        #expect(world.names(in: world.apps) == left.apps)
+        #expect(world.names(in: world.scratch) == left.scratch)
         // (The folder listing may spell the temporary folder's path with /private in front.)
         #expect(
             world.runner.calls.contains { $0.arguments.first == "detach" && $0.arguments.last?.hasSuffix("/cua-bar-update-OLD333/mnt") == true },
             "the image is let go of before its folder goes")
+    }
+
+    @Test func theLeftoversGoWhenTheAppStartsWithoutAnyUpdateBeingMade() async throws {
+        let world = try world()
+        defer { world.remove() }
+        let left = try leaveLeftovers(world)
+        await world.installer.clearLeftovers()
+        #expect(world.names(in: world.apps) == left.apps)
+        #expect(world.names(in: world.scratch) == left.scratch)
+        #expect(world.transport.downloads.isEmpty, "nothing is fetched")
+        #expect(world.commands == ["hdiutil detach"], "the one image that was still mounted is let go of, and that is all that ran")
+        #expect(world.oldAppIsInPlace)
+        #expect(world.swaps.swaps == 0)
+        // Nothing left: asking again does nothing.
+        await world.installer.clearLeftovers()
+        #expect(world.commands == ["hdiutil detach"])
     }
 
     @Test func aMountThatCannotBeLetGoOfIsLeftAloneInsteadOfBeingDeletedAround() async throws {

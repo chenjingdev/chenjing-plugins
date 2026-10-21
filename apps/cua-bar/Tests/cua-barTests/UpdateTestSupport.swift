@@ -72,6 +72,9 @@ final class FakeInstaller: UpdateInstalling, @unchecked Sendable {
     private var answers: [UpdateInstallResult]
     private var recorded: [UpdateOffer] = []
     private var moments: [Bool] = []
+    private var tidied = 0
+    /// Runs when the app asks to tidy up what an earlier run left.
+    var onClearLeftovers: (@Sendable () -> Void)?
     /// While shut, an install waits here once it has been recorded.
     var gate: AsyncGate?
     /// Asks the caller whether the moment is right, as the real installer does right before it replaces the app, and
@@ -83,6 +86,13 @@ final class FakeInstaller: UpdateInstalling, @unchecked Sendable {
     var offers: [UpdateOffer] { lock.withLock { recorded } }
     /// What the caller answered each time it was asked.
     var momentsAsked: [Bool] { lock.withLock { moments } }
+    /// How often the app asked to tidy up.
+    var leftoversCleared: Int { lock.withLock { tidied } }
+
+    func clearLeftovers() async {
+        lock.withLock { tidied += 1 }
+        onClearLeftovers?()
+    }
 
     func install(_ offer: UpdateOffer, canCommit: @escaping @MainActor @Sendable () -> Bool) async -> UpdateInstallResult {
         lock.withLock { recorded.append(offer) }
@@ -115,11 +125,15 @@ final class FakeLauncher: DetachedLaunching, @unchecked Sendable {
 
     private let lock = NSLock()
     private var recorded: [Launch] = []
+    private var threads: [Bool] = []
     var fails = false
 
     var launches: [Launch] { lock.withLock { recorded } }
+    /// Whether each launch was asked for on the main thread.
+    var launchedOnTheMainThread: [Bool] { lock.withLock { threads } }
 
     func launch(_ executable: URL, arguments: [String]) throws {
+        lock.withLock { threads.append(Thread.isMainThread) }
         if fails { throw CocoaError(.fileNoSuchFile) }
         lock.withLock { recorded.append(Launch(executable: executable.path, arguments: arguments)) }
     }
@@ -186,4 +200,13 @@ final class Announcements: @unchecked Sendable {
             }
         }
     }
+}
+
+/// Writes down on which thread things happened.
+final class ThreadLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [Bool] = []
+    /// `true` for each thing that happened on the main thread.
+    var onTheMainThread: [Bool] { lock.withLock { recorded } }
+    func record() { lock.withLock { recorded.append(Thread.isMainThread) } }
 }

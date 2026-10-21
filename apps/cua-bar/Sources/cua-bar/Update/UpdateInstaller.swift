@@ -55,6 +55,10 @@ protocol UpdateInstalling: Sendable {
     /// Fetches the offer's disk image, checks it and puts the app inside it in place of the running one. `canCommit`
     /// is asked once more right before the replacing: it is the only part that touches the running app.
     func install(_ offer: UpdateOffer, canCommit: @escaping @MainActor @Sendable () -> Bool) async -> UpdateInstallResult
+
+    /// Takes away what an earlier run left behind (copies beside the app, images still mounted). Asked when the app
+    /// starts, and again before each install.
+    func clearLeftovers() async
 }
 
 /// Starts a process that goes on after this one has ended.
@@ -170,7 +174,7 @@ struct UpdateInstaller: UpdateInstalling {
 
     func install(_ offer: UpdateOffer, canCommit: @escaping @MainActor @Sendable () -> Bool) async -> UpdateInstallResult {
         let parent = bundleURL.deletingLastPathComponent()
-        await clearLeftovers(in: parent)
+        await clearLeftovers()
         guard FileManager.default.isWritableFile(atPath: parent.path) else { return .failed(.place) }
         let session = Session()
         let result = await fetchCheckAndReplace(offer, parent: parent, canCommit: canCommit, session: session)
@@ -240,15 +244,22 @@ struct UpdateInstaller: UpdateInstalling {
 
         guard !Task.isCancelled else { return .deferred }
         // The moment is looked at and the replacing done in one turn of the main actor, so that nothing (the popover
-        // opening, an install starting) can come between them.
-        return await MainActor.run {
-            guard canCommit() else { return UpdateInstallResult.deferred }
+        // opening, an install starting) can come between them. Only that is done there; the old app is put away after it.
+        let decision = await MainActor.run { () -> (result: UpdateInstallResult, oldApp: URL?) in
+            guard canCommit() else { return (.deferred, nil) }
             return replace(with: staged, version: offer.version)
         }
+        // Moving the old app into the backups and dropping the older ones can take a moment (a copy when the backups are on
+        // another volume, a handful of whole apps to delete): not on the main actor, where the menu bar would stand still.
+        if let oldApp = decision.oldApp { keepBackup(of: oldApp) }
+        return decision.result
     }
 
-    /// Everything from the mark to the helper happens without waiting for anything.
-    private func replace(with staged: URL, version: VersionNumber) -> UpdateInstallResult {
+    /// Everything from the mark to the helper happens without waiting for anything. Besides the result it says where the
+    /// old app is now, when it is to be kept as the backup: the update is done (the old app is in the staging folder, in
+    /// place of the new one), or the new app is in the place for good because even the swap back failed (the old app is
+    /// then in the staging folder, which is taken away, and this is its only copy).
+    private func replace(with staged: URL, version: VersionNumber) -> (result: UpdateInstallResult, oldApp: URL?) {
         // Before it is done, so that the new app, whenever it starts, finds it.
         try? notice.leave(version: version)
 
@@ -258,18 +269,21 @@ struct UpdateInstaller: UpdateInstalling {
             try swapItems(staged, bundleURL)
         } catch {
             notice.clear()
-            return .failed(.replace)
+            return (.failed(.replace), nil)
         }
         do {
             try launcher.launch(RelaunchHelper.shell, arguments: RelaunchHelper.arguments(waitingFor: processID, opening: bundleURL))
         } catch {
-            // The same step back. Should that fail too, the new app, whole and checked, stays in the place, and its mark
-            // with it: it tells the person when it is started.
-            if (try? swapItems(staged, bundleURL)) != nil { notice.clear() }
-            return .failed(.relaunch)
+            // The same step back: the old app is in its place again, and the new one in the staging folder goes with it.
+            if (try? swapItems(staged, bundleURL)) != nil {
+                notice.clear()
+                return (.failed(.relaunch), nil)
+            }
+            // Should that fail too, the new app, whole and checked, stays in the place, and its mark with it: it tells the
+            // person when it is started. The old app is kept.
+            return (.failed(.relaunch), staged)
         }
-        keepBackup(of: staged)
-        return .replaced
+        return (.replaced, staged)
     }
 
     /// Asks the system whether the file at `target` is signed by CUA Bar's developer (`requirement`). nil when it is;
@@ -322,8 +336,9 @@ struct UpdateInstaller: UpdateInstalling {
     /// folder, and images still mounted in the temporary folder. A staging folder with a `Previous.app` in it is left, for
     /// it may hold an old app that nothing else does (a version of this update that moved the old app aside by that name
     /// did; this one swaps, and the place is never empty).
-    private func clearLeftovers(in parent: URL) async {
+    func clearLeftovers() async {
         let fm = FileManager.default
+        let parent = bundleURL.deletingLastPathComponent()
         for entry in (try? fm.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil)) ?? []
         where entry.lastPathComponent.hasPrefix(Self.stagingPrefix) {
             if !fm.fileExists(atPath: entry.appendingPathComponent("Previous.app").path) { try? fm.removeItem(at: entry) }

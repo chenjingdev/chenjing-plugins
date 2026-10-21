@@ -50,7 +50,7 @@ final class LiveApp {
             setup: setup, codex: codex, updateNotice: updateNotice, announce: { await notifier.post($0) })
         let loginItem = LoginItemRegistrar(service: MainAppLoginItem(), defaults: defaults, home: home)
         let pasteboard = DiagnosisPasteboard(base: SystemPasteboard()) {
-            "앱: CUA Bar \(appVersion ?? "개발용")\n\(loginItem.line)" + (updater.diagnosisLine.map { "\n" + $0 } ?? "")
+            DiagnosisPasteboard.appLines(appVersion: appVersion, loginItemLine: loginItem.line, updateLine: updater.diagnosisLine)
         }
         let model = CUABarViewModel(
             engine: engine, appVersion: appVersion, systemActions: actions, pasteboard: pasteboard,

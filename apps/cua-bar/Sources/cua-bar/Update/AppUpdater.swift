@@ -81,16 +81,26 @@ final class AppUpdater: ObservableObject {
         failure = installer == nil ? nil : storedFailure()
     }
 
-    /// The line the copied diagnosis adds while an update has failed.
-    var diagnosisLine: String? { failure?.diagnosisLine }
+    /// What the copied diagnosis says when the updates are off, so that a build that should update and does not can be
+    /// told from the diagnosis: the build is not the official one (a development build, a local build signed ad hoc).
+    static let offLine = "업데이트: 꺼짐(정식 서명 판이 아님)"
+
+    /// The line the copied diagnosis adds: that the updates are off, or that an update has failed; nothing otherwise.
+    var diagnosisLine: String? {
+        guard installer != nil else { return Self.offLine }
+        return failure?.diagnosisLine
+    }
 
     // MARK: Schedule
 
-    /// Looks now, at start, and again a day after each look while the app runs.
+    /// Tidies up what an earlier run left, once, and then looks now, at start, and again a day after each look while the
+    /// app runs. (A hidden image that a finished update could not let go of is let go of at the next start, not at the next
+    /// update, which may be weeks away.)
     func start() {
         // Without a bundle to replace or a version to compare, there is nothing to look for.
-        guard appVersion != nil, installer != nil, loop == nil else { return }
+        guard appVersion != nil, let installer, loop == nil else { return }
         loop = Task { [weak self] in
+            await installer.clearLeftovers()
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.check()

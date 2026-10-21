@@ -363,6 +363,59 @@ struct AppUpdaterTests {
         kit.updater.stop()
     }
 
+    @Test func atStartItTidiesUpWhatAnEarlierRunLeftOnceAndBeforeTheFirstLook() async {
+        let installer = FakeInstaller(.replaced)
+        let kit = kit(site: versionDocument("0.7.0"), installer: installer)
+        defer { kit.suite.remove() }
+        let looks = LooksSeen()
+        installer.onClearLeftovers = { [transport = kit.transport] in looks.record(transport.versionRequestCount) }
+        kit.updater.start()
+        #expect(await waitUntil { kit.sleeper.requestedDurations.count == 1 })
+        #expect(installer.leftoversCleared == 1)
+        #expect(looks.values == [0], "before the app has looked at anything")
+        // The daily look does not tidy again; an install does, by itself.
+        #expect(kit.sleeper.releaseAll() == 1)
+        #expect(await waitUntil { kit.sleeper.requestedDurations.count == 2 })
+        #expect(kit.transport.versionRequestCount == 2)
+        #expect(installer.leftoversCleared == 1)
+        kit.updater.stop()
+    }
+
+    final class LooksSeen: @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [Int] = []
+        var values: [Int] { lock.withLock { recorded } }
+        func record(_ value: Int) { lock.withLock { recorded.append(value) } }
+    }
+
+    @Test func aBuildThatDoesNotUpdateSaysSoInTheDiagnosis() async {
+        // No installer: a development build, or a local build that is not signed as the official one is.
+        let off = kit(bundled: false)
+        defer { off.suite.remove() }
+        off.updater.start()
+        await off.updater.check()
+        #expect(off.updater.diagnosisLine == "업데이트: 꺼짐(정식 서명 판이 아님)")
+        #expect(AppUpdater.offLine == "업데이트: 꺼짐(정식 서명 판이 아님)")
+    }
+
+    @Test func theDiagnosisSaysNothingWhileTheUpdatesWorkAndTheFailureWhenOneFailed() async {
+        let working = kit()
+        defer { working.suite.remove() }
+        #expect(working.updater.diagnosisLine == nil)
+        let failing = kit(installer: FakeInstaller(.failed(.team)))
+        defer { failing.suite.remove() }
+        await failing.updater.check()
+        #expect(failing.updater.diagnosisLine == "업데이트 실패: 새 버전 0.8.0 — \(UpdateStep.team.reason)")
+    }
+
+    @Test func theLinesTheAppAddsToTheCopiedDiagnosis() {
+        let login = "로그인 때 자동 실행: 켜짐"
+        #expect(DiagnosisPasteboard.appLines(appVersion: "0.8.0", loginItemLine: login, updateLine: nil) == "앱: CUA Bar 0.8.0\n로그인 때 자동 실행: 켜짐")
+        #expect(
+            DiagnosisPasteboard.appLines(appVersion: nil, loginItemLine: login, updateLine: AppUpdater.offLine)
+                == "앱: CUA Bar 개발용\n로그인 때 자동 실행: 켜짐\n업데이트: 꺼짐(정식 서명 판이 아님)")
+    }
+
     @Test func aLookThatFailedWaitsADayLikeAGoodOne() async {
         let kit = kit(transport: FakeTransport(failing: UpdateTransportError.badResponse))
         defer { kit.suite.remove() }
