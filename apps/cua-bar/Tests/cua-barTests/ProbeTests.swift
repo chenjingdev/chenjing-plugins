@@ -546,3 +546,148 @@ struct InstallProbeTests {
         #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
     }
 }
+
+// MARK: - The test and the install do not run beside each other
+
+/// An install that stays in flight until the test lets it go; what it does at its end can be set (the real one ends with
+/// the connection test).
+private final class InstallGate: SystemActions, @unchecked Sendable {
+    let gate = AsyncGate()
+    private let lock = NSLock()
+    private var atTheEnd: (@Sendable () async -> Void)?
+    private var runs = 0
+
+    func atTheEnd(_ work: @escaping @Sendable () async -> Void) { lock.withLock { atTheEnd = work } }
+    var setUpCount: Int { lock.withLock { runs } }
+
+    func openCodexDownload() async -> ActionOutcome { ActionOutcome(kind: .info, message: "") }
+    func installDeveloperTools() async -> ActionOutcome { ActionOutcome(kind: .info, message: "") }
+
+    func setUp() async -> ActionOutcome {
+        lock.withLock { runs += 1 }
+        await gate.wait()
+        let end = lock.withLock { atTheEnd }
+        await end?()
+        return ActionOutcome(kind: .info, message: "")
+    }
+}
+
+@MainActor
+struct ProbeAndInstallTests {
+    private func ready() throws -> EngineStatus {
+        var status = try Fixtures.status("status-ready")
+        status.engine.version = "0.7.0"
+        return status
+    }
+
+    private func probes(_ engine: FakeEngineClient) -> Int {
+        engine.calls.filter { if case .probe = $0 { true } else { false } }.count
+    }
+
+    private func model(_ engine: FakeEngineClient, install: any SystemActions, setup: SetupActivity = SetupActivity()) -> CUABarViewModel {
+        CUABarViewModel(
+            engine: engine, appVersion: "0.7.0", systemActions: install, clock: { Fixtures.now }, calendar: Fixtures.utc,
+            bannerDuration: .seconds(3600), setupActivity: setup)
+    }
+
+    @Test func whileAnInstallRunsThePressIsRefusedAndTheButtonIsOff() async throws {
+        let engine = FakeEngineClient(status: try ready())
+        let install = InstallGate()
+        defer { install.gate.open() }
+        let model = model(engine, install: install)
+        await model.refresh()
+        #expect(model.checkContent.line(.host)?.button?.isEnabled == true)
+
+        let running = model.send(.runSetup)
+        #expect(await yieldUntil { model.inFlight.contains(.runSetup) && install.setUpCount == 1 })
+        let line = try #require(model.checkContent.line(.host))
+        #expect(line.button?.isEnabled == false && line.button?.help == "설정하는 중이에요. 끝나면 시험할 수 있어요")
+        let pressed = await model.perform(.runProbe)
+        #expect(pressed == ActionOutcome(kind: .info, message: "설정하는 중이라 시험하지 않았어요. 끝나면 다시 눌러 주세요"))
+        #expect(probes(engine) == 0, "no test beside the install")
+        #expect(model.lastProbe == nil)
+
+        install.gate.open()
+        await running?.value
+        #expect(model.checkContent.line(.host)?.button?.isEnabled == true)
+        #expect(await model.perform(.runProbe) == ActionOutcome(kind: .success, message: "연결 시험을 통과했어요"))
+        #expect(probes(engine) == 1)
+    }
+
+    @Test func theTestAnInstallEndsWithStillRunsInsideItAndIsNotRefused() async throws {
+        let engine = FakeEngineClient(status: try ready())
+        let install = InstallGate()
+        let model = model(engine, install: install)
+        await model.refresh()
+        install.atTheEnd { [weak model] in _ = await model?.probeAfterInstall() }
+        let running = model.send(.runSetup)
+        #expect(await yieldUntil { model.inFlight.contains(.runSetup) && install.setUpCount == 1 })
+        install.gate.open()
+        await running?.value
+        #expect(probes(engine) == 1, "the install's own test ran although the install was in flight")
+        #expect(model.lastProbe?.outcome == .checked)
+    }
+
+    @Test func anInstallThatTheModelDoesNotKnowAboutButTheSetupSlotDoesAlsoKeepsTheTestOut() async throws {
+        let engine = FakeEngineClient(status: try ready())
+        let setup = SetupActivity()
+        let model = model(engine, install: InstallGate(), setup: setup)
+        await model.refresh()
+        #expect(setup.begin(), "a run that was not started by a button: the start-up one, or what was put off")
+        #expect(model.checkContent.line(.host)?.button?.isEnabled == false)
+        #expect(await model.perform(.runProbe).message == "설정하는 중이라 시험하지 않았어요. 끝나면 다시 눌러 주세요")
+        #expect(probes(engine) == 0)
+        setup.end(succeeded: true)
+        #expect(model.checkContent.line(.host)?.button?.isEnabled == true)
+        #expect(await model.perform(.runProbe).kind == .success)
+    }
+}
+
+// MARK: - What a copy puts on the pasteboard
+
+@MainActor
+struct CopyTests {
+    private let command = "launchctl unsetenv CODEX_CLI_PATH"
+
+    @Test func aCommandIsCopiedAsItIsAndTheDiagnosisKeepsTheLinesOfTheApp() async throws {
+        let board = RecordingPasteboard()
+        let pasteboard = DiagnosisPasteboard(base: board) { "앱: CUA Bar 0.8.0\n로그인 때 자동 실행: 켜짐" }
+        let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
+        engine.configure { $0.diagnosis = "CUA diagnosis\nhost: ready\n" }
+        let model = CUABarViewModel(
+            engine: engine, appVersion: "0.7.0", pasteboard: pasteboard, clock: { Fixtures.now }, calendar: Fixtures.utc)
+        await model.perform(.copyCommand(command, on: .wrapper))
+        // Exactly the command: pasted into a terminal, every line after it would run too.
+        #expect(board.copied == [command])
+        await model.perform(.copyDiagnosis)
+        #expect(board.copied.count == 2)
+        let diagnosis = board.copied[1]
+        #expect(diagnosis.hasPrefix("CUA diagnosis\nhost: ready\n"))
+        #expect(diagnosis.hasSuffix("앱: CUA Bar 0.8.0\n로그인 때 자동 실행: 켜짐\n"))
+        #expect(diagnosis.contains("점검 Claude Code:"))
+    }
+
+    @Test func throughTheAppsOwnAssemblyACommandIsExactlyTheTextAndTheDiagnosisHasTheAppLines() async throws {
+        let home = try TempHome()
+        defer { home.remove() }
+        let suite = DefaultsSuite()
+        defer { suite.remove() }
+        // A stand-in `codex-cua` that only answers `diagnose`, so the whole path runs for real in a throwaway home.
+        try home.writeCommand("#!/bin/sh\n# codex-cua authored command v1\necho 'CUA diagnosis'\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: home.command.path)
+        let board = RecordingPasteboard()
+        let app = LiveApp.make(
+            quit: {}, defaults: suite.defaults, home: home.url, appVersion: "0.8.0", bundle: nil, appBundle: nil, pasteboard: board)
+
+        await app.model.perform(.copyCommand("curl -fsSL https://claude.ai/install.sh | bash", on: .claudeCode))
+        await app.model.perform(.copyCommand(command, on: .wrapper))
+        #expect(board.copied == ["curl -fsSL https://claude.ai/install.sh | bash", command], "nothing of the app is added to a command")
+
+        await app.model.perform(.copyDiagnosis)
+        #expect(board.copied.count == 3)
+        let diagnosis = board.copied[2]
+        #expect(diagnosis.hasPrefix("CUA diagnosis\n"))
+        #expect(diagnosis.contains("앱: CUA Bar 0.8.0\n로그인 때 자동 실행: "), "the app's lines are in the diagnosis")
+        #expect(diagnosis.split(separator: "\n").filter { $0.hasPrefix("점검 ") }.count == 9)
+    }
+}

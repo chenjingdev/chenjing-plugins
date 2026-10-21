@@ -25,7 +25,9 @@ final class LiveApp {
         bundle: BundledEngine? = BundledEngine.locate(),
         // The app bundle this may replace: the one it runs from, when this is the official build (signed by the team's
         // Developer ID). nil for a development build, a local one signed ad hoc among them: no update is looked for.
-        appBundle: URL? = UpdateSource.replaceableBundle()
+        appBundle: URL? = UpdateSource.replaceableBundle(),
+        // Where a copy goes: the system's pasteboard. The diagnosis gets the app's lines on the way; a command does not.
+        pasteboard base: any PasteboardWriting = SystemPasteboard()
     ) -> LiveApp {
         let locator = CommandLocator(home: home)
         let runner = SystemProcessRunner()
@@ -50,7 +52,7 @@ final class LiveApp {
             setup: setup, codex: codex, updateNotice: updateNotice, announce: { await notifier.post($0) })
         let loginItem = LoginItemRegistrar(service: MainAppLoginItem(), defaults: defaults, home: home)
         let loginEnvironment = LoginEnvironmentReader(home: home, runner: runner)
-        let pasteboard = DiagnosisPasteboard(base: SystemPasteboard()) {
+        let pasteboard = DiagnosisPasteboard(base: base) {
             DiagnosisPasteboard.appLines(appVersion: appVersion, loginItemLine: loginItem.line, updateLine: updater.diagnosisLine)
         }
         let model = CUABarViewModel(

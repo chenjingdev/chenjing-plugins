@@ -91,6 +91,8 @@ struct CheckInput: Sendable {
     var fixTried = false
     var probe: ProbeRecord?
     var probing = false
+    /// The install is running: the connection test waits for it (the one right after it is the install's own).
+    var installing = false
     var now = Date()
     var calendar = Calendar.current
     /// `~/.local/share/codex-cua/start-desktop-cli.sh`: the value the app's setup puts in `CODEX_CLI_PATH`.
@@ -105,9 +107,12 @@ struct CheckContent: Equatable, Sendable {
     static let fixedOnCard = "위 카드에서 고쳐요"
     static let codexOff = "Claude 대화를 열면 켜져요"
     static let loadingDetail = "확인하는 중이에요"
-    static let installCommand = "npm install -g @anthropic-ai/claude-code"
+    /// The native installer of Claude Code's own documentation: it needs no Node and puts `claude` in `~/.local/bin`,
+    /// which is the first place the app looks.
+    static let installCommand = "curl -fsSL https://claude.ai/install.sh | bash"
     static let removeMCPCommand = "claude mcp remove -s user cua"
-    static let removeSkillCommand = "rm -r ~/.claude/skills/cua"
+    /// Out of the skills folder, not beside it: another name in there is read as a skill of its own.
+    static let moveSkillCommand = "mv ~/.claude/skills/cua ~/cua-skill-backup"
     static let unsetLauncherCommand = "launchctl unsetenv CODEX_CLI_PATH"
     static let agentFile = "~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist"
 
@@ -145,11 +150,16 @@ private struct Judge {
     }
 
     private var claude: ClaudeSetupState { input.claude }
-    private var codexMissing: Bool { input.status?.codex.installed == false }
+    /// There is no Codex app: the engine says so, or the card does (it can when there is no status to read, because the
+    /// install does nothing without Codex and so the engine is never unpacked).
+    private var codexMissing: Bool { input.card?.kind == .codexMissing || input.status?.codex.installed == false }
     private var loading: Bool { input.status == nil && input.error == nil }
 
     func line(for item: CheckItem) -> CheckLine {
-        switch item {
+        if codexMissing, !showsConflict(item), let waiting = codexWaiting(item) {
+            return item == .mcp ? withLegacyPlugin(waiting) : waiting
+        }
+        return switch item {
         case .claudeCode: claudeCodeLine()
         case .mcp: mcpLine()
         case .skill: skillLine()
@@ -160,6 +170,34 @@ private struct Judge {
         case .loginItem: loginItemLine()
         case .host: hostLine()
         }
+    }
+
+    /// What the install would put right waits for the Codex app, as it waits for Claude Code: the card says the one
+    /// thing that is wrong. The lines that do not depend on Codex say what they have to say.
+    private func codexWaiting(_ item: CheckItem) -> CheckLine? {
+        switch item {
+        case .engine, .mcp, .skill, .python, .wrapper, .relay:
+            return CheckLine(item: item, status: .waiting, detail: "Codex가 생기면 맞춰요", facts: "Codex 없음")
+        case .claudeCode, .loginItem, .host:
+            return nil
+        }
+    }
+
+    /// A cua MCP server or skill the app did not put there is told, Codex or not (F1): the install leaves it as it is
+    /// either way, so waiting for Codex would not put it right, and the line has the command that does.
+    private func showsConflict(_ item: CheckItem) -> Bool {
+        guard claudeWaiting(item) == nil else { return false }
+        switch item {
+        case .mcp: return claude.mcp == .conflict
+        case .skill: return claude.skill == .conflict
+        default: return false
+        }
+    }
+
+    /// What follows the command on a conflict line: the card's fix, or, while the card is the one that says there is
+    /// no Codex (it has no fix), the install that comes once Codex is there.
+    private func afterConflict(_ done: String, _ result: String) -> String {
+        codexMissing ? "\(done) Codex를 깔면 \(result)" : "\(done) 위 카드의 고치기를 누르면 \(result)"
     }
 
     /// A broken line: the card's, or its own.
@@ -197,8 +235,6 @@ private struct Judge {
 
     // MARK: MCP and skill
 
-    private var claudeIsUsable: Bool { claude.claudeCodeFound && !claude.claudeCodeUnusable }
-
     private func claudeWaiting(_ item: CheckItem) -> CheckLine? {
         if !claude.claudeCodeFound {
             return CheckLine(item: item, status: .waiting, detail: "Claude Code가 생기면 연결해요", facts: "Claude Code 없음")
@@ -224,7 +260,7 @@ private struct Judge {
                     item: item, status: .problem, detail: "앱이 깔지 않은 cua MCP가 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cua MCP",
                     steps: [
                         "지우려면 터미널에서 아래 명령을 실행해 주세요. 앱은 남이 둔 설정을 지우지 않아요",
-                        "지운 뒤 위 카드의 고치기를 누르면 앱이 연결해요",
+                        afterConflict("지운 뒤", "앱이 연결해요"),
                     ],
                     commands: [CheckCommand(CheckContent.removeMCPCommand, on: item)])
             case .unknown: line = undecided(item, "~/.claude.json을 읽지 못했어요")
@@ -262,10 +298,10 @@ private struct Judge {
             return CheckLine(
                 item: item, status: .problem, detail: "앱이 깔지 않은 cua 스킬이 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cua 스킬",
                 steps: [
-                    "~/.claude/skills/cua는 앱이 깐 것이 아니에요. 필요 없으면 아래 명령으로 지워 주세요. 앱은 지우지 않아요",
-                    "지운 뒤 위 카드의 고치기를 누르면 앱이 스킬을 깔아요",
+                    "~/.claude/skills/cua는 앱이 깐 것이 아니에요. 아래 명령으로 skills 폴더 밖으로 옮겨 두세요. 앱은 옮기거나 지우지 않아요",
+                    afterConflict("옮긴 뒤", "앱이 스킬을 깔아요"),
                 ],
-                commands: [CheckCommand(CheckContent.removeSkillCommand, on: item)])
+                commands: [CheckCommand(CheckContent.moveSkillCommand, on: item)])
         case .unknown: return undecided(item, "스킬 폴더를 읽지 못했어요")
         }
     }
@@ -324,9 +360,9 @@ private struct Judge {
         guard let status = input.status else { return undecided(item, "엔진을 읽지 못해 확인하지 못했어요") }
         let setup = status.setup
         // Somebody else's value: the setup leaves it alone, so only the person can clear it.
-        if setup.loginEnvironment == "conflict" { return loginConflictLine(stale: false) }
+        if setup.loginEnvironment == "conflict" { return withWrapperProblems(loginConflictLine(stale: false)) }
         if setup.loginEnvironment == "stale", input.fixTried, let foreign = foreignLauncher() {
-            return loginConflictLine(stale: true, foreign: foreign)
+            return withWrapperProblems(loginConflictLine(stale: true, foreign: foreign))
         }
         if let issue = issues(of: item).first {
             let extra = issues(of: item).dropFirst().map(\.sentence)
@@ -338,6 +374,19 @@ private struct Judge {
             return CheckLine(item: item, status: .ready, detail: "래퍼와 로그인 설정이 준비됐어요", facts: "래퍼 준비됨, 로그인 환경 준비됨")
         }
         return undecided(item, "엔진이 상태를 알려 주지 않았어요")
+    }
+
+    /// A wrapper that is missing or broken, beside a login environment the person has to clear: the line is about the
+    /// conflict, and this is told on it too, and kept in the diagnosis.
+    private func withWrapperProblems(_ line: CheckLine) -> CheckLine {
+        let wrapper = issues(of: .wrapper).filter { $0.name == "래퍼" }
+        guard !wrapper.isEmpty else { return line }
+        var changed = line
+        for issue in wrapper {
+            changed.steps.append(issue.sentence + (onCard.contains(.wrapper) ? " — 위 카드에서 고쳐요" : ""))
+            changed.facts = (changed.facts ?? changed.detail) + ", " + issue.sentence
+        }
+        return changed
     }
 
     /// A value in launchd's `CODEX_CLI_PATH` that is not the app's (a setup does not overwrite it).
@@ -353,12 +402,14 @@ private struct Judge {
         var facts = stale ? "로그인 환경 옛 설정" : "로그인 환경 충돌"
         let login = input.login
         if let label = login?.agentLabel, !stale {
-            // A file at the app's own place that is somebody else's (another label).
+            // A file at the app's own place that is somebody else's (another label). A label is somebody else's
+            // text: it is shown, and goes into the diagnosis, only when it is plain.
+            let plain = Self.safeLabel(label)
             steps = [
-                "\(CheckContent.agentFile)이 이 앱의 것이 아니에요(라벨 \(label))",
+                "\(CheckContent.agentFile)이 이 앱의 것이 아니에요" + (plain.map { "(라벨 \($0))" } ?? ""),
                 "그 파일을 다른 곳으로 옮긴 뒤 위 카드의 고치기를 눌러 주세요. 앱은 남의 파일을 옮기지 않아요",
             ]
-            facts += " (남의 로그인 에이전트 라벨 \(label))"
+            facts += plain.map { " (남의 로그인 에이전트 라벨 \($0))" } ?? " (남의 로그인 에이전트)"
         } else if let value = foreign ?? foreignLauncher() {
             steps = [
                 "launchd의 CODEX_CLI_PATH가 다른 값이에요: \(value)",
@@ -377,6 +428,13 @@ private struct Judge {
         }
         let detail = stale ? "로그인 설정이 옛 값이고, 고치기로는 바뀌지 않았어요" : "로그인 설정이 다른 값과 겹쳐요"
         return CheckLine(item: item, status: .problem, detail: detail, facts: facts, steps: steps, commands: commands)
+    }
+
+    /// A launchd label worth showing and putting in the diagnosis: letters, digits, dots, dashes and underscores, not long.
+    static func safeLabel(_ value: String) -> String? {
+        guard (1...100).contains(value.count), value.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || ".-_".contains($0)) })
+        else { return nil }
+        return value
     }
 
     /// A value worth putting in the diagnosis: one absolute path on one line.
@@ -416,10 +474,9 @@ private struct Judge {
 
     private func hostLine() -> CheckLine {
         let item = CheckItem.host
+        // The card carries this one, with or without a status to read.
+        if codexMissing { return broken(item, "Codex 앱이 없어요") }
         guard let status = input.status else { return undecided(item, "엔진을 읽지 못해 확인하지 못했어요") }
-        if status.codex.installed == false {
-            return broken(item, "Codex 앱이 없어요")
-        }
         let state = status.host.state
         switch state {
         case .ready:
@@ -430,8 +487,8 @@ private struct Judge {
             return CheckLine(item: item, status: .waiting, detail: "Codex가 꺼지는 중이에요", facts: "꺼지는 중")
         case .closed, .missing, .unknown:
             if status.codex.running {
-                // Codex runs without the host this app needs: the card restarts it.
-                if state == .unknown("") { return undecided(item, "엔진이 호스트 상태를 알려 주지 않았어요") }
+                // Codex runs without the host this app needs, whatever the engine called its state (the card says the
+                // same of an empty one): the card restarts it.
                 return broken(item, "Codex가 연결 없이 켜져 있어요")
             }
             // Off: nothing is started for a test, and the test is skipped.
@@ -444,9 +501,10 @@ private struct Judge {
         var steps: [String] = []
         if status.host.startedBeforeSetup { steps.append(StatusEvaluator.restartAppliesStep) }
         var facts = "켜져 있음" + (status.host.engineVersion.map { ", 엔진 \($0)로 켜짐" } ?? "")
-        let button = ButtonSpec(
-            title: "연결 시험", action: .runProbe, isEnabled: !input.probing,
-            help: input.probing ? "시험하는 중이에요" : "Codex가 화면 도구를 읽을 수 있는지 한 번 시험해요. Codex를 켜거나 끄지 않아요")
+        let help = input.probing ? "시험하는 중이에요"
+            : input.installing ? "설정하는 중이에요. 끝나면 시험할 수 있어요"
+            : "Codex가 화면 도구를 읽을 수 있는지 한 번 시험해요. Codex를 켜거나 끄지 않아요"
+        let button = ButtonSpec(title: "연결 시험", action: .runProbe, isEnabled: !input.probing && !input.installing, help: help)
         if input.probing {
             return CheckLine(item: item, status: .ready, detail: "연결 시험을 하는 중이에요…", facts: facts + ", 시험 중", steps: steps, button: button)
         }
@@ -476,8 +534,14 @@ extension StatusEvaluator {
             if let status {
                 items = Set((setupIssues(in: status.setup) + engineIssues(in: status.engine, appVersion: appVersion)
                     + claudeIssues(in: claude)).map(\.item))
-            } else if let error, error.needsEngineInstall {
-                items = [.engine]
+            } else {
+                if let error, error.needsEngineInstall { items = [.engine] }
+                // With no status to list the broken parts from, the card's button is still the whole install (고치기, or
+                // 설치 for the developer tools, which runs it once the tools are there): it puts Claude Code's MCP server
+                // and skill in too, so the lines of those say to fix them on the card.
+                if card.fix == .runSetup || card.fix == .installDeveloperTools {
+                    items.formUnion(claudeIssues(in: claude).map(\.item))
+                }
             }
             if card.kind == .developerToolsNeeded { items.insert(.python) }
             return items

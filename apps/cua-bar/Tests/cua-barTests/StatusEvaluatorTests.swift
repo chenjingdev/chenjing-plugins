@@ -174,13 +174,13 @@ struct StatusEvaluatorTests {
              nextStep: "고치기를 누르면 설정을 다시 맞춰요", fix: .runSetup, fixLabel: "고치기"),
         // Nothing the app may fix: it did not put it there. Said on the card, with where to read how.
         ProblemCase(name: "claude_conflict", kind: .claudeConflict, title: "Claude Code에 앱이 깔지 않은 cua MCP가 있어요",
-             nextStep: "점검 탭에서 지우는 방법을 보세요", fix: nil, fixLabel: nil),
+             nextStep: "점검 탭에서 치우는 방법을 보세요", fix: nil, fixLabel: nil),
         ProblemCase(name: "codex_without_host", kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요",
              nextStep: "다시 켜면 Claude가 붙어요", fix: .restartCodex, fixLabel: "다시 켜기",
              warning: "하던 Codex 작업이 끊길 수 있어요"),
         // The setup leaves somebody else's launchd value alone, so 고치기 could not change it: no button.
         ProblemCase(name: "login_environment_conflict", kind: .loginEnvironmentConflict, title: "Codex 로그인 설정이 다른 값과 겹쳐요",
-             nextStep: "점검 탭에서 겹치는 값과 지우는 방법을 보세요", fix: nil, fixLabel: nil),
+             nextStep: "점검 탭에서 겹치는 값과 치우는 방법을 보세요", fix: nil, fixLabel: nil),
         // One line's problem: the card says what to do, the button is on that line.
         ProblemCase(name: "ended_connections", kind: .endedConnections, title: "끝난 연결이 1개 남아 있어요",
              nextStep: "목록 맨 위의 정리를 눌러 주세요", fix: nil, fixLabel: nil),
@@ -410,7 +410,7 @@ struct StatusEvaluatorTests {
             let summary = evaluate(status, facts: claude(mcp: mcp, skill: skill))
             #expect(summary.problem?.kind == .claudeConflict)
             #expect(summary.problem?.title == title)
-            #expect(summary.nextStep == "점검 탭에서 지우는 방법을 보세요")
+            #expect(summary.nextStep == "점검 탭에서 치우는 방법을 보세요")
             #expect(summary.fix == nil)
             #expect(summary.icon == .problem)
         }

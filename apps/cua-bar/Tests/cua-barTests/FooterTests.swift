@@ -238,10 +238,18 @@ struct FooterTests {
     @Test func theDiagnosisCopyAddsALineBreakOnlyWhenNeeded() {
         let board = RecordingPasteboard()
         let pasteboard = DiagnosisPasteboard(base: board) { "앱: x" }
-        pasteboard.copy("no newline at the end")
-        pasteboard.copy("with newline\n")
-        pasteboard.copy("")
+        pasteboard.copyDiagnosis("no newline at the end")
+        pasteboard.copyDiagnosis("with newline\n")
+        pasteboard.copyDiagnosis("")
         #expect(board.copied == ["no newline at the end\n앱: x\n", "with newline\n앱: x\n", "앱: x\n"])
+    }
+
+    @Test func aCopyThatIsNotTheDiagnosisGoesOnAsItIsWithNoLineOfTheApp() {
+        let board = RecordingPasteboard()
+        let pasteboard = DiagnosisPasteboard(base: board) { "앱: x\n로그인 때 자동 실행: 켜짐" }
+        pasteboard.copy("launchctl unsetenv CODEX_CLI_PATH")
+        pasteboard.copy("with newline\n")
+        #expect(board.copied == ["launchctl unsetenv CODEX_CLI_PATH", "with newline\n"], "a terminal runs every line that is pasted")
     }
 
     @Test func theActivityTabShowsTheLoginLineWhenGivenWithoutMakingThePopoverTaller() async throws {

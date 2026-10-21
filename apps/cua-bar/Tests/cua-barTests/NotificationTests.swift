@@ -281,7 +281,7 @@ struct NotificationViewModelTests {
         let rig = await Rig(try codexProblem(), notifier: FakeNotifier(allowed: false))
         rig.engine.configure { $0.diagnosis = "codex-cua diagnose\n" }
         await rig.model.perform(.copyDiagnosis)
-        // The lines of the 점검 tab sit between the engine's text and this line (see CheckDiagnosisTests).
+        // The lines of the 점검 tab sit between the engine's text and this line (see ProbeModelTests.theCopiedDiagnosisCarriesTheCheckLinesBetweenTheEnginesTextAndTheNotificationLine).
         #expect(rig.pasteboard.copied.last.map(CheckFixtures.withoutCheckLines) == "codex-cua diagnose\n알림: 꺼짐\n")
     }
 

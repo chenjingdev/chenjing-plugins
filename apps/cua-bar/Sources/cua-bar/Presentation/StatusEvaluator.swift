@@ -270,14 +270,14 @@ enum StatusEvaluator {
         case (false, false): return nil
         }
         return Problem(
-            kind: .claudeConflict, title: title, nextStep: "점검 탭에서 지우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
+            kind: .claudeConflict, title: title, nextStep: "점검 탭에서 치우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
     }
 
     /// The setup leaves a launchd value somebody else set as it is (`login_environment: conflict`), so 고치기 could not
     /// change it: no button, and the check tab shows the value and how to clear it.
     static let loginEnvironmentConflictProblem = Problem(
         kind: .loginEnvironmentConflict, title: "Codex 로그인 설정이 다른 값과 겹쳐요",
-        nextStep: "점검 탭에서 겹치는 값과 지우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
+        nextStep: "점검 탭에서 겹치는 값과 치우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
 
     private static func summary(for problem: Problem) -> StatusSummary {
         StatusSummary(

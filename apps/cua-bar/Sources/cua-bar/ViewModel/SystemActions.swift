@@ -29,7 +29,14 @@ struct UnwiredSystemActions: SystemActions {
 
 @MainActor
 protocol PasteboardWriting {
+    /// Puts exactly this text on the pasteboard: a command the person pastes into a terminal runs everything it holds.
     func copy(_ text: String)
+    /// Puts the diagnosis on the pasteboard. The same as `copy`, unless the writer adds lines about the app to it.
+    func copyDiagnosis(_ text: String)
+}
+
+extension PasteboardWriting {
+    func copyDiagnosis(_ text: String) { copy(text) }
 }
 
 struct SystemPasteboard: PasteboardWriting {
