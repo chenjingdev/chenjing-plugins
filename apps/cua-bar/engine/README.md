@@ -97,7 +97,7 @@ CUA Bar의 **앱 지우기…**가 이 엔진의 제거까지 합니다([앱 REA
 ~/.local/bin/codex-cua uninstall
 ```
 
-로그인 항목, 등록한 설정값, 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 앱이 Claude Code에 깐 `cua` MCP와 스킬은 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
+로그인 항목, 등록한 설정값, 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 연결 기록 폴더(`~/Library/Caches/codex-cua`)와 호스트 상태 폴더(`~/Library/Caches/codex-host-cua`)는 지우지 않으니 필요 없으면 직접 지웁니다. 앱이 Claude Code에 깐 `cua` MCP와 스킬은 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
 
 ## 업데이트와 옛 플러그인
 
