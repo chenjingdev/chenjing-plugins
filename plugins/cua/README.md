@@ -11,18 +11,16 @@ Claude Code에서 Mac의 앱과 브라우저를 Codex CUA로 조작하는 플러
 
 ## 설치와 사용
 
+CUA Bar를 쓰면 앱이 이 플러그인을 깔고 설정까지 합니다(아래 CUA Bar 절). 앱 없이 쓸 때는 플러그인을 깐 뒤 설정을 한 번 실행합니다.
+
 ```sh
 claude plugin marketplace add chenjingdev/chenjing-plugins
 claude plugin install cua@chenjing-plugins --scope user
+sh ~/.claude/plugins/cache/chenjing-plugins/cua/0.7.0/setup.sh setup
+~/.local/bin/codex-cua doctor --probe
 ```
 
-Claude Code의 새 대화에서 다음을 실행합니다.
-
-```text
-/cua:setup
-```
-
-Claude가 설치와 연결을 점검합니다. 이후 **“cua 써서 이 앱을 확인해 줘”**처럼 요청하면 됩니다. 연결이 끊겼다면 **“CUA 연결 복구해 줘”**라고 요청합니다.
+새 Claude Code 대화부터 **“cua 써서 이 앱을 확인해 줘”**처럼 요청하면 됩니다. 연결이 안 되면 CUA Bar가 메뉴 막대에 문제와 고치는 버튼을 보이고, 앱 없이는 `~/.local/bin/codex-cua doctor --probe`로 확인합니다.
 
 설정이 끝나면 Codex를 따로 준비하지 않아도 됩니다.
 
@@ -31,8 +29,8 @@ Claude가 설치와 연결을 점검합니다. 이후 **“cua 써서 이 앱을
 - **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** CUA Bar는 이런 Codex를 끄지 않고 알림으로 다시 켤지 묻고, **다시 켜기**를 누르면 정상 종료한 뒤 다시 켭니다. 앱 없이 하려면 진행 중인 작업을 마치고 Codex를 정상 종료(⌘Q)한 뒤 다시 엽니다. 어느 쪽도 강제로 종료하지 않지만, 다시 켜면 하던 Codex 작업은 끊깁니다. 다시 켠 뒤에도 Claude Code에서 cua가 연결되지 않은 것으로 보이면 `/mcp`로 다시 연결합니다.
 - **Codex가 꺼졌다 켜져도(앱 갱신 포함) 열려 있던 Claude 대화는 이어집니다.** 다음 CUA 호출 때 새 호스트에 다시 붙습니다. 연결이 끊길 때 하던 조작은 다시 보내지 않으므로 그 조작이 실제로 됐는지는 알 수 없습니다. 화면을 확인한 뒤에 이어 갑니다.
 - Codex가 뒤에서 열리는 동안 로그인·권한·업데이트 창이 떠 있으면, 기다리다가 Codex를 앞으로 띄우고 안내합니다.
-- **플러그인에 문제가 있어도 Codex는 켜집니다.** 연결용 파이썬 환경이나 `command.py`가 없을 때, 환경이 아직 준비되지 않았을 때(Codex를 켜는 동안에는 복구하지도 기다리지도 않습니다), 등록된 플러그인이 없거나 필요한 파일이 빠졌거나 손상됐을 때, 연결을 시작하기 전에 상태 폴더·점유 같은 설정이 막혔을 때 Codex는 연결 없이 원래대로 켜집니다. CUA 연결만 빠지므로 `/cua:setup`으로 복구합니다.
-- 다음은 이 보호 밖입니다. `~/.local/share/codex-cua` 폴더 전체를 `codex-cua uninstall` 없이 지운 경우, `command.py` 자체에 문법 오류가 있는 경우, 설정 때 Codex 실행 파일 경로를 기록하지 못했거나 기록한 경로가 앱 업데이트로 바뀐 경우(`/cua:setup`으로 다시 기록), 연결 가능한 방식으로 시작한 뒤에 생긴 오류입니다. Claude Code에 등록된 플러그인이 0.7.0보다 낮은 판이면 Codex 시작도 그 판의 코드가 맡으므로 그 판의 보호만 받습니다.
+- **플러그인에 문제가 있어도 Codex는 켜집니다.** 연결용 파이썬 환경이나 `command.py`가 없을 때, 환경이 아직 준비되지 않았을 때(Codex를 켜는 동안에는 복구하지도 기다리지도 않습니다), 등록된 플러그인이 없거나 필요한 파일이 빠졌거나 손상됐을 때, 연결을 시작하기 전에 상태 폴더·점유 같은 설정이 막혔을 때 Codex는 연결 없이 원래대로 켜집니다. CUA 연결만 빠지므로 CUA Bar의 **고치기**나 위의 `setup.sh setup`으로 복구합니다.
+- 다음은 이 보호 밖입니다. `~/.local/share/codex-cua` 폴더 전체를 `codex-cua uninstall` 없이 지운 경우, `command.py` 자체에 문법 오류가 있는 경우, 설정 때 Codex 실행 파일 경로를 기록하지 못했거나 기록한 경로가 앱 업데이트로 바뀐 경우(`codex-cua setup`으로 다시 기록), 연결 가능한 방식으로 시작한 뒤에 생긴 오류입니다. Claude Code에 등록된 플러그인이 0.7.0보다 낮은 판이면 Codex 시작도 그 판의 코드가 맡으므로 그 판의 보호만 받습니다.
 
 ## CUA Bar (메뉴 막대 앱)
 
@@ -76,7 +74,7 @@ CUA Bar는 연결 상태를 보고 놓아주기·종료를 하는 macOS 메뉴 �
 
 중계기는 `~/.codex/config.toml`을 고치지 않습니다. Claude 대화의 런타임에는 Codex를 켜는 래퍼가 원래 `cua_repl` 정의를 읽어 그 앞에 끼웁니다. Codex 앱이 대화마다 보내는 `cua_repl` 설정에서는 런타임 경로 한 값만 중계기로 바꿔 전달하고, 예상한 값일 때만 바꾸며 나머지는 그대로 넘깁니다. 모델·권한·승인 설정은 건드리지 않습니다.
 
-중계기가 없어도 Codex는 켜집니다. 원래 정의를 읽지 못하거나 중계기가 깨졌으면 Codex는 중계기 없이 원래대로 켜집니다. 그때는 Codex 대화의 연결을 끄기 전에 탭을 놓지 못하고, 작업 중·쉼·세션 ID도 알 수 없습니다. 중계기 사본이 없거나 깨졌으면 CUA Bar가 문제로 알리고 **고치기**로 고칩니다(`/cua:setup`도 같은 일을 합니다). 원래 정의를 읽지 못해 중계기 없이 켜진 경우는 `status --json`의 `setup.relay`가 `inactive`로만 보이고 CUA Bar는 문제로 알리지 않습니다. 이유는 `codex-cua diagnose`의 `relay left out …` 줄에 나옵니다. 이번 설정보다 먼저 켜진 Codex는 `host.started_before_setup`이 `true`이고, CUA Bar 카드가 "Codex를 다시 켜면 새 설정이 적용돼요"라고 안내합니다. 그 전에는 연결 상태를 모르거나 놓아주지 못할 수 있습니다.
+중계기가 없어도 Codex는 켜집니다. 원래 정의를 읽지 못하거나 중계기가 깨졌으면 Codex는 중계기 없이 원래대로 켜집니다. 그때는 Codex 대화의 연결을 끄기 전에 탭을 놓지 못하고, 작업 중·쉼·세션 ID도 알 수 없습니다. 중계기 사본이 없거나 깨졌으면 CUA Bar가 문제로 알리고 **고치기**로 고칩니다(`codex-cua setup`도 같은 일을 합니다). 원래 정의를 읽지 못해 중계기 없이 켜진 경우는 `status --json`의 `setup.relay`가 `inactive`로만 보이고 CUA Bar는 문제로 알리지 않습니다. 이유는 `codex-cua diagnose`의 `relay left out …` 줄에 나옵니다. 이번 설정보다 먼저 켜진 Codex는 `host.started_before_setup`이 `true`이고, CUA Bar 카드가 "Codex를 다시 켜면 새 설정이 적용돼요"라고 안내합니다. 그 전에는 연결 상태를 모르거나 놓아주지 못할 수 있습니다.
 
 ## 관리
 
@@ -88,9 +86,9 @@ claude plugin uninstall codex-computer-use@chenjing-plugins --scope user
 claude plugin install cua@chenjing-plugins --scope user
 ```
 
-새 Claude Code 대화에서 `/cua:setup`을 실행합니다.
+그다음 위 [설치와 사용](#설치와-사용)의 `setup.sh setup` 줄을 한 번 실행합니다. CUA Bar를 쓰면 앱이 합니다.
 
-설정 스킬이 설치한 명령은 직접 실행할 수도 있습니다. 놓아주기·끄기·다시 켜기는 사람이 직접 부르거나 CUA Bar에서 누르는 명령입니다. AI는 `doctor`·`status --json`·`diagnose`만 씁니다(설치는 `/cua:setup`이 합니다). `codex-cua`는 언제나 지금 설치된 플러그인 판의 코드를 실행하므로, 플러그인이 자동으로 갱신돼도 새 명령이 바로 나타납니다. 상태 확인·놓아주기·종료 명령은 아래 [고급 명령](#고급-명령)에 있습니다.
+설정이 설치한 명령 `codex-cua`는 직접 실행할 수도 있습니다. 놓아주기·끄기·다시 켜기는 사람이 직접 부르거나 CUA Bar에서 누르는 명령입니다. AI는 `doctor`·`status --json`·`diagnose`만 씁니다. `codex-cua`는 언제나 지금 설치된 플러그인 판의 코드를 실행하므로, 플러그인이 자동으로 갱신돼도 새 명령이 바로 나타납니다. 상태 확인·놓아주기·종료 명령은 아래 [고급 명령](#고급-명령)에 있습니다.
 
 ```sh
 ~/.local/bin/codex-cua doctor --probe  # 연결 확인
@@ -105,7 +103,7 @@ claude plugin update cua@chenjing-plugins --scope user
 ~/.local/bin/codex-cua setup
 ```
 
-0.6.0 이하에서 올릴 때는 마지막 줄 대신 새 Claude Code 대화에서 `/cua:setup`을 실행합니다. 이전 판의 `codex-cua`는 새 판의 설정을 모두 알지 못해서, 이 한 번만 필요합니다.
+0.6.0 이하에서 올릴 때는 마지막 줄 대신 새 판 폴더의 설정(`sh ~/.claude/plugins/cache/chenjing-plugins/cua/<판>/setup.sh setup`)을 실행합니다. CUA Bar의 맞는 판 받기는 처음부터 이렇게 합니다. 이전 판의 `codex-cua`는 새 판의 설정을 모두 알지 못해서, 이 한 번만 필요합니다.
 
 제거할 때는 진행 중인 Codex 작업을 마치고 Codex 앱을 정상 종료한 다음 실행합니다. 로그인 항목, 등록한 설정값, 중계기 사본과 설치한 명령도 함께 지웁니다.
 

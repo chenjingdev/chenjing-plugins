@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: Use the installed CUA MCP to inspect and operate Mac desktop apps and browsers from Claude Code. Use when the user asks to use CUA, including requests like "cua 써서", or requests GUI work through Codex CUA.
+description: Use the installed CUA MCP to inspect and operate Mac desktop apps and browsers from Claude Code. Use when the user asks to use CUA, including requests like "cua 써서", requests GUI work through Codex CUA, or asks why CUA does not connect.
 ---
 
 # Mac computer use
@@ -31,8 +31,18 @@ runtime; do not invent APIs from ordinary Node.js or Playwright examples.
   or sends: look at the current state first and decide from what you see. Treat
   the first `js` call after reconnecting like the first call of a new connection,
   since earlier handles may be gone.
-- If the host is unavailable, use the `setup` skill and `codex-cua doctor`.
-  Retry discovery after reconnecting; do not replay uncertain clicks or submits.
+- If the host is unavailable, run `~/.local/bin/codex-cua doctor --probe --json`
+  (`status --json` and `diagnose` release and stop nothing either) and say
+  which of setup, transport, tool discovery and a native call failed. Broken
+  setup is fixed by CUA Bar's 고치기 or by the user running `codex-cua setup`;
+  with no `codex-cua` at all, setup never ran: point the user to CUA Bar or the
+  setup line of the plugin README. Codex running without the host needs one restart by the user
+  (CUA Bar's 다시 켜기, or ⌘Q and reopen once the Codex work is done); never
+  quit or force-quit Codex yourself. Retry discovery after reconnecting; do not
+  replay uncertain clicks or submits.
+- Never replace a connection failure with a separately launched CUA engine,
+  model proxy, changed permissions or automatic approval. Keep request
+  payloads, screenshots and secrets out of diagnostic output.
 - Do not run `codex-cua release`, `release-session`, `stop` or `restart-codex`
   yourself and never pass `--user`; point the user to the CUA Bar button or the
   command instead.
