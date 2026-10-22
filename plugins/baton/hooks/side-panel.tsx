@@ -12,7 +12,8 @@ import { answerMark, closeAnswered, EMPTY, restore, settingsFrom as asksSettings
 // 0.7.2~0.7.3은 패널 입력칸에서 한글 조합이 깨져서(2026-10-10 "ㅌ튀어나와서", "기억ㅇ ㅣ섞인단") 답을 입력창에서 쓰게 했다.
 // 2026-10-11 사용자 "그전에 클릭해서 input채우는 경험이 좋앗던거 같음": 깨질 수 있다는 것을 알고 패널 입력칸을 골랐다.
 // 같은 날 tmux에서 패널 입력칸의 커서는 제자리에 놓였다. 쓰는 도중에 패널을 다시 그리는 것이 남은 의심이라, 쓰는 동안은 입력칸 값을 다시 넣지 않고 곁대화 답이 와도 다시 그리지 않는다.
-// 곁질문은 입력창에서 /baton-side로 쓴다
+// 곁질문도 같은 식으로 패널에서 쓴다: q를 누르면 곁대화 아래 입력칸이 열리고 Enter로 묻는다(0.7.7. 2026-10-23 사용자 "곁대화 왜 메인에서만 되냐? 사이드바에서도 되야하는데").
+// 입력칸을 그리지 못하는 화면에서만 입력창에 /baton-side를 붙인다
 // 작업과 관계없는 곁질문은 본 대화에 넣지 않고 곁대화로 보낸다: 질문처럼 보이는 메시지만 작은 모델로 가르고,
 // 애매하거나 판정이 늦거나 패널을 둘 자리가 없으면 본 대화로 보낸다. 곁대화의 답은 지금 대화를 이어받은 모델($.model.fork)이 쓴다.
 const ENABLED = { plugin: 'baton', key: 'sideEnabled' } as const
@@ -51,6 +52,9 @@ const SEND_KEY = 'send-answers'
 // 내 차례 항목 id별로 써 두고 아직 보내지 않은 답, 지금 입력칸이 열린 항목
 const drafts = new Map<number, string>()
 let editing: number | undefined
+// 곁질문 입력칸이 열려 있는지
+let asking = false
+const ASK_KEY = 'ask'
 
 // 곁대화와 써 둔 답을 함께 둔다. 0.7.1의 sent(보냈지만 아직 닫히지 않은 답)는 이제 없다: 보내는 쪽이 항목을 바로 닫는다(0.7.2)
 export function toKeep(c: readonly SideTurn[], d: ReadonlyMap<number, string>): SideKeep {
@@ -242,12 +246,31 @@ function prune(open: readonly number[]) {
 // 엔진은 입력창이 비어 있을 때만 내주므로, 쓰던 글이 있으면 입력칸을 눌러 쓰라고 알린다
 async function startAnswer($: EngineInterface, id: number) {
   editing = id
+  asking = false
   $.ui.invalidate('ui.render')
-  const to = { requestId: PANE, key: `answer-${id}` }
+  await focusField($, `answer-${id}`, '답 칸')
+}
+
+async function focusField($: EngineInterface, key: string, name: string) {
+  const to = { requestId: PANE, key }
   if (!(await $.ui.focus(to)).deny) return
   await openPane($, true)
   if (!(await $.ui.focus(to)).deny) return
-  $.ui.toast('입력창에 쓰던 글이 있어서 키보드가 아직 입력창에 있어요. 답 칸을 눌러서 쓰세요.', { timeoutMs: 6000 })
+  $.ui.toast(`입력창에 쓰던 글이 있어서 키보드가 아직 입력창에 있어요. ${name}을 눌러서 쓰세요.`, { timeoutMs: 6000 })
+}
+
+// 곁질문(q): 곁대화 아래 입력칸을 열고 키보드를 그리로 옮긴다
+async function startAsk($: EngineInterface) {
+  asking = true
+  editing = undefined
+  $.ui.invalidate('ui.render')
+  await focusField($, ASK_KEY, '곁질문 칸')
+}
+
+function submitAsk($: EngineInterface, value: string) {
+  asking = false
+  $.ui.invalidate('ui.render')
+  if (value.trim()) void askSide($, value).catch(() => undefined)
 }
 
 function saveAnswer($: EngineInterface, id: number, value: string, order: readonly number[]) {
@@ -318,7 +341,7 @@ async function askSide($: EngineInterface, question: string) {
   if (r.isAnswered) turn.a = r.text
   else turn.err = `답을 받지 못했어요: ${r.reason}`
   // 패널 입력칸에 답을 쓰는 중이면 지금 다시 그리지 않는다: 저장하면 그때 함께 그려진다(머리 주석)
-  if (editing === undefined) $.ui.invalidate('ui.render')
+  if (editing === undefined && !asking) $.ui.invalidate('ui.render')
   await persist($).catch(() => undefined)
 }
 
@@ -484,7 +507,7 @@ export function registerSide(on: On, options: PluginOptions): void {
     const shown = todo.slice(0, 8)
     const order = shown.map(a => a.id)
     // 패널이 키보드를 받으면 링은 아직 답 안 한 첫 [답하기]에서 시작한다: 숫자·글자 단축키는 버튼에 링이 있을 때만 먹고, 입력칸에 있으면 글자로 들어가기 때문
-    const firstOpen = editing === undefined ? shown.findIndex(a => !drafts.has(a.id)) : -1
+    const firstOpen = editing === undefined && !asking ? shown.findIndex(a => !drafts.has(a.id)) : -1
     // 항목 글은 패널 폭을 다 쓰고(줄이 바뀌면 번호 뒤에 맞춰 들여 쓴다), 써 둔 답과 입력칸과 버튼은 그 아래 줄에 둔다.
     // 버튼을 글 양옆에 두던 때는 글이 패널의 반쯤으로 좁아져 한 항목이 예닐곱 줄이 됐다(2026-10-10)
     const rows = shown.map((a, i) => {
@@ -579,9 +602,15 @@ export function registerSide(on: On, options: PluginOptions): void {
             </Box>
           ))
         : [<Text key="side-none" dimColor wrap="wrap">작업과 관계없는 질문은 q로 여기에 물어요. 본 대화에 남지 않아요.</Text>]),
+      // 쓰는 동안 값을 넣지 않는다(내 차례 입력칸과 같은 까닭). 비우고 Enter면 그냥 닫힌다
+      ...(Input && asking
+        ? [<Input key={ASK_KEY} label="곁질문" placeholder="묻고 Enter (비우면 닫기)" submitLabel="묻기" autoFocus onSubmit={v => submitAsk($, v)} />]
+        : []),
       <Box key="side-actions" flexDirection="row" flexWrap="wrap" columnGap={1}>
         {[
-          <Button key="ask-focus" label="곁질문 (q)" hotkey="q" dimColor onPress={() => void askInBox($).catch(() => undefined)} />,
+          ...(Input && asking
+            ? []
+            : [<Button key="ask-focus" label="곁질문 (q)" hotkey="q" dimColor onPress={() => void (Input ? startAsk($) : askInBox($)).catch(() => undefined)} />]),
           ...(last ? [<Button key="main" label="본 대화로 보내기 (m)" hotkey="m" dimColor onPress={() => void sendAsUser($, last.q).catch(() => undefined)} />] : []),
           ...(chat.length
             ? [<Button key="clear" label="비우기" dimColor onPress={() => { chat = []; $.ui.invalidate('ui.render'); void persist($).catch(() => undefined) }} />]

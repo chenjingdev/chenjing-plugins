@@ -209,11 +209,24 @@ test('an answer that only says what was done differently leaves nothing to answe
   expect(opened).toEqual(['side-chat'])
 })
 
-test('q starts a side question in the prompt box', async ($, on) => {
+test('q opens a side question field in the panel, Enter asks it there and leaves the prompt box alone', async ($, on) => {
   const box = fakeBox(on)
+  const forks: string[] = []
+  on('model.fork', (_$, e) => {
+    forks.push(e.prompt)
+    return { value: { isAnswered: true as const, text: '대화형이면 zsh예요.', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
+  })
   const ui = await seed($, on, ['A?'])
   await ui.press({ key: 'ask-focus' })
-  expect(box.text).toBe('/baton-side ')
+  expect(box.text).toBe('')
+  expect(await ui.find({ key: 'ask-focus' })).toBe(undefined)
+  expect((await ui.find({ key: 'ask' }))?.props.autoFocus).toBe(true)
+  await ui.input({ key: 'ask', text: 'zsh랑 bash 차이?' })
+  expect(await ui.find({ key: 'ask' })).toBe(undefined)
+  expect(forks.at(-1)).toContain('zsh랑 bash 차이?')
+  await ui.redraw()
+  expect((await ui.find({ key: 'turn-0' }))?.text).toBe('Q. zsh랑 bash 차이?대화형이면 zsh예요.')
+  expect(box.text).toBe('')
 })
 
 // 엔진은 baton이 보낸 글에 baton의 prompt.submit 훅을 돌리지 않는다(re-entry). 그래서 보내는 쪽이 사람 턴을 직접 센다:
