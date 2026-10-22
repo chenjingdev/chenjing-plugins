@@ -6,7 +6,7 @@ import type { Ask, AsksStats as Stats, Book } from '../types'
 
 // Claude가 사용자에게 넘긴 일(물을 것·볼 것)을 모아 두고, 입력창 아래 줄 끝에 개수를 보인다. 목록은 옆 패널의 내 차례(side-panel).
 // 다르게 한 것은 답할 것이 없는 알림이라 모으지 않는다: 본문에 남는다(answer-blocks).
-// 턴이 끝날 때마다 작은 모델이 판정한다: 이번 메시지로 답한 질문은 닫고, 이번 답의 새 질문은 더한다.
+// 턴이 끝날 때마다 작은 모델이 판정한다: 이번 메시지로 답한 질문은 닫고, 상황이 바뀐 질문은 고쳐 쓰고, 이번 답의 새 질문은 더한다.
 
 const BOOK = { plugin: 'baton', key: 'book' } as const
 const TURN = { plugin: 'baton', key: 'turn' } as const
@@ -86,25 +86,31 @@ export function judgePrompt(open: readonly Ask[], request: string | undefined, a
     '[이번 Claude 답]',
     answer.replace(CODE, '[코드 블록]').slice(0, 6000),
     '',
-    '두 가지를 판정하라.',
+    '세 가지를 판정하라.',
     'closed: 위 목록에서 이번 턴으로 끝난 질문의 번호. 사용자가 답했거나 골랐거나 거절·보류한 것, Claude가 이번 답에서 이미 처리한 것, 상황이 바뀌어 더 물을 필요가 없어진 것. "ㅇㅇ" "ㄱㄱ" "해봐"처럼 짧은 답은 직전 답의 질문에 대한 답으로 본다. 사용자가 다른 얘기를 했거나 그 질문에 대해 되묻기만 했으면 닫지 않는다. "볼 것:"으로 시작하는 항목은 사용자가 이번 메시지를 보냈고 그 항목에 되묻거나 반대하지 않았으면 닫는다.',
     'new: 이번 Claude 답에서 사용자가 답하거나 골라야 다음으로 넘어가는데 "물을 것:" 줄로 쓰지 않은 질문. "할까요?" "어느 쪽으로 할까요?" 같은 것. 수사적 질문, 이번 메시지에서 이미 답한 것, 목록이나 이미 잡은 항목에 있는 것, "다르게 한 것:" 줄(한 일을 알리기만 한다)은 넣지 않는다. 최대 3개. 각각 60자 안에서, 이것만 봐도 무엇에 관한 질문인지 알도록 대상 이름을 넣고, 원문보다 단정하지 않게 쓴다.',
-    '출력 형식: {"closed":[번호],"new":["질문"]}',
+    'changed: 위 목록에서 닫을 것은 아니지만 이번 턴으로 내용이 바뀐 질문(선택지가 줄었거나, 전제가 바뀌었거나, 이미 정해진 부분이 생긴 것)의 번호와 지금 상황에 맞게 고쳐 쓴 글. 60자 안에서 대상 이름을 넣는다. 그대로 맞으면 넣지 않는다. closed에 넣은 번호는 넣지 않는다.',
+    '출력 형식: {"closed":[번호],"changed":[{"n":번호,"text":"고친 질문"}],"new":["질문"]}',
   ].join('\n')
 }
 
-export type Judgment = { closed: number[]; added: string[] }
+export type Judgment = { closed: number[]; changed: { n: number; text: string }[]; added: string[] }
 
 export function parseJudgment(text: string): Judgment | undefined {
   const m = text.match(/\{[\s\S]*\}/)
   if (!m) return undefined
   try {
-    const j = JSON.parse(m[0]) as { closed?: unknown; new?: unknown }
+    const j = JSON.parse(m[0]) as { closed?: unknown; changed?: unknown; new?: unknown }
     const closed = Array.isArray(j.closed) ? j.closed.map(Number).filter(n => Number.isInteger(n) && n > 0) : []
+    const changed = Array.isArray(j.changed)
+      ? j.changed
+          .map(x => ({ n: Number((x as { n?: unknown })?.n), text: String((x as { text?: unknown })?.text ?? '').trim() }))
+          .filter(x => Number.isInteger(x.n) && x.n > 0 && x.text && !closed.includes(x.n))
+      : []
     const added = Array.isArray(j.new)
       ? j.new.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean).slice(0, 3)
       : []
-    return { closed, added }
+    return { closed, changed, added }
   } catch {
     return undefined
   }
@@ -124,7 +130,8 @@ export function labeledAsks(answer: string): string[] {
   return out.slice(0, 5)
 }
 
-// seen: 판정 모델이 본 질문 id. 그중 닫히지 않은 것은 사람 턴이 한 번 지나갈 때마다 skips가 는다
+// seen: 판정 모델이 본 질문 id. 그중 닫히지 않은 것은 사람 턴이 한 번 지나갈 때마다 skips가 는다.
+// changed: 상황이 바뀌어 고쳐 쓴 글(id별). id를 그대로 두어 옆 패널에 써 둔 답이 남고, 다른 항목과 같아지면 고치지 않는다
 export function apply(
   b: Book,
   seen: readonly number[],
@@ -133,12 +140,19 @@ export function apply(
   turnNo: number,
   now: number,
   countSkips: boolean,
+  changed: ReadonlyMap<number, string> = new Map(),
 ): Book {
   const items: Ask[] = []
   const closed = [...b.closed]
+  const others = (id: number) => new Set(b.items.filter(a => a.id !== id).map(a => sameKey(a.text)))
   for (const a of b.items) {
-    if (closedIds.includes(a.id)) closed.push({ text: a.text, at: now })
-    else items.push(countSkips && seen.includes(a.id) ? { ...a, skips: a.skips + 1 } : a)
+    if (closedIds.includes(a.id)) {
+      closed.push({ text: a.text, at: now })
+      continue
+    }
+    const t = changed.has(a.id) ? shorten(changed.get(a.id) ?? '') : ''
+    const next = t && !others(a.id).has(sameKey(t)) ? { ...a, text: t } : a
+    items.push(countSkips && seen.includes(a.id) ? { ...next, skips: next.skips + 1 } : next)
   }
   let seq = b.seq
   const have = new Set(items.map(a => sameKey(a.text)))
@@ -285,9 +299,14 @@ async function judgeOnce($: EngineInterface, s: Settings, answer: string, reques
   await update($, stats, (x: Stats): Stats => (j ? { ...x, judged: x.judged + 1 } : { ...x, failed: x.failed + 1 }))
   // 판정이 없으면 닫지도 세지도 않는다
   const closedIds = j ? j.closed.map(n => open[n - 1]?.id).filter((id): id is number => id !== undefined) : []
+  const changed = new Map<number, string>()
+  for (const c of j?.changed ?? []) {
+    const id = open[c.n - 1]?.id
+    if (id !== undefined) changed.set(id, c.text)
+  }
   const added = j ? j.added : []
   const seen = open.map(a => a.id)
-  await update($, book, (cur: Book): Book => apply(cur, seen, closedIds, added, turnNo, Date.now(), countSkips && request !== undefined && j !== undefined))
+  await update($, book, (cur: Book): Book => apply(cur, seen, closedIds, added, turnNo, Date.now(), countSkips && request !== undefined && j !== undefined, changed))
 }
 
 // 모듈을 다시 불러오면 그 전에 시작된 판정이 사라질 수 있다. 불러올 때 마지막 턴을 한 번 더 판정한다(같은 질문은 다시 더하지 않는다)

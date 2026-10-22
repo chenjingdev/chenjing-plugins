@@ -21,7 +21,8 @@ test('answers without a question skip the model when nothing is open', () => {
 })
 
 test('judgment parsing tolerates fences and drops junk', () => {
-  expect(parseJudgment('```json\n{"closed":[1,"2",0,-1],"new":["A할까요?"," ",3]}\n```')).toEqual({ closed: [1, 2], added: ['A할까요?'] })
+  expect(parseJudgment('```json\n{"closed":[1,"2",0,-1],"new":["A할까요?"," ",3]}\n```')).toEqual({ closed: [1, 2], changed: [], added: ['A할까요?'] })
+  expect(parseJudgment('{"closed":[1],"changed":[{"n":1,"text":"X"},{"n":2,"text":" Y? "},{"n":3},"z"]}')?.changed).toEqual([{ n: 2, text: 'Y?' }])
   expect(parseJudgment('모르겠어요')).toBe(undefined)
   expect(parseJudgment('{"closed": [1,}')).toBe(undefined)
   expect(parseJudgment('{"new":["a","b","c","d"]}')?.added.length).toBe(3)
@@ -245,4 +246,12 @@ test('a session that ends leaves the mark of its last judged answer in the store
   await clock.settle()
   await $.session.end({ reason: 'other', sessionId: 'test-session', resume: { id: 'test-session' } })
   expect(endMarkOf(s.store.get(END_MARKS), 'test-session')).toBe(answerMark(answer))
+})
+
+test('a question whose situation changed is rewritten in place, keeping its id, unless it would duplicate another', () => {
+  const b: Book = { items: [ask(1, 'A·B·C 중 무엇으로 할까요?', 1, 0), ask(2, 'D를 켤까요?', 1, 0)], closed: [], seq: 2 }
+  const next = apply(b, [1, 2], [], [], 2, 0, false, new Map([[1, 'A와 B 중 무엇으로 할까요?']]))
+  expect(next.items.map(a => [a.id, a.text])).toEqual([[1, 'A와 B 중 무엇으로 할까요?'], [2, 'D를 켤까요?']])
+  expect(apply(b, [], [], [], 2, 0, false, new Map([[1, 'D를 켤까요']])).items[0]?.text).toBe('A·B·C 중 무엇으로 할까요?')
+  expect(judgePrompt([ask(1, 'A?', 1, 1)], 'q', 'a', 2)).toContain('changed:')
 })
