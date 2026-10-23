@@ -21,7 +21,7 @@ enum ProblemKind: String, CaseIterable, Sendable {
     /// The engine, its Python environment, the wrapper, the relay, or Claude Code's MCP server or skill is
     /// missing, broken or of another version: the card's 고치기 installs it all again.
     case setupIncomplete = "setup_incomplete"
-    /// An MCP server or a skill named cua that the app did not put into Claude Code: left alone, told.
+    /// An MCP server or a skill named cuabar that the app did not put into Claude Code: left alone, told.
     case claudeConflict = "claude_conflict"
     case codexWithoutHost = "codex_without_host"
     /// The login environment value the wrapper needs is set to somebody else's: the setup leaves it alone, so only
@@ -179,7 +179,7 @@ enum StatusEvaluator {
     /// The card has a fix button only for a problem of the whole app. An ended connection or a leftover
     /// lease is one line's problem: the card says what to do and the button is on that line (F2). A conflict
     /// has no button either: the app does not touch what it did not put there. So the problems that have a
-    /// button come first, and a conflict someone left on purpose (their own cua server) does not hide them.
+    /// button come first, and a conflict someone left on purpose (their own cuabar server) does not hide them.
     ///
     /// `tabsReleased` holds the ended connections the app may only release (it may not stop them) whose
     /// tabs it released in this run. Once that is all that is left, the card says so instead of sending
@@ -259,14 +259,14 @@ enum StatusEvaluator {
         return issues
     }
 
-    /// An MCP server or a skill named cua that is not the app's.
+    /// An MCP server or a skill named cuabar that is not the app's.
     static func conflictProblem(in claude: ClaudeSetupState) -> Problem? {
         guard claude.claudeCodeFound, !claude.claudeCodeUnusable else { return nil }
         let title: String
         switch (claude.mcp == .conflict, claude.skill == .conflict) {
-        case (true, true): title = "Claude Code에 앱이 깔지 않은 cua MCP와 스킬이 있어요"
-        case (true, false): title = "Claude Code에 앱이 깔지 않은 cua MCP가 있어요"
-        case (false, true): title = "Claude Code에 앱이 깔지 않은 cua 스킬이 있어요"
+        case (true, true): title = "Claude Code에 앱이 깔지 않은 cuabar MCP와 스킬이 있어요"
+        case (true, false): title = "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요"
+        case (false, true): title = "Claude Code에 앱이 깔지 않은 cuabar 스킬이 있어요"
         case (false, false): return nil
         }
         return Problem(

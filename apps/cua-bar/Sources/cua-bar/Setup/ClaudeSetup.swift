@@ -36,15 +36,15 @@ enum LegacyPlugin {
     static let removeCommand = "claude plugin uninstall cua@chenjing-plugins --scope user"
 }
 
-/// The app's way into Claude Code: the `cua` MCP server in `~/.claude.json` and the `cua` skill in
-/// `~/.claude/skills/cua/`.
+/// The app's way into Claude Code: the `cuabar` MCP server in `~/.claude.json` and the `cuabar` skill in
+/// `~/.claude/skills/cuabar/`.
 ///
 /// The MCP server is changed only with `claude mcp add -s user` and `claude mcp remove -s user`, and read
 /// from the file (`claude mcp list` and `get` start the servers). The skill is two files the app writes: the
 /// skill itself and `.cua-bar.json`, the mark that says the app put it there. What the app did not put there
 /// is never changed or removed.
 struct ClaudeIntegration: Sendable, ClaudeRemoving {
-    static let serverName = "cua"
+    static let serverName = "cuabar"
     static let markerName = ".cua-bar.json"
 
     var home: URL
@@ -70,7 +70,7 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     var claudeCodeFound: Bool { claude.locate() != nil }
 
     var configURL: URL { home.appendingPathComponent(".claude.json") }
-    var skillFolder: URL { home.appendingPathComponent(".claude/skills/cua", isDirectory: true) }
+    var skillFolder: URL { home.appendingPathComponent(".claude/skills/cuabar", isDirectory: true) }
     var legacyRegistryURL: URL { home.appendingPathComponent(".claude/plugins/installed_plugins.json") }
 
     /// Where the app's engine copies are; a server command under it is the app's.
@@ -99,7 +99,7 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     /// The start script behind `current` is there (a link is followed: a dangling one is not there).
     var defaultLauncherExists: Bool { FileManager.default.fileExists(atPath: defaultLauncher) }
 
-    /// What `mcpServers.cua` at the top of `~/.claude.json` is, compared with what the app installs: the
+    /// What `mcpServers.cuabar` at the top of `~/.claude.json` is, compared with what the app installs: the
     /// launcher the engine reported, else `defaultLauncher`, with no arguments.
     func mcpState(launcher: String?) -> ClaudeSetupState.Part {
         switch mcpEntry() {
@@ -242,12 +242,12 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         case cannotStart
     }
 
-    /// `claude mcp add -s user cua -- <command>`.
+    /// `claude mcp add -s user cuabar -- <command>`.
     func addMCP(command: String) async -> CommandResult {
         await runClaude(["mcp", "add", "-s", "user", Self.serverName, "--", command])
     }
 
-    /// `claude mcp remove -s user cua`.
+    /// `claude mcp remove -s user cuabar`.
     func removeMCP() async -> CommandResult {
         await runClaude(["mcp", "remove", "-s", "user", Self.serverName])
     }

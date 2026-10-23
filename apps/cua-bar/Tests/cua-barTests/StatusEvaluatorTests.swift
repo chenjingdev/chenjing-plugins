@@ -173,7 +173,7 @@ struct StatusEvaluatorTests {
         ProblemCase(name: "setup_incomplete", kind: .setupIncomplete, title: "Codex 연결용 래퍼가 깨졌어요",
              nextStep: "고치기를 누르면 설정을 다시 맞춰요", fix: .runSetup, fixLabel: "고치기"),
         // Nothing the app may fix: it did not put it there. Said on the card, with where to read how.
-        ProblemCase(name: "claude_conflict", kind: .claudeConflict, title: "Claude Code에 앱이 깔지 않은 cua MCP가 있어요",
+        ProblemCase(name: "claude_conflict", kind: .claudeConflict, title: "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요",
              nextStep: "점검 탭에서 치우는 방법을 보세요", fix: nil, fixLabel: nil),
         ProblemCase(name: "codex_without_host", kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요",
              nextStep: "다시 켜면 Claude가 붙어요", fix: .restartCodex, fixLabel: "다시 켜기",
@@ -402,9 +402,9 @@ struct StatusEvaluatorTests {
     @Test func aConflictHasNoButtonAndNamesWhatIsThere() throws {
         let status = try healthy()
         let titles: [(ClaudeSetupState.Part, ClaudeSetupState.Part, String)] = [
-            (.conflict, .ready, "Claude Code에 앱이 깔지 않은 cua MCP가 있어요"),
-            (.ready, .conflict, "Claude Code에 앱이 깔지 않은 cua 스킬이 있어요"),
-            (.conflict, .conflict, "Claude Code에 앱이 깔지 않은 cua MCP와 스킬이 있어요"),
+            (.conflict, .ready, "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요"),
+            (.ready, .conflict, "Claude Code에 앱이 깔지 않은 cuabar 스킬이 있어요"),
+            (.conflict, .conflict, "Claude Code에 앱이 깔지 않은 cuabar MCP와 스킬이 있어요"),
         ]
         for (mcp, skill, title) in titles {
             let summary = evaluate(status, facts: claude(mcp: mcp, skill: skill))

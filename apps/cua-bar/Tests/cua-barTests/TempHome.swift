@@ -58,10 +58,10 @@ struct TempHome {
 
     var claudeConfig: URL { url.appendingPathComponent(".claude.json") }
 
-    /// `~/.claude.json` with other things in it, as a used Claude Code leaves it, and `cua` among the user's MCP servers.
+    /// `~/.claude.json` with other things in it, as a used Claude Code leaves it, and `cuabar` among the user's MCP servers.
     func addMcp(command: String, args: [String] = [], others: [String: Any] = [:], type: String = "stdio") throws {
         var servers = others
-        servers["cua"] = ["type": type, "command": command, "args": args, "env": [String: String]()] as [String: Any]
+        servers["cuabar"] = ["type": type, "command": command, "args": args, "env": [String: String]()] as [String: Any]
         try writeClaudeConfig(["numStartups": 7, "projects": ["/x": ["history": []]], "mcpServers": servers])
     }
 
@@ -70,9 +70,9 @@ struct TempHome {
         try write(String(decoding: data, as: UTF8.self), to: claudeConfig)
     }
 
-    var skillFolder: URL { url.appendingPathComponent(".claude/skills/cua", isDirectory: true) }
+    var skillFolder: URL { url.appendingPathComponent(".claude/skills/cuabar", isDirectory: true) }
 
-    /// `~/.claude/skills/cua/` with a skill in it, and the app's mark when `version` is given.
+    /// `~/.claude/skills/cuabar/` with a skill in it, and the app's mark when `version` is given.
     func addSkill(version: String?, body: String = "the skill\n") throws {
         try write(body, to: skillFolder.appendingPathComponent("SKILL.md"))
         if let version { try write(#"{"version": "\#(version)"}"#, to: skillFolder.appendingPathComponent(".cua-bar.json")) }

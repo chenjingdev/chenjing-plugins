@@ -185,7 +185,7 @@ struct RemovalTests {
         let removal = Task { await rig.flow.confirm() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         #expect(rig.flow.phase == .finished(RemovalMessages.done + RemovalMessages.mcpStays))
-        #expect(RemovalMessages.mcpStays.contains("claude mcp remove -s user cua"))
+        #expect(RemovalMessages.mcpStays.contains("claude mcp remove -s user cuabar"))
         rig.sleeper.releaseAll()
         await removal.value
     }

@@ -186,7 +186,7 @@ struct CheckContentTests {
     }
 
     @Test func withoutCodexACuaTheAppDidNotPutThereIsStillToldWithItsCommand() throws {
-        // F1: someone else's cua MCP server or skill is left as it is, Codex or not, so waiting for Codex would not put it
+        // F1: someone else's cuabar MCP server or skill is left as it is, Codex or not, so waiting for Codex would not put it
         // right. The line says it, with the command, and what comes after the command is Codex, not the card's fix.
         var claude = CheckFixtures.claudeReady()
         claude.mcp = .conflict
@@ -200,11 +200,11 @@ struct CheckContentTests {
             #expect(input.card?.kind == .codexMissing)
             let content = CheckContent(input)
             let mcp = try #require(content.line(.mcp))
-            #expect(mcp.status == .problem && mcp.detail == "앱이 깔지 않은 cua MCP가 있어요 — 그대로 뒀어요")
+            #expect(mcp.status == .problem && mcp.detail == "앱이 깔지 않은 cuabar MCP가 있어요 — 그대로 뒀어요")
             #expect(mcp.commands.map(\.text) == [CheckContent.removeMCPCommand])
             #expect(mcp.steps.last == "지운 뒤 Codex를 깔면 앱이 연결해요")
             let skill = try #require(content.line(.skill))
-            #expect(skill.status == .problem && skill.detail == "앱이 깔지 않은 cua 스킬이 있어요 — 그대로 뒀어요")
+            #expect(skill.status == .problem && skill.detail == "앱이 깔지 않은 cuabar 스킬이 있어요 — 그대로 뒀어요")
             #expect(skill.commands.map(\.text) == [CheckContent.moveSkillCommand])
             #expect(skill.steps.last == "옮긴 뒤 Codex를 깔면 앱이 스킬을 깔아요")
             for item in [CheckItem.engine, .python, .wrapper, .relay] {
@@ -296,10 +296,10 @@ struct CheckContentTests {
         let content = CheckFixtures.content(try status { _ in }, claude: claude)
         let line = try #require(content.line(.mcp))
         #expect(line.status == .problem)
-        #expect(line.detail == "앱이 깔지 않은 cua MCP가 있어요 — 그대로 뒀어요")
-        #expect(line.commands.map(\.text) == ["claude mcp remove -s user cua"])
+        #expect(line.detail == "앱이 깔지 않은 cuabar MCP가 있어요 — 그대로 뒀어요")
+        #expect(line.commands.map(\.text) == ["claude mcp remove -s user cuabar"])
         // The command is handed over to copy, never run by the app.
-        #expect(line.commands.first?.copy.action == .copyCommand("claude mcp remove -s user cua", on: .mcp))
+        #expect(line.commands.first?.copy.action == .copyCommand("claude mcp remove -s user cuabar", on: .mcp))
         #expect(line.button == nil)
         #expect(content.problemCount == 1)
     }
@@ -309,10 +309,10 @@ struct CheckContentTests {
         claude.skill = .conflict
         let line = try #require(CheckFixtures.content(try status { _ in }, claude: claude).line(.skill))
         #expect(line.status == .problem)
-        #expect(line.detail == "앱이 깔지 않은 cua 스킬이 있어요 — 그대로 뒀어요")
+        #expect(line.detail == "앱이 깔지 않은 cuabar 스킬이 있어요 — 그대로 뒀어요")
         // Moved out of the skills folder (another name in there would be read as a skill), never removed, and not by the app.
-        #expect(line.commands.map(\.text) == ["mv ~/.claude/skills/cua ~/cua-skill-backup"])
-        #expect(line.commands.first?.copy.action == .copyCommand("mv ~/.claude/skills/cua ~/cua-skill-backup", on: .skill))
+        #expect(line.commands.map(\.text) == ["mv ~/.claude/skills/cuabar ~/cuabar-skill-backup"])
+        #expect(line.commands.first?.copy.action == .copyCommand("mv ~/.claude/skills/cuabar ~/cuabar-skill-backup", on: .skill))
         #expect(line.steps.first?.contains("옮겨 두세요") == true)
         #expect(!line.steps.joined().contains("지워 주세요") && !line.commands.map(\.text).joined().contains("rm "))
         #expect(line.steps.joined().contains("앱은 옮기거나 지우지 않아요"))
@@ -329,7 +329,7 @@ struct CheckContentTests {
         // Both a conflicting server and the old plugin: both are told.
         claude.mcp = .conflict
         let both = try #require(CheckFixtures.content(try status { _ in }, claude: claude).line(.mcp))
-        #expect(both.commands.map(\.text) == ["claude mcp remove -s user cua", LegacyPlugin.removeCommand])
+        #expect(both.commands.map(\.text) == ["claude mcp remove -s user cuabar", LegacyPlugin.removeCommand])
     }
 
     // MARK: Claude Code

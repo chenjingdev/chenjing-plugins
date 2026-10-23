@@ -21,7 +21,7 @@ curl -fsSL ${origin}/install.sh | sh
 - CUABar.app을 /Applications에 깝니다. 쓸 수 없으면 ~/Applications에 깝니다. 이미 같거나 새 판이 있으면 받지 않습니다.
 - 앱을 켭니다. 메뉴 막대에 아이콘이 생깁니다.
 
-앱 하나만 깔면 됩니다. Claude 플러그인은 따로 깔지 않습니다. 앱이 켜지면 묻지 않고 Claude Code에 cua MCP와 cua 스킬을 깔고
+앱 하나만 깔면 됩니다. Claude 플러그인은 따로 깔지 않습니다. 앱이 켜지면 묻지 않고 Claude Code에 cuabar MCP와 cuabar 스킬을 깔고
 Codex 연결에 필요한 엔진을 준비합니다. 새 Claude 대화부터 CUA가 붙고, 이미 열려 있는 대화에는 붙지 않습니다.
 잘 깔렸는지는 메뉴 막대 아이콘의 창에서 '점검' 탭이 항목마다 보여 줍니다.
 Claude Code가 아직 없으면 그 줄은 점검 탭에만 보이고(카드와 아이콘은 문제로 보이지 않습니다), 생긴 뒤에 한 번 깝니다.

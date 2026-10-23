@@ -27,14 +27,14 @@ Apple Silicon Mac, macOS 14 이상에서 돌아요. Computer Use를 쓸 수 있�
    - **파이썬 환경**: `~/.local/share/codex-cua/venv`에 필요한 패키지를 받아요. 첫 설치는 몇 분 걸릴 수 있고, 그동안 상태 카드가 "연결을 설정하는 중"이라고 말해요. 패키지가 바뀌는 판에서만 새로 만들어요.
    - **Codex 연결**: `~/.local/bin/codex-cua` 명령, Codex를 연결 가능한 방식으로 켜는 래퍼와 로그인 설정(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`), 중계기 사본이에요.
    - **Claude Code의 MCP**: `claude mcp add -s user cua -- ~/.local/share/codex-cua/engine/current/start-mcp.sh`로 한 번 등록해요. 판이 바뀌어도 `current` 링크가 새 판을 가리키니 다시 등록하지 않아요.
-   - **Claude Code의 스킬**: `~/.claude/skills/cua/`에 스킬을 두고, 앱이 깐 것이라는 표식 `.cua-bar.json`을 함께 둬요.
+   - **Claude Code의 스킬**: `~/.claude/skills/cuabar/`에 스킬을 두고, 앱이 깐 것이라는 표식 `.cua-bar.json`을 함께 둬요.
 
    바뀐 것이 있으면 "새 Claude 대화부터 CUA가 붙어요"라고 한 번 알려요. 이미 열려 있는 Claude 대화에는 붙지 않아요. 실패하면 카드에 "연결 설정에 실패했어요"와 **다시 하기** 버튼이 떠요. 저절로 하는 것은 앱을 켤 때마다 한 번과, 켤 때 없어서 미룬 것이 나중에 생겼을 때 한 번이에요. 그 밖에는 버튼을 누를 때만 해요.
 2. **없는 것은 미뤄요.**
    - Claude Code가 없으면 엔진까지만 깔고 MCP와 스킬은 미뤄요. 이 줄은 점검 탭에만 나오고 상태 카드와 아이콘은 문제로 보이지 않아요(Codex만 쓰는 맥이 늘 문제로 보이지 않게). Claude Code가 생기면 알아채고 한 번 깔아요.
    - Codex 앱이 없으면 엔진도 MCP도 스킬도 깔지 않아요. 상태 카드와 아이콘이 "Codex 앱이 없어요"와 **받는 곳 열기**를 보여요. Codex가 깔리면 알아채고 한 번 깔아요.
    - 개발자 도구가 없으면 설치 창을 저절로 띄우지 않고(앱이 앞으로 나서지 않게), 카드에 "개발자 도구 필요"와 **설치** 버튼만 둬요. 누르면 macOS의 개발자 도구 설치 창이 떠요. 끝난 뒤 한 번 더 누르면 이어서 깔아요.
-3. **남의 것은 건드리지 않아요.** 앱이 깔지 않은 `cua` MCP나 `cua` 스킬, 옛 `cua@chenjing-plugins` 플러그인이 있으면 지우거나 덮지 않고, 점검 탭에 충돌과 치우는 방법을 보여요(MCP와 옛 플러그인은 지우는 명령, 스킬은 skills 폴더 밖으로 옮겨 두는 명령이에요). 아래 "옛 플러그인에서 옮기기"를 보세요.
+3. **남의 것은 건드리지 않아요.** 앱이 깔지 않은 `cuabar` MCP나 `cuabar` 스킬, 옛 `cua@chenjing-plugins` 플러그인이 있으면 지우거나 덮지 않고, 점검 탭에 충돌과 치우는 방법을 보여요(MCP와 옛 플러그인은 지우는 명령, 스킬은 skills 폴더 밖으로 옮겨 두는 명령이에요). 아래 "옛 플러그인에서 옮기기"를 보세요.
 4. **로그인할 때 저절로 떠요.** Applications나 `~/Applications`에서 처음 열 때 한 번만 로그인 항목으로 등록해요. 그 뒤로는 다시 등록하지 않아요. 끄고 싶으면 시스템 설정 → 일반 → 로그인 항목에서 끄면 되고, 앱이 그것을 존중해요. 앱 안에는 스위치가 없어요. 지금 상태는 점검 탭의 앱 로그인 항목 줄과, 기록 탭 아래쪽(진단 복사 버튼 줄 위)에 적혀요.
 5. **Codex를 한 번 다시 켜야 해요.** 이미 켜져 있던 Codex는 연결 없이 켜진 것이라, 카드가 "Codex가 연결 없이 켜져 있어요"라고 하고 **다시 켜기**를 보여요. 앱은 누르기 전에는 Codex를 끄지 않아요. 누르면 "하던 Codex 작업이 끊겨요"라고 한 번 묻고, 정상 종료(강제 종료 없음)한 뒤 다시 켜요. macOS가 CUA Bar가 Codex를 제어하려 한다고 물으면 **허용**을 눌러요. 종료 요청이 그 권한으로 가요. Codex가 종료를 한 번 더 물으면(예약 작업이 있으면 Codex가 물어요) Codex 창에서 **종료**를 눌러 주세요. 그동안 카드가 꺼지기를 기다린다고 말하고, 10분 안에 꺼지면 앱이 Codex를 다시 켜요. 그 뒤로는 Dock이나 Spotlight로 켜도 Claude가 바로 붙고, Codex가 꺼져 있으면 Claude 대화를 열 때 뒤에서 켜져요.
 
@@ -54,7 +54,7 @@ Apple Silicon Mac, macOS 14 이상에서 돌아요. Computer Use를 쓸 수 있�
 
 "끝난 연결이 남아 있어요"와 "점유가 남았을 수 있어요"에는 카드 버튼이 없어요. 카드가 그 줄의 버튼 이름으로 "목록 맨 위의 정리를 눌러 주세요"(남은 점유면 "목록 맨 위의 탭 풀기를 눌러 주세요")라고 말하고, 연결 탭 맨 위의 **손볼 것**에서 눌러요.
 
-앱이 건드리지 않는 것이 문제일 때도 카드에는 버튼이 없어요. Claude Code에 앱이 깔지 않은 cua MCP·스킬이 있다는 카드와 "Codex 로그인 설정이 다른 값과 겹쳐요" 카드는 "점검 탭에서 치우는 방법을 보세요"(겹치는 값이면 "겹치는 값과 치우는 방법을 보세요")라고만 말하고, 방법은 점검 탭에 있어요. 문제가 여럿이면 가장 먼저 걸리는 하나만 카드에 보여요. 버튼이 있는 문제가 먼저예요.
+앱이 건드리지 않는 것이 문제일 때도 카드에는 버튼이 없어요. Claude Code에 앱이 깔지 않은 cuabar MCP·스킬이 있다는 카드와 "Codex 로그인 설정이 다른 값과 겹쳐요" 카드는 "점검 탭에서 치우는 방법을 보세요"(겹치는 값이면 "겹치는 값과 치우는 방법을 보세요")라고만 말하고, 방법은 점검 탭에 있어요. 문제가 여럿이면 가장 먼저 걸리는 하나만 카드에 보여요. 버튼이 있는 문제가 먼저예요.
 
 그 아래에 탭이 셋 있어요: 연결, 기록, 점검.
 
@@ -66,8 +66,8 @@ Apple Silicon Mac, macOS 14 이상에서 돌아요. Computer Use를 쓸 수 있�
 - **기록**: 최근 조작(시각 · 에이전트 · 폴더 · 도구 · 성공 여부 · 걸린 시간)이에요. 맨 아래에 가끔 쓰는 버튼이 모여 있어요. **진단 복사**는 붙여 넣어도 안전한 진단 글을 복사하고, 끝에 점검 결과(항목마다 한 줄), 알림 상태, 앱 판, 로그인 항목, 업데이트 줄을 차례로 덧붙여요(경로·판·상태 낱말만 들어가요). 업데이트 줄은 새 판을 저절로 올리지 못했으면 그 기록이고, 정식 서명 판이 아니라서 업데이트를 하지 않는 빌드이면 "업데이트: 꺼짐(정식 서명 판이 아님)"이에요. 할 말이 없으면 이 줄은 없어요. Codex가 이미 끝난 대화의 스레드를 스스로 다시 켠 빈 런타임은 목록에 보이지 않고, 있으면 이 글에 "Codex가 다시 켠 빈 런타임 n개 · 메모리" 한 줄로만 들어가요(Codex가 곧 내려요). 알림을 보일 수 없을 때만 **알림 켜기**가 보여요. **앱 지우기…**는 아래 "지우기"를 보세요.
 - **점검**: 환경을 항목마다 한 줄씩 보여요. 줄마다 상태와 짧은 설명이 있고, 순서는 이래요.
   1. **Claude Code**: 찾았는지. 없으면 받는 법을 한 줄로 알려요. 찾았지만 시작하지 못하면(npm으로 깐 `claude`가 옆의 `node`를 못 찾을 때처럼) 찾은 `claude`의 경로와 "터미널에서 그 claude가 도는지 확인해 주세요"를 보여요.
-  2. **MCP**: Claude Code에 `cua` MCP가 앱이 깐 것으로 들어 있는지.
-  3. **스킬**: `~/.claude/skills/cua`가 앱이 깐 것이고 이 판과 같은지.
+  2. **MCP**: Claude Code에 `cuabar` MCP가 앱이 깐 것으로 들어 있는지.
+  3. **스킬**: `~/.claude/skills/cuabar`가 앱이 깐 것이고 이 판과 같은지.
   4. **엔진**: 엔진 사본의 판이 앱의 판과 같은지.
   5. **파이썬 환경**: 필요한 패키지가 준비됐는지.
   6. **Codex 래퍼와 로그인 설정**: Codex를 연결 가능한 방식으로 켜는 래퍼와 로그인 설정이 제자리에 있는지.
@@ -77,7 +77,7 @@ Apple Silicon Mac, macOS 14 이상에서 돌아요. Computer Use를 쓸 수 있�
 
   깨진 줄이 상태 카드에도 올라 있으면(MCP·스킬·엔진·파이썬 환경·래퍼·중계기, 그리고 Codex 앱이 없거나 Codex가 연결 없이 켜져 있을 때의 Codex 호스트 줄) 줄에는 "위 카드에서 고쳐요"만 적고, 카드의 버튼으로 고쳐요. 카드에 오르지 않는 줄은 그 줄에서 고쳐요.
   - 개발자 도구: **설치** 버튼이에요. 누를 때만 macOS 설치 창이 떠요.
-  - 앱이 깔지 않은 `cua` MCP나 옛 플러그인: 지우는 명령(`claude mcp remove -s user cua`, `claude plugin uninstall cua@chenjing-plugins --scope user`)을 보여 줘요. 앱이 깔지 않은 `cua` 스킬은 지우지 않고 skills 폴더 밖으로 옮겨 두라고 해요(`mv ~/.claude/skills/cua ~/cua-skill-backup`. skills 안의 다른 이름으로 옮기면 그대로 스킬로 읽혀서 밖으로 옮겨요). 명령은 복사 버튼으로 줘요. 앱이 대신 하지 않아요.
+  - 앱이 깔지 않은 `cuabar` MCP나 옛 플러그인: 지우는 명령(`claude mcp remove -s user cuabar`, `claude plugin uninstall cua@chenjing-plugins --scope user`)을 보여 줘요. 앱이 깔지 않은 `cuabar` 스킬은 지우지 않고 skills 폴더 밖으로 옮겨 두라고 해요(`mv ~/.claude/skills/cua ~/cuabar-skill-backup`. skills 안의 다른 이름으로 옮기면 그대로 스킬로 읽혀서 밖으로 옮겨요). 명령은 복사 버튼으로 줘요. 앱이 대신 하지 않아요.
   - Codex 로그인 설정이 남의 값과 겹칠 때: 겹치는 것과 치우는 법을 보여요. 로그인 항목 파일이 남의 것이면 그 파일을 다른 곳으로 옮기라고, `CODEX_CLI_PATH`가 남의 값이면 그 값(읽기만 해요)과 `launchctl unsetenv CODEX_CLI_PATH`(복사 버튼)를 보여 주고 지운 뒤 카드의 고치기를 누르라고 안내해요.
   - Claude Code 없음: 이 탭에만 나와요. 상태 카드와 아이콘은 문제로 보이지 않아요.
 
@@ -113,7 +113,7 @@ AI가 정리 없이 끝나면 앱이 끝난 연결의 점유를 대신 풀어 �
 
 1. 먼저 한 번 물어요: "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지워요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜져요. 열린 Claude 대화의 CUA도 끊겨요."
 2. 확인하면 이 순서로 해요. 먼저 Codex 호스트가 켜져 있는지 봐요(켜져 있으면 여기서 멈춰요).
-   - Claude Code에서 앱이 깐 `cua` MCP(`claude mcp remove -s user cua`)와 스킬(`~/.claude/skills/cua`)을 지워요. Claude Code가 MCP를 지우지 못하면 결과에 `claude mcp remove -s user cua`를 직접 하라고 덧붙여요.
+   - Claude Code에서 앱이 깐 `cuabar` MCP(`claude mcp remove -s user cuabar`)와 스킬(`~/.claude/skills/cuabar`)을 지워요. Claude Code가 MCP를 지우지 못하면 결과에 `claude mcp remove -s user cuabar`를 직접 하라고 덧붙여요.
    - `codex-cua uninstall`을 돌려요. 연결 설정·중계기·Codex 로그인 설정·`~/.local/bin/codex-cua`를 되돌리고, `~/.local/share/codex-cua`를 엔진 사본과 파이썬 환경까지 통째로 지워요. `codex-cua`가 없거나 이 앱의 것이 아니면 앱에 묶인 엔진 사본의 `setup.sh uninstall`을 대신 돌려요.
    - 앱 자신의 로그인 항목을 풀어요.
 
@@ -127,7 +127,7 @@ AI가 정리 없이 끝나면 앱이 끝난 연결의 점유를 대신 풀어 �
 - `~/Library/Preferences/dev.chenjing.cua-bar.plist`: 앱 설정
 - `~/Library/Application Support/CUABar/Backups/<시각>/CUABar.app`: 업데이트가 남긴 옛 앱 한 벌
 
-앱 파일은 휴지통으로 옮기면 돼요. 앱이 깔지 않은 `cua` MCP·스킬이나 옛 플러그인은 앱의 것이 아니라서 건드리지 않고 그대로 있어요.
+앱 파일은 휴지통으로 옮기면 돼요. 앱이 깔지 않은 `cuabar` MCP·스킬이나 옛 플러그인은 앱의 것이 아니라서 건드리지 않고 그대로 있어요.
 
 **앱 파일만 휴지통에 버리면** MCP·스킬·엔진은 그대로 남아서 Claude의 CUA가 계속 쓰이고, 엔진 사본(`~/.local/share/codex-cua`)과 Codex 로그인 설정도 남아요. 이 맥에서 CUA를 치우려면 앱 지우기를 먼저 누르고 그다음에 앱 파일을 버려요.
 
@@ -141,7 +141,9 @@ AI가 정리 없이 끝나면 앱이 끝난 연결의 점유를 대신 풀어 �
 2. 그 명령으로 옛 플러그인을 지워요: `claude plugin uninstall cua@chenjing-plugins --scope user`
 3. 새 Claude 대화를 열어요. 이제 앱이 깐 MCP와 스킬만 붙어요.
 
-도구 이름이 `mcp__plugin_cua_cua__js`에서 `mcp__cua__js`로(`js_reset`도 같게) 바뀌었어요. 권한 허용 목록이나 훅에 옛 이름을 적어 두었다면 새 이름으로 고쳐요.
+도구 이름이 `mcp__plugin_cua_cua__js`에서 `mcp__cuabar__js`로(`js_reset`도 같게) 바뀌었어요. 권한 허용 목록이나 훅에 옛 이름을 적어 두었다면 새 이름으로 고쳐요.
+
+0.8.0은 MCP와 스킬을 `cua`라는 이름으로 깔았어요. 0.8.1부터는 이름이 `cuabar`예요. 0.8.0을 썼다면 새 판이 `cuabar`를 깐 뒤 옛 이름을 지워요: `claude mcp remove -s user cua`, `rm -rf ~/.claude/skills/cua`. 지우지 않으면 CUA가 둘 붙어요.
 
 ## 개인정보
 
@@ -165,7 +167,7 @@ CUABAR_NOTARY_PROFILE=<프로필> ./scripts/package-release.sh   # dist/에 서�
 
 - `build-app.sh`는 언제나 hardened runtime으로 서명해서, 손으로 깐 앱도 릴리스와 같은 규칙으로 돌아요. 예외는 Apple Events 하나예요(`scripts/CUABar.entitlements`). Codex 다시 켜기가 osascript로 Codex에 종료를 요청하기 때문이에요. `CUABAR_CODE_SIGN_IDENTITY`를 주면 그 신원으로 서명하고 보안 타임스탬프를 붙여요. 엔진은 서명하기 전에 `CUABar.app/Contents/Resources/engine/`에 담아서 서명이 엔진까지 덮어요(링크와 `__pycache__`·`*.pyc`·`.DS_Store`는 빼요).
 - `--install`은 있던 앱과 설정을 `~/Library/Application Support/CUABar/Backups/<시각>/`에 백업하고, 앱이 켜져 있으면 멈추고, 복사본의 서명을 확인한 뒤에 바꿔요.
-- 번들로 켠 앱은 개발용 ad hoc 서명이어도 이 맥의 실제 `~/.claude.json`·`~/.claude/skills/cua`·`~/.local/share/codex-cua`를 바꿔요. `swift run`처럼 번들 밖에서 돈 앱은 엔진도 MCP·스킬도 건드리지 않고, 자동 업데이트도 하지 않아요. 번들이어도 ad hoc 서명이면 자동 업데이트를 하지 않아요.
+- 번들로 켠 앱은 개발용 ad hoc 서명이어도 이 맥의 실제 `~/.claude.json`·`~/.claude/skills/cuabar`·`~/.local/share/codex-cua`를 바꿔요. `swift run`처럼 번들 밖에서 돈 앱은 엔진도 MCP·스킬도 건드리지 않고, 자동 업데이트도 하지 않아요. 번들이어도 ad hoc 서명이면 자동 업데이트를 하지 않아요.
 - `package-release.sh [폴더]`는 키체인의 Developer ID Application 인증서로 앱을 만들어요(여럿이면 `CUABAR_CODE_SIGN_IDENTITY`로 골라요). `CUABAR_NOTARY_PROFILE`은 `xcrun notarytool store-credentials`로 만든 프로필 이름이에요. 앱을 공증받아 티켓을 붙이고, 그 앱을 담은 `CUABar-v<판>-macos-arm64.dmg`도 서명·공증해 티켓을 붙인 뒤 `SHA256SUMS.txt`와 함께 폴더에 써요. 기본 폴더는 `apps/cua-bar/dist/`이고 git이 보지 않아요. 체크섬, dmg와 그 안 앱의 서명·티켓, Gatekeeper가 둘 다 받아들이는지까지 확인한 뒤, GitHub 릴리스용 태그 `cua-bar--v<판>`과 실행할 `gh release create ...` 명령을 **출력만** 해요. 태그를 만들거나 올리거나 `gh`를 부르지 않아요. 올리는 것은 그때그때 물어보고 직접 해요. GitHub 릴리스는 선택이에요. 앱의 업데이트와 한 줄 설치는 GitHub를 보지 않아요.
 - `download/`는 cua.chenjing.org를 맡는 Cloudflare Worker예요. dmg, `SHA256SUMS.txt`, `install.sh`는 정적 파일로 나가고, `worker.js`가 첫 주소와 `/download`(맥 브라우저는 dmg로 넘기고, 휴대폰·curl 같은 것에는 안내 두 줄), `/install`(에이전트가 읽는 안내), `/version`(`install.sh`와 앱의 자동 업데이트가 읽는 판 정보)을 답해요. `install.sh`는 받은 dmg를 열기 전에(팀만 봐요), 그리고 그 안의 앱을 깔기 전에(번들 ID까지 봐요) 서명 요구 사항(`codesign --verify -R`)으로 검증한 뒤에만 깔아요. `public/`과 `release.json`은 `build-download-site.sh`가 만들고 git이 보지 않아요. 릴리스마다 `package-release.sh` → `build-download-site.sh` → `wrangler deploy` 순서로 올려요(GitHub 릴리스를 올릴 때는 그 사이에 해요). 올리는 것은 그때그때 물어봐요.
 - 앱 판 번호는 `engine/.claude-plugin/plugin.json`의 `version`에서 와요(이 파일 이름은 엔진 매니페스트로 그대로 써요). 판을 올릴 때 `engine/host_mcp.py`의 `VERSION`도 같은 값으로 올려요. `tests/cua/test_host_mcp.py`가 둘이 같은지 봐요.

@@ -27,7 +27,7 @@ enum InstallMessages {
     static let engineFailed = "연결 엔진을 설치하지 못했어요"
     static let mcpFailed = "Claude Code에 CUA를 연결하지 못했어요"
     static let skillFailed = "Claude Code에 CUA 스킬을 깔지 못했어요"
-    /// An MCP server or a skill named cua that the app did not put there: left as it is.
+    /// An MCP server or a skill named cuabar that the app did not put there: left as it is.
     static let conflict = "Claude Code에 앱이 깔지 않은 cua가 있어서 그대로 뒀어요 — 점검 탭에서 치우는 방법을 보세요"
     /// A new Claude conversation is where the connection shows up.
     static let installed = "새 Claude 대화부터 CUA가 붙어요"
@@ -41,7 +41,7 @@ enum InstallMessages {
 
 /// The fixes that reach outside the engine: opening a download page, the developer tools' installer, and the
 /// install itself (F1, R1): the engine in the app's bundle is unpacked by its own `setup.sh install-engine`,
-/// then the `cua` MCP server and skill are put into Claude Code.
+/// then the `cuabar` MCP server and skill are put into Claude Code.
 ///
 /// Every step runs only because the app was started or a button was pressed; a status read never reaches
 /// here. The install takes the shared setup slot (`SetupActivity`), so two never run at once. It looks

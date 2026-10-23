@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import cua_bar
 
-/// What the app reads of Claude Code (`~/.claude.json`, `~/.claude/skills/cua/`) and what it changes there.
+/// What the app reads of Claude Code (`~/.claude.json`, `~/.claude/skills/cuabar/`) and what it changes there.
 /// Everything runs over a throwaway home, and `claude` is a stand-in that is never run for real.
 struct ClaudeSetupTests {
     private func make(
@@ -62,9 +62,9 @@ struct ClaudeSetupTests {
             #expect(claude.mcpState(launcher: home.launcher) == .conflict, "\(command)")
         }
         try home.addMcp(command: "/x", type: "http")
-        try home.writeClaudeConfig(["mcpServers": ["cua": ["type": "http", "url": "https://example.com/mcp"]]])
+        try home.writeClaudeConfig(["mcpServers": ["cuabar": ["type": "http", "url": "https://example.com/mcp"]]])
         #expect(claude.mcpState(launcher: home.launcher) == .conflict, "a server without a command")
-        try home.writeClaudeConfig(["mcpServers": ["cua": "oops"]])
+        try home.writeClaudeConfig(["mcpServers": ["cuabar": "oops"]])
         #expect(claude.mcpState(launcher: home.launcher) == .conflict)
     }
 
@@ -169,11 +169,11 @@ struct ClaudeSetupTests {
         let home = try TempHome()
         defer { home.remove() }
         let (claude, _) = make(home)
-        try home.addSkill(version: nil, body: "the user's own cua skill\n")
+        try home.addSkill(version: nil, body: "the user's own cuabar skill\n")
         #expect(claude.skillState(source: try source(home), appVersion: "0.7.0") == .conflict)
-        // A link named cua, or a file, is not the app's folder either.
+        // A link named cuabar, or a file, is not the app's folder either.
         try FileManager.default.removeItem(at: home.skillFolder)
-        let target = home.url.appendingPathComponent("my-skills/cua", isDirectory: true)
+        let target = home.url.appendingPathComponent("my-skills/cuabar", isDirectory: true)
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         try home.write(#"{"version": "0.7.0"}"#, to: target.appendingPathComponent(".cua-bar.json"))
         try FileManager.default.createSymbolicLink(at: home.skillFolder, withDestinationURL: target)
@@ -221,13 +221,13 @@ struct ClaudeSetupTests {
         try home.addMcp(command: home.launcher, others: ["other": ["command": "/usr/bin/other"]])
         try home.addSkill(version: "0.7.0")
         let (claude, runner) = make(home) { call in
-            // `claude mcp remove` takes only cua out of the file.
+            // `claude mcp remove` takes only cuabar out of the file.
             try home.writeClaudeConfig(["mcpServers": ["other": ["command": "/usr/bin/other"]]])
             return StepRunner.ok()
         }
         let removal = await claude.removeAppOwned()
         #expect(removal == ClaudeIntegration.Removal(mcpStays: false, removedAnything: true))
-        #expect(runner.calls.map(\.arguments) == [["mcp", "remove", "-s", "user", "cua"]])
+        #expect(runner.calls.map(\.arguments) == [["mcp", "remove", "-s", "user", "cuabar"]])
         #expect(runner.calls.first?.executable == home.claudeCLI.path)
         #expect(!FileManager.default.fileExists(atPath: home.skillFolder.path))
         #expect(claude.mcpState(launcher: home.launcher) == .missing)
@@ -292,7 +292,7 @@ struct ClaudeSetupTests {
         try home.write("#!/bin/sh\n", to: resources.appendingPathComponent("engine/setup.sh"))
         let found = try #require(BundledEngine.locate(in: bundle))
         #expect(found.setupScript.lastPathComponent == "setup.sh")
-        #expect(found.skillSource.path.hasSuffix("engine/skills/cua/SKILL.md"))
+        #expect(found.skillSource.path.hasSuffix("engine/skills/cuabar/SKILL.md"))
     }
 
     @Test func codexIsFoundInTheEnginesPlacesAndByItsBundleId() throws {
@@ -347,7 +347,7 @@ struct ClaudeCommandStartTests {
         try executable("#!/usr/bin/env node\n", at: home.claudeCLI, in: home)
         #expect(await integration(home).addMCP(command: "/x/start-mcp.sh") == .succeeded)
         let line = try String(contentsOf: ran, encoding: .utf8)
-        #expect(line.hasPrefix(home.claudeCLI.path + " mcp add -s user cua -- /x/start-mcp.sh"))
+        #expect(line.hasPrefix(home.claudeCLI.path + " mcp add -s user cuabar -- /x/start-mcp.sh"))
     }
 
     @Test func aClaudeWhoseInterpreterIsNowhereCannotStart() async throws {

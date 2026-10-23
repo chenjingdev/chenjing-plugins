@@ -9,7 +9,7 @@ struct BundledEngine: Equatable, Sendable {
     var root: URL
 
     var setupScript: URL { root.appendingPathComponent("setup.sh") }
-    var skillSource: URL { root.appendingPathComponent("skills/cua/SKILL.md") }
+    var skillSource: URL { root.appendingPathComponent("skills/cuabar/SKILL.md") }
 
     static func locate(in bundle: Bundle = .main) -> BundledEngine? {
         guard let resources = bundle.resourceURL else { return nil }

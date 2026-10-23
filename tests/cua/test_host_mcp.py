@@ -340,7 +340,7 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         adapter, proxy, output, _, _ = self.fixture()
         await self.initialize(adapter)
         self.assertEqual(output[-1]['result']['serverInfo'], {
-            'name': 'cua', 'version': version})
+            'name': 'cuabar', 'version': version})
         initialized = next(m for m in proxy.received if m.get('method') == 'initialize')
         self.assertEqual(initialized['params']['clientInfo'], {
             'name': 'claude_codex_computer_use', 'title': 'Claude Codex Computer Use', 'version': version})

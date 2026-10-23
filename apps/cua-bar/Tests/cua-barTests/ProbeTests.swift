@@ -268,8 +268,8 @@ struct ProbeModelTests {
     @Test func copyingACommandPutsItOnThePasteboardAndRunsNothing() async throws {
         let rig = await Rig(try ready())
         rig.model.selectedTab = .check
-        let outcome = await rig.model.perform(.copyCommand("claude mcp remove -s user cua", on: .mcp))
-        #expect(rig.pasteboard.copied == ["claude mcp remove -s user cua"])
+        let outcome = await rig.model.perform(.copyCommand("claude mcp remove -s user cuabar", on: .mcp))
+        #expect(rig.pasteboard.copied == ["claude mcp remove -s user cuabar"])
         #expect(outcome == ActionOutcome(kind: .success, message: "명령을 복사했어요"))
         #expect(rig.model.placedResults[.check(.mcp)] == outcome, "told on the line of the command")
         #expect(rig.actionCalls.isEmpty)

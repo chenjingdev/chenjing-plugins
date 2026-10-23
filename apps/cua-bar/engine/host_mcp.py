@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.0'
+VERSION = '0.8.1'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -558,7 +558,7 @@ class HostMcp:
                 requested_protocol = params.get('protocolVersion')
                 protocol_version = requested_protocol if requested_protocol in ('2025-06-18', '2025-11-25') else '2025-06-18'
                 self.reply(ident, {'protocolVersion': protocol_version, 'capabilities': {'tools': {}},
-                    'serverInfo': {'name': 'cua', 'version': VERSION},
+                    'serverInfo': {'name': 'cuabar', 'version': VERSION},
                     'instructions': 'Tools execute on this connection\'s new Codex-hosted ephemeral thread. This adapter does not start a runtime or reuse another thread. Call turn_ended with an empty object; the adapter supplies only its owned lifecycle scope.'})
             elif method == 'ping':
                 self.reply(ident, {})

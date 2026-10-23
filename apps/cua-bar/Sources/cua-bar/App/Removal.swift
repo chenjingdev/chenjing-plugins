@@ -10,7 +10,7 @@ enum RemovalMessages {
     static let working = "되돌리는 중…"
     static let trashHint = "이 앱 파일은 이제 휴지통으로 옮겨도 돼요."
     /// Claude Code could not take the app's MCP server away (no `claude` command, it refused, or its file cannot be read).
-    static let mcpStays = " Claude Code의 CUA 연결은 `claude mcp remove -s user cua`로 직접 지워 주세요."
+    static let mcpStays = " Claude Code의 CUA 연결은 `claude mcp remove -s user cuabar`로 직접 지워 주세요."
     /// What was taken out of Claude Code, said when the rest did not go as the question promised.
     static let claudeRemoved = " Claude Code에 깐 CUA 연결과 스킬은 지웠어요."
     static let done = "연결 설정과 중계기를 되돌렸어요. " + trashHint

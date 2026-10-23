@@ -1,11 +1,11 @@
 ---
-name: cua
-description: Use the installed CUA MCP to inspect and operate Mac desktop apps and browsers from Claude Code. Use when the user asks to use CUA, including requests like "cua 써서", requests GUI work through Codex CUA, or asks why CUA does not connect.
+name: cuabar
+description: Use the installed CUA MCP to inspect and operate Mac desktop apps and browsers from Claude Code. Use when the user asks to use CUA, including requests like "cuabar 써서", "cua 써서", requests GUI work through Codex CUA, or asks why CUA does not connect.
 ---
 
 # Mac computer use
 
-Use the `cua` MCP tools for the user's requested computer or browser task.
+Use the `cuabar` MCP tools for the user's requested computer or browser task.
 The tools execute in a dedicated thread on the running Codex host. Read and
 follow the live tool descriptions and the API documentation returned by the
 runtime; do not invent APIs from ordinary Node.js or Playwright examples.

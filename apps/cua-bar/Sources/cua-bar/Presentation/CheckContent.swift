@@ -110,9 +110,9 @@ struct CheckContent: Equatable, Sendable {
     /// The native installer of Claude Code's own documentation: it needs no Node and puts `claude` in `~/.local/bin`,
     /// which is the first place the app looks.
     static let installCommand = "curl -fsSL https://claude.ai/install.sh | bash"
-    static let removeMCPCommand = "claude mcp remove -s user cua"
+    static let removeMCPCommand = "claude mcp remove -s user cuabar"
     /// Out of the skills folder, not beside it: another name in there is read as a skill of its own.
-    static let moveSkillCommand = "mv ~/.claude/skills/cua ~/cua-skill-backup"
+    static let moveSkillCommand = "mv ~/.claude/skills/cuabar ~/cuabar-skill-backup"
     static let unsetLauncherCommand = "launchctl unsetenv CODEX_CLI_PATH"
     static let agentFile = "~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist"
 
@@ -183,7 +183,7 @@ private struct Judge {
         }
     }
 
-    /// A cua MCP server or skill the app did not put there is told, Codex or not (F1): the install leaves it as it is
+    /// A cuabar MCP server or skill the app did not put there is told, Codex or not (F1): the install leaves it as it is
     /// either way, so waiting for Codex would not put it right, and the line has the command that does.
     private func showsConflict(_ item: CheckItem) -> Bool {
         guard claudeWaiting(item) == nil else { return false }
@@ -257,7 +257,7 @@ private struct Judge {
             case .outdated: line = broken(item, "Claude Code의 CUA 연결이 옛 판이에요")
             case .conflict:
                 line = CheckLine(
-                    item: item, status: .problem, detail: "앱이 깔지 않은 cua MCP가 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cua MCP",
+                    item: item, status: .problem, detail: "앱이 깔지 않은 cuabar MCP가 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cuabar MCP",
                     steps: [
                         "지우려면 터미널에서 아래 명령을 실행해 주세요. 앱은 남이 둔 설정을 지우지 않아요",
                         afterConflict("지운 뒤", "앱이 연결해요"),
@@ -296,7 +296,7 @@ private struct Judge {
         case .outdated: return broken(item, "Claude Code의 CUA 스킬이 옛 판이에요")
         case .conflict:
             return CheckLine(
-                item: item, status: .problem, detail: "앱이 깔지 않은 cua 스킬이 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cua 스킬",
+                item: item, status: .problem, detail: "앱이 깔지 않은 cuabar 스킬이 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cuabar 스킬",
                 steps: [
                     "~/.claude/skills/cua는 앱이 깐 것이 아니에요. 아래 명령으로 skills 폴더 밖으로 옮겨 두세요. 앱은 옮기거나 지우지 않아요",
                     afterConflict("옮긴 뒤", "앱이 스킬을 깔아요"),

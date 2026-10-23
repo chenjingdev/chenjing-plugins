@@ -109,10 +109,10 @@ struct LiveSystemActionsTests {
             .init(executable: "/usr/bin/xcode-select", arguments: ["-p"], timeout: .seconds(30))
         }
         func mcpAdd(_ command: String? = nil) -> StepRunner.Call {
-            .init(executable: claudePath, arguments: ["mcp", "add", "-s", "user", "cua", "--", command ?? launcher], timeout: .seconds(120))
+            .init(executable: claudePath, arguments: ["mcp", "add", "-s", "user", "cuabar", "--", command ?? launcher], timeout: .seconds(120))
         }
         var mcpRemove: StepRunner.Call {
-            .init(executable: claudePath, arguments: ["mcp", "remove", "-s", "user", "cua"], timeout: .seconds(120))
+            .init(executable: claudePath, arguments: ["mcp", "remove", "-s", "user", "cuabar"], timeout: .seconds(120))
         }
         var skillSourceBody: String { (try? String(contentsOf: bundle.skillSource, encoding: .utf8)) ?? "" }
     }
@@ -135,7 +135,7 @@ struct LiveSystemActionsTests {
         let home = try TempHome()
         let bundleRoot = home.url.appendingPathComponent("Bundle/engine", isDirectory: true)
         try home.write("#!/bin/sh\nexit 0\n", to: bundleRoot.appendingPathComponent("setup.sh"))
-        try home.write("the bundled skill\n", to: bundleRoot.appendingPathComponent("skills/cua/SKILL.md"))
+        try home.write("the bundled skill\n", to: bundleRoot.appendingPathComponent("skills/cuabar/SKILL.md"))
         let bundle = BundledEngine(root: bundleRoot)
         let launcher = home.launcher
         let claudePath = home.claudeCLI.path
@@ -222,7 +222,7 @@ struct LiveSystemActionsTests {
         try rig.home.installClaudeCode()
         _ = await rig.actions.setUp()
         let add = try #require(rig.runner.calls.first { $0.isClaude })
-        #expect(add.arguments == ["mcp", "add", "-s", "user", "cua", "--", rig.home.engineCopies.appendingPathComponent("current/start-mcp.sh").path])
+        #expect(add.arguments == ["mcp", "add", "-s", "user", "cuabar", "--", rig.home.engineCopies.appendingPathComponent("current/start-mcp.sh").path])
         #expect(!rig.runner.calls.contains { $0.isClaude && ($0.arguments.contains("list") || $0.arguments.contains("get")) }, "those start the servers")
     }
 
@@ -657,7 +657,7 @@ struct LiveSystemActionsTests {
     }
 
     @Test func anMCPAddThatSaysOkButLeavesNoServerIsAFailureBecauseTheFileIsWhatCounts() async throws {
-        let rig = try rig(responses: { call in call.isClaude ? StepRunner.ok("Added stdio MCP server cua") : nil })
+        let rig = try rig(responses: { call in call.isClaude ? StepRunner.ok("Added stdio MCP server cuabar") : nil })
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         let outcome = await rig.actions.setUp()
