@@ -6,8 +6,8 @@ import { countChars, pickRecent, ruleText, splitBlocks, textKey, turnNote } from
 
 test('the rule names the three blocks and drops the length cap', () => {
   const r = ruleText()
-  expect(r).toContain('첫 문단: 사용자가 물은 것에 답한다')
-  expect(r).toContain('단서(확인 못 함·추정·실패·위험)와 사용자가 판단에 쓸 숫자는 첫 문단에 쓴다')
+  expect(r).toContain('요약(첫 덩어리): 사용자가 물은 것에 답한다')
+  expect(r).toContain('단서(확인 못 함·추정·실패·위험)와 사용자가 판단에 쓸 숫자는 요약에 쓴다')
   expect(r).toContain('"설명:"으로 시작하는 문단')
   expect(r).toContain('"물을 것:"')
   expect(r).toContain('길이 제한은 없다')
@@ -21,6 +21,34 @@ test('an answer splits into answer, explanation and user turn', () => {
     turn: '물을 것: 데스크톱에도 켤까요?\n볼 것: /blocks 출력',
     notice: '',
   })
+})
+
+// 2026-10-23 사용자 "지금 그냥 줄글로 되있어서 복잡함": 요약은 결론 한 줄과 "- **이름:** 내용" 목록으로 쓴다
+test('the rule asks for a summary of one conclusion line and a bold-named list, and bold only there', () => {
+  const r = ruleText()
+  expect(r).toContain('요약은 줄글로 이어 쓰지 않고')
+  expect(r).toContain('"- **이름:** 내용" 목록')
+  expect(r).toContain('굵은 글씨는 요약 목록의 이름에만 쓴다')
+  expect(r).not.toContain('굵은 글씨와 제목은 쓰지 않는다')
+})
+
+test('a summary list with bold names stays in the answer, and the user turn after the explanation still splits off', () => {
+  const text = [
+    '0.7.7부터 옆 패널에서 곁질문을 쓸 수 있어요.',
+    '',
+    '- **쓰는 법:** 패널에서 q를 누르고 Enter',
+    '- **확인 못 함:** 한글이 깨지는지는 쳐 보지 않았어요.',
+    '',
+    '설명:',
+    '- 확인한 것: 테스트 101개',
+    '',
+    '- **볼 것:** 패널 입력칸에 한글을 쳐 보기',
+  ].join('\n')
+  const b = splitBlocks(text)
+  expect(b.answer).toBe('0.7.7부터 옆 패널에서 곁질문을 쓸 수 있어요.\n\n- **쓰는 법:** 패널에서 q를 누르고 Enter\n- **확인 못 함:** 한글이 깨지는지는 쳐 보지 않았어요.')
+  expect(b.explain).toBe('- 확인한 것: 테스트 101개')
+  expect(b.turn).toBe('- **볼 것:** 패널 입력칸에 한글을 쳐 보기')
+  expect(turnNote(b.turn)).toBe('↩ 볼 것 1 → 옆 패널 내 차례 (/baton-side)')
 })
 
 test('without markers everything stays in the answer', () => {
