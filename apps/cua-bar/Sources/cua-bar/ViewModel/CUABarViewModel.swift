@@ -47,6 +47,10 @@ final class CUABarViewModel: ObservableObject {
     static let cleanupBusyOutcome = ActionOutcome(kind: .info, message: "자동 정리 중이에요. 끝나면 다시 눌러 주세요")
     /// The notification's 다시 켜기 while the status cannot be read.
     static let restartNeedsStatus = "상태를 읽지 못해 다시 켜지 않았어요. 잠시 뒤 다시 눌러 주세요"
+    /// The same, when the Codex it was about has gone or has its host now.
+    static let restartNotNeeded = "Codex는 이미 다시 켜졌거나 연결돼서 그대로 뒀어요"
+    /// The same, when that Codex still has no host but the card has something to fix first.
+    static let restartWaitsForTheCard = "먼저 맞출 설정이 있어서 Codex를 다시 켜지 않았어요 — 상태 카드를 보세요"
     /// While a restart waits for the Codex it asked to quit (S10): the card's next step, 다시 켜기 on
     /// hover, and what is said when the same Codex outlasts the wait.
     static let quitWaitStep = "Codex가 꺼지기를 기다려요 — 종료를 물으면 '종료'를 눌러 주세요. 꺼지면 다시 켤게요"
@@ -787,7 +791,7 @@ final class CUABarViewModel: ObservableObject {
         do {
             switch action {
             case .releaseConnection(let id), .retryRelease(let id):
-                let result = try await engine.releaseConnection(id: id)
+                let result = try await engine.releaseConnection(id: id, earlierSessions: earlierSessions(of: id))
                 return ActionResult(outcome: ActionMessages.releaseConnection(result), reason: result.reason)
             case .releaseSession(let id, let user):
                 let result = try await engine.releaseSession(id: id, user: user)
@@ -871,10 +875,16 @@ final class CUABarViewModel: ObservableObject {
         return client.flatMap(TidyPlan.way(for:))
     }
 
+    /// The sessions `release --connection` also releases by id: those its bridge left under an earlier Codex host, which
+    /// the latest status lists with the connection's id. The app waits longer for each.
+    private func earlierSessions(of id: String) -> Int {
+        lastStatus?.leases.maybeLeft.filter { $0.connectionID == id }.count ?? 0
+    }
+
     private func tidy(_ id: String, _ way: TidyPlan.Way) async throws -> TidyStep {
         switch way {
         case .releaseOnly:
-            let step = TidyStep(release: try await engine.releaseConnection(id: id))
+            let step = TidyStep(release: try await engine.releaseConnection(id: id, earlierSessions: earlierSessions(of: id)))
             // Only what the engine confirmed: the card says "탭은 풀었어요" for these and for nothing it does not know.
             if step.kind == .tabsOnly { tabsReleasedIDs.insert(id) }
             return step
@@ -1113,8 +1123,12 @@ final class CUABarViewModel: ObservableObject {
                 show(ActionOutcome(kind: .info, message: Self.restartNeedsStatus))
                 return
             }
-            guard codexRunsWithoutHost(in: status), NotificationPlanner.codexKey(for: status) == key else {
-                show(ActionOutcome(kind: .info, message: "Codex는 이미 다시 켜졌거나 연결돼서 그대로 뒀어요"))
+            let sameCodex = NotificationPlanner.codexKey(for: status) == key
+            guard sameCodex, codexRunsWithoutHost(in: status) else {
+                // The same Codex may still be without its host while the card asks for something else first, which a
+                // restart would not fix: "already restarted" would be untrue then.
+                let otherFirst = sameCodex && StatusEvaluator.codexRunsWithoutItsHost(status)
+                show(ActionOutcome(kind: .info, message: otherFirst ? Self.restartWaitsForTheCard : Self.restartNotNeeded))
                 return
             }
             runInBackground { [weak self] in _ = await self?.perform(.restartCodex) }

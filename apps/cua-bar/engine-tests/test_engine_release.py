@@ -218,6 +218,15 @@ class RefusalTests(ReleaseCase):
         self.state.bridge('a1', 4242, NOW-900, owner_pid=500, session_id=SESSION_C)
         self.assertEqual(self.refused(SESSION_C), 'session_live')
 
+    def test_the_engines_own_release_thread_holding_the_session_is_no_owner(self):
+        # The automatic cleanup releases it while a person presses 탭 풀기 on the same one: that is no conversation using
+        # it, and both may end it.
+        self.dead()
+        self.add_runtime(2000, NOW-30)
+        self.state.relay('r1', 2001, NOW-30, root_pid=2000, runtime_pid=2002, cwd='/tmp/codex-cua-release-abc12345',
+                         scopes=[State.scope(SESSION_C)])
+        self.assertTrue(self.release([SESSION_C], user=True)[SESSION_C]['released'])
+
     def test_a_live_session_is_refused_even_when_no_dead_record_lists_it(self):
         self.add_runtime(2000, NOW-890)
         self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_C)])

@@ -126,15 +126,17 @@ struct Rig {
     /// test itself caused. Pass `refresh: false` to watch that first read happen.
     init(
         _ status: EngineStatus, engine: FakeEngineClient? = nil, notifier: FakeNotifier = FakeNotifier(),
-        clock: TestClock = TestClock(), refresh: Bool = true
+        clock: TestClock = TestClock(), refresh: Bool = true, claude: ClaudeBox? = nil
     ) async {
         let engine = engine ?? FakeEngineClient(status: status)
         let opener = FakeAppOpener()
         let pasteboard = RecordingPasteboard()
         let sleeper = ManualSleeper()
+        var inspector: (@Sendable (String?) -> ClaudeSetupState)?
+        if let claude { inspector = { _ in claude.state } }
         let model = CUABarViewModel(
             engine: engine, appVersion: "0.7.0", pasteboard: pasteboard, appOpener: opener, notifier: notifier,
-            clock: { clock.now }, calendar: Fixtures.utc, sleep: sleeper.sleep)
+            clock: { clock.now }, calendar: Fixtures.utc, sleep: sleeper.sleep, claudeInspector: inspector)
         if refresh {
             await model.refresh()
             await model.waitForBackgroundWork()
@@ -151,4 +153,17 @@ struct Rig {
 
     /// Every engine call since the rig went quiet, except reading the status, in order.
     var actionCalls: [FakeEngineClient.Call] { engine.calls.dropFirst(baseline).filter { $0 != .status } }
+}
+
+/// What Claude Code has of CUA, as a test changes it between reads.
+final class ClaudeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: ClaudeSetupState
+
+    init(_ value: ClaudeSetupState = .none) { self.value = value }
+
+    var state: ClaudeSetupState {
+        get { lock.withLock { value } }
+        set { lock.withLock { value = newValue } }
+    }
 }

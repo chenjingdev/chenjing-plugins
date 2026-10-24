@@ -223,6 +223,11 @@ struct EngineClientTests {
         // The release step of a connection is asked twice at worst (an answer that could not confirm is asked once more):
         // 2 s to connect and 53 s for the reply (ten open scopes) each time, and a stop adds its 8 s of grace and 3 s after a kill.
         #expect(EngineTimeouts().release >= .seconds(2 * (2 + 53)))
+        // Then the sessions its bridge left under an earlier host, by id: boot 17 s, 55 s each, closing 8 s, and the
+        // runtime's end. Two of them used to outlast the 120 s, and a killed engine leaves its release thread behind.
+        _ = try await client.releaseConnection(id: "a", earlierSessions: 2)
+        #expect(runner.calls.last?.timeout == .seconds(120 + 2 * 90))
+        #expect(EngineTimeouts().releaseEndedPerSession >= .seconds(17 + 55 + 8))
         #expect(EngineTimeouts().stop >= .seconds(2 * (2 + 53) + 8 + 3 + 3))
         #expect(EngineTimeouts().groupStop >= EngineTimeouts().stop)
         #expect(EngineTimeouts().releaseEndedPerConnection >= .seconds(2 * (2 + 13)))

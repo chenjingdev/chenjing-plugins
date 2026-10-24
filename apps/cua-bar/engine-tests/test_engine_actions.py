@@ -84,6 +84,16 @@ class ReleaseTests(ActionCase):
             self.assertEqual(self.release(BRIDGE_ID), {'ok': True, 'released': True, 'reason': None, 'scope_count': 1})
         self.assertEqual(by_id, [([SESSION_B], True)])
 
+    def test_a_session_released_meanwhile_holds_nothing_and_is_no_failure(self):
+        # The automatic cleanup released it between the look and the release thread's own look (not_found).
+        UNCONFIRMED = {'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0}
+        self.left_by_its_host(at(300), UNCONFIRMED)
+        gone = lambda ctx, sessions, **_: {session: {'released': False, 'reason': 'not_found', 'tab_count': None}
+                                           for session in sessions}
+        with patch.object(engine_actions, 'release_sessions', side_effect=gone):
+            self.assertEqual(self.release(BRIDGE_ID),
+                             {'ok': True, 'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
+
     def test_a_scope_chrome_has_forgotten_since_is_nothing_to_release(self):
         UNCONFIRMED = {'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0}
         self.machine.add(900, 1, self.commands.chrome, start=NOW-1000)               # Chrome restarted after that scope

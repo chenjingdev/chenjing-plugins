@@ -438,6 +438,21 @@ struct NotificationViewModelTests {
         #expect(rig.model.pending == nil, "the notification was the question")
     }
 
+    @Test func theRestartButtonSaysTheCardComesFirstWhenASetupProblemDoes() async throws {
+        // A notification from before Claude Code lost its CUA: Codex is still without its host, so "already restarted"
+        // was untrue, and a restart would not have fixed what the card asks for.
+        let claude = ClaudeBox()
+        let rig = await Rig(try codexProblem(), claude: claude)
+        let key = try #require(rig.notifier.delivered.first?.key)
+        claude.state = ClaudeSetupState(claudeCodeFound: true, mcp: .missing, skill: .ready)
+        await rig.model.refresh()
+        #expect(rig.model.summary.fix == .runSetup)
+        rig.notifier.tap(.restartCodex(key: key))
+        await rig.model.waitForBackgroundWork()
+        #expect(rig.actionCalls.isEmpty)
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "먼저 맞출 설정이 있어서 Codex를 다시 켜지 않았어요 — 상태 카드를 보세요"))
+    }
+
     @Test func anOldRestartButtonDoesNothingWhenThatCodexHasMovedOn() async throws {
         let rig = await Rig(try codexProblem())
         // A button from a Codex process that is gone: another process runs now.

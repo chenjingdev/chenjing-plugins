@@ -86,6 +86,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
     private var script: Script
     private var recorded: [Call] = []
     private var recordedLoads: [ReleaseEndedLoad] = []
+    private var recordedEarlierSessions: [Int] = []
 
     init(status: EngineStatus = EngineStatus()) {
         script = Script(status: .success(status))
@@ -95,6 +96,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
 
     /// What each `releaseEnded` call was told it would have to do, in order.
     var releaseEndedLoads: [ReleaseEndedLoad] { lock.withLock { recordedLoads } }
+    /// What each `releaseConnection` was told about sessions left under an earlier host, in order.
+    var earlierSessionCounts: [Int] { lock.withLock { recordedEarlierSessions } }
 
     var statusCallCount: Int { calls.filter { $0 == .status }.count }
 
@@ -113,7 +116,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         return try script.status.get()
     }
 
-    func releaseConnection(id: String) async throws -> ReleaseResult {
+    func releaseConnection(id: String, earlierSessions: Int) async throws -> ReleaseResult {
+        lock.withLock { recordedEarlierSessions.append(earlierSessions) }
         let script = try await begin(.releaseConnection(id), isAction: true)
         return lock.withLock {
             self.script.releaseConnectionQueue.isEmpty ? script.releaseConnection : self.script.releaseConnectionQueue.removeFirst()

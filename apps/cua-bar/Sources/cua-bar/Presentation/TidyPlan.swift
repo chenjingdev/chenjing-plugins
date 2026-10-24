@@ -70,6 +70,15 @@ enum TidyPlan {
         return status.connections.filter { $0.sessionID == session }
     }
 
+    /// The live Claude connection the engine names as this lease's holder: the session is one its bridge opened under an
+    /// earlier Codex host, or under one that is gone, and can never end by itself. Its 탭 풀기 releases it by id
+    /// (`release --connection`), whether Codex is on or not, so it is the line to press: with a line of its own too,
+    /// the same session was two lines and a problem on the card. Its owner is not counted as there for it
+    /// (`ownerIsAlive`): the bridge will never let go of it, so the notification still goes out when it stays.
+    private static func bridgeLeftItBehind(_ lease: LeftoverLease, in status: EngineStatus) -> [Connection] {
+        status.connections.filter { $0.id == lease.connectionID && $0.agent == .claude && $0.state != .ended }
+    }
+
     /// The line to press instead of this leftover lease's own, if there is one: the connection that holds its session
     /// and has a button. For an ended connection that is 정리, for a live one 탭 풀기; either lets go of the session.
     /// The lease is then no thing of its own: a second line for the same session would count it twice and send the
@@ -78,7 +87,8 @@ enum TidyPlan {
     /// keeps its line, with the advice to reset the extension, which is all that is left for it. A live holder is
     /// preferred to an ended one.
     static func lineToPress(for lease: LeftoverLease, in status: EngineStatus, tabsReleased: Set<String> = []) -> Connection? {
-        let pressable = holders(of: lease, in: status).filter { hasButton($0, tabsReleased: tabsReleased) }
+        let pressable = (bridgeLeftItBehind(lease, in: status) + holders(of: lease, in: status))
+            .filter { hasButton($0, tabsReleased: tabsReleased) }
         // A live line the list leaves out (it holds nothing, as the engine sees it) has no button to press.
         return pressable.first { $0.state != .ended && !$0.isQuiet } ?? pressable.filter { $0.state == .ended }.sorted(by: newestFirst).first
     }

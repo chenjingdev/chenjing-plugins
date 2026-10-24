@@ -151,6 +151,8 @@ def release_earlier_hosts(ctx, conn, reply):
             result = outcome.get(session) or {'released': False, 'reason': UNCONFIRMED}
             if result['released']:
                 released, count = True, count+1
+            elif result['reason'] == 'not_found':
+                continue                   # no longer listed by the time it was asked about: released or forgotten meanwhile
             elif reason is None:
                 reason = result['reason'] or UNCONFIRMED
     ok = reason is None

@@ -1,5 +1,6 @@
 """The status the menu bar app reads: every contract field, attribution of runtimes, states, leases and activity."""
 import json
+import os
 import re
 import shutil
 import unittest
@@ -306,10 +307,27 @@ class RelaySetupTests(StatusCase):
         self.assertEqual(host(), {'relay_reason': 'plugin_entry', 'restart_adds_relay': False})
         plugin = self.home/'.codex/plugins/cache/openai-bundled/unified-computer-use'/APP_VERSION
         (plugin/'.codex-plugin').mkdir(parents=True)
-        (plugin/'.codex-plugin/plugin.json').write_text('{}')
+        (plugin/'.codex-plugin/plugin.json').write_text(json.dumps({'name': 'computer-use', 'version': APP_VERSION}))
         self.assertEqual(host()['restart_adds_relay'], False, 'half written')
         (plugin/'.mcp.json').write_text('{}')
         self.assertEqual(host(), {'relay_reason': 'plugin_entry', 'restart_adds_relay': True})
+        # A copy the launcher (pid 1000 here) refused for a lasting cause brings nothing: one that was there before it
+        # started, one others may write, one of another version. The hint would stay through every restart.
+        launched = NOW-7200
+        for name in ('.codex-plugin/plugin.json', '.mcp.json'):
+            os.utime(plugin/name, (launched-60, launched-60))
+        self.assertEqual(host()['restart_adds_relay'], False, 'there before the launcher looked')
+        os.utime(plugin/'.mcp.json', (launched+12, launched+12))
+        self.assertEqual(host()['restart_adds_relay'], True, 'written since, even if only in part')
+        (plugin/'.mcp.json').chmod(0o664)
+        self.assertEqual(host()['restart_adds_relay'], False, 'others may write it')
+        (plugin/'.mcp.json').chmod(0o644)
+        (plugin/'.codex-plugin/plugin.json').write_text(json.dumps({'name': 'computer-use', 'version': '1.0'}))
+        self.assertEqual(host()['restart_adds_relay'], False, 'of another version')
+        (plugin/'.codex-plugin/plugin.json').write_text(json.dumps({'name': 'computer-use', 'version': APP_VERSION}))
+        self.assertEqual(host()['restart_adds_relay'], True)
+        self.write_host(relay=False, relay_reason='plugin_entry', owner=4999)
+        self.assertEqual(host()['restart_adds_relay'], False, 'a launcher that is gone cannot be compared')
         self.write_host(relay=False, relay_reason='not_bundled')       # Codex's own setting: a restart changes nothing
         self.assertEqual(host(), {'relay_reason': 'not_bundled', 'restart_adds_relay': False})
         self.write_host(relay=True)
@@ -1092,6 +1110,15 @@ class LeaseTests(StatusCase):
         self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_C)])
         entry = self.left()[0]
         self.assertFalse(entry['releasable'])                   # a live relay still lists it
+
+    def test_the_engines_own_release_thread_does_not_make_the_session_it_releases_unreleasable(self):
+        # While the automatic cleanup releases it, its thread's relay holds the very session (in a release folder).
+        self.start_world()
+        self.dead_bridge()
+        self.add_runtime(2000, NOW-30)
+        self.state.relay('r1', 2001, NOW-30, root_pid=2000, runtime_pid=2002, cwd='/tmp/codex-cua-release-abc12345',
+                         scopes=[State.scope(SESSION_C)])
+        self.assertTrue(self.left()[0]['releasable'])
 
     def named_relay(self, name='d9', pid=7101, session=SESSION_A, bridge='bridge-4242-%d' % (NOW-900), cleanup='not_confirmed'):
         """The relay of a Claude bridge's thread that died with a scope open (B7): its record names the bridge."""

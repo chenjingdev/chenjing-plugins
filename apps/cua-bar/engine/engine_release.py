@@ -26,7 +26,7 @@ import uuid
 from engine_core import RELEASE_FOLDER_PREFIX, SESSION_ID, iso
 from engine_inventory import is_cua_repl, lookup, same_process, snapshot, working_folders
 from engine_records import remember_released, remove_sessions
-from engine_status import build_view
+from engine_status import build_view, of_a_connection_test
 
 TITLE = 'Release an ended CUA session'
 DEFAULT_OPTIONS = {'boot': 15.0, 'call': 45.0, 'end': 10.0, 'cleanup': 5.0}
@@ -72,7 +72,9 @@ def refusal(view, session, user):
     if not isinstance(session, str) or not SESSION_ID.match(session):
         return 'not_found'
     for record in view.records:
-        if record.live and session in record.live_sessions():
+        # The engine's own release thread holds the session it releases (the automatic cleanup's, while a person presses
+        # 탭 풀기 on the same one): that is no conversation using it, and ending it twice is harmless.
+        if record.live and not of_a_connection_test(record) and session in record.live_sessions():
             return 'session_live'
     entry = next((item for item in view.maybe_left if item['session_id'] == session), None)
     if entry is None:

@@ -26,8 +26,10 @@ extension ReleaseEndedLoad {
 /// thrown `EngineError` means the engine could not be asked at all.
 protocol EngineClient: Sendable {
     func status() async throws -> EngineStatus
-    /// `release --connection <id>`
-    func releaseConnection(id: String) async throws -> ReleaseResult
+    /// `release --connection <id>`. `earlierSessions` is how many sessions the latest status lists as left by this
+    /// connection under an earlier Codex host (the `maybe_left` entries that name it): the command releases those by
+    /// id after the bridge's own release, and its time limit grows with them.
+    func releaseConnection(id: String, earlierSessions: Int) async throws -> ReleaseResult
     /// `release --ended`. `load` is what the latest status says it will have to do: the command's
     /// time limit grows with it.
     func releaseEnded(_ load: ReleaseEndedLoad) async throws -> ReleaseEndedResult
@@ -51,4 +53,11 @@ protocol EngineClient: Sendable {
     /// while a Codex host is running (the command then exits non-zero and nothing is removed).
     /// Throws `engineMissing` when there is no engine: nothing was set up to undo.
     func uninstall() async throws
+}
+
+extension EngineClient {
+    /// A release with no session left under an earlier host.
+    func releaseConnection(id: String) async throws -> ReleaseResult {
+        try await releaseConnection(id: id, earlierSessions: 0)
+    }
 }

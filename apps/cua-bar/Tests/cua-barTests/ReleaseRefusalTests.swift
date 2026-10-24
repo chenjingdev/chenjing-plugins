@@ -60,6 +60,19 @@ struct ReleaseRefusalTests {
         #expect(row.retryButton.action == .retryRelease(Self.target))
     }
 
+    @Test func aReleaseWaitsLongerForEachSessionItsBridgeLeftUnderAnEarlierHost() async throws {
+        // The engine releases those by id after the bridge's own release; the app's limit grows with them, or it killed
+        // an engine that would have finished, leaving its release thread behind.
+        var status = try idleStatus()
+        status.leases.maybeLeft = [
+            LeftoverLease(sessionID: "019a-1", agent: .claude, connectionID: Self.target, cwd: "/a", endedAt: nil, releasable: true),
+            LeftoverLease(sessionID: "019a-2", agent: .claude, connectionID: Self.target, cwd: "/a", endedAt: nil, releasable: true),
+            LeftoverLease(sessionID: "019a-3", agent: .claude, connectionID: "claude-9-9", cwd: "/b", endedAt: nil, releasable: true)]
+        let rig = await Rig(status)
+        await rig.model.send(.releaseConnection(Self.target))?.value
+        #expect(rig.engine.earlierSessionCounts == [2])
+    }
+
     @Test func refusedAgainTheRowSaysSoAndKeepsOnlyTabRelease() async throws {
         let rig = try await rig([Self.refused, Self.refused])
         await rig.model.send(.releaseConnection(Self.target))?.value

@@ -7,7 +7,8 @@ import Foundation
 struct EngineTimeouts: Equatable, Sendable {
     var status: Duration = .seconds(10)
     /// `release --connection`: 2 s to connect, then up to 53 s for the reply (ten open scopes), and the same
-    /// once more when the answer was that the end of a turn could not be confirmed.
+    /// once more when the answer was that the end of a turn could not be confirmed. The sessions its bridge left under an
+    /// earlier Codex host are then released by id, each as long as one of `release --ended` (`release(earlierSessions:)`).
     var release: Duration = .seconds(120)
     /// `stop`, normal or forced: the release first (twice at worst), 8 s of grace, 3 s more after a kill.
     var stop: Duration = .seconds(130)
@@ -58,8 +59,9 @@ struct CodexCUAEngineClient: EngineClient {
         return status
     }
 
-    func releaseConnection(id: String) async throws -> ReleaseResult {
-        try await json(ReleaseResult.self, ["release", "--connection", id, "--json"], timeout: timeouts.release)
+    func releaseConnection(id: String, earlierSessions: Int) async throws -> ReleaseResult {
+        try await json(
+            ReleaseResult.self, ["release", "--connection", id, "--json"], timeout: timeouts.release(earlierSessions: earlierSessions))
     }
 
     func releaseEnded(_ load: ReleaseEndedLoad) async throws -> ReleaseEndedResult {
@@ -163,5 +165,9 @@ extension EngineTimeouts {
     /// each releasable Claude session.
     func releaseEnded(for load: ReleaseEndedLoad) -> Duration {
         releaseEndedBase + releaseEndedPerConnection * load.endedConnections + releaseEndedPerSession * load.claudeSessions
+    }
+
+    func release(earlierSessions: Int) -> Duration {
+        release + releaseEndedPerSession * max(0, earlierSessions)
     }
 }

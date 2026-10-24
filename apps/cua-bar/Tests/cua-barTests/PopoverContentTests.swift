@@ -406,6 +406,23 @@ struct PopoverContentTests {
         #expect(try #require(content(of: status).connections.tidy).rows.map(\.id) == ["lease-left-019a-live"])
     }
 
+    @Test func aSessionALiveBridgeLeftUnderAnEarlierHostIsItsLineWhetherCodexIsOnOrNot() throws {
+        // The engine names the live connection the lease's holder, and its 탭 풀기 releases the session by id. With Codex
+        // on (releasable) the lease was a second line for the same session, and a problem on the card.
+        var status = try liveConnectionAndItsDeadRelay()
+        status.connections[0].holds = true
+        status.leases.maybeLeft = [LeftoverLease(
+            sessionID: "019a-earlier", agent: .claude, connectionID: "claude-23601-1792412520",
+            cwd: "/Users/chenjing/dev/unified-login", endedAt: nil, releasable: true)]
+        for releasable in [true, false] {
+            status.leases.maybeLeft[0].releasable = releasable
+            let connections = content(of: status).connections
+            #expect(connections.tidy == nil, "releasable \(releasable)")
+            #expect(connections.groups.flatMap(\.rows).map(\.id) == ["claude-23601-1792412520"], "releasable \(releasable)")
+            #expect(StatusEvaluator.problem(in: status, appVersion: status.engine.version) == nil, "releasable \(releasable)")
+        }
+    }
+
     @Test func theLeaseNoticeIsSaidOnlyWhereThereIsALeaseLine() throws {
         // An unreadable list with nothing left: no lease line, so no notice and no head.
         var status = try Fixtures.status("status-ready")

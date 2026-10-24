@@ -14,8 +14,11 @@ The same goes for a runtime that works in the folder of a connection test's thre
 is_probe_folder): it is the test's, lives for seconds, and is in no list, no lease and no judgment of the screen. A
 targeted release's thread (`release-session`) is one of those too.
 """
+import json
+import os
 from pathlib import Path
 import re
+import stat
 
 from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, HOST_STOP_GRACE, IDLE_SECONDS, SCHEMA_VERSION, connection_id,
                          iso, is_probe_folder)
@@ -476,7 +479,10 @@ class View:
         inv = self.inv
         listed = set()
         for record in self.live:
-            listed |= record.live_sessions()
+            # The engine's own short-lived thread is no owner: a release's holds the very session it releases, which
+            # stays releasable meanwhile, and a test's holds none of a conversation.
+            if not of_a_connection_test(record):
+                listed |= record.live_sessions()
         released = read_released(self.ctx.state_dir, self.ctx.uid)
         found = {}
 
@@ -616,15 +622,33 @@ class View:
 
     def restart_adds_relay(self):
         """True when the host that runs now went without the relay only because Codex's own copy of its computer-use
-        plugin was not there yet when the host started (`plugin_entry`), and it is there now.
+        plugin was not there yet when the host's launcher looked (`plugin_entry`), and a good copy is there now.
 
         Codex writes that copy for a new version of itself as it starts after an update, a few seconds after the
-        launcher has looked: the first start after a Codex update goes without the relay, and the next one has it."""
-        if self.relay_reason() != 'plugin_entry' or not self.inv.app_version or not VERSION_NAME.match(self.inv.app_version):
+        launcher has looked: the first start after a Codex update goes without the relay, and the next one has it.
+        `plugin_entry` has lasting causes too (a copy another user owns or others may write, one of another version, one
+        that says something else than Codex's settings), so the copy must look as the launcher wants it, as far as the
+        engine can tell, and have been written since the launcher started: a copy that was there before was refused for
+        one of those, and a restart would refuse it again. The launcher of the next start is newer than the copy, so
+        this never asks for a second restart, whatever the cause."""
+        inv = self.inv
+        if self.relay_reason() != 'plugin_entry' or not inv.app_version or not VERSION_NAME.match(inv.app_version):
+            return False
+        owner = (inv.host.registry or {}).get('owner_pid')
+        launcher = inv.procs.get(owner) if isinstance(owner, int) and not isinstance(owner, bool) else None
+        if launcher is None:
             return False
         codex_home = self.ctx.environment.get('CODEX_HOME') or str(self.ctx.home/'.codex')
-        plugin = Path(codex_home)/'plugins/cache/openai-bundled/unified-computer-use'/self.inv.app_version
-        return all((plugin/name).is_file() for name in ('.codex-plugin/plugin.json', '.mcp.json'))
+        plugin = Path(codex_home)/'plugins/cache/openai-bundled/unified-computer-use'/inv.app_version
+        try:
+            files = [os.lstat(plugin/name) for name in ('.codex-plugin/plugin.json', '.mcp.json')]
+            manifest = json.loads((plugin/'.codex-plugin/plugin.json').read_text())
+        except (OSError, ValueError):
+            return False
+        return (all(stat.S_ISREG(info.st_mode) and info.st_uid == self.ctx.uid and not stat.S_IMODE(info.st_mode) & 0o022
+                    for info in files)
+                and isinstance(manifest, dict) and manifest.get('version') == inv.app_version
+                and max(info.st_mtime for info in files) >= launcher.start)
 
     def _codex(self):
         inv = self.inv

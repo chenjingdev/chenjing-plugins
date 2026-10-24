@@ -105,6 +105,11 @@ enum StatusEvaluator {
             accessibilityLabel: IconState.ready.accessibilityDescription)
     }
 
+    /// Codex runs and has no host, nor one on its way up or down. It is the card's problem only when nothing comes first.
+    static func codexRunsWithoutItsHost(_ status: EngineStatus) -> Bool {
+        status.codex.running && status.host.state != .ready && status.host.state != .starting && status.host.state != .stopping
+    }
+
     /// For a Codex that a launcher older than this setup started (S8).
     static let restartAppliesStep = "Codex를 다시 켜면 새 설정이 적용돼요"
     static let restartAppliesWarning = "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 탭을 풀 수 없을 수 있어요"
@@ -209,7 +214,7 @@ enum StatusEvaluator {
                 kind: .setupIncomplete, title: title, nextStep: "고치기를 누르면 설정을 다시 맞춰요",
                 warning: nil, fix: .runSetup, fixLabel: "고치기")
         }
-        if status.codex.running, status.host.state != .ready, status.host.state != .starting, status.host.state != .stopping {
+        if codexRunsWithoutItsHost(status) {
             return Problem(
                 kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요", nextStep: "다시 켜면 Claude가 붙어요",
                 warning: "하던 Codex 작업이 끊길 수 있어요", fix: .restartCodex, fixLabel: "다시 켜기")
