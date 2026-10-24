@@ -18,7 +18,7 @@ import unittest
 
 from fake_host import private_socket, write_registry
 
-PLUGIN = Path(__file__).resolve().parents[2]/'apps/cua-bar/engine'
+PLUGIN = Path(__file__).resolve().parents[1]/'engine'
 TESTS = Path(__file__).resolve().parent
 STUB = '''
 import os, sys

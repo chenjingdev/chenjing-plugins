@@ -17,7 +17,7 @@ from test_desktop_cli_wrapper import FAKE, FAKE_STDIO, PRIMARY
 from test_relay_install import Machine
 from toml_subset import parse_override
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'apps/cua-bar/engine'
+PLUGIN_ROOT = Path(__file__).resolve().parents[1]/'engine'
 TESTS = Path(__file__).resolve().parent
 OVERRIDE_PREFIX = 'mcp_servers.cua_repl='
 

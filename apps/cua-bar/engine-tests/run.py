@@ -48,7 +48,7 @@ def main(argv=None):
     parser.add_argument('--real-home', type=Path,
                         help='home whose support folders the guard watches (default: the home of this account)')
     args = parser.parse_args(argv)
-    plugin = here.parents[1] / 'apps/cua-bar/engine'
+    plugin = here.parent / 'engine'
     sys.path.insert(0, str(plugin))
     sys.path.insert(0, str(here))
     import guard

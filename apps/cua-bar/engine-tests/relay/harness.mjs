@@ -13,11 +13,11 @@ process.env.HOME = DEFAULT_HOME;
 
 // A child that is given an environment without HOME would find the real home through the account database, and an
 // overwrite inside an existing file changes no name. So the real support folders are fingerprinted (read only: lstat
-// and readdir) when the tests start and again when they end, and any difference fails the run. tests/cua/guard.py
+// and readdir) when the tests start and again when they end, and any difference fails the run. apps/cua-bar/engine-tests/guard.py
 // does the same for the Python tests, with the same exit codes: 1 for a failing test or a stray in the throw-away
 // home, 2 for a change in the real folders. A run that saw such a change proves nothing, so 2 wins over 1; the
 // changed paths are printed with their new modification time in local time. `node --test` reports every failing
-// file as 1 itself, the 2 is the exit code of the test process: run `node tests/cua/relay` to see it.
+// file as 1 itself, the 2 is the exit code of the test process: run `node apps/cua-bar/engine-tests/relay` to see it.
 export const WATCHED = ['.local/share/codex-cua', '.local/bin/codex-cua', 'Library/Caches/codex-cua',
   'Library/Caches/codex-host-cua'];
 // Shared folders, of which only the entries with our own prefix count: other tools change their own entries all
@@ -105,7 +105,7 @@ process.on('exit', () => {
 
 // RELAY_DIR_UNDER_TEST points the tests at a modified copy of the relay (mutation checks of these tests).
 export const RELAY_DIR = process.env.RELAY_DIR_UNDER_TEST
-  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../apps/cua-bar/engine/relay');
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../engine/relay');
 export const RELAY_MJS = path.join(RELAY_DIR, 'relay.mjs');
 export const LAUNCHER = path.join(RELAY_DIR, 'node-repl-relay');
 

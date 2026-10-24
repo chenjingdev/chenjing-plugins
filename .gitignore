@@ -21,4 +21,3 @@ plugins/codex-computer-use/node_modules/
 plugins/codex-computer-use/*.app/
 plugins/codex-computer-use/*.tar.gz
 plugins/codex-computer-use/*.zip
-tests/codex-computer-use/__pycache__/

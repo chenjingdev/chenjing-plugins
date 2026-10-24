@@ -18,7 +18,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'apps/cua-bar/engine'
+PLUGIN_ROOT = Path(__file__).resolve().parents[1]/'engine'
 spec = importlib.util.spec_from_file_location("host_wrapper", PLUGIN_ROOT / "desktop_cli_wrapper.py")
 wrapper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wrapper)

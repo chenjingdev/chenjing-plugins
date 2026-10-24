@@ -1,14 +1,14 @@
 # Codex CUA 개발용 테스트
 
-CUA Bar에 담는 연결 엔진 `apps/cua-bar/engine`(0.8.0)의 회귀 시험이다. Python 시험 834개와 Node 시험 98개가 있고, 둘 다 저장소 루트에서 실행한다. Python 시험과 `node --test`는 1분쯤 걸리고, `node tests/cua/relay`로 직접 돌리면 네 파일이 한 프로세스에서 차례로 돌아 1분 20초쯤 걸린다.
+CUA Bar에 담는 연결 엔진 `apps/cua-bar/engine`(0.8.0)의 회귀 시험이다. Python 시험 834개와 Node 시험 98개가 있고, 둘 다 저장소 루트에서 실행한다. Python 시험과 `node --test`는 1분쯤 걸리고, `node apps/cua-bar/engine-tests/relay`로 직접 돌리면 네 파일이 한 프로세스에서 차례로 돌아 1분 20초쯤 걸린다.
 
 ```sh
-python3 tests/cua/run.py       # Python 시험 834개
-node --test tests/cua/relay    # Node 시험 98개 (중계기)
+python3 apps/cua-bar/engine-tests/run.py       # Python 시험 834개
+node --test apps/cua-bar/engine-tests/relay    # Node 시험 98개 (중계기)
 ```
 
 - Python 시험은 표준 라이브러리의 `unittest`만 쓰고 Python 3.9 이상이면 된다. `run.py`가 `apps/cua-bar/engine`을 모듈 검색 경로에 추가한 뒤 이 폴더의 `test_*.py`를 찾아 실행한다. `bridge_case.py`, `fake_host.py`, `engine_support.py`, `fake_native_cli.py`, `toml_subset.py`는 시험이 쓰는 도우미라 수집되지 않는다.
-- Node 시험은 `node:test`만 쓴다. 이 맥의 Node 26.8.1에서 확인했다. `relay/index.js`는 네 시험 파일을 한 프로세스에서 불러오는 입구다. `node tests/cua/relay`로 직접 돌리면 어느 판에서나 이 입구를 거친다. `node --test tests/cua/relay`는 폴더를 모듈 경로로 읽는 판(22, 24)에서만 이 입구를 거치고, 폴더를 직접 펼치는 판(이 맥의 26)에서는 `index.js` 없이 네 파일을 각각 따로 돌린다.
+- Node 시험은 `node:test`만 쓴다. 이 맥의 Node 26.8.1에서 확인했다. `relay/index.js`는 네 시험 파일을 한 프로세스에서 불러오는 입구다. `node apps/cua-bar/engine-tests/relay`로 직접 돌리면 어느 판에서나 이 입구를 거친다. `node --test apps/cua-bar/engine-tests/relay`는 폴더를 모듈 경로로 읽는 판(22, 24)에서만 이 입구를 거치고, 폴더를 직접 펼치는 판(이 맥의 26)에서는 `index.js` 없이 네 파일을 각각 따로 돌린다.
 
 ## CUA를 쓰지 않을 때 돌린다
 
@@ -29,7 +29,7 @@ node --test tests/cua/relay    # Node 시험 98개 (중계기)
 Library/Caches/codex-cua  new, modified 2026-10-19 00:12:34 +0900
 ```
 
-Node 시험도 같은 출력과 종료 코드를 시험 프로세스가 낸다. 다만 `node --test`는 실패한 시험 파일을 늘 1로 보고하므로, 2를 보려면 `node tests/cua/relay`로 직접 돌린다. `run.py`의 `--tests`와 `--real-home`은 러너 자체의 시험(`test_guard.py`)이 가짜 시험 묶음과 가짜 홈을 가리킬 때 쓰는 옵션이라 평소에는 쓰지 않는다.
+Node 시험도 같은 출력과 종료 코드를 시험 프로세스가 낸다. 다만 `node --test`는 실패한 시험 파일을 늘 1로 보고하므로, 2를 보려면 `node apps/cua-bar/engine-tests/relay`로 직접 돌린다. `run.py`의 `--tests`와 `--real-home`은 러너 자체의 시험(`test_guard.py`)이 가짜 시험 묶음과 가짜 홈을 가리킬 때 쓰는 옵션이라 평소에는 쓰지 않는다.
 
 ## Python 시험
 
@@ -48,7 +48,7 @@ Node 시험도 같은 출력과 종료 코드를 시험 프로세스가 낸다. 
 | 보호 장치 | `test_guard`(16) | 지문이 같은 크기로 덮어쓴 파일과 원자적 교체, 새로 생기거나 사라진 항목을 보는 것, 링크를 따라가지 않는 것, 우리 로그인 항목만 지켜보는 것, 바뀐 경로의 출력, `run.py`의 종료 코드 0·1·2(잘못된 인자는 1). |
 | 기본(0.6.0부터) | `test_host_mcp`(32), `test_setup`(26), `test_autostart`(12), `test_registry`(5), `test_runtime_paths`(4) | MCP catalog·이미지·오류·승인 전달, 전용 thread 종료(닫힌 stderr에서도 끝까지), 다른 client 유지, launcher의 인자·환경·stdio 보존, registry와 원본 앱 탐색, 설치 캐시 업데이트, 의존성 준비의 동시 실행과 부분 설치 복구, 닫힌 앱의 백그라운드 실행과 포커스 복귀, 켜져 있는 앱 보존, 동시 실행 시 한 번만 열기, 로그인 항목 설정·충돌 보존·제거. 엔진 폴더는 `source.json` 묶음에서만 찾고 플러그인 등록부는 읽지 않는다. 릴리스 버전은 엔진 manifest(`.claude-plugin/plugin.json`)에서 읽어 실행 정보와 비교한다. 설치 캐시 업데이트를 흉내 내는 `0.4.0`과 `0.4.1`은 시험 데이터다. `probe_host`는 끊기거나 취소된 시험에서 호스트에 스레드를 돌려받을 시간을 1초만 주고, 끊기지 않았으면 남은 시간을 모두 준다. |
 
-## Node 시험 (`tests/cua/relay`)
+## Node 시험 (`apps/cua-bar/engine-tests/relay`)
 
 | 파일(시험 수) | 확인하는 것 |
 |---|---|
@@ -65,4 +65,4 @@ Node 시험도 같은 출력과 종료 코드를 시험 프로세스가 낸다. 
 
 코드는 지원 폴더를 홈에서 찾는다. 그래서 `run.py`와 Node 도우미는 시험 전체를 버리는 HOME에서 돌린다. 시험이 자기 폴더를 주입하는 것을 잊으면 거기에 쓰게 되고, 거기에 뭔가 생기면 실패한다(종료 코드 1). 시험 파일과 fixture 코드는 앱에 담기는 엔진 폴더(`apps/cua-bar/engine`)에 포함하지 않는다.
 
-이 테스트 코드는 엔진과 같은 [MIT 라이선스](../../apps/cua-bar/engine/LICENSE)를 따른다.
+이 테스트 코드는 엔진과 같은 [MIT 라이선스](../engine/LICENSE)를 따른다.

@@ -143,7 +143,7 @@ struct NotificationPlannerTests {
     /// S21 itself is stopped one level down. The engine asks a release that could not be confirmed once more; a
     /// release confirmed at once takes the session out of the dead bridge's record, and one confirmed only when asked
     /// again lets the same cleanup release the session by id through the browser (`ReleaseBookingTests`,
-    /// `SecondAskTests` in tests/cua), so the next status has no such lease and there is nothing to notify. What is left here is a
+    /// `SecondAskTests` in engine-tests), so the next status has no such lease and there is nothing to notify. What is left here is a
     /// release that stayed unconfirmed after both asks: it waits for the cleanup, and then it is worth a minute's news.
     @Test func aLeaseAnEndedConnectionStillServesWaitsForThatConnectionsCleanup() throws {
         var planner = NotificationPlanner()

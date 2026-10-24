@@ -15,7 +15,7 @@ import relay_install
 from test_host_mcp import FakeProxy, HOST_THREAD
 from test_relay_install import Machine, relay_entry
 
-PLUGIN_ROOT = Path(__file__).resolve().parents[2]/'apps/cua-bar/engine'
+PLUGIN_ROOT = Path(__file__).resolve().parents[1]/'engine'
 spec = importlib.util.spec_from_file_location('host_mcp', PLUGIN_ROOT/'host_mcp.py')
 bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)

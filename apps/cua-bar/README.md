@@ -163,11 +163,11 @@ CUABAR_NOTARY_PROFILE=<프로필> ./scripts/package-release.sh   # dist/에 서�
 (cd download && wrangler deploy)   # cua.chenjing.org에 올려요
 ```
 
-엔진 시험은 저장소 루트에서 `python3 tests/cua/run.py`와 `node --test tests/cua/relay`로 돌려요([tests/cua/README.md](../../tests/cua/README.md)). 시험은 CUA를 쓰지 않을 때 돌려요.
+엔진 시험은 저장소 루트에서 `python3 apps/cua-bar/engine-tests/run.py`와 `node --test apps/cua-bar/engine-tests/relay`로 돌려요([engine-tests/README.md](engine-tests/README.md)). 시험은 CUA를 쓰지 않을 때 돌려요.
 
 - `build-app.sh`는 언제나 hardened runtime으로 서명해서, 손으로 깐 앱도 릴리스와 같은 규칙으로 돌아요. 예외는 Apple Events 하나예요(`scripts/CUABar.entitlements`). Codex 다시 켜기가 osascript로 Codex에 종료를 요청하기 때문이에요. `CUABAR_CODE_SIGN_IDENTITY`를 주면 그 신원으로 서명하고 보안 타임스탬프를 붙여요. 엔진은 서명하기 전에 `CUABar.app/Contents/Resources/engine/`에 담아서 서명이 엔진까지 덮어요(링크와 `__pycache__`·`*.pyc`·`.DS_Store`는 빼요).
 - `--install`은 있던 앱과 설정을 `~/Library/Application Support/CUABar/Backups/<시각>/`에 백업하고, 앱이 켜져 있으면 멈추고, 복사본의 서명을 확인한 뒤에 바꿔요.
 - 번들로 켠 앱은 개발용 ad hoc 서명이어도 이 맥의 실제 `~/.claude.json`·`~/.claude/skills/cuabar`·`~/.local/share/codex-cua`를 바꿔요. `swift run`처럼 번들 밖에서 돈 앱은 엔진도 MCP·스킬도 건드리지 않고, 자동 업데이트도 하지 않아요. 번들이어도 ad hoc 서명이면 자동 업데이트를 하지 않아요.
 - `package-release.sh [폴더]`는 키체인의 Developer ID Application 인증서로 앱을 만들어요(여럿이면 `CUABAR_CODE_SIGN_IDENTITY`로 골라요). `CUABAR_NOTARY_PROFILE`은 `xcrun notarytool store-credentials`로 만든 프로필 이름이에요. 앱을 공증받아 티켓을 붙이고, 그 앱을 담은 `CUABar-v<판>-macos-arm64.dmg`도 서명·공증해 티켓을 붙인 뒤 `SHA256SUMS.txt`와 함께 폴더에 써요. 기본 폴더는 `apps/cua-bar/dist/`이고 git이 보지 않아요. 체크섬, dmg와 그 안 앱의 서명·티켓, Gatekeeper가 둘 다 받아들이는지까지 확인한 뒤, GitHub 릴리스용 태그 `cua-bar--v<판>`과 실행할 `gh release create ...` 명령을 **출력만** 해요. 태그를 만들거나 올리거나 `gh`를 부르지 않아요. 올리는 것은 그때그때 물어보고 직접 해요. GitHub 릴리스는 선택이에요. 앱의 업데이트와 한 줄 설치는 GitHub를 보지 않아요.
 - `download/`는 cua.chenjing.org를 맡는 Cloudflare Worker예요. dmg, `SHA256SUMS.txt`, `install.sh`는 정적 파일로 나가고, `worker.js`가 첫 주소와 `/download`(맥 브라우저는 dmg로 넘기고, 휴대폰·curl 같은 것에는 안내 두 줄), `/install`(에이전트가 읽는 안내), `/version`(`install.sh`와 앱의 자동 업데이트가 읽는 판 정보)을 답해요. `install.sh`는 받은 dmg를 열기 전에(팀만 봐요), 그리고 그 안의 앱을 깔기 전에(번들 ID까지 봐요) 서명 요구 사항(`codesign --verify -R`)으로 검증한 뒤에만 깔아요. `public/`과 `release.json`은 `build-download-site.sh`가 만들고 git이 보지 않아요. 릴리스마다 `package-release.sh` → `build-download-site.sh` → `wrangler deploy` 순서로 올려요(GitHub 릴리스를 올릴 때는 그 사이에 해요). 올리는 것은 그때그때 물어봐요.
-- 앱 판 번호는 `engine/.claude-plugin/plugin.json`의 `version`에서 와요(이 파일 이름은 엔진 매니페스트로 그대로 써요). 판을 올릴 때 `engine/host_mcp.py`의 `VERSION`도 같은 값으로 올려요. `tests/cua/test_host_mcp.py`가 둘이 같은지 봐요.
+- 앱 판 번호는 `engine/.claude-plugin/plugin.json`의 `version`에서 와요(이 파일 이름은 엔진 매니페스트로 그대로 써요). 판을 올릴 때 `engine/host_mcp.py`의 `VERSION`도 같은 값으로 올려요. `engine-tests/test_host_mcp.py`가 둘이 같은지 봐요.
