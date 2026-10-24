@@ -107,11 +107,15 @@ class Record:
         return found
 
     def live_sessions(self):
-        """The sessions this record's writer is serving right now: a bridge's current thread, a relay's open scopes.
+        """The sessions this record's writer is serving right now: a bridge's current thread while it is connected to a
+        host, a relay's open scopes.
 
-        Other open scopes of a live bridge belong to hosts it has left (after a reconnect); it cannot end them."""
+        Other open scopes of a live bridge belong to hosts it has left (after a reconnect); it cannot end them. Nor can
+        it end those of its current thread once that host is gone (`host` is null: Codex quit or restarted): its next
+        call opens a new thread, and until then nobody serves the one it still names."""
         if self.kind == 'bridge':
-            return {self.current_session} if self.current_session else set()
+            host = self.data.get('host')
+            return {self.current_session} if self.current_session and isinstance(host, dict) and host else set()
         return set(self.open_sessions)
 
     def last_scope_time(self, session_id):

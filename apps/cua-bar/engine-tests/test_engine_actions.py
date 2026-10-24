@@ -61,6 +61,60 @@ class ReleaseTests(ActionCase):
         self.assertEqual(bridge.requests, [{'action': 'release', 'pid': 4242, 'started_at': NOW-900}])
         self.assertEqual(relay.requests, [])
 
+    def left_by_its_host(self, earlier_last, reply, own_open=False):
+        """A Claude conversation whose Codex was restarted: its bridge serves a new thread (SESSION_A) and still lists a
+        scope it opened under the host before (SESSION_B), which it can no longer end, so it answers every release
+        with cleanup_not_confirmed (the jev connection of 2026-10-24)."""
+        directory, _ = self.bridge_with_runtime()
+        scopes = [State.scope(SESSION_B, first=earlier_last+60, last=earlier_last)]
+        if own_open:
+            scopes.append(State.scope(SESSION_A))
+        self.update(directory, 'bridge', scopes=scopes)
+        return self.writer(directory, 4242, NOW-900, reply)
+
+    def test_a_scope_of_a_host_the_bridge_has_left_is_released_by_id_with_the_connection(self):
+        UNCONFIRMED = {'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0}
+        self.left_by_its_host(at(300), UNCONFIRMED)
+        by_id = []
+
+        def release_by_id(ctx, sessions, user=False, view=None, options=None):
+            by_id.append((list(sessions), user))
+            return {session: {'released': True, 'reason': None, 'tab_count': 1} for session in sessions}
+        with patch.object(engine_actions, 'release_sessions', side_effect=release_by_id):
+            self.assertEqual(self.release(BRIDGE_ID), {'ok': True, 'released': True, 'reason': None, 'scope_count': 1})
+        self.assertEqual(by_id, [([SESSION_B], True)])
+
+    def test_a_scope_chrome_has_forgotten_since_is_nothing_to_release(self):
+        UNCONFIRMED = {'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0}
+        self.machine.add(900, 1, self.commands.chrome, start=NOW-1000)               # Chrome restarted after that scope
+        self.left_by_its_host(at(5000), UNCONFIRMED)
+        with patch.object(engine_actions, 'release_sessions', side_effect=AssertionError('nothing is held')):
+            self.assertEqual(self.release(BRIDGE_ID),
+                             {'ok': True, 'released': False, 'reason': 'no_trusted_scope', 'scope_count': 0})
+
+    def test_the_bridges_own_scope_left_open_is_still_a_failure(self):
+        UNCONFIRMED = {'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0}
+        self.machine.add(900, 1, self.commands.chrome, start=NOW-1000)
+        self.left_by_its_host(at(5000), UNCONFIRMED, own_open=True)
+        with patch.object(engine_actions, 'release_sessions', side_effect=AssertionError('nothing is held by id')):
+            self.assertEqual(self.release(BRIDGE_ID),
+                             {'ok': False, 'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0})
+
+    def test_a_bridge_whose_host_is_gone_has_its_scope_released_by_id(self):
+        """Codex quit or restarted and the conversation has made no call since: the bridge still names the thread of the
+        gone host, and its scope there is one it can never end (new-chat-2 of 2026-10-24)."""
+        directory, _ = self.bridge_with_runtime(relay_scopes=[])
+        self.update(directory, 'bridge', host=None)
+        self.writer(directory, 4242, NOW-900, {'released': False, 'reason': 'cleanup_not_confirmed', 'scope_count': 0})
+        by_id = []
+
+        def release_by_id(ctx, sessions, user=False, view=None, options=None):
+            by_id.append((list(sessions), user))
+            return {session: {'released': True, 'reason': None, 'tab_count': 2} for session in sessions}
+        with patch.object(engine_actions, 'release_sessions', side_effect=release_by_id):
+            self.assertEqual(self.release(BRIDGE_ID), {'ok': True, 'released': True, 'reason': None, 'scope_count': 1})
+        self.assertEqual(by_id, [([SESSION_A], True)])
+
     def test_a_codex_connection_is_released_through_its_relay(self):
         relay = self.codex_relay({'released': True, 'reason': None, 'scope_count': 3})
         self.assertEqual(self.release(RELAY_ID), {'ok': True, 'released': True, 'reason': None, 'scope_count': 3})

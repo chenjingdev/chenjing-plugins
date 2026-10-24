@@ -25,6 +25,15 @@ struct StatusEvaluatorTests {
         #expect(summary.fix == nil)
     }
 
+    @Test func aConnectionThatHoldsNothingIsNotCounted() throws {
+        var status = try healthy()
+        let claude = try #require(status.connections.firstIndex { $0.agent == .claude })
+        status.connections[claude].holds = false
+        #expect(evaluate(status).headline == "연결 Codex 1")
+        status.connections[claude].holds = true
+        #expect(evaluate(status).headline == "연결 Claude 1 · Codex 1")
+    }
+
     @Test func aConnectionThatNeverMadeACallIsNotCounted() throws {
         var status = try healthy()
         status.connections.append(Connection(id: "claude-777-1792300000", agent: .claude, state: .active, canRelease: true))

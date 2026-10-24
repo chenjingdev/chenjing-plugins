@@ -79,7 +79,8 @@ enum TidyPlan {
     /// preferred to an ended one.
     static func lineToPress(for lease: LeftoverLease, in status: EngineStatus, tabsReleased: Set<String> = []) -> Connection? {
         let pressable = holders(of: lease, in: status).filter { hasButton($0, tabsReleased: tabsReleased) }
-        return pressable.first { $0.state != .ended } ?? pressable.sorted(by: newestFirst).first
+        // A live line the list leaves out (it holds nothing, as the engine sees it) has no button to press.
+        return pressable.first { $0.state != .ended && !$0.isQuiet } ?? pressable.filter { $0.state == .ended }.sorted(by: newestFirst).first
     }
 
     /// Whether a connection that is not over holds the session of this leftover lease. Its owner is there, so

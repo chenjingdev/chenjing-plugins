@@ -122,6 +122,22 @@ struct PopoverContentTests {
         #expect(rows(content(of: status)).contains { $0.id == unused.id }, "listed once it has made a call")
     }
 
+    @Test func aConnectionThatHoldsNothingIsNotListedThoughAnExtensionResetStillNamesIt() throws {
+        var status = try Fixtures.status("status-ready")
+        let id = status.connections[0].id
+        let live = status.connections.filter { $0.state != .ended }.count
+        status.connections[0].holds = false      // its AI ended its turn a moment ago, or a 탭 풀기 did
+        var connections = content(of: status).connections
+        #expect(!connections.groups.flatMap(\.rows).contains { $0.id == id })
+        #expect(connections.guidance.liveConnections.count == live, "an extension reset cuts it off all the same")
+        status.connections[0].holds = true
+        #expect(rows(content(of: status)).contains { $0.id == id }, "a turn its AI has not ended")
+        status.connections[0].holds = false
+        status.connections[0].busy = true
+        connections = content(of: status).connections
+        #expect(connections.groups.flatMap(\.rows).contains { $0.id == id }, "a call in flight is listed whatever it holds")
+    }
+
     @Test func otherAgentsGetTheirOwnGroupAfterClaudeAndCodex() throws {
         let content = try content("status-unknown-keys").connections
         #expect(content.groups.map(\.title) == ["Claude · 1", "gemini · 1"])

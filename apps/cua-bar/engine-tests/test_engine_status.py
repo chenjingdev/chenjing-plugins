@@ -13,7 +13,7 @@ from engine_support import (ABSENT, APP_VERSION, ENGINE_PID, NOW, SESSION_A, SES
 TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'engine', 'codex', 'host', 'setup', 'connections', 'leases',
             'other_tools', 'screen', 'activity']
 CONNECTION_KEYS = ['id', 'agent', 'state', 'pid', 'owner_pid', 'owner_alive', 'cwd', 'started_at', 'memory_bytes',
-                   'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop']
+                   'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop', 'holds']
 CMUX_CLIENT_KEYS = ['id', 'pid', 'mcp_pid', 'agent', 'cwd', 'started_at', 'can_stop']
 TIME = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
 
@@ -349,7 +349,23 @@ class AttributionTests(StatusCase):
             'id': 'codex-4000-%d' % (NOW-5000), 'agent': 'codex', 'state': 'active', 'pid': 4000, 'owner_pid': 1100,
             'owner_alive': True, 'cwd': '/work/unrecorded', 'started_at': iso(NOW-5000),
             'memory_bytes': (1000+2000)*1024, 'last_call_at': None, 'idle_seconds': None, 'session_id': None,
-            'busy': False, 'can_release': False, 'can_stop': True})
+            'busy': False, 'can_release': False, 'can_stop': True, 'holds': None})
+
+    def test_what_a_connection_holds_is_a_scope_it_still_serves_or_a_session_left_with_it(self):
+        """holds: an AI that called and has not ended its turn holds its scope; once the turn ended (or was released) it
+        holds nothing, however recently it called; a bridge whose host is gone still holds what may be left in Chrome."""
+        self.start_world()
+        directory, relay_directory = self.bridge_with_runtime(last_call=20)
+        bridge = 'claude-4242-%d' % (NOW-900)
+        holds = lambda: next(item['holds'] for item in self.status()['connections'] if item['id'] == bridge)
+        self.assertIs(holds(), True)
+        self.update(directory, 'bridge', scopes=[], cleanup='none')
+        self.update(relay_directory, 'relay', scopes=[])
+        self.assertIs(holds(), False, 'the turn ended a moment ago: nothing is held')
+        self.update(directory, 'bridge', host=None, scopes=[State.scope(SESSION_A, last=at(300))])
+        self.assertIs(holds(), True, 'its host is gone, and what it holds may still be left in Chrome')
+        self.machine.add(5000, 1, self.commands.chrome, start=NOW-100)
+        self.assertIs(holds(), False, 'Chrome restarted since: it forgot that lease')
 
     def test_what_the_engine_must_never_signal_is_not_offered_for_stopping(self):
         from engine_support import ENGINE_PID
@@ -1204,6 +1220,20 @@ class ActivityAndScreenTests(StatusCase):
         self.update(bridge_dir, 'bridge', last_call_at=iso(at(11)))
         self.update(relay_dir, 'relay', last_call_at=iso(at(11)))
         self.assertEqual(self.status()['screen'], {'active_connection_id': None, 'last_call_at': iso(at(11))})
+
+    def test_an_ended_turn_is_no_call(self):
+        """turn_ended only ends a turn, the AI's own or the one a release ends: the relay cannot tell which, and neither
+        uses the screen. So it wakes no resting connection up and holds no screen; it is still a line of the log."""
+        self.start_world()
+        self.bridge_with_runtime(last_call=4000, relay_last_call=4000)
+        self.state.activity([State.line('relay-2001-%d' % (NOW-890), 3, SESSION_A, tool='turn_ended',
+                                        owner='bridge-4242-%d' % (NOW-900))])
+        status = self.status()
+        conn = next(item for item in status['connections'] if item['id'] == 'claude-4242-%d' % (NOW-900))
+        self.assertEqual((conn['state'], conn['idle_seconds']), ('idle', 4000))
+        self.assertEqual(status['screen'], {'active_connection_id': None, 'last_call_at': iso(at(4000))})
+        self.assertEqual([(line['tool'], line['connection_id']) for line in status['activity']],
+                         [('turn_ended', 'claude-4242-%d' % (NOW-900))])
 
     def test_a_call_that_is_still_running_keeps_the_screen_even_if_it_started_long_ago(self):
         self.start_world()

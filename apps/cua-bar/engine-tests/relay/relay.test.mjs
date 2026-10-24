@@ -394,6 +394,36 @@ test('a runtime that works in the folder of a connection test leaves no line and
   assert.equal(client.stderr, '');
 });
 
+test('a runtime that works in the folder of a targeted release leaves no line and no last call either', async t => {
+  // `release-session` opens a thread of its own in a folder named like this, under the session it releases: the calls
+  // are the engine's, not the conversation's whose session it is.
+  const folder = fs.mkdtempSync('/tmp/codex-cua-release-');
+  t.after(() => fs.rmSync(folder, {recursive: true, force: true}));
+  const {fixture, client} = await boot(t, {cwd: folder});
+  await client.call('count tabs', turn('s-gone', 't9'));
+  let record = await readRecord(fixture, r => r.scopes.length === 1 && r.busy === false);
+  assert.equal(record.last_call_at, null);
+  const ended = await client.request('tools/call', {name: 'turn_ended', arguments: {hook_event_name: 'Stop', session_id: 's-gone', turn_id: 't9'}});
+  assert.equal(ended.result.isError, undefined);
+  record = await readRecord(fixture, r => r.scopes.length === 0);
+  assert.equal(record.last_call_at, null);
+  assert.equal(fs.existsSync(path.join(fixture.state, 'activity.jsonl')), false);
+});
+
+test('ending a turn is a line in the activity log but no last call: whoever ended it, the screen was not used', async t => {
+  // A release through a Claude bridge ends the pair with the same turn_ended the AI sends: the relay cannot tell them
+  // apart, and neither is a use of the screen. Taking one for a call made a connection just released look busy.
+  const {fixture, client} = await boot(t);
+  await client.call('one', turn('s-chat', 't1'));
+  const before = (await readRecord(fixture, r => r.scopes.length === 1 && r.busy === false)).last_call_at;
+  assert.match(before, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+  await sleep(1100);
+  await client.request('tools/call', {name: 'turn_ended', arguments: {hook_event_name: 'Stop', session_id: 's-chat', turn_id: 't1'}});
+  const after = await readRecord(fixture, r => r.scopes.length === 0 && r.busy === false);
+  assert.equal(after.last_call_at, before);
+  assert.deepEqual(activityLines(fixture).map(line => line.tool), ['js', 'turn_ended']);
+});
+
 test('a relay that can no longer read its folder still records the one it started in', async t => {
   // The test removes its folder as soon as it is done, while its relay may still be ending. Where reading the working
   // folder of a removed folder fails, the dead record would lose the name that tells it is a test's; the preload below
@@ -425,7 +455,7 @@ process.cwd = () => {
 test('a folder that only looks like the one of a connection test is a conversation\'s, and its calls are written down', async t => {
   const base = fs.mkdtempSync('/tmp/crp-');
   t.after(() => fs.rmSync(base, {recursive: true, force: true}));
-  for (const name of ['codex-cua-probe', 'codex-cua-probe-ab', 'my-codex-cua-probe-abcdef', 'codex-cua-release-abcdef', 'codex-cua-probe-abcdef.old']) {
+  for (const name of ['codex-cua-probe', 'codex-cua-probe-ab', 'my-codex-cua-probe-abcdef', 'codex-cua-releases-abcdef', 'codex-cua-probe-abcdef.old']) {
     const folder = path.join(base, name);
     fs.mkdirSync(folder);
     const {fixture, client} = await boot(t, {cwd: folder});

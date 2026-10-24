@@ -22,7 +22,9 @@ CURRENT_ENGINE = 'current'
 # this one. The runtime Codex starts for the thread then works there too: that is how the test finds it to end it, and
 # how the status tells it is no connection (the relay of such a runtime does the same for its own records).
 PROBE_FOLDER_PREFIX = 'codex-cua-probe-'
-_PROBE_FOLDER = re.compile(r'^codex-cua-probe-[A-Za-z0-9_]{6,32}$')
+# A targeted release (`release-session`) does the same with a folder of its own: its thread is no conversation either.
+RELEASE_FOLDER_PREFIX = 'codex-cua-release-'
+_PROBE_FOLDER = re.compile(r'^codex-cua-(?:probe|release)-[A-Za-z0-9_]{6,32}$')
 IDLE_SECONDS = 30*60       # R16: an idle connection has had no CUA call for more than 30 minutes
 ACTIVE_SECONDS = 10        # R13: a CUA call in the last 10 seconds means the screen is in use
 ACTIVITY_LIMIT = 200       # R18: the newest 200 operations
@@ -62,7 +64,8 @@ def parse_iso(value):
 
 
 def is_probe_folder(path):
-    """Whether `path` is the working folder of a connection test's thread: named like the folders the test makes."""
+    """Whether `path` is the working folder of one of the engine's own short-lived threads, a connection test's or a
+    targeted release's: named like the folders those make."""
     return isinstance(path, str) and _PROBE_FOLDER.match(os.path.basename(path.rstrip('/'))) is not None
 
 

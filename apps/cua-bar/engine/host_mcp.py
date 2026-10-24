@@ -652,17 +652,21 @@ class HostMcp:
         except Exception:
             self.log('owned_connection_cleanup_unconfirmed')
 
-    def begin_call(self):
+    def begin_call(self, uses_screen=True):
+        """A tool call goes out. turn_ended only ends a turn: it is in flight like any call, but no use of the screen,
+        so it leaves last_call_at as it is."""
         self.active_tool_calls += 1
-        self.last_call_at = utc_now()
+        if uses_screen:
+            self.last_call_at = utc_now()
         self.changed()
 
     def finish_call(self, name, ok, started, scope, relay):
         self.active_tool_calls -= 1
-        self.last_call_at = utc_now()
-        entry = self.scopes.get((scope['session_id'], scope['turn_id']))
-        if entry is not None:
-            entry['last_at'] = self.last_call_at
+        if name != 'turn_ended':
+            self.last_call_at = utc_now()
+            entry = self.scopes.get((scope['session_id'], scope['turn_id']))
+            if entry is not None:
+                entry['last_at'] = self.last_call_at
         self.changed()
         callback = self.on_call
         if callback is not None:
@@ -744,7 +748,7 @@ class HostMcp:
             rpc, scope = self.rpc, self.current_scope()
             relay = bool(self.host and self.host.get('relay'))
             started = time.monotonic()
-            self.begin_call()
+            self.begin_call(uses_screen=False)
             ok = False
             try:
                 ok, result = await self.end_scope(scope, self.cleanup_timeout)

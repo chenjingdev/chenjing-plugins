@@ -316,6 +316,21 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                           if key not in ('inputSchema', 'description')})
         self.assertEqual(proxy.tools, TOOLS)
 
+    async def test_ending_the_turn_is_in_flight_like_a_call_but_no_use_of_the_screen(self):
+        """The AI's turn_ended only ends its turn: last_call_at keeps the time of the last real call."""
+        adapter, _, _, _, _ = self.fixture()
+        await self.initialize(adapter)
+        await adapter.handle({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call',
+                              'params': {'name': 'js', 'arguments': {'code': 'one'}}})
+        used = adapter.last_call_at
+        self.assertIsNotNone(used)
+        adapter.last_call_at = '2026-10-24T01:00:00Z'          # a call made a while ago
+        await adapter.handle({'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call',
+                              'params': {'name': 'turn_ended', 'arguments': {}}})
+        self.assertEqual(adapter.last_call_at, '2026-10-24T01:00:00Z')
+        self.assertEqual(adapter.active_tool_calls, 0)
+        self.assertEqual(adapter.snapshot()['scopes'], [])
+
     async def test_lifecycle_advertised_empty_call_executes_native_scope_and_preserves_result(self):
         result = {'content': [{'type': 'text', 'text': 'Native lifecycle result'}],
                   'structuredContent': {'original': [1, 2]}, '_meta': {'original': True}}

@@ -117,8 +117,46 @@ def release_connection(ctx, wanted):
         return {'ok': False, 'released': False, 'reason': 'unsupported', 'scope_count': 0}
     result = release_one(ctx, conn)
     book_connection(ctx, view.records, conn, result)
-    return {'ok': result.released or result.nothing, 'released': result.released, 'reason': result.reason,
-            'scope_count': result.count}
+    reply = {'ok': result.released or result.nothing, 'released': result.released, 'reason': result.reason,
+             'scope_count': result.count}
+    return release_earlier_hosts(ctx, conn, reply)
+
+
+def release_earlier_hosts(ctx, conn, reply):
+    """The part of a Claude connection's release that its bridge cannot do: the sessions of Codex hosts it has left.
+
+    A bridge ends only the scopes of its current host's thread. One it opened before Codex was restarted stays in its
+    record, and the bridge answers every release with cleanup_not_confirmed because of it. So does every scope of a
+    bridge whose host is gone (Codex quit or restarted and the conversation has made no call since). The status lists such a
+    session as one that may have been left behind, with the live connection as its holder, so the app shows no line of
+    its own for it: this connection's 탭 풀기 is where it is released. It is released by id, through the browser, like
+    any session whose owner is gone. One that Chrome has forgotten since (it restarted) or that the engine already
+    released is no longer listed, and holds nothing: it does not make the release a failure."""
+    record = conn.record
+    if conn.agent != 'claude' or record is None or record.kind != 'bridge':
+        return reply
+    if all(session in record.live_sessions() for session in record.open_sessions):
+        return reply                       # every scope it lists is of the host it serves: the bridge's answer is all
+    view = build_view(ctx, with_folders=False, with_checks=False)     # the release above changed the records
+    fresh = next((item for item in view.live_bridges if item.writer == record.writer), None)
+    if fresh is None:
+        return reply
+    earlier = [item['session_id'] for item in view.maybe_left if item['connection_id'] == conn.id]
+    own_left = any(session in fresh.live_sessions() for session in fresh.open_sessions)
+    bridge_done = reply['ok'] or (reply['reason'] == UNCONFIRMED and not own_left)
+    released, reason, count = reply['released'], (None if bridge_done else reply['reason']), reply['scope_count']
+    if earlier:
+        outcome = release_sessions(ctx, earlier, user=True, view=view)
+        for session in earlier:
+            result = outcome.get(session) or {'released': False, 'reason': UNCONFIRMED}
+            if result['released']:
+                released, count = True, count+1
+            elif reason is None:
+                reason = result['reason'] or UNCONFIRMED
+    ok = reason is None
+    if ok and not released:
+        reason = 'no_trusted_scope'        # nothing was held: like any release with nothing to end
+    return {'ok': ok, 'released': released, 'reason': None if released and ok else reason, 'scope_count': count}
 
 
 def release_ended(ctx):

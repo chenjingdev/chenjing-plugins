@@ -354,7 +354,8 @@ class RealProcessTests(unittest.TestCase):
         self.assertEqual(status['setup']['command'], 'missing')         # nothing is installed in the temporary home
         for connection in status['connections']:
             self.assertEqual(sorted(connection), sorted(['id', 'agent', 'state', 'pid', 'owner_pid', 'owner_alive', 'cwd',
-                'started_at', 'memory_bytes', 'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop']))
+                'started_at', 'memory_bytes', 'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop',
+                'holds']))
         self.assertLess(seconds, 5)
         self.assertEqual(sorted(item.name for item in self.home.rglob('*') if item.name != 'Applications'
                                 and 'Applications' not in item.parts), [])      # nothing was written into the home

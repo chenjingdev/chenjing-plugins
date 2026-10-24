@@ -32,11 +32,13 @@ FOLDER = '/private/var/folders/ab/xyz/T/codex-cua-probe-q1w2e3r4'
 
 class FolderNameTests(unittest.TestCase):
     def test_only_a_folder_made_by_the_test_is_taken_for_one(self):
-        for path in (FOLDER, FOLDER+'/', '/tmp/codex-cua-probe-aB3_xY9z', 'codex-cua-probe-q1w2e3r4'):
+        # A targeted release's thread works in a folder of the same kind: it is no conversation either.
+        for path in (FOLDER, FOLDER+'/', '/tmp/codex-cua-probe-aB3_xY9z', 'codex-cua-probe-q1w2e3r4',
+                     '/private/var/folders/ab/xyz/T/codex-cua-release-q1w2e3r4'):
             with self.subTest(path):
                 self.assertTrue(is_probe_folder(path))
         for path in (None, 7, '', '/', '/work/codex-cua-probe', '/work/codex-cua-probe-', '/work/codex-cua-probe-ab',
-                     '/work/my-codex-cua-probe-q1w2e3r4', '/work/codex-cua-probe-q1w2e3r4/sub', '/work/codex-cua-release-q1w2e3r4',
+                     '/work/my-codex-cua-probe-q1w2e3r4', '/work/codex-cua-probe-q1w2e3r4/sub', '/work/codex-cua-releases-q1w2e3r4',
                      '/work/codex-cua-probe-q1w2e3r4.bak', '/work/codex-cua-probe-q1w 2e3r4', '/work/codex-cua-probe-'+'x'*40):
             with self.subTest(path):
                 self.assertFalse(is_probe_folder(path))
@@ -126,11 +128,11 @@ class LeftOutOfTheStatusTests(StatusCase):
 
     def test_a_folder_that_only_looks_like_the_one_of_the_test_is_a_connection_like_any_other(self):
         for index, folder in enumerate(('/work/codex-cua-probe', '/work/codex-cua-probe-ab', '/work/my-codex-cua-probe-q1w2e3r4',
-                                        '/work/codex-cua-release-q1w2e3r4')):
+                                        '/work/codex-cua-releases-q1w2e3r4')):
             self.probe_runtime(repl=3100+10*index, folder=folder, start=NOW-2000)
         status = self.status()
         self.assertEqual(sorted(item['cwd'] for item in status['connections']),
-                         ['/work/codex-cua-probe', '/work/codex-cua-probe-ab', '/work/codex-cua-release-q1w2e3r4',
+                         ['/work/codex-cua-probe', '/work/codex-cua-probe-ab', '/work/codex-cua-releases-q1w2e3r4',
                           '/work/my-codex-cua-probe-q1w2e3r4'])
 
 

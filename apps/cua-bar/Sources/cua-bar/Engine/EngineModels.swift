@@ -146,10 +146,17 @@ struct Connection: Equatable, Sendable, Identifiable {
     var canRelease = false
     /// The engine may signal this process.
     var canStop = false
+    /// It holds something its 탭 풀기 could let go of: a scope of a turn its AI has not ended, or a session it may
+    /// have left in Chrome. nil where the engine cannot tell (a runtime without a relay, an older engine).
+    var holds: Bool?
 
-    /// Running, but it has never made a CUA call (no call is in flight, none was ever recorded): it holds no tab,
-    /// so the 연결 list and the card's count leave it out.
-    var isUnused: Bool { state == .active && !busy && lastCallAt == nil && idleSeconds == nil }
+    /// Running, with no call in flight and nothing to let go of: the AI has ended its turn, or never called. The 연결
+    /// list and the card's count leave it out. Where the engine cannot tell what it holds, only one that never called is.
+    var isQuiet: Bool {
+        if busy || state == .ended { return false }
+        if let holds { return !holds }
+        return state == .active && lastCallAt == nil && idleSeconds == nil
+    }
 }
 
 struct Leases: Equatable, Sendable {
@@ -308,7 +315,7 @@ extension Connection: Decodable {
         case startedAt = "started_at", memoryBytes = "memory_bytes"
         case lastCallAt = "last_call_at", idleSeconds = "idle_seconds"
         case sessionID = "session_id", busy
-        case canRelease = "can_release", canStop = "can_stop"
+        case canRelease = "can_release", canStop = "can_stop", holds
     }
 
     /// A connection without an id cannot be acted on, so it is the one thing that fails.
@@ -329,6 +336,7 @@ extension Connection: Decodable {
         busy = c.lenientBool(.busy) ?? false
         canRelease = c.lenientBool(.canRelease) ?? false
         canStop = c.lenientBool(.canStop) ?? false
+        holds = c.lenientBool(.holds)
     }
 }
 

@@ -353,11 +353,12 @@ enum StatusEvaluator {
 
     // MARK: Helpers
 
-    /// `Claude 1 · Codex 1` for the connections that are not ended and have made a CUA call; empty when there are none.
+    /// `Claude 1 · Codex 1` for the connections that are not ended and are working or hold something (the ones the 연결
+    /// list shows); empty when there are none.
     private static func connectionCounts(in status: EngineStatus) -> String {
         var order: [AgentKind] = []
         var counts: [AgentKind: Int] = [:]
-        for connection in status.connections where connection.state != .ended && !connection.isUnused {
+        for connection in status.connections where connection.state != .ended && !connection.isQuiet {
             if counts[connection.agent] == nil { order.append(connection.agent) }
             counts[connection.agent, default: 0] += 1
         }

@@ -23,7 +23,7 @@ import subprocess
 import tempfile
 import uuid
 
-from engine_core import SESSION_ID, iso
+from engine_core import RELEASE_FOLDER_PREFIX, SESSION_ID, iso
 from engine_inventory import is_cua_repl, lookup, same_process, snapshot, working_folders
 from engine_records import remember_released, remove_sessions
 from engine_status import build_view
@@ -266,7 +266,7 @@ def release_sessions(ctx, sessions, user=False, view=None, options=None):
         results.update({session: _failure('unsupported') for session in allowed})
         return results
     try:
-        folder = tempfile.mkdtemp(prefix='codex-cua-release-')
+        folder = tempfile.mkdtemp(prefix=RELEASE_FOLDER_PREFIX)
     except OSError:
         folder = None      # the thread works where the engine does, and Codex keeps its runtime for about half an hour
     since = ctx.clock()

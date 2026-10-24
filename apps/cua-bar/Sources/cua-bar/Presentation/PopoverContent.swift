@@ -315,7 +315,8 @@ struct ConnectionsContent: Equatable, Sendable {
     var screen: ScreenLine
     /// nil when there is nothing to tidy.
     var tidy: TidyContent?
-    /// The connections whose AI is alive and that have made a CUA call, Claude then Codex: a 탭 풀기 on each line.
+    /// The connections whose AI is alive and that are working or hold something, Claude then Codex: a 탭 풀기 on each
+    /// line. One that holds nothing is left out (`Connection.isQuiet`).
     var groups: [ConnectionGroup]
     var tools: [OtherToolRow]
     /// R21: no connection of any kind.
@@ -325,14 +326,19 @@ struct ConnectionsContent: Equatable, Sendable {
     init(status: EngineStatus, now: Date, calendar: Calendar, tabsReleased: Set<String> = []) {
         screen = ScreenLine(status: status, now: now)
 
-        let live = status.connections.filter { $0.state != .ended && !$0.isUnused }.sorted(by: TidyPlan.newestFirst)
-        var agents: [AgentKind] = []
-        for connection in live where !agents.contains(connection.agent) { agents.append(connection.agent) }
-        let rank: (AgentKind) -> Int = { $0 == .claude ? 0 : ($0 == .codex ? 1 : 2) }
-        agents = agents.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
-        groups = agents.map { agent in
-            let rows = live.filter { $0.agent == agent }.map { ConnectionRow($0, now: now, calendar: calendar) }
-            return ConnectionGroup(agent: agent, title: "\(agent.label) · \(rows.count)", rows: rows)
+        // Claude, then Codex, then the others; within one agent the newest first.
+        let byAgent = { (connections: [Connection]) -> [(agent: AgentKind, connections: [Connection])] in
+            var agents: [AgentKind] = []
+            for connection in connections where !agents.contains(connection.agent) { agents.append(connection.agent) }
+            let rank: (AgentKind) -> Int = { $0 == .claude ? 0 : ($0 == .codex ? 1 : 2) }
+            agents = agents.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+            return agents.map { agent in (agent, connections.filter { $0.agent == agent }) }
+        }
+        // Every live connection is cut off by an extension reset, also one the list leaves out for holding nothing.
+        let allLive = byAgent(status.connections.filter { $0.state != .ended }.sorted(by: TidyPlan.newestFirst))
+        groups = allLive.compactMap { agent, connections in
+            let rows = connections.filter { !$0.isQuiet }.map { ConnectionRow($0, now: now, calendar: calendar) }
+            return rows.isEmpty ? nil : ConnectionGroup(agent: agent, title: "\(agent.label) · \(rows.count)", rows: rows)
         }
 
         tools = status.otherTools.map { tool in
@@ -379,7 +385,9 @@ struct ConnectionsContent: Equatable, Sendable {
             ],
             warning: "확장을 껐다 켜면 이 Chrome을 쓰는 모든 CUA 연결의 점유가 한꺼번에 풀려요. 다른 작업 중에는 하지 마세요.",
             liveConnectionsTitle: "확장을 껐다 켜면 끊길 살아 있는 연결",
-            liveConnections: groups.flatMap(\.rows).map { row in row.path == nil ? row.agent.label : "\(row.agent.label) · \(row.folder)" },
+            liveConnections: allLive.flatMap(\.connections).map {
+                $0.cwd == nil ? $0.agent.label : "\($0.agent.label) · \(Format.folder($0.cwd))"
+            },
             liveConnectionsEmptyText: "없음",
             needsAttention: leases.contains { $0.kind == .maybeLeft && !$0.canReleaseSession })
     }

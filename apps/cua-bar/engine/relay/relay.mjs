@@ -12,8 +12,11 @@
 //     does every activity line: it still says whose call it was when the conversation, this relay and the bridge's
 //     own record are gone. The record also says whether that bridge was running when this relay came up
 //     (owner_running): a runtime that Codex starts again for a conversation that has ended finds it gone,
-//   - leaves out of the activity log, and out of last_call_at, the calls of a runtime that works in the folder of a
-//     connection test's thread (`codex-cua doctor --probe`, see PROBE_FOLDER): a test is no conversation's call.
+//   - leaves out of the activity log, and out of last_call_at, the calls of a runtime that works in the folder of one
+//     of the engine's own short-lived threads (a connection test, `codex-cua doctor --probe`, or a targeted release,
+//     `release-session`; see PROBE_FOLDER): neither is a conversation's call,
+//   - never takes a turn_ended for a use of the screen: it ends a turn (the AI's own, or a release asked for through
+//     a Claude bridge, which the relay cannot tell apart), so it is a line in the activity log but no last_call_at.
 // The format of those files is documented in the engine records description of the plugin.
 //
 // Nothing the user did is written down: no tool arguments or results, no code, titles, URLs, page text or
@@ -36,8 +39,9 @@ const ENV_STATE = 'CODEX_CUA_STATE_DIR';
 const ENV_RUNTIME_PATH = 'CUA_REPL_NODE_REPL_PATH';
 const ENV_OWNER = 'CODEX_CUA_OWNER';
 const OWNER = /^bridge-[0-9]{1,10}-[0-9]{1,12}$/;
-// The folder a connection test's thread works in, named like the engine's is_probe_folder (engine_core.py) names it.
-const PROBE_FOLDER = /^codex-cua-probe-[A-Za-z0-9_]{6,32}$/;
+// The folder one of the engine's own short-lived threads works in (a connection test's or a targeted release's), named
+// like the engine's is_probe_folder (engine_core.py) names it.
+const PROBE_FOLDER = /^codex-cua-(?:probe|release)-[A-Za-z0-9_]{6,32}$/;
 
 const IN_FLIGHT_WAIT_MS = 2500;      // how long a release waits for running tool calls
 const OWNED_TIMEOUT_MS = 4000;       // one turn_ended of our own
@@ -405,7 +409,7 @@ function relay(child) {
       // opened here is the AI's own: the others are neither a call nor a line in the activity log.
       // The same goes for every call of a connection test: it opens its scope like any call, but nobody made it.
       const routine = probe || (isEnd && !(pair && scopes.has(pairKey(pair.session_id, pair.turn_id))));
-      if (!routine) lastCallAt = iso();
+      if (!routine && !isEnd) lastCallAt = iso();
       if (key !== null) {
         callsInFlight += 1;
         pending.set(key, {kind: 'call', tool: name, sessionId: scope?.session_id ?? pair?.session_id ?? null, pair, routine,
@@ -454,7 +458,7 @@ function relay(child) {
       callsInFlight -= 1;
       const ok = confirmed(message);
       if (!entry.routine) {
-        lastCallAt = iso();
+        if (entry.tool !== 'turn_ended') lastCallAt = iso();
         activity({sessionId: entry.sessionId, tool: entry.tool, ok, ms: Date.now() - entry.started});
       }
       if (ok && entry.pair) closeScope(entry.pair);

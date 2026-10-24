@@ -56,6 +56,8 @@ class Connection:
         self.can_stop = True
         self.state = 'active'
         self.idle_seconds = None
+        # Whether it holds anything a release could let go of; None where no record tells (see View._holdings).
+        self.holds = None
 
     @property
     def id(self):
@@ -77,7 +79,7 @@ class Connection:
                 'started_at': iso(self.started), 'memory_bytes': self.memory_bytes,
                 'last_call_at': iso(self.last_call), 'idle_seconds': self.idle_seconds,
                 'session_id': self.session_id, 'busy': self.busy, 'can_release': self.can_release,
-                'can_stop': self.can_stop}
+                'can_stop': self.can_stop, 'holds': self.holds}
 
 
 class CmuxConnection:
@@ -234,6 +236,7 @@ class View:
         self._map_activity(activity)
         self._finish(with_folders)
         self._leases()
+        self._holdings()
 
     # --- connections ---------------------------------------------------------------------------------
 
@@ -407,7 +410,9 @@ class View:
                 target, agent = session_bridge[line['session_id']], 'claude'
             else:
                 target, agent = 'codex-'+line['writer'][len('relay-'):], 'codex'
-            self.newest[target] = _later(self.newest.get(target), line['at'])
+            if line['tool'] != 'turn_ended':
+                # Ending a turn is no use of the screen: the AI's own end, or a release that ends it for the AI.
+                self.newest[target] = _later(self.newest.get(target), line['at'])
             self.activity.append((line, target, agent))
 
     def _finish(self, with_folders):
@@ -462,8 +467,8 @@ class View:
     def _leases(self):
         """Sessions whose leases may have been left behind.
 
-        They come from dead records, and from a live bridge's open scopes of sessions that are no longer its current
-        one: those belong to a host it has left, and the bridge cannot end them any more. A live writer's record is
+        They come from dead records, and from a live bridge's open scopes of sessions it no longer serves: those of a
+        host it has left, or of its current thread once that host is gone, which the bridge cannot end any more. A live writer's record is
         never touched, so what the engine has already released is remembered in its own file."""
         inv = self.inv
         listed = set()
@@ -484,8 +489,9 @@ class View:
             for session in record.open_sessions:
                 note(record, session)
         for record in self.live_bridges:
+            serving = record.live_sessions()
             for session in record.open_sessions:
-                if session != record.current_session:
+                if session not in serving:
                     note(record, session)
         chrome = inv.chrome_started
         stale = set()
@@ -521,6 +527,22 @@ class View:
                 session for session in sessions if session in stale or (record.writer, session) in released}
             if sessions <= gone:
                 self.prunable.append((record, gone))
+
+    def _holdings(self):
+        """Whether each connection holds anything its 탭 풀기 could let go of.
+
+        That is a scope of a session its writer still serves (an AI that called and has not ended its turn yet), or a
+        session listed as maybe left with this connection as its holder (a host its bridge has left). A turn the AI
+        ended, or a release, closes the scope: the connection then holds nothing, however recently it called. Where no
+        record tells (a runtime without a relay, a bridge without a readable record) it is None: not known."""
+        left = {item['connection_id'] for item in self.maybe_left}
+        for conn in self.connections:
+            record = conn.record
+            if record is None:
+                conn.holds = None
+                continue
+            serving = record.live_sessions() if record.live else set()
+            conn.holds = any(scope.session_id in serving for scope in record.scopes) or conn.id in left
 
     # --- lookups -------------------------------------------------------------------------------------
 
@@ -621,7 +643,8 @@ class View:
             elif conn.last_call is not None and 0 <= self.now-conn.last_call <= ACTIVE_SECONDS:
                 recent.append((conn.last_call, conn))
         recent.sort(key=lambda item: (-item[0], item[1].pid))
-        last = _later(*[conn.last_call for conn in self.connections], *[line['at'] for line, _, _ in self.activity])
+        last = _later(*[conn.last_call for conn in self.connections],
+                      *[line['at'] for line, _, _ in self.activity if line['tool'] != 'turn_ended'])
         return {'active_connection_id': recent[0][1].id if recent else None, 'last_call_at': iso(last)}
 
     def _activity(self):
