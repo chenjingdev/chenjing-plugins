@@ -451,9 +451,7 @@ final class CUABarViewModel: ObservableObject {
         lastError = nil
         loginEnvironment = login
         claudeSetup = claude
-        publish(StatusEvaluator.evaluate(
-            status, appVersion: appVersion, tabsReleased: tabsReleasedIDs,
-            facts: LocalFacts(claude: claude, developerToolsNeeded: setupActivity.developerToolsNeeded)))
+        publish(StatusEvaluator.evaluate(status, appVersion: appVersion, tabsReleased: tabsReleasedIDs, facts: localFacts))
         content = PopoverContent(status: status, now: now, calendar: calendar, tabsReleased: tabsReleasedIDs)
         updatedAt = now
         forgetWhatIsGone(in: status)
@@ -675,7 +673,13 @@ final class CUABarViewModel: ObservableObject {
     }
 
     private func codexRunsWithoutHost(in status: EngineStatus) -> Bool {
-        StatusEvaluator.problem(in: status, appVersion: appVersion)?.kind == .codexWithoutHost
+        StatusEvaluator.problem(in: status, appVersion: appVersion, facts: localFacts)?.kind == .codexWithoutHost
+    }
+
+    /// What the card judges from besides the engine's answer. The notifications and the notification's 다시 켜기 judge
+    /// from the same, so they never offer a restart while the card asks for 고치기 first.
+    private var localFacts: LocalFacts {
+        LocalFacts(claude: claudeSetup, developerToolsNeeded: setupActivity.developerToolsNeeded)
     }
 
     // MARK: Actions
@@ -737,6 +741,13 @@ final class CUABarViewModel: ObservableObject {
         guard !inFlight.contains(action) else {
             return ActionOutcome(kind: .info, message: "이미 하는 중이에요")
         }
+        // Nor a second restart while the last one waits for Codex to quit (S10): it would ask Codex to quit again. The
+        // card's button waits; this is for the notification's 다시 켜기, which may still be in Notification Center.
+        if waitsForQuit(action) {
+            let outcome = ActionOutcome(kind: .info, message: Self.quitWaitHelp)
+            tell(outcome, about: action)
+            return outcome
+        }
         inFlight.insert(action)
         defer { inFlight.remove(action) }
         let result = await execute(action)
@@ -757,9 +768,9 @@ final class CUABarViewModel: ObservableObject {
                 return (result.outcome, true)
             }
             releaseRefusals[id, default: 0] += 1
-            // A question in a closed popover would only be stale by the time it opens: the row
-            // state says it instead.
-            if case .releaseConnection = action, isPopoverOpen {
+            // A question in a closed popover would only be stale by the time it opens, and one on 기록 or 점검 would
+            // never be seen (it is asked under the row, and coming back to the list withdraws it): the row says it instead.
+            if case .releaseConnection = action, isPopoverOpen, selectedTab == .connections {
                 // The question is the message; no banner on top of it.
                 pending = PendingConfirmation(action: .retryRelease(id), kind: .retryRelease)
                 return (result.outcome, false)
@@ -1076,7 +1087,8 @@ final class CUABarViewModel: ObservableObject {
         guard let status = lastStatus else { return }
         let due = notificationPlanner.due(
             status: status, appVersion: appVersion, now: now,
-            cleanupTried: cleanupPlanner.tried, cleanupRunning: automaticCleanupTask != nil, tabsReleased: tabsReleasedIDs)
+            cleanupTried: cleanupPlanner.tried, cleanupRunning: automaticCleanupTask != nil, tabsReleased: tabsReleasedIDs,
+            facts: localFacts)
         for notification in due {
             runInBackground { [weak self, notifier] in
                 let delivered = await notifier.post(notification)
@@ -1175,10 +1187,21 @@ final class CUABarViewModel: ObservableObject {
 
     /// A line that left the list takes its answer with it, so the answer is said under the card instead:
     /// a 정리 that worked is the common way for its line to go. So does a tab that is no longer shown.
+    /// There is one banner: of several answers that move at once, or of one that moves while another is still under the
+    /// card, the graver one stays. A success never hides a warning or a failure.
     private func moveGonePlacesToTheBanner() {
-        for (place, outcome) in placedResults where !isOnScreen(place) {
-            forgetPlaced(place)
-            show(outcome)
+        let gone = placedResults.filter { !isOnScreen($0.key) }
+        for place in gone.keys { forgetPlaced(place) }
+        guard let gravest = gone.values.max(by: { Self.weight($0.kind) < Self.weight($1.kind) }) else { return }
+        if let showing = banner?.outcome, Self.weight(showing.kind) > Self.weight(gravest.kind) { return }
+        show(gravest)
+    }
+
+    private static func weight(_ kind: ActionOutcome.Kind) -> Int {
+        switch kind {
+        case .success, .info: 0
+        case .warning: 1
+        case .failure: 2
         }
     }
 

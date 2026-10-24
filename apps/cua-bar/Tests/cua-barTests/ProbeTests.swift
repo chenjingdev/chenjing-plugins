@@ -59,9 +59,11 @@ struct ProbeClientTests {
 
     @Test func theWordsAreTheEnginesAndOnlyAFailedTestIsAFailure() {
         #expect(ProbeOutcome(word: "checked").isSuccess)
-        let failures: [ProbeOutcome] = [.failed, .timeout, .approvalRequired, .cleanupUnconfirmed, .dependenciesMissing, .couldNotRun, .other("x")]
-        #expect(failures.allSatisfy { $0.isFailure })
+        let failures: [ProbeOutcome] = [.failed, .timeout, .approvalRequired, .dependenciesMissing, .couldNotRun, .other("x")]
+        #expect(failures.allSatisfy { $0.isFailure && !$0.reachedHost })
         #expect(!ProbeOutcome.checked.isFailure && !ProbeOutcome.hostUnavailable.isFailure, "a host that was not ready was not tested at all")
+        // The read worked; only the test thread could not be shown gone. It was said as a failed test after an update.
+        #expect(!ProbeOutcome.cleanupUnconfirmed.isFailure && ProbeOutcome.cleanupUnconfirmed.reachedHost)
         #expect(ProbeOutcome.checked.word == "checked" && ProbeOutcome.approvalRequired.word == "approval_required")
     }
 
@@ -71,6 +73,7 @@ struct ProbeClientTests {
         #expect(ProbeMessages.attach(.timeout, to: said).hasSuffix("연결 시험이 실패했어요 — 점검 탭을 보세요"))
         #expect(ProbeMessages.attach(.checked, to: said) == said)
         #expect(ProbeMessages.attach(.hostUnavailable, to: said) == said)
+        #expect(ProbeMessages.attach(.cleanupUnconfirmed, to: said) == said)
         #expect(ProbeMessages.attach(nil, to: said) == said)
         #expect(ProbeMessages.attach(.failed, to: "") == "연결 시험이 실패했어요 — 점검 탭을 보세요")
 

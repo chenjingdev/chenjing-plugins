@@ -131,6 +131,27 @@ struct AnswerPlaceTests {
         #expect(rig.model.placedResults[.connection("claude-9-9")] == nil, "nowhere is left to put it")
     }
 
+    @Test func aSuccessThatMovesToTheBannerDoesNotHideAWarningThatIsStillThere() async throws {
+        // Two 정리 in a row: the second line's "정리했어요" replaced the first one's warning within a second.
+        var status = try Fixtures.status("status-ready")
+        status.connections.append(ended("claude-1-1", startedAgo: 10))
+        status.connections.append(ended("claude-2-2", startedAgo: 20))
+        let rig = await Rig(status)
+        rig.engine.configure {
+            $0.stopConnectionByID["claude-1-1"] = StopResult(ok: true, stopped: true, released: false, reason: "cleanup_not_confirmed")
+        }
+        var after = status
+        after.connections.removeAll { $0.id == "claude-1-1" }
+        rig.engine.setStatus(after)
+        await rig.model.send(.tidy("claude-1-1"))?.value
+        let warning = try #require(rig.model.banner?.outcome)
+        #expect(warning.kind == .warning)
+        rig.engine.setStatus(try Fixtures.status("status-ready"))
+        await rig.model.send(.tidy("claude-2-2"))?.value
+        #expect(rig.model.banner?.outcome == warning)
+        #expect(rig.model.placedResults.isEmpty, "the success is not kept anywhere: its line is gone, which says it")
+    }
+
     @Test func anAnswerToAPressOnALineThatIsNotListedIsInTheBanner() async throws {
         let rig = await Rig(try Fixtures.status("status-ready"))
         await rig.model.send(.tidy("claude-1-1"))?.value // gate: not in the list

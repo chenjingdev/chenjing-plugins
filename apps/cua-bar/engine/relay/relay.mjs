@@ -10,7 +10,8 @@
 //   - keeps a relay record, a control socket and activity lines in the codex-cua state directory. A Claude bridge
 //     that starts its thread with this relay names itself in CODEX_CUA_OWNER. The record carries that name, and so
 //     does every activity line: it still says whose call it was when the conversation, this relay and the bridge's
-//     own record are gone. The record also says whether that bridge was running when this relay came up
+//     own record are gone. Every line also carries the folder the runtime works in (cwd), so the 기록 tab still names
+//     it then. The record also says whether that bridge was running when this relay came up
 //     (owner_running): a runtime that Codex starts again for a conversation that has ended finds it gone,
 //   - leaves out of the activity log, and out of last_call_at, the calls of a runtime that works in the folder of one
 //     of the engine's own short-lived threads (a connection test, `codex-cua doctor --probe`, or a targeted release,
@@ -235,11 +236,14 @@ function relay(child) {
     };
   }
 
+  // A folder that can no longer be read (it was removed under the relay) is still the one the relay started in; the
+  // record of a connection test's relay is told by it after the test has removed its folder.
+  function folder() {
+    try {return process.cwd();} catch {return startFolder;}
+  }
+
   function snapshot() {
-    // A folder that can no longer be read (it was removed under the relay) is still the one the relay started in; the
-    // record of a connection test's relay is told by it after the test has removed its folder.
-    let cwd = startFolder;
-    try {cwd = process.cwd();} catch {/* removed directory */}
+    const cwd = folder();
     return {
       schema_version: 1, kind: 'relay', pid: me, started_at: records.startedAt,
       runtime_pid: child.pid ?? null, root_pid: rootPid, app_server_pid: records.appServerPid, cwd, owner,
@@ -289,7 +293,7 @@ function relay(child) {
     // `owner` is only there when a bridge named itself; without it (Codex's own runtime) the line is what it always was.
     const line = JSON.stringify({at: iso(), writer: 'relay-' + me + '-' + records.startedAt,
       session_id: text(entry.sessionId) ? entry.sessionId : null, tool, ok: entry.ok === true, ms: entry.ms,
-      ...(owner ? {owner} : {})}) + '\n';
+      cwd: folder(), ...(owner ? {owner} : {})}) + '\n';
     let fd;
     try {
       fd = fs.openSync(records.activity, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);

@@ -406,6 +406,16 @@ struct NotificationViewModelTests {
         #expect(rig.model.summary.icon == .problem)
     }
 
+    @Test func codexWithoutItsHostIsNotToldWhileTheCardAsksForTheSetupToBeFixedFirst() throws {
+        // The card said 고치기 (Claude Code had no CUA), and the notification offered 다시 켜기, which fixes nothing.
+        let status = try codexProblem()
+        let broken = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .missing, skill: .ready))
+        #expect(StatusEvaluator.problem(in: status, appVersion: "0.7.0", facts: broken)?.kind == .setupIncomplete)
+        var planner = NotificationPlanner()
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: Fixtures.now, cleanupTried: [], cleanupRunning: false, facts: broken).isEmpty)
+        #expect(planner.due(status: status, appVersion: "0.7.0", now: Fixtures.now, cleanupTried: [], cleanupRunning: false).map(\.kind) == [.codexWithoutHost])
+    }
+
     @Test func clickingTheBodyOpensThePopoverAndAMatchingTab() async throws {
         let rig = await Rig(try codexProblem())
         var opened = 0

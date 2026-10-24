@@ -33,13 +33,15 @@ struct NotificationPlanner: Sendable {
     /// `cleanupTried` and `cleanupRunning` come from the automatic cleanup (F5): a session it is
     /// about to release by itself is not worth a notification until it has tried and failed.
     /// `tabsReleased`: the ended connections the app may only release, whose tabs it released in this run (their 정리 is off).
+    /// `facts`: what the card judges from besides the status, so that Codex without its host is told only when the card
+    /// says it too (a setup problem comes first, and a restart would not fix it).
     mutating func due(
         status: EngineStatus, appVersion: String?, now: Date, cleanupTried: Set<String>, cleanupRunning: Bool,
-        tabsReleased: Set<String> = []
+        tabsReleased: Set<String> = [], facts: LocalFacts = LocalFacts()
     ) -> [AppNotification] {
         var result: [AppNotification] = []
 
-        if StatusEvaluator.problem(in: status, appVersion: appVersion)?.kind == .codexWithoutHost {
+        if StatusEvaluator.problem(in: status, appVersion: appVersion, facts: facts)?.kind == .codexWithoutHost {
             let key = Self.codexKey(for: status)
             if canPost(key, now: now) { result.append(.codexWithoutHost(key: key)) }
         }

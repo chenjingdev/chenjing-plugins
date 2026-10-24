@@ -66,6 +66,13 @@ enum Format {
         return String(format: "%02ld:%02ld:%02ld", parts.hour ?? 0, parts.minute ?? 0, parts.second ?? 0)
     }
 
+    /// `09:39:12` today, `10/17 16:11:05` on another day: the log holds days, and yesterday must not read as today.
+    static func clock(_ date: Date?, now: Date, calendar: Calendar) -> String {
+        guard let date, !calendar.isDate(date, inSameDayAs: now) else { return clock(date, calendar: calendar) }
+        let parts = calendar.dateComponents([.month, .day], from: date)
+        return String(format: "%ld/%ld ", parts.month ?? 0, parts.day ?? 0) + clock(date, calendar: calendar)
+    }
+
     static func clockMinutes(_ date: Date, calendar: Calendar) -> String {
         let parts = calendar.dateComponents([.hour, .minute], from: date)
         return String(format: "%02ld:%02ld", parts.hour ?? 0, parts.minute ?? 0)

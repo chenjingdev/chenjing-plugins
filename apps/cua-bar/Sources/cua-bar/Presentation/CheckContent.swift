@@ -298,7 +298,7 @@ private struct Judge {
             return CheckLine(
                 item: item, status: .problem, detail: "앱이 깔지 않은 cuabar 스킬이 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cuabar 스킬",
                 steps: [
-                    "~/.claude/skills/cua는 앱이 깐 것이 아니에요. 아래 명령으로 skills 폴더 밖으로 옮겨 두세요. 앱은 옮기거나 지우지 않아요",
+                    "~/.claude/skills/cuabar는 앱이 깐 것이 아니에요. 아래 명령으로 skills 폴더 밖으로 옮겨 두세요. 앱은 옮기거나 지우지 않아요",
                     afterConflict("옮긴 뒤", "앱이 스킬을 깔아요"),
                 ],
                 commands: [CheckCommand(CheckContent.moveSkillCommand, on: item)])
@@ -449,6 +449,15 @@ private struct Judge {
         if let issue = issues(of: item).first { return broken(item, issue.sentence) }
         switch status.setup.relay {
         case "active": return CheckLine(item: item, status: .ready, detail: "중계기가 켜져 있어요", facts: "켜져 있음")
+        case "inactive" where status.host.state == .ready:
+            // Codex runs, and its host went without the relay: it is ready, but not in use until Codex starts again.
+            let reason = status.host.relayReason.map { ", 까닭 \($0)" } ?? ""
+            return CheckLine(
+                item: item, status: .waiting,
+                detail: status.host.restartAddsRelay
+                    ? "Codex가 업데이트 직후 중계기 없이 켜졌어요 — 다시 켜면 붙어요" : "Codex가 중계기 없이 켜져 있어요",
+                facts: "준비됨, 지금 Codex에는 붙지 않음" + reason,
+                steps: status.host.restartAddsRelay ? [StatusEvaluator.restartAddsRelayStep] : [])
         case "inactive": return CheckLine(item: item, status: .ready, detail: "준비됐어요 — Codex를 켜면 붙어요", facts: "준비됨, 호스트에는 붙지 않음")
         default: return undecided(item, "엔진이 상태를 알려 주지 않았어요")
         }
@@ -513,7 +522,7 @@ private struct Judge {
         }
         let time = Format.when(probe.at, now: input.now, calendar: input.calendar)
         facts += ", 연결 시험 \(probe.outcome.word) \(time)"
-        let status: CheckStatus = probe.outcome.isFailure ? .problem : probe.outcome == .checked ? .ready : .waiting
+        let status: CheckStatus = probe.outcome.isFailure ? .problem : probe.outcome.reachedHost ? .ready : .waiting
         return CheckLine(
             item: item, status: status, detail: "\(probe.outcome.summary) · \(time)", facts: facts, steps: steps, button: button)
     }

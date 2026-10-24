@@ -230,12 +230,15 @@ class State:
         os.chmod(path, 0o600)
 
     @staticmethod
-    def line(writer, seconds_ago, session=None, tool='js', ok=True, ms=1000, owner=None):
+    def line(writer, seconds_ago, session=None, tool='js', ok=True, ms=1000, owner=None, cwd=None):
         """One activity line. `owner` is the name of the bridge a relay's runtime serves; a line without it is an older
-        relay's, or a Codex runtime's, and has no such key at all."""
+        relay's, or a Codex runtime's, and has no such key at all. So is `cwd`, the writer's folder, for an older
+        writer's line."""
         line = {'at': iso(at(seconds_ago)), 'writer': writer, 'session_id': session, 'tool': tool, 'ok': ok, 'ms': ms}
         if owner is not None:
             line['owner'] = owner
+        if cwd is not None:
+            line['cwd'] = cwd
         return line
 
     def names(self, kind):

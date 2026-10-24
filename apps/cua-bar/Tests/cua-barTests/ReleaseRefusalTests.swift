@@ -46,6 +46,20 @@ struct ReleaseRefusalTests {
         #expect(releaseCalls(rig) == 1)
     }
 
+    @Test func refusedWhileTheListIsNotShownTheRowSaysItInsteadOfAQuestionNobodySees() async throws {
+        // The question is asked under the row: on 기록 it was never seen, and coming back to 연결 withdrew it, so a
+        // 탭 풀기 that did nothing left no trace.
+        let rig = try await rig([Self.refused])
+        rig.model.selectedTab = .activity
+        await rig.model.send(.releaseConnection(Self.target))?.value
+        #expect(rig.model.pending == nil)
+        #expect(rig.model.refusedReleaseIDs == [Self.target])
+        rig.model.selectedTab = .connections
+        #expect(rig.model.refusedReleaseIDs == [Self.target], "coming back to the list keeps it")
+        let row = try #require(rig.model.content?.connections.groups.flatMap(\.rows).first { $0.id == Self.target })
+        #expect(row.retryButton.action == .retryRelease(Self.target))
+    }
+
     @Test func refusedAgainTheRowSaysSoAndKeepsOnlyTabRelease() async throws {
         let rig = try await rig([Self.refused, Self.refused])
         await rig.model.send(.releaseConnection(Self.target))?.value

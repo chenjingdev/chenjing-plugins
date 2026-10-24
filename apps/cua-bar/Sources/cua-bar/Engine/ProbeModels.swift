@@ -52,10 +52,13 @@ enum ProbeOutcome: Equatable, Sendable {
 
     var isSuccess: Bool { self == .checked }
 
-    /// A test that was run and did not pass. (A host that was not ready was not tested at all.)
+    /// The host answered the read: the connection works, whatever became of the test thread afterwards.
+    var reachedHost: Bool { self == .checked || self == .cleanupUnconfirmed }
+
+    /// A test that was run and did not reach the host. (A host that was not ready was not tested at all.)
     var isFailure: Bool {
         switch self {
-        case .checked, .hostUnavailable: false
+        case .checked, .cleanupUnconfirmed, .hostUnavailable: false
         default: true
         }
     }

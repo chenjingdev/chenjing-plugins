@@ -162,6 +162,15 @@ struct ActionMessagesTests {
                 == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — 도구 호출이 아직 끝나지 않았어요"))
     }
 
+    @Test func aTidyWithNobodyToAskSaysSoAsTabReleaseDoes() {
+        // `ok: false` with `no_trusted_scope` is an endpoint that is gone (P4). It read "정리하지 못했어요 — 풀 점유가 없어요",
+        // a failure because there was nothing to fail at.
+        let nobody = TidyStep(release: ReleaseResult(ok: false, released: false, reason: "no_trusted_scope", scopeCount: 0))
+        #expect(nobody.kind == .failed)
+        #expect(ActionMessages.tidy(nobody) == ActionOutcome(kind: .failure, message: "정리하지 못했어요 — 탭을 풀 길을 확인하지 못했어요"))
+        #expect(ActionMessages.tidyAll([TidyStep(kind: .cleaned), nobody]).message == "1개 정리, 1개는 못 했어요 — 탭을 풀 길을 확인하지 못했어요")
+    }
+
     // MARK: 모두 정리 (reads every step)
 
     @Test func tidyAllCountsWhatWentAndSaysWhyTheRestDidNot() {

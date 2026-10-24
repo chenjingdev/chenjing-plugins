@@ -84,13 +84,13 @@ enum StatusEvaluator {
         // Not a problem (nothing is broken and the icon stays ready), but nothing else would say why
         // the connections of a Codex from before the update cannot be released. Said while working
         // too, or the card would drop it each time an AI uses the screen.
-        let restartApplies = status.codex.running && status.host.startedBeforeSetup
+        let restart = restartNotice(in: status)
         if let use = screenUse(in: status) {
             let sentence = "\(use.subject)가 화면을 쓰는 중"
             return StatusSummary(
                 icon: .working, stateLabel: "작업 중", headline: sentence,
-                nextStep: restartApplies ? restartAppliesStep : "없음",
-                warning: restartApplies ? restartAppliesWarning : nil, problem: nil,
+                nextStep: restart?.step ?? "없음",
+                warning: restart?.warning, problem: nil,
                 tooltip: "CUA 작업 중 · \(sentence)", accessibilityLabel: IconState.working.accessibilityDescription)
         }
         let counts = connectionCounts(in: status)
@@ -98,9 +98,9 @@ enum StatusEvaluator {
         return StatusSummary(
             icon: .ready, stateLabel: "준비됨",
             headline: counts.isEmpty ? "연결 없음" : "연결 " + counts,
-            nextStep: restartApplies ? restartAppliesStep
-                : codexIsOffButStartable ? "없음 — Claude 대화를 열면 Codex가 뒤에서 켜져요" : "없음",
-            warning: restartApplies ? restartAppliesWarning : nil, problem: nil,
+            nextStep: restart?.step
+                ?? (codexIsOffButStartable ? "없음 — Claude 대화를 열면 Codex가 뒤에서 켜져요" : "없음"),
+            warning: restart?.warning, problem: nil,
             tooltip: "CUA 준비됨 · " + (counts.isEmpty ? "연결 없음" : counts),
             accessibilityLabel: IconState.ready.accessibilityDescription)
     }
@@ -108,6 +108,17 @@ enum StatusEvaluator {
     /// For a Codex that a launcher older than this setup started (S8).
     static let restartAppliesStep = "Codex를 다시 켜면 새 설정이 적용돼요"
     static let restartAppliesWarning = "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 탭을 풀 수 없을 수 있어요"
+    /// For a Codex whose first start after its own update went without the relay (`restart_adds_relay`).
+    static let restartAddsRelayStep = "Codex를 다시 켜면 중계기가 붙어요"
+    static let restartAddsRelayWarning = "Codex가 업데이트 직후 중계기 없이 켜져서, Codex 대화의 연결은 목록에 보이지 않고 탭도 풀 수 없어요"
+
+    /// What a restart of Codex would bring, said under the card while nothing is broken; nil when it brings nothing.
+    static func restartNotice(in status: EngineStatus) -> (step: String, warning: String)? {
+        guard status.codex.running else { return nil }
+        if status.host.startedBeforeSetup { return (restartAppliesStep, restartAppliesWarning) }
+        if status.host.restartAddsRelay { return (restartAddsRelayStep, restartAddsRelayWarning) }
+        return nil
+    }
 
     /// The card's next steps for a problem that belongs to a line of the list.
     static let tidyStep = "목록 맨 위의 정리를 눌러 주세요"

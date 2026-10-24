@@ -442,10 +442,11 @@ def prune(state_dir, uid, record, droppable=(), now=None, min_age=0):
 def read_activity(state_dir, uid):
     """Every valid line of activity.jsonl that the tail of the file holds, oldest first.
 
-    A line is {"at", "writer", "session_id", "tool", "ok", "ms"}, and a relay that a bridge started adds "owner", that
-    bridge's name (None here for a line without one, or with a value that is no bridge's name: the line still counts).
-    Anything else in a line is ignored and a line that does not fit is skipped, so a damaged file never breaks the
-    status."""
+    A line is {"at", "writer", "session_id", "tool", "ok", "ms", "cwd"}, and a relay that a bridge started adds "owner",
+    that bridge's name (None here for a line without one, or with a value that is no bridge's name: the line still
+    counts). "cwd" is the folder the writer worked in, so the line still names it after the connection is gone; an older
+    writer's line has none, and anything but an absolute path is None too. Anything else in a line is ignored and a line
+    that does not fit is skipped, so a damaged file never breaks the status."""
     if not private_directory(state_dir, uid):
         return []
     try:
@@ -485,6 +486,8 @@ def read_activity(state_dir, uid):
                 or not isinstance(ms, (int, float)) or isinstance(ms, bool) or not 0 <= ms < 10**9
                 or not (session is None or _valid_session(session))):
             continue
+        cwd = item.get('cwd')
         found.append({'at': at, 'writer': writer, 'session_id': session, 'tool': tool, 'ok': ok, 'ms': int(ms),
-                      'owner': bridge_name(item.get('owner'))})
+                      'owner': bridge_name(item.get('owner')),
+                      'cwd': cwd if isinstance(cwd, str) and os.path.isabs(cwd) and len(cwd) <= 1024 else None})
     return found

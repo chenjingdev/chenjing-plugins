@@ -78,7 +78,7 @@ struct PopoverContent: Equatable, Sendable {
     /// `tabsReleased`: the ended connections the app may only release, whose tabs it released in this run.
     init(status: EngineStatus, now: Date, calendar: Calendar = .current, tabsReleased: Set<String> = []) {
         connections = ConnectionsContent(status: status, now: now, calendar: calendar, tabsReleased: tabsReleased)
-        activity = ActivityContent(status: status, calendar: calendar)
+        activity = ActivityContent(status: status, now: now, calendar: calendar)
     }
 }
 
@@ -471,7 +471,7 @@ struct ActivityContent: Equatable, Sendable {
         self.copyButton = copyButton
     }
 
-    init(status: EngineStatus, calendar: Calendar) {
+    init(status: EngineStatus, now: Date, calendar: Calendar) {
         var seen: [String: Int] = [:]
         rows = status.activity.prefix(200).map { entry in
             let connection = status.connection(withID: entry.connectionID)
@@ -480,8 +480,10 @@ struct ActivityContent: Equatable, Sendable {
             seen[base] = occurrence + 1
             let agent = entry.agent == .other("") ? (connection?.agent ?? entry.agent) : entry.agent
             return ActivityRow(
-                id: "\(base)|\(occurrence)", timeText: Format.clock(entry.at, calendar: calendar), agent: agent,
-                folder: Format.folder(connection?.cwd), tool: Format.tool(entry.tool), ok: entry.ok,
+                id: "\(base)|\(occurrence)", timeText: Format.clock(entry.at, now: now, calendar: calendar), agent: agent,
+                // The line's own folder names it after its connection has gone (most of the log); an older line has
+                // only the connection's, while it is listed.
+                folder: Format.folder(entry.cwd ?? connection?.cwd), tool: Format.tool(entry.tool), ok: entry.ok,
                 durationText: Format.milliseconds(entry.ms))
         }
         emptyText = rows.isEmpty ? PopoverTab.activity.emptyText : nil

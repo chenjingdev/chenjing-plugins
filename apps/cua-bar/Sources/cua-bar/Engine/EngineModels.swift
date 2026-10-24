@@ -116,6 +116,12 @@ struct HostInfo: Equatable, Sendable {
     /// The version of the engine whose launcher started the host that runs (or is starting or quitting); nil when
     /// there is no such host or its record names none.
     var engineVersion: String?
+    /// Why the launcher left the relay out of the host that runs now (a code word such as `plugin_entry`); nil when it
+    /// has the relay or no host runs.
+    var relayReason: String?
+    /// The host went without the relay only because Codex had not yet written its plugin copy after an update, and the
+    /// copy is there now: restarting Codex brings the relay.
+    var restartAddsRelay = false
 }
 
 /// Raw states as the contract lists them (`ready`, `missing`, `broken`, ...); nil is unknown.
@@ -230,6 +236,8 @@ struct ActivityEntry: Equatable, Sendable {
     var tool: String?
     var ok: Bool?
     var ms: Int?
+    /// The folder the writer worked in when it wrote the line; nil for an older writer's line.
+    var cwd: String?
 }
 
 // MARK: - Decoding
@@ -284,6 +292,7 @@ extension CodexInfo: Decodable {
 extension HostInfo: Decodable {
     private enum CodingKeys: String, CodingKey {
         case state, since, startedBeforeSetup = "started_before_setup", engineVersion = "engine_version"
+        case relayReason = "relay_reason", restartAddsRelay = "restart_adds_relay"
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -291,6 +300,8 @@ extension HostInfo: Decodable {
         since = c.lenientDate(.since)
         startedBeforeSetup = c.lenientBool(.startedBeforeSetup) ?? false
         engineVersion = c.lenientString(.engineVersion)
+        relayReason = c.lenientString(.relayReason)
+        restartAddsRelay = c.lenientBool(.restartAddsRelay) ?? false
     }
 }
 
@@ -421,7 +432,7 @@ extension ScreenInfo: Decodable {
 
 extension ActivityEntry: Decodable {
     private enum CodingKeys: String, CodingKey {
-        case at, connectionID = "connection_id", agent, tool, ok, ms
+        case at, connectionID = "connection_id", agent, tool, ok, ms, cwd
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -431,5 +442,6 @@ extension ActivityEntry: Decodable {
         tool = c.lenientString(.tool)
         ok = c.lenientBool(.ok)
         ms = c.lenientInt(.ms)
+        cwd = c.lenientString(.cwd)
     }
 }

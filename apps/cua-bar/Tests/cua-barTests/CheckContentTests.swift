@@ -397,8 +397,7 @@ struct CheckContentTests {
         let ready = try status { _ in }
         let expected: [(ProbeOutcome, String)] = [
             (.failed, "연결 시험이 실패했어요"), (.timeout, "연결 시험이 시간 안에 끝나지 않았어요"),
-            (.approvalRequired, "Codex에서 승인이 필요해요"), (.cleanupUnconfirmed, "시험은 됐지만 뒷정리를 확인하지 못했어요"),
-            (.couldNotRun, "연결 시험을 실행하지 못했어요"),
+            (.approvalRequired, "Codex에서 승인이 필요해요"), (.couldNotRun, "연결 시험을 실행하지 못했어요"),
         ]
         for (outcome, sentence) in expected {
             let line = try #require(CheckFixtures.content(ready, probe: ProbeRecord(outcome: outcome, at: Fixtures.now)).line(.host))
@@ -406,6 +405,12 @@ struct CheckContentTests {
             #expect(line.detail == sentence + " · 12:00", "\(outcome)")
             #expect(line.button?.action == .runProbe, "\(outcome): and it can be tried again")
         }
+    }
+
+    @Test func aTestThatReachedTheHostButCouldNotConfirmItsCleanupIsNoProblem() throws {
+        let line = try #require(CheckFixtures.content(try status { _ in }, probe: ProbeRecord(outcome: .cleanupUnconfirmed, at: Fixtures.now)).line(.host))
+        #expect(line.status == .ready)
+        #expect(line.detail == "시험은 됐지만 뒷정리를 확인하지 못했어요 · 12:00")
     }
 
     @Test func theButtonWaitsWhileATestRuns() throws {
@@ -454,6 +459,24 @@ struct CheckContentTests {
         #expect(line.status == .ready)
         #expect(line.steps == [StatusEvaluator.restartAppliesStep])
         #expect(line.facts?.contains("엔진 0.6.0로 켜짐") == true)
+    }
+
+    @Test func aRelayLeftOutOfTheRunningHostWaitsAndSaysWhetherARestartBringsIt() throws {
+        // It used to say "준비됐어요 — Codex를 켜면 붙어요" while Codex ran without it.
+        let after = try #require(CheckFixtures.content(try status {
+            $0.setup.relay = "inactive"; $0.host.relayReason = "plugin_entry"; $0.host.restartAddsRelay = true
+        }).line(.relay))
+        #expect(after.status == .waiting)
+        #expect(after.detail == "Codex가 업데이트 직후 중계기 없이 켜졌어요 — 다시 켜면 붙어요")
+        #expect(after.steps == [StatusEvaluator.restartAddsRelayStep])
+        #expect(after.facts?.contains("까닭 plugin_entry") == true)
+        let other = try #require(CheckFixtures.content(try status { $0.setup.relay = "inactive"; $0.host.relayReason = "node_missing" }).line(.relay))
+        #expect(other.status == .waiting && other.detail == "Codex가 중계기 없이 켜져 있어요" && other.steps.isEmpty)
+        // With no host running, the relay is simply ready for the next start.
+        let off = try #require(CheckFixtures.content(try status {
+            $0.setup.relay = "inactive"; $0.host.state = .closed; $0.codex.running = false; $0.codex.pids = []
+        }).line(.relay))
+        #expect(off.status == .ready && off.detail == "준비됐어요 — Codex를 켜면 붙어요")
     }
 
     // MARK: The login environment

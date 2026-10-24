@@ -95,7 +95,8 @@ class BridgeControl:
             return
         try:
             records.append_activity(self.state, {'at': records.utc_now(), 'writer': self.writer_id,
-                                                 'session_id': session_id, 'tool': tool, 'ok': bool(ok), 'ms': int(ms)})
+                                                 'session_id': session_id, 'tool': tool, 'ok': bool(ok), 'ms': int(ms),
+                                                 'cwd': self.cwd})
         except Exception:
             pass
 

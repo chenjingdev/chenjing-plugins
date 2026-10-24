@@ -78,6 +78,30 @@ struct StatusEvaluatorTests {
         #expect(evaluate(status).warning == nil)
     }
 
+    @Test func aCodexThatStartedWithoutTheRelayAfterItsUpdateSaysARestartBringsIt() throws {
+        // The first start after a Codex update went without the relay: Codex's connections were not listed and their
+        // tabs could not be released, while the card said all was well.
+        var status = try healthy()
+        status.setup.relay = "inactive"
+        status.host.relayReason = "plugin_entry"
+        status.host.restartAddsRelay = true
+        let summary = evaluate(status)
+        #expect(summary.icon == .ready && summary.problem == nil)
+        #expect(summary.nextStep == "Codex를 다시 켜면 중계기가 붙어요")
+        #expect(summary.warning == "Codex가 업데이트 직후 중계기 없이 켜져서, Codex 대화의 연결은 목록에 보이지 않고 탭도 풀 수 없어요")
+        // An older launcher is the bigger reason, and its restart brings the relay too.
+        status.host.startedBeforeSetup = true
+        #expect(evaluate(status).nextStep == "Codex를 다시 켜면 새 설정이 적용돼요")
+        // No restart is asked of a Codex that is off, or when a restart would bring nothing.
+        status.host.startedBeforeSetup = false
+        status.host.restartAddsRelay = false
+        #expect(evaluate(status).warning == nil && evaluate(status).nextStep == "없음")
+        status.host.restartAddsRelay = true
+        status.codex.running = false
+        status.codex.pids = []
+        #expect(evaluate(status).warning == nil)
+    }
+
     @Test func theRestartHintStaysWhileAnAIUsesTheScreen() throws {
         // S8: the card flipped between the hint and "없음" each time an AI used the screen.
         var status = try Fixtures.status("status-working")

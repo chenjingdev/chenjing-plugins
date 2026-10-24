@@ -224,6 +224,16 @@ struct ConfirmationTests {
         #expect(!rig.model.fixIsBusy)
     }
 
+    @Test func theNotificationsRestartWaitsForTheQuitToo() async throws {
+        // Its 다시 켜기 stays in Notification Center; pressed while Codex asked whether to quit, it asked a second time.
+        let rig = try await quitPending()
+        let key = try #require(rig.notifier.delivered.first { $0.kind == .codexWithoutHost }?.key)
+        rig.notifier.tap(.restartCodex(key: key))
+        await rig.model.waitForBackgroundWork()
+        #expect(rig.actionCalls.filter { $0 == .restartCodex }.count == 1, "only the first restart")
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "Codex가 꺼지기를 기다리는 중이에요"))
+    }
+
     @Test func aQuitThatOutlastsTheWaitSaysTheRestartIsOver() async throws {
         let rig = try await quitPending()
         rig.clock.advance(CUABarViewModel.relaunchWait)

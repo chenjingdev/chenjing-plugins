@@ -51,6 +51,14 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(control.finalize)
         return control
 
+    async def test_a_call_with_no_relay_in_front_is_one_activity_line_that_names_the_bridges_folder(self):
+        control = await self.started()
+        control.record_call('js', True, 12, 'session', False)
+        control.record_call('js', True, 3, 'session', True)       # the relay in front of the runtime writes that one
+        lines = [json.loads(line) for line in (control.state/'activity.jsonl').read_text().splitlines()]
+        self.assertEqual([(line['writer'], line['tool'], line['ms'], line['cwd']) for line in lines],
+                         [(control.writer_id, 'js', 12, os.getcwd())])
+
     async def test_default_location_is_the_private_codex_cua_bridges_directory(self):
         control = await self.started()
         state = self.home/'Library/Caches/codex-cua'

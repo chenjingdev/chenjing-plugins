@@ -324,9 +324,10 @@ test('activity lines hold the tool name, success and duration, and nothing of wh
   assert.equal(lines.length, 7, 'one line per tools/call, none for tools/list or the end of a turn nobody opened');
   const writer = 'relay-' + record.pid + '-' + record.started_at;
   for (const line of lines) {
-    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms']);
+    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd']);
     assert.match(line.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
     assert.equal(line.writer, writer);
+    assert.equal(line.cwd, record.cwd, 'the folder, as the record names it');
     assert.equal(typeof line.ok, 'boolean');
     assert.ok(Number.isInteger(line.ms) && line.ms >= 0);
   }
@@ -354,8 +355,10 @@ test('every activity line of a runtime that a bridge started carries the bridge\
   assert.deepEqual(lines.map(line => [line.tool, line.session_id, line.ok]), [
     ['js', 's-own', true], ['js', 's-own', false], ['js_reset', null, true], ['turn_ended', 's-own', true]]);
   for (const line of lines) {
-    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'owner']);
+    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd', 'owner']);
     assert.equal(line.owner, owner);
+    // The folder too, so the 기록 tab still names it once the conversation and its records are gone.
+    assert.equal(line.cwd, process.cwd(), 'the folder the record names');
   }
   assert.equal((await readRecord(fixture)).owner, owner, 'the same name as in the record');
   assert.equal(fixture.events('start')[0].env.owner, null, 'the runtime still never sees the name');
@@ -367,7 +370,7 @@ test('a runtime nobody named, or named by something that is not a bridge, writes
     await client.call('one', turn('s-none', 't1'));
     const [line, ...others] = activityLines(fixture);
     assert.deepEqual(others, [], String(value));
-    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms'], String(value));
+    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd'], String(value));
   }
 });
 

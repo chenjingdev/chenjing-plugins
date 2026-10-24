@@ -122,11 +122,17 @@ enum ActionMessages {
         }
     }
 
+    /// The reason behind a failure. `no_trusted_scope` there is P4's "nobody to ask at all" (`ok: false`), never "nothing
+    /// to release", which is not a failure: it is said as 탭 풀기 says it.
+    static func failureReason(_ raw: String?) -> String {
+        raw == "no_trusted_scope" ? noWayToRelease : reason(raw)
+    }
+
     /// The reasons behind several failures in one phrase: each distinct reason once, at most two.
     static func why(_ reasons: [String?]) -> String {
         var distinct: [String] = []
         for raw in reasons {
-            let text = reason(raw)
+            let text = failureReason(raw)
             if !distinct.contains(text) { distinct.append(text) }
         }
         switch distinct.count {
@@ -174,7 +180,7 @@ enum ActionMessages {
     static func tidy(_ step: TidyStep) -> ActionOutcome {
         switch step.kind {
         case .failed:
-            return ActionOutcome(kind: .failure, message: "정리하지 못했어요 — \(reason(step.reason))")
+            return ActionOutcome(kind: .failure, message: "정리하지 못했어요 — \(failureReason(step.reason))")
         case .tabsOnly:
             return ActionOutcome(kind: .success, message: "탭만 풀었어요 — 이 연결은 앱이 끌 수 없어요")
         case .cleaned:

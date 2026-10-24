@@ -752,9 +752,9 @@ class ActivityTests(RegisteredCase):
         self.assertEqual([(line['tool'], line['ok']) for line in lines], [('js', True), ('js_reset', False), ('turn_ended', True)])
         writer = 'bridge-%d-%d' % (control.pid, control.started_at)
         for line in lines:
-            self.assertEqual(set(line), {'at', 'writer', 'session_id', 'tool', 'ok', 'ms'})
+            self.assertEqual(set(line), {'at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd'})
             self.assertRegex(line['at'], ISO)
-            self.assertEqual((line['writer'], line['session_id']), (writer, 'thread-A'))
+            self.assertEqual((line['writer'], line['session_id'], line['cwd']), (writer, 'thread-A', control.cwd))
             self.assertIs(type(line['ms']), int)
             self.assertGreaterEqual(line['ms'], 0)
         self.assertEqual(stat.S_IMODE((self.state/'activity.jsonl').stat().st_mode), 0o600)

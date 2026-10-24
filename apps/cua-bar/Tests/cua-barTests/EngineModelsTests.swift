@@ -144,6 +144,23 @@ struct EngineModelsTests {
         #expect(try host("null").startedBeforeSetup == false)
     }
 
+    @Test func anActivityLineKeepsTheFolderItNames() throws {
+        let json = #"{"activity": [{"at": null, "connection_id": "claude-1-2", "agent": "claude", "tool": "js", "ok": true, "ms": 3, "cwd": "/Users/x/dev/a"}, {"tool": "js", "cwd": 7}]}"#
+        let activity = try JSONDecoder().decode(EngineStatus.self, from: Data(json.utf8)).activity
+        #expect(activity.map(\.cwd) == ["/Users/x/dev/a", nil])
+    }
+
+    @Test func whyAHostWentWithoutTheRelayAndWhetherARestartBringsItAreRead() throws {
+        func host(_ fields: String) throws -> HostInfo {
+            let json = #"{"host": {"state": "ready", "since": null, \#(fields)}}"#
+            return try JSONDecoder().decode(EngineStatus.self, from: Data(json.utf8)).host
+        }
+        let after = try host(#""relay_reason": "plugin_entry", "restart_adds_relay": true"#)
+        #expect(after.relayReason == "plugin_entry" && after.restartAddsRelay)
+        let unsaid = try host(#""relay_reason": null, "restart_adds_relay": "yes""#)
+        #expect(unsaid.relayReason == nil && unsaid.restartAddsRelay == false)
+    }
+
     @Test func aHostThatIsStartingOrStoppingIsReadAsSuch() throws {
         func state(_ raw: String) throws -> HostState {
             let json = #"{"host": {"state": "\#(raw)", "since": null}}"#

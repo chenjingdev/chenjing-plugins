@@ -11,8 +11,10 @@ conversation) is a CmuxConnection that can be stopped on its own.
 A runtime that Codex itself started again for the thread of a bridge that was gone, and that nobody has used, is none
 of these either: it is a RevivedRuntime, left out of the connections and only counted in the diagnosis.
 The same goes for a runtime that works in the folder of a connection test's thread (`doctor --probe`, engine_core.
-is_probe_folder): it is the test's, lives for seconds, and is in no list, no lease and no judgment of the screen.
+is_probe_folder): it is the test's, lives for seconds, and is in no list, no lease and no judgment of the screen. A
+targeted release's thread (`release-session`) is one of those too.
 """
+from pathlib import Path
 import re
 
 from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, HOST_STOP_GRACE, IDLE_SECONDS, SCHEMA_VERSION, connection_id,
@@ -22,6 +24,7 @@ from engine_records import (WRITER, bridge_name, control_socket, forget_released
                             read_released)
 
 PRUNE_MIN_AGE = 60
+VERSION_NAME = re.compile(r'^[0-9A-Za-z._+-]{1,64}$')     # a Codex version, safe as a folder name
 # A Codex that has just opened starts its host a few seconds later; until then it is not one without a host (S9).
 HOST_START_GRACE = 30
 # A bridge starts its thread, and so the runtime of it, within seconds. A runtime that came up this much later than the
@@ -606,6 +609,23 @@ class View:
         version = self.host_engine_version()
         return 'relay_config' not in host.registry or version is None or version != self.ctx.plugin_version()
 
+    def relay_reason(self):
+        """Why the launcher left the relay out when it started the host that runs now (a fixed code word), or None."""
+        host = self.inv.host
+        return host.relay_reason if host.state == 'ready' and not host.relay else None
+
+    def restart_adds_relay(self):
+        """True when the host that runs now went without the relay only because Codex's own copy of its computer-use
+        plugin was not there yet when the host started (`plugin_entry`), and it is there now.
+
+        Codex writes that copy for a new version of itself as it starts after an update, a few seconds after the
+        launcher has looked: the first start after a Codex update goes without the relay, and the next one has it."""
+        if self.relay_reason() != 'plugin_entry' or not self.inv.app_version or not VERSION_NAME.match(self.inv.app_version):
+            return False
+        codex_home = self.ctx.environment.get('CODEX_HOME') or str(self.ctx.home/'.codex')
+        plugin = Path(codex_home)/'plugins/cache/openai-bundled/unified-computer-use'/self.inv.app_version
+        return all((plugin/name).is_file() for name in ('.codex-plugin/plugin.json', '.mcp.json'))
+
     def _codex(self):
         inv = self.inv
         installation = inv.installation
@@ -650,7 +670,8 @@ class View:
     def _activity(self):
         ordered = sorted(enumerate(self.activity), key=lambda item: (item[1][0]['at'], item[0]), reverse=True)
         return [{'at': iso(line['at']), 'connection_id': target, 'agent': agent, 'tool': line['tool'],
-                 'ok': line['ok'], 'ms': line['ms']} for _, (line, target, agent) in ordered[:ACTIVITY_LIMIT]]
+                 'ok': line['ok'], 'ms': line['ms'], 'cwd': line.get('cwd')}
+                for _, (line, target, agent) in ordered[:ACTIVITY_LIMIT]]
 
     def maybe_left_json(self):
         return [{key: item[key] for key in ('session_id', 'agent', 'connection_id', 'cwd', 'ended_at', 'releasable')}
@@ -665,7 +686,9 @@ class View:
                 'codex': self._codex(),
                 'host': {'state': self.host_state(), 'since': iso(host.since),
                          'started_before_setup': self.started_before_setup(),
-                         'engine_version': self.host_engine_version()},
+                         'engine_version': self.host_engine_version(),
+                         'relay_reason': self.relay_reason(),
+                         'restart_adds_relay': self.restart_adds_relay()},
                 'setup': self._setup(),
                 'connections': [conn.to_json() for conn in self.connections],
                 'leases': {'readable': False, 'items': [], 'maybe_left': self.maybe_left_json()},

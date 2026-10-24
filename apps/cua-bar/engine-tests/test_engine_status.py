@@ -43,7 +43,7 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['codex'], {'installed': False, 'app_path': None, 'app_version': None, 'running': False,
                                            'pids': []})
         self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False,
-                                          'engine_version': None})
+                                          'engine_version': None, 'relay_reason': None, 'restart_adds_relay': False})
         self.assertEqual(list(status['setup']), ['command', 'dependencies', 'login_environment', 'wrapper', 'relay'])
         self.assertEqual(status['connections'], [])
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})
@@ -64,7 +64,7 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['codex'], {'installed': True, 'app_path': str(self.app), 'app_version': APP_VERSION,
                                            'running': True, 'pids': [1000]})
         self.assertEqual(status['host'], {'state': 'ready', 'since': iso(NOW-300), 'started_before_setup': False,
-                                          'engine_version': self.engine_version()})
+                                          'engine_version': self.engine_version(), 'relay_reason': None, 'restart_adds_relay': False})
         self.assertEqual(status['setup'], {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready',
                                            'wrapper': 'ready', 'relay': 'active'})
         for connection in status['connections']:
@@ -170,7 +170,7 @@ class HostStopTests(StatusCase):
         self.assertEqual(self.status()['host']['state'], 'ready')
         self.machine.remove(1200)                       # the app let go of its proxy: Codex is quitting
         self.assertEqual(self.status()['host'], {'state': 'stopping', 'since': None, 'started_before_setup': False,
-                                                 'engine_version': self.engine_version()})
+                                                 'engine_version': self.engine_version(), 'relay_reason': None, 'restart_adds_relay': False})
         self.machine.remove(1100)                       # the wrapper ended the app-server
         self.assertEqual(self.status()['host']['state'], 'stopping')
         self.machine.remove(1001)                       # the wrapper wrote `closed` and ended; Codex is still quitting
@@ -185,7 +185,7 @@ class HostStopTests(StatusCase):
             self.machine.remove(pid)
         self.write_host(status='stopping', owner=1001, stopping_at=iso(NOW-5), age=5)
         self.assertEqual(self.status()['host'], {'state': 'stopping', 'since': iso(NOW-5), 'started_before_setup': False,
-                                                 'engine_version': self.engine_version()})
+                                                 'engine_version': self.engine_version(), 'relay_reason': None, 'restart_adds_relay': False})
         self.machine.now = NOW+30                       # 35 s after it began, and the wrapper is still there
         self.assertEqual(self.status()['host']['state'], 'closed')
 
@@ -295,6 +295,25 @@ class RelaySetupTests(StatusCase):
 
     def test_a_relay_flag_of_a_closed_host_is_not_active(self):
         self.assertEqual(self.relay_state(False, True, 'ready'), 'inactive')
+
+    def test_a_host_that_went_without_the_relay_says_why_and_whether_a_restart_brings_it(self):
+        """The first start after a Codex update: Codex writes its copy of the computer-use plugin a few seconds after the
+        launcher looked for it (plugin_entry). Once the copy is there, the next start has the relay."""
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world(relay=False)
+        self.write_host(relay=False, relay_reason='plugin_entry')
+        host = lambda: {key: self.status()['host'][key] for key in ('relay_reason', 'restart_adds_relay')}
+        self.assertEqual(host(), {'relay_reason': 'plugin_entry', 'restart_adds_relay': False})
+        plugin = self.home/'.codex/plugins/cache/openai-bundled/unified-computer-use'/APP_VERSION
+        (plugin/'.codex-plugin').mkdir(parents=True)
+        (plugin/'.codex-plugin/plugin.json').write_text('{}')
+        self.assertEqual(host()['restart_adds_relay'], False, 'half written')
+        (plugin/'.mcp.json').write_text('{}')
+        self.assertEqual(host(), {'relay_reason': 'plugin_entry', 'restart_adds_relay': True})
+        self.write_host(relay=False, relay_reason='not_bundled')       # Codex's own setting: a restart changes nothing
+        self.assertEqual(host(), {'relay_reason': 'not_bundled', 'restart_adds_relay': False})
+        self.write_host(relay=True)
+        self.assertEqual(host(), {'relay_reason': None, 'restart_adds_relay': False})
 
     def test_the_host_must_name_this_plugins_launcher_to_count_as_having_the_relay(self):
         self.machine.add(5, 1, '/bin/x')
@@ -1202,7 +1221,20 @@ class ActivityAndScreenTests(StatusCase):
             ('turn_ended', 'claude-4242-%d' % (NOW-900), 'claude', True, 22),
             ('js', 'claude-4242-%d' % (NOW-900), 'claude', True, 11)])
         self.assertEqual(activity[0]['at'], iso(at(70)))
-        self.assertEqual(sorted(activity[0]), ['agent', 'at', 'connection_id', 'ms', 'ok', 'tool'])
+        self.assertEqual(sorted(activity[0]), ['agent', 'at', 'connection_id', 'cwd', 'ms', 'ok', 'tool'])
+        self.assertEqual(activity[0]['cwd'], None, 'an older writer\'s line names no folder')
+
+    def test_a_line_names_the_folder_its_writer_worked_in_after_the_connection_is_gone(self):
+        """Most of the log is of conversations that have ended and been tidied away: their records are gone, and the
+        기록 tab showed "—" for 194 of 200 lines."""
+        self.start_world()
+        self.state.activity([
+            State.line('bridge-8001-%d' % (NOW-8000), 30, SESSION_D, cwd='/Users/x/dev/gone'),
+            State.line('relay-9002-%d' % (NOW-9000), 20, None, cwd='dev/relative'),
+            State.line('relay-9003-%d' % (NOW-9000), 10, None, cwd=['/a'])])
+        self.assertEqual([(item['connection_id'], item['cwd']) for item in self.status()['activity']], [
+            ('codex-9003-%d' % (NOW-9000), None), ('codex-9002-%d' % (NOW-9000), None),
+            ('claude-8001-%d' % (NOW-8000), '/Users/x/dev/gone')])
 
     def test_only_the_newest_two_hundred_lines_are_reported(self):
         self.start_world()

@@ -584,6 +584,9 @@ struct PopoverContentTests {
         var status = try Fixtures.status("status-problem")
         status.connections = []
         #expect(content(of: status).activity.rows[0].folder == "—")
+        // Unless the line names its own folder, as a writer of 0.8.2 on does: it outlives the connection.
+        status.activity[0].cwd = "/Users/chenjing/dev/gone-project"
+        #expect(content(of: status).activity.rows[0].folder == "dev/gone-project")
     }
 
     @Test func activityRowsKeepTheEnginesNewestFirstOrderAndHaveUniqueIDs() throws {
@@ -593,6 +596,15 @@ struct PopoverContentTests {
         let rows = content(of: status).activity.rows
         #expect(Set(rows.map(\.id)).count == 3)
         #expect(content(of: try Fixtures.status("status-problem")).activity.rows.map(\.timeText) == ["11:59:30", "11:58:12", "09:02:00"])
+    }
+
+    @Test func anActivityRowOfAnotherDaySaysItsDay() throws {
+        // The log holds 200 lines over days: yesterday's read as today's.
+        var status = try Fixtures.status("status-problem")
+        status.activity[0].at = Fixtures.now.addingTimeInterval(-86400 - 30)
+        let rows = content(of: status).activity.rows
+        #expect(rows[0].timeText == "10/17 11:59:30")
+        #expect(rows[1].timeText == "11:58:12", "today's keep the time alone")
     }
 
     @Test func toolNamesAreShownInWordsAndUnknownOnesAsTheEngineWroteThem() {

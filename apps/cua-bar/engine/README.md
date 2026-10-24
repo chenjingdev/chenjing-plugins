@@ -48,6 +48,7 @@ CUA Bar에 담겨 다니는 연결 엔진입니다. Claude Code가 Mac의 앱과
 
 - `engine`: `version`(이 엔진의 매니페스트 판), `root`(이 엔진이 도는 폴더), `launcher`(MCP를 등록하는 경로). `plugin.version`은 `engine.version`과 같은 값을 이전 이름으로 한 번 더 냅니다.
 - `host.engine_version`, `host.started_before_setup`: 아래 [host.json의 engine_version](#hostjson의-engine_version).
+- `host.relay_reason`, `host.restart_adds_relay`: 준비된 호스트가 중계기 없이 켜졌을 때 래퍼가 적은 까닭 낱말(`plugin_entry` 등, 아니면 `null`)과, 다시 켜면 중계기가 붙는지(`true`·`false`). 아래 [중계기](#중계기)의 마지막 문단.
 - `setup`: `command`, `dependencies`, `login_environment`, `wrapper`, `relay`.
 
 ### host.json의 engine_version
@@ -71,7 +72,7 @@ Codex 래퍼(`desktop_cli_wrapper.py`)는 호스트를 켤 때 상태 폴더(`~/
 
 - **Codex를 평소처럼 켜도 됩니다.** 설정 때 로그인 항목(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`)이 등록돼, Dock이나 Spotlight로 연 Codex도 연결 가능한 방식으로 켜집니다. 시스템 설정의 로그인 항목에는 이 항목이 실행하는 스크립트 이름 `codex-cua-login-env`로 보입니다.
 - **Codex가 꺼져 있어도 됩니다.** Claude가 CUA에 연결할 때 Codex를 뒤에서 열고, 앞에 있던 앱으로 포커스를 돌려줍니다. Codex를 켜는 것은 새 Claude 대화가 CUA에 연결할 때와, 연결이 끊긴 뒤의 다음 CUA 호출뿐입니다. 대화 끝 정리(`turn_ended`)는 켜지 않습니다.
-- **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** CUA Bar는 이런 Codex를 끄지 않고 알림으로 다시 켤지 묻고, **다시 켜기**를 누르면 정상 종료한 뒤 다시 켭니다. 직접 하려면 진행 중인 작업을 마치고 Codex를 정상 종료(⌘Q)한 뒤 다시 엽니다. 어느 쪽도 강제로 종료하지 않지만, 다시 켜면 하던 Codex 작업은 끊깁니다. 다시 켠 뒤에도 Claude Code에서 cua가 연결되지 않은 것으로 보이면 `/mcp`로 다시 연결합니다.
+- **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** CUA Bar는 이런 Codex를 끄지 않고 알림으로 다시 켤지 묻고, **다시 켜기**를 누르면 정상 종료한 뒤 다시 켭니다. 직접 하려면 진행 중인 작업을 마치고 Codex를 정상 종료(⌘Q)한 뒤 다시 엽니다. 어느 쪽도 강제로 종료하지 않지만, 다시 켜면 하던 Codex 작업은 끊깁니다. 다시 켠 뒤에도 Claude Code에서 cuabar가 연결되지 않은 것으로 보이면 `/mcp`로 다시 연결합니다.
 - **Codex가 꺼졌다 켜져도(앱 갱신 포함) 열려 있던 Claude 대화는 이어집니다.** 다음 CUA 호출 때 새 호스트에 다시 붙습니다. 연결이 끊길 때 하던 조작은 다시 보내지 않으므로 그 조작이 실제로 됐는지는 알 수 없습니다. 화면을 확인한 뒤에 이어 갑니다.
 - Codex가 뒤에서 열리는 동안 로그인·권한·업데이트 창이 떠 있으면, 기다리다가 Codex를 앞으로 띄우고 안내합니다.
 - **엔진에 문제가 있어도 Codex는 켜집니다.** 연결용 파이썬 환경이나 `command.py`가 없을 때, 환경이 아직 준비되지 않았을 때(Codex를 켜는 동안에는 복구하지도 기다리지도 않습니다), 묶인 엔진 사본(`source.json`)이 없거나 필요한 파일이 빠졌거나 손상됐을 때, 연결을 시작하기 전에 상태 폴더·점유 같은 설정이 막혔을 때 Codex는 연결 없이 원래대로 켜집니다. CUA 연결만 빠지므로 CUA Bar의 **고치기**로 복구합니다(손으로는 사본 폴더의 `setup.sh install-engine`).
@@ -83,11 +84,11 @@ Codex 래퍼(`desktop_cli_wrapper.py`)는 호스트를 켤 때 상태 폴더(`~/
 
 - **끄기 전에 탭을 놓아줍니다.** 열린 대화의 범위를 알고 있어서, 연결을 끄기 전에 AI가 정상 종료 때 하는 정리와 같은 놓아주기를 합니다. AI가 만든 임시 탭은 닫히고, 사용자 탭과 넘겨주려고 남긴 탭은 그대로 둡니다.
 - **Codex 연결이 목록에 보입니다.** Codex 대화의 런타임이 작업 폴더, 작업 중·쉼, 세션 ID와 함께 연결 목록에 올라옵니다.
-- **조작 기록을 남깁니다.** 시각, 연결, 세션 ID, 도구 이름, 성공 여부, 걸린 시간만 `activity.jsonl`에 한 줄씩 적습니다. Claude 대화의 런타임이면 그 대화를 연 다리의 이름(다리의 pid와 시작 시각)도 줄마다 적어서, 대화가 끝나 연결이 사라진 뒤에도 기록 탭이 그 줄을 Claude의 것으로 보입니다. 파일이 256KB를 넘으면 최근 200줄만 남기고 줄이며, 상태에는 최근 200개가 보입니다(아래 [개인정보](#개인정보)).
+- **조작 기록을 남깁니다.** 시각, 연결, 세션 ID, 도구 이름, 성공 여부, 걸린 시간, 작업 폴더만 `activity.jsonl`에 한 줄씩 적습니다. 작업 폴더는 연결이 사라진 뒤에도 기록 탭이 그 줄의 폴더를 보이려고 0.8.2부터 적습니다(`status --json`의 `activity[].cwd`, 그 전 줄은 `null`). Claude 대화의 런타임이면 그 대화를 연 다리의 이름(다리의 pid와 시작 시각)도 줄마다 적어서, 대화가 끝나 연결이 사라진 뒤에도 기록 탭이 그 줄을 Claude의 것으로 보입니다. 파일이 256KB를 넘으면 최근 200줄만 남기고 줄이며, 상태에는 최근 200개가 보입니다(아래 [개인정보](#개인정보)).
 
 중계기는 `~/.codex/config.toml`을 고치지 않습니다. Claude 대화의 런타임에는 Codex를 켜는 래퍼가 원래 `cua_repl` 정의를 읽어 그 앞에 끼웁니다. Codex 앱이 대화마다 보내는 `cua_repl` 설정에서는 런타임 경로 한 값만 중계기로 바꿔 전달하고, 예상한 값일 때만 바꾸며 나머지는 그대로 넘깁니다. 모델·권한·승인 설정은 건드리지 않습니다.
 
-중계기가 없어도 Codex는 켜집니다. 원래 정의를 읽지 못하거나 중계기가 깨졌으면 Codex는 중계기 없이 원래대로 켜집니다. 그때는 Codex 대화의 연결을 끄기 전에 탭을 놓지 못하고, 작업 중·쉼·세션 ID도 알 수 없습니다. 중계기 사본이 없거나 깨졌으면 CUA Bar가 문제로 알리고 **고치기**로 고칩니다(`codex-cua setup`도 같은 일을 합니다). 원래 정의를 읽지 못해 중계기 없이 켜진 경우는 `status --json`의 `setup.relay`가 `inactive`로만 보이고 CUA Bar는 문제로 알리지 않습니다. 이유는 `codex-cua diagnose`의 `relay left out …` 줄에 나옵니다. 이번 설정보다 먼저 켜진 Codex는 `host.started_before_setup`이 `true`이고, CUA Bar 카드가 "Codex를 다시 켜면 새 설정이 적용돼요"라고 안내합니다. 그 전에는 연결 상태를 모르거나 놓아주지 못할 수 있습니다.
+중계기가 없어도 Codex는 켜집니다. 원래 정의를 읽지 못하거나 중계기가 깨졌으면 Codex는 중계기 없이 원래대로 켜집니다. 그때는 Codex 대화의 연결을 끄기 전에 탭을 놓지 못하고, 작업 중·쉼·세션 ID도 알 수 없습니다. 중계기 사본이 없거나 깨졌으면 CUA Bar가 문제로 알리고 **고치기**로 고칩니다(`codex-cua setup`도 같은 일을 합니다). 원래 정의를 읽지 못해 중계기 없이 켜진 경우는 `status --json`의 `setup.relay`가 `inactive`이고, 까닭이 `host.relay_reason`과 `codex-cua diagnose`의 `relay left out …` 줄에 나옵니다. CUA Bar는 문제로 알리지 않고 점검 탭의 중계기 줄을 대기로 둡니다. Codex가 스스로 업데이트된 뒤 처음 켜질 때가 그렇습니다. Codex가 새 판의 번들 플러그인 사본(`~/.codex/plugins/cache/openai-bundled/unified-computer-use/<판>`)을 래퍼가 살펴본 몇 초 뒤에야 써서, 래퍼가 `plugin_entry`로 중계기를 뺍니다. 그 사본이 이제 있으면 `host.restart_adds_relay`가 `true`이고, CUA Bar 카드가 "Codex를 다시 켜면 중계기가 붙어요"라고 안내합니다. 이번 설정보다 먼저 켜진 Codex는 `host.started_before_setup`이 `true`이고, CUA Bar 카드가 "Codex를 다시 켜면 새 설정이 적용돼요"라고 안내합니다. 그 전에는 연결 상태를 모르거나 놓아주지 못할 수 있습니다.
 
 ## 제거
 
@@ -97,7 +98,7 @@ CUA Bar의 **앱 지우기…**가 이 엔진의 제거까지 합니다([앱 REA
 ~/.local/bin/codex-cua uninstall
 ```
 
-로그인 항목, 등록한 설정값, 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 연결 기록 폴더(`~/Library/Caches/codex-cua`)와 호스트 상태 폴더(`~/Library/Caches/codex-host-cua`)는 지우지 않으니 필요 없으면 직접 지웁니다. 앱이 Claude Code에 깐 `cua` MCP와 스킬은 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
+로그인 항목, 등록한 설정값, 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 연결 기록 폴더(`~/Library/Caches/codex-cua`)와 호스트 상태 폴더(`~/Library/Caches/codex-host-cua`)는 지우지 않으니 필요 없으면 직접 지웁니다. 앱이 Claude Code에 깐 `cuabar` MCP와 스킬은 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
 
 ## 업데이트와 옛 플러그인
 
