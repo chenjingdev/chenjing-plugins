@@ -64,7 +64,9 @@ struct ButtonWiringTests {
         // can_release false (no verified control endpoint)
         #expect(try liveRow("codex-15888-1792319000", in: content).button.isEnabled == false)
         // Nothing known: nothing may be offered.
-        let unknown = try self.content("status-nulls").connections.groups.flatMap(\.rows).map(\.button)
+        var nulls = try Fixtures.status("status-nulls")
+        nulls.connections[0].busy = true // on its first call, so it is listed
+        let unknown = PopoverContent(status: nulls, now: Fixtures.now, calendar: Fixtures.utc).connections.groups.flatMap(\.rows).map(\.button)
         #expect(!unknown.isEmpty)
         #expect(unknown.allSatisfy { !$0.isEnabled })
     }

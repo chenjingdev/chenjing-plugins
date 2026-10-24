@@ -79,7 +79,6 @@ struct ConfirmationTests {
     @Test func anActiveConnectionWhoseIdleTimeIsUnknownStillAsks() async throws {
         var status = try Fixtures.status("status-ready")
         status.connections[0].idleSeconds = nil
-        status.connections[0].lastCallAt = nil
         let rig = await Rig(status)
         let row = try #require(rig.model.content?.connections.groups.flatMap(\.rows).first { $0.id == status.connections[0].id })
         #expect(row.state.text == "알 수 없음", "it reads unknown, but the contract says active")

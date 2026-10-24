@@ -146,6 +146,10 @@ struct Connection: Equatable, Sendable, Identifiable {
     var canRelease = false
     /// The engine may signal this process.
     var canStop = false
+
+    /// Running, but it has never made a CUA call (no call is in flight, none was ever recorded): it holds no tab,
+    /// so the 연결 list and the card's count leave it out.
+    var isUnused: Bool { state == .active && !busy && lastCallAt == nil && idleSeconds == nil }
 }
 
 struct Leases: Equatable, Sendable {

@@ -315,7 +315,7 @@ struct ConnectionsContent: Equatable, Sendable {
     var screen: ScreenLine
     /// nil when there is nothing to tidy.
     var tidy: TidyContent?
-    /// The connections whose AI is alive, Claude then Codex: a 탭 풀기 on each line.
+    /// The connections whose AI is alive and that have made a CUA call, Claude then Codex: a 탭 풀기 on each line.
     var groups: [ConnectionGroup]
     var tools: [OtherToolRow]
     /// R21: no connection of any kind.
@@ -325,7 +325,7 @@ struct ConnectionsContent: Equatable, Sendable {
     init(status: EngineStatus, now: Date, calendar: Calendar, tabsReleased: Set<String> = []) {
         screen = ScreenLine(status: status, now: now)
 
-        let live = status.connections.filter { $0.state != .ended }.sorted(by: TidyPlan.newestFirst)
+        let live = status.connections.filter { $0.state != .ended && !$0.isUnused }.sorted(by: TidyPlan.newestFirst)
         var agents: [AgentKind] = []
         for connection in live where !agents.contains(connection.agent) { agents.append(connection.agent) }
         let rank: (AgentKind) -> Int = { $0 == .claude ? 0 : ($0 == .codex ? 1 : 2) }

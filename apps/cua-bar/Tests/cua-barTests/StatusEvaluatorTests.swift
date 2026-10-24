@@ -25,6 +25,14 @@ struct StatusEvaluatorTests {
         #expect(summary.fix == nil)
     }
 
+    @Test func aConnectionThatNeverMadeACallIsNotCounted() throws {
+        var status = try healthy()
+        status.connections.append(Connection(id: "claude-777-1792300000", agent: .claude, state: .active, canRelease: true))
+        #expect(evaluate(status).headline == "연결 Claude 1 · Codex 1")
+        status.connections[status.connections.count-1].lastCallAt = Date() // it made a call: counted from then on
+        #expect(evaluate(status).headline == "연결 Claude 2 · Codex 1")
+    }
+
     @Test func readyWithoutConnectionsSaysSo() throws {
         var status = try healthy()
         status.connections = []

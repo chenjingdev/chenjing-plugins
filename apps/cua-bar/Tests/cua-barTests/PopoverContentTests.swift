@@ -99,7 +99,10 @@ struct PopoverContentTests {
     }
 
     @Test func unknownValuesInARowAreDashesNotGuesses() throws {
-        let row = try #require(try rows(content("status-nulls")).first)
+        var status = try Fixtures.status("status-nulls")
+        // On its first call: listed, though nothing about it is known yet.
+        status.connections[0].busy = true
+        let row = try #require(rows(content(of: status)).first)
         #expect(row.folder == "—")
         #expect(row.path == nil)
         #expect(row.startedText == "시작 시각 알 수 없음")
@@ -110,6 +113,15 @@ struct PopoverContentTests {
         #expect(row.button.isEnabled == false, "nothing known: nothing may be offered")
     }
 
+    @Test func aConnectionThatNeverMadeACallIsNotListed() throws {
+        var status = try Fixtures.status("status-ready")
+        let unused = Connection(id: "claude-777-1792300000", agent: .claude, state: .active, canRelease: true)
+        status.connections.append(unused)
+        #expect(!rows(content(of: status)).contains { $0.id == unused.id }, "it holds no tab: there is nothing to see or release")
+        status.connections[status.connections.count-1].lastCallAt = Fixtures.now.addingTimeInterval(-60)
+        #expect(rows(content(of: status)).contains { $0.id == unused.id }, "listed once it has made a call")
+    }
+
     @Test func otherAgentsGetTheirOwnGroupAfterClaudeAndCodex() throws {
         let content = try content("status-unknown-keys").connections
         #expect(content.groups.map(\.title) == ["Claude · 1", "gemini · 1"])
@@ -117,9 +129,8 @@ struct PopoverContentTests {
 
     @Test func aRowKeepsTheContractStateNotOnlyHowItReads() throws {
         var status = try Fixtures.status("status-ready")
-        // Active, but no call was ever recorded: it reads 알 수 없음 yet the contract says active.
+        // Active, with no idle time: it reads 알 수 없음 yet the contract says active.
         status.connections[0].idleSeconds = nil
-        status.connections[0].lastCallAt = nil
         let row = try #require(rows(content(of: status)).first { $0.id == status.connections[0].id })
         #expect(row.state == StateDisplay(kind: .unknown, text: "알 수 없음"))
         #expect(row.contractState == .active)
@@ -343,7 +354,8 @@ struct PopoverContentTests {
         var status = try Fixtures.status("status-ready")
         status.connections = [Connection(
             id: "claude-23601-1792412520", agent: .claude, state: state, cwd: "/Users/chenjing/dev/unified-login",
-            startedAt: Fixtures.now.addingTimeInterval(-3600), sessionID: "019a-live", canRelease: canRelease, canStop: true)]
+            startedAt: Fixtures.now.addingTimeInterval(-3600), lastCallAt: Fixtures.now.addingTimeInterval(-600), idleSeconds: 600,
+            sessionID: "019a-live", canRelease: canRelease, canStop: true)]
         status.leases.maybeLeft = [LeftoverLease(
             sessionID: "019a-live", agent: .codex, connectionID: "codex-23654-1792412521", cwd: "/Users/chenjing/dev/unified-login",
             endedAt: Fixtures.now.addingTimeInterval(-7200), releasable: false)]
