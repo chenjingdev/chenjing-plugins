@@ -114,7 +114,7 @@ test('probe.md hands off to build.md on its last line', () => {
 
 test('build.md checks git, uses worker and reviewer, records Rulings', () => {
   const text = read('skills/pact/build.md');
-  for (const s of ['git-state.mjs', 'pact:worker', 'pact:reviewer', 'BLOCKED', 'Ruling:', 'pact/<slug>']) {
+  for (const s of ['git-state.mjs', 'pact:worker', 'pact:reviewer', 'BLOCKED', 'Ruling:', 'pact/<run-id>']) {
     assert.ok(text.includes(s), s);
   }
   assert.match(text, /set-status <명세> building/);
@@ -145,7 +145,17 @@ test('the report is written for the person who approved the spec: plain fields o
 test('verify.md runs the verifier, builds the report, merges locally and asks only before push', () => {
   const text = read('skills/pact/verify.md');
   for (const s of ['pact:verifier', 'report.mjs', 'merge --no-ff', 'push']) assert.ok(text.includes(s), s);
-  assert.match(text, /set-status <명세> done/);
+  assert.match(text, /verification\.mjs finish <명세> <프로젝트>/);
+  assert.doesNotMatch(text, /scripts\/spec\.mjs set-status <명세> done/);
+});
+
+test('repair keeps the two-review cap and screenshots for every step', () => {
+  const build = read('skills/pact/build.md');
+  const verifier = read('agents/verifier.md');
+  assert.ok(build.includes('이 두 번째 검토에서도 고칠 것이 있으면 당신이 직접 고치고 완료 기준 명령을 돌린 뒤 넘어간다. 세 번째 검토는 없다.'));
+  assert.ok(verifier.includes('모든 시나리오의 모든 단계에 스크린샷이 있어야 사용자가 보고서만 보고 판단할 수 있다.'));
+  assert.match(verifier, /unverified/);
+  assert.match(verifier, /HTTP.*통과시키지 않는다/);
 });
 
 test('build and verify never ask the user to review a plan or pick an execution mode', () => {
@@ -198,9 +208,10 @@ test('screens are checked with Codex CUA, not Playwright', () => {
   for (const file of PROSE) assert.ok(!/playwright\.mjs|Playwright 스크립트/.test(readFileSync(file, 'utf8')), `${rel(file)} still uses Playwright`);
   const verifier = read('agents/verifier.md');
   assert.ok(verifier.includes(CUA));
-  assert.match(verifier, /ToolSearch.*select:mcp__cua__js.*select:mcp__plugin_cua_cua__js/);
+  assert.ok(verifier.includes('mcp__cua_repl.js') && verifier.includes(OLD_CUA));
+  assert.match(verifier, /ToolSearch.*CUA·JavaScript/);
   assert.ok(read('skills/pact/SKILL.md').includes(CUA) && read('skills/pact/SKILL.md').includes(OLD_CUA));
-  assert.match(verifier, /createBrowserTab\("chrome"/);
+  assert.match(verifier, /createBrowserTab\("<browsers에서 고른 이름>"/);
   assert.match(verifier, /getScreenshot\(\{ emit: false \}\)/);
   assert.match(verifier, /shots\/<시나리오 id>-<단계 번호>\.jpg/);
   assert.match(verifier, /tab\.close\(\)/);
@@ -281,6 +292,7 @@ test('first end-to-end run: friction fixes stay in the guidance', () => {
   const verify = read('skills/pact/verify.md');
   assert.match(verify, /cua\.getState\(\)/);
   assert.match(verify, /처음부터 다시 돌리지 않는다/);
+  assert.match(verify, /changed_files/);
   assert.match(verify, /results-round<n>\.json/);
   const verifier = read('agents/verifier.md');
   assert.match(verifier, /## 다시 검수/);

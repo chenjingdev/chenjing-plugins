@@ -9,7 +9,13 @@ import { renderReport } from '../scripts/report.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(here, '..', 'scripts', 'report.mjs');
-const tmp = () => mkdtempSync(path.join(tmpdir(), 'pact-report-'));
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64');
+const tmp = () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'pact-report-'));
+  mkdirSync(path.join(dir, 'shots'), { recursive: true });
+  writeFileSync(path.join(dir, 'shots', 'S1-1.png'), png);
+  return dir;
+};
 
 const scenario = (id, result, steps, title = `${id} 제목`) => ({
   id, title, kind: 'spec', items: ['F1'], result, note: `${id} 메모`, steps,
@@ -20,7 +26,7 @@ const RESULTS = {
   scenarios: [
     scenario('S1', 'pass', [{ action: '목록 열기', shot: 'shots/S1-1.png', output: null }]),
     scenario('S2', 'fail', [{ action: '빈 수업', shot: 'shots/S2-1.png', output: null }]),
-    scenario('S3', 'pass', [{ action: 'CLI 실행', shot: null, output: 'exit 0' }]),
+    scenario('S3', 'pass', [{ action: 'CLI 실행', shot: null, output: 'exit 0', exitCode: 0 }]),
   ],
   specCheck: { missing: ['F2 <내보내기> 없음'], extra: [], misunderstood: [] },
   rulings: ['Ruling: 빈 상태 문구 <기본> — 명세에 없음 — 문구 수정'],
@@ -45,9 +51,9 @@ const FILLED = {
   todo: ['빈 수업 화면 문구를 정해 주세요'],
   changes: ['결석 사유는 선생님만 봅니다'],
   scenarios: [
-    { ...scenario('S1', 'pass', [{ action: '목록 열기', shot: null, output: 'ok' }]), summary: '목록이 열린다' },
-    { ...scenario('D1', 'doubt', [{ action: '새로고침', shot: null, output: 'ok' }], '새로고침하면 입력이 사라짐'), summary: '쓰던 출결이 지워진다', decision: '그대로 둡니다. 저장 버튼이 있어서요.' },
-    { ...scenario('S2', 'fail', [{ action: '빈 수업', shot: null, output: 'ok' }]), summary: '빈 수업에서 화면이 멈춘다', note: 'TypeError at render()' },
+    { ...scenario('S1', 'pass', [{ action: '목록 열기', shot: null, output: 'ok', exitCode: 0 }]), summary: '목록이 열린다' },
+    { ...scenario('D1', 'doubt', [{ action: '새로고침', shot: null, output: 'ok', exitCode: 0 }], '새로고침하면 입력이 사라짐'), summary: '쓰던 출결이 지워진다', decision: '그대로 둡니다. 저장 버튼이 있어서요.' },
+    { ...scenario('S2', 'fail', [{ action: '빈 수업', shot: null, output: 'ok', exitCode: 0 }]), summary: '빈 수업에서 화면이 멈춘다', note: 'TypeError at render()' },
   ],
 };
 
@@ -97,7 +103,7 @@ test('the title names the topic from the spec next to the run dir', () => {
 
 test('missing screenshots are marked, existing ones are linked relative to the run dir', () => {
   const dir = tmp();
-  mkdirSync(path.join(dir, 'shots'));
+  mkdirSync(path.join(dir, 'shots'), { recursive: true });
   writeFileSync(path.join(dir, 'shots', 'S1-1.png'), 'png');
   const { html } = renderReport(RESULTS, { runDir: dir });
   assert.match(html, /<a href="shots\/S1-1\.png" target="_blank"><img src="shots\/S1-1\.png"/);
@@ -143,4 +149,61 @@ test('CLI explains a missing or broken results.json in Korean', () => {
   r = spawnSync('node', [CLI, dir], { encoding: 'utf8' });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /results\.json을 읽지 못했습니다/);
+});
+
+test('a declared pass without its screenshot is counted as unverified', () => {
+  const dir = tmp();
+  const { html, summary } = renderReport({
+    surface: 'ui',
+    scenarios: [scenario('S9', 'pass', [{ action: '저장 누름', shot: 'shots/not-created.png', output: null }])],
+  }, { runDir: dir });
+  assert.match(summary, /통과 0/);
+  assert.match(summary, /미검증 1/);
+  assert.match(html, /미검증/);
+});
+
+test('HTTP output alone cannot turn an unobserved UI step into a pass', () => {
+  const { summary } = renderReport({
+    surface: 'ui',
+    scenarios: [scenario('S9', 'pass', [{ action: '저장 화면 확인', shot: null, output: 'HTTP 200', exitCode: 0 }])],
+  }, { runDir: tmp() });
+  assert.match(summary, /통과 0/);
+  assert.match(summary, /미검증 1/);
+});
+
+test('an empty report explicitly says that verification was not performed', () => {
+  const { html } = renderReport({ scenarios: [] }, { runDir: tmp() });
+  assert.match(html, /검수한 시나리오가 없습니다/);
+});
+
+test('an old result cannot appear passed under a new capture id', () => {
+  const dir = tmp();
+  writeFileSync(path.join(dir, 'verification.json'), JSON.stringify({ verification_id: 'new-capture', surface: 'ui' }));
+  const { html, summary } = renderReport({
+    verification_id: 'old-capture',
+    scenarios: [{ ...scenario('S1', 'pass', [{ action: '화면 확인', shot: 'shots/S1-1.png' }]), verification_id: 'old-capture' }],
+  }, { runDir: dir });
+  assert.match(summary, /통과 0/);
+  assert.match(summary, /미검증 1/);
+  assert.match(html, /이어지지 않는 결과/);
+});
+
+test('scenario receipts must match even when the result-level receipt is current', () => {
+  const dir = tmp();
+  writeFileSync(path.join(dir, 'verification.json'), JSON.stringify({ verification_id: 'current', surface: 'ui' }));
+  const data = { verification_id: 'current', scenarios: [{ ...scenario('S1', 'pass', [{ action: '화면 확인', shot: 'shots/S1-1.png' }]), verification_id: 'older' }] };
+  assert.match(renderReport(data, { runDir: dir }).summary, /미검증 1/);
+  data.scenarios[0].verification_id = 'current';
+  assert.equal(renderReport(data, { runDir: dir }).summary, '통과 1 · 실패 0 · 의심 0');
+});
+
+test('results from an earlier round of the same verification still count and are marked', () => {
+  const dir = tmp();
+  writeFileSync(path.join(dir, 'verification.json'), JSON.stringify({ verification_id: 'round2', history: ['round1'], surface: 'ui' }));
+  const data = { verification_id: 'round2', scenarios: [{ ...scenario('S1', 'pass', [{ action: '화면 확인', shot: 'shots/S1-1.png' }]), verification_id: 'round1' }] };
+  const { html, summary } = renderReport(data, { runDir: dir });
+  assert.equal(summary, '통과 1 · 실패 0 · 의심 0');
+  assert.match(html, /앞 판에서 확인/);
+  data.scenarios[0].verification_id = 'round0';
+  assert.match(renderReport(data, { runDir: dir }).summary, /미검증 1/);
 });

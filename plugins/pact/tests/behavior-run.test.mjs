@@ -127,3 +127,45 @@ test('run.mjs imports the old records as the first round before overwriting them
   assert.doesNotMatch(again.stderr, /가져옴/);
   assert.equal(listRounds(out).filter((r) => r.kind === 'legacy').length, 1);
 });
+
+test('resume reruns a response when its requested model or CLI launcher changes', () => {
+  const { dir, out, env } = world();
+  const args = [run, 'confirm-only', '--runs', '1', '--variant', 'control', '--concurrency', '1'];
+  const runWith = (extra = {}) => spawnSync('node', [...args, '--resume', '1'], { encoding: 'utf8', env: { ...env, ...extra } });
+  const first = runWith({ PACT_TEST_MODEL: 'model-a' });
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(readFileSync(path.join(dir, 'count'), 'utf8'), '2');
+  writeFileSync(path.join(env.PACT_TEST_PROFILE, '.claude.json'), JSON.stringify({ oauthAccount: { id: 'x' }, numStartups: 2 }));
+  const same = runWith({ PACT_TEST_MODEL: 'model-a' });
+  assert.equal(same.status, 0, same.stderr);
+  assert.equal(readFileSync(path.join(dir, 'count'), 'utf8'), '2', 'unchanged execution rejudges without a CLI call');
+  const changed = runWith({ PACT_TEST_MODEL: 'model-b' });
+  assert.equal(changed.status, 0, changed.stderr);
+  assert.equal(readFileSync(path.join(dir, 'count'), 'utf8'), '4', 'different requested model runs both turns again');
+  assert.equal(listRounds(out).at(-1).attempts[0].reused, false);
+  const meta = JSON.parse(readFileSync(path.join(out, 'confirm-only/control-1.jsonl'), 'utf8').split('\n')[0]);
+  assert.equal(meta.execution.model, 'model-b');
+  assert.equal(typeof meta.judge.fingerprint, 'string');
+  writeFileSync(path.join(dir, 'count'), '0');
+  writeFileSync(env.PACT_TEST_CLAUDE, readFileSync(env.PACT_TEST_CLAUDE, 'utf8') + '\n// launcher version changed\n');
+  const launcherChanged = runWith({ PACT_TEST_MODEL: 'model-b' });
+  assert.equal(launcherChanged.status, 0, launcherChanged.stderr);
+  assert.equal(readFileSync(path.join(dir, 'count'), 'utf8'), '2', 'different launcher bytes rerun rather than reuse');
+  assert.equal(listRounds(out).at(-1).kind, 'new');
+});
+
+test('resume never treats unstamped legacy control responses as current execution evidence', () => {
+  const { dir, out, env } = world();
+  const args = [run, 'confirm-only', '--runs', '1', '--variant', 'control', '--concurrency', '1'];
+  const first = spawnSync('node', args, { encoding: 'utf8', env });
+  assert.equal(first.status, 0, first.stderr);
+  const file = path.join(out, 'confirm-only/control-1.jsonl');
+  const lines = readFileSync(file, 'utf8').trim().split('\n');
+  const meta = JSON.parse(lines[0]);
+  delete meta.fingerprint;
+  writeFileSync(file, [JSON.stringify(meta), ...lines.slice(1)].join('\n') + '\n');
+  const resumed = spawnSync('node', [...args, '--resume', '1'], { encoding: 'utf8', env });
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.equal(readFileSync(path.join(dir, 'count'), 'utf8'), '4');
+  assert.equal(listRounds(out).at(-1).attempts[0].reused, false);
+});

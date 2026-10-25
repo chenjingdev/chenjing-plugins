@@ -14,6 +14,10 @@ export function gitState(dir) {
   if (git(dir, 'rev-parse', '--is-inside-work-tree') !== 'true') return { repo: false, branch: null, dirty: false, changed: [], untracked: [] };
   const branch = git(dir, 'symbolic-ref', '--short', '-q', 'HEAD') || null;
   const r = spawnSync('git', ['status', '--porcelain=v1', '-z'], { cwd: dir, encoding: 'utf8' });
+  if (r.error || r.status !== 0) {
+    const reason = r.error?.message || r.stderr?.trim() || `종료 코드 ${r.status}, 신호 ${r.signal ?? '없음'}`;
+    throw new Error(`git status 조회 실패: ${reason}`);
+  }
   const entries = (r.stdout ?? '').split('\0').filter(Boolean);
   const changed = [];
   const untracked = [];
@@ -30,5 +34,10 @@ export function gitState(dir) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  console.log(JSON.stringify(gitState(process.argv[2] ?? process.cwd())));
+  try {
+    console.log(JSON.stringify(gitState(process.argv[2] ?? process.cwd())));
+  } catch (err) {
+    console.error(err.message);
+    process.exitCode = 1;
+  }
 }

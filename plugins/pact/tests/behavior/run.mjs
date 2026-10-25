@@ -10,9 +10,10 @@ import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSyn
 import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { hitLimit, wrappedUp } from './judge.mjs';
 import { buildBoard } from './board.mjs';
-import { judgeChecks, fingerprint as fingerprintOf, guidelineHash, buildRound, saveRound, listRounds, importLegacy, defaultOutDir } from './runs.mjs';
+import { judgeChecks, fingerprint as fingerprintOf, guidelineHash, judgmentFingerprint, EXECUTION_CONTRACT, buildRound, saveRound, listRounds, importLegacy, defaultOutDir } from './runs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACT = path.resolve(HERE, '..', '..');
@@ -22,6 +23,24 @@ const TURN_TIMEOUT_MS = Number(process.env.PACT_TEST_TURN_TIMEOUT_MS) || 15 * 60
 const CLAUDE = process.env.PACT_TEST_CLAUDE || 'claude';
 // 터미널이 끼워 넣는 claude 래퍼(cmux shim)는 훅과 MCP를 더해 깨끗한 프로필을 흐리므로 PATH에서 뺀다.
 const BASE_PATH = (process.env.PATH ?? '').split(':').filter((p) => !p.includes('cmux-cli-shims')).join(':');
+const fileHash = (file) => existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex') : null;
+function executionIdentity() {
+  const candidate = CLAUDE.includes(path.sep)
+    ? path.resolve(CLAUDE)
+    : BASE_PATH.split(path.delimiter).map((dir) => path.join(dir, CLAUDE)).find((file) => existsSync(file));
+  const resolved = candidate && existsSync(candidate) ? realpathSync(candidate) : null;
+  return {
+    contract: EXECUTION_CONTRACT,
+    model: process.env.PACT_TEST_MODEL || 'cli-default',
+    cli: { command: CLAUDE, path: resolved, digest: resolved ? fileHash(resolved) : null },
+    node: process.version,
+    maxTurns: process.env.PACT_TEST_MAX_TURNS || '20',
+    turnTimeoutMs: TURN_TIMEOUT_MS,
+    // 로그인 상태·실행 횟수가 바뀌는 .claude.json은 실행 설정이 아니다.
+    profile: ['settings.json', 'settings.local.json'].map((file) => ({ file, digest: fileHash(path.join(PROFILE, file)) })),
+  };
+}
+let execution;
 const live = new Set();
 let limited = false;
 const killAll = () => {
@@ -128,25 +147,26 @@ const judgeAll = judgeChecks;
 
 // 보내는 턴이나 pact 지침(skills, agents)이 바뀌면 옛 transcript는 다시 쓰지 않는다.
 // 검사(checks)만 바뀐 것은 다시 판정하면 되고, 대조군은 pact 지침과 상관없다.
-const fingerprint = (scenario, variant) => fingerprintOf(PACT, scenario, variant);
+const fingerprint = (scenario, variant) => fingerprintOf(PACT, scenario, variant, { execution });
 
-function loadPrevious(file, scenario, variant) {
+function loadPrevious(file, expectedFingerprint) {
   if (!existsSync(file)) return null;
   const lines = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const meta = lines[0];
   const transcript = [];
   for (const e of lines.slice(1)) (transcript[e._turn] ??= []).push(e);
-  // 지문이 없는 옛 기록은 대조군만 받는다(대조군은 지침과 상관없음).
-  const stamp = meta.fingerprint ?? (variant === 'control' ? fingerprint(scenario, variant) : null);
-  if (stamp !== fingerprint(scenario, variant) || hitLimit(transcript) || !existsSync(meta.workdir ?? '')) return null;
+  // 옛 기록은 실행 입력을 증명하지 못한다. 결과판에는 남기되 새 실행의 캐시로 쓰지 않는다.
+  const stamp = meta.fingerprint;
+  if (stamp !== expectedFingerprint || hitLimit(transcript) || !existsSync(meta.workdir ?? '')) return null;
   return { transcript, cwd: meta.workdir };
 }
 
 async function runOnce(scenario, variant, n, bin, resume) {
   const fixture = path.join(HERE, 'fixtures', scenario.fixture);
   const outFile = path.join(OUT, scenario.name, `${variant}-${n}.jsonl`);
-  const previous = resume ? loadPrevious(outFile, scenario, variant) : null;
-  if (previous) return { results: judgeAll(scenario, previous.transcript, previous.cwd, fixture), transcript: previous.transcript, fingerprint: fingerprint(scenario, variant), reused: true };
+  const stamp = fingerprint(scenario, variant);
+  const previous = resume ? loadPrevious(outFile, stamp) : null;
+  if (previous) return { results: judgeAll(scenario, previous.transcript, previous.cwd, fixture), transcript: previous.transcript, fingerprint: stamp, reused: true };
   if (limited) return { limited: true };
   const cwd = workdirFor(fixture);
   const env = {
@@ -175,8 +195,7 @@ async function runOnce(scenario, variant, n, bin, resume) {
   reap(cwd);
   const outDir = path.join(OUT, scenario.name);
   mkdirSync(outDir, { recursive: true });
-  const stamp = fingerprint(scenario, variant);
-  const lines = [{ type: 'pact-test', scenario: scenario.name, variant, n, workdir: cwd, fingerprint: stamp }];
+  const lines = [{ type: 'pact-test', scenario: scenario.name, variant, n, workdir: cwd, fingerprint: stamp, execution, judge: { fingerprint: judgmentFingerprint() } }];
   transcript.forEach((events, turn) => events.forEach((e) => lines.push({ ...e, _turn: turn })));
   writeFileSync(outFile, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   if (hitLimit(transcript)) return { limited: true, transcript, fingerprint: stamp };
@@ -211,6 +230,7 @@ async function main() {
     console.error(`CLAUDE_CONFIG_DIR=${PROFILE} claude 로 한 번 /login 하세요`);
     return 2;
   }
+  execution = executionIdentity();
   // 아직 판이 없으면, 이번 시험이 jsonl을 덮어쓰기 전에 옛 기록을 첫 판으로 가져온다. 기록이 없으면 아무것도 만들지 않는다.
   if (!listRounds(OUT).length) {
     const legacy = importLegacy(OUT);
@@ -242,6 +262,7 @@ async function main() {
       variants,
       runs: opts.runs,
       pactFingerprint,
+      execution,
       attempts: results.map((x) => ({ scenario: x.s, variant: x.v, n: x.n, limited: x.limited, reused: x.reused, fingerprint: x.fingerprint, results: x.results, transcript: x.transcript })),
     }),
   );

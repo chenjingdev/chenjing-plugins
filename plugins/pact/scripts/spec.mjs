@@ -117,11 +117,16 @@ export function newSpecPath(projectDir, topic, date) {
   return file;
 }
 
-// docs/pact/2026-10-10-출결.md → 프로젝트 폴더와 slug '출결'
+// 명세의 날짜와 중복 번호까지 실행 ID에 남겨 서로 다른 명세의 산출물을 분리한다.
 export function specRunDir(specFile) {
   const projectDir = path.resolve(path.dirname(specFile), '..', '..');
-  const slug = path.basename(specFile, '.md').replace(/^\d{4}-\d{2}-\d{2}-/, '');
-  return ensureRunDir(projectDir, slug);
+  const runId = path.basename(specFile, '.md');
+  const legacySlug = runId.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+  const legacyWorktree = path.join(projectDir, '.pact', legacySlug, 'wt');
+  if (legacySlug !== runId && existsSync(legacyWorktree)) {
+    throw new Error(`기존 pact 작업 공간을 자동으로 이어 할 수 없습니다: ${legacyWorktree}. 원래 명세를 확인한 뒤 별도로 복구하세요.`);
+  }
+  return ensureRunDir(projectDir, runId);
 }
 
 function today() {
@@ -135,7 +140,7 @@ const USAGE = `사용법:
   spec.mjs status <명세>               status 값을 출력
   spec.mjs set-status <명세> <값>      status를 바꿈 (${STATUSES.join(', ')})
   spec.mjs lint <명세>                 형식 문제를 줄마다 출력, 있으면 종료 코드 1
-  spec.mjs run-dir <명세>              실행 산출물 폴더 .pact/<slug>/를 만들고 경로를 출력`;
+  spec.mjs run-dir <명세>              실행 산출물 폴더 .pact/<명세 파일명(확장자 제외)>/를 만들고 경로를 출력`;
 
 function main([cmd, ...args]) {
   if (cmd === 'new' && args.length >= 2) {
@@ -159,6 +164,10 @@ function main([cmd, ...args]) {
     return 0;
   }
   if (cmd === 'set-status' && args[1]) {
+    if (args[1] === 'done') {
+      console.error('done은 verification.mjs finish <명세> <프로젝트>가 완료 검사를 통과한 뒤에 바꿉니다. 여기서는 바꾸지 않습니다.');
+      return 1;
+    }
     writeFileSync(args[0], setStatus(readFileSync(args[0], 'utf8'), args[1]));
     return 0;
   }

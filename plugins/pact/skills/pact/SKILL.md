@@ -11,7 +11,7 @@ description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라�
 
 이 스킬의 Base directory에서 두 단계 위가 pact 폴더다. 아래에서 `<pact>`라고 쓴다. 스크립트는 `node <pact>/scripts/<이름>.mjs`로 부른다. 하위 에이전트는 `pact:spec-checker`, `pact:worker`, `pact:reviewer`, `pact:verifier`다.
 
-화면 확인에는 CUA Bar가 까는 Codex CUA 도구(`mcp__cua__js`)를 쓴다. 없으면 옛 플러그인 이름(`mcp__plugin_cua_cua__js`)을 찾고, 둘 다 없으면 화면 없이 확인한다.
+화면 확인에는 Codex CUA의 `js` 도구를 쓴다. 도구 이름은 호스트마다 다르다: CUA Bar가 까는 `mcp__cua__js`, Codex 쪽의 `mcp__cua_repl.js`, 옛 플러그인의 `mcp__plugin_cua_cua__js`. 처음에 이름만 보이는 지연 도구일 수 있으니 `ToolSearch`로 CUA·JavaScript를 검색해 실제 이름을 찾는다. 첫 응답에 API 설명이 오니 그것을 따른다. 정말 없으면 화면으로만 확인할 수 있는 항목은 미검증으로 남긴다.
 
 페이지나 보고서를 사용자에게 열어 줄 때 macOS는 `open`, Linux는 `xdg-open`, Windows는 `start ""`를 쓴다. 아래에서 `open`이라고 쓴 곳은 모두 이것이다.
 
@@ -29,6 +29,8 @@ description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라�
 | `approved`, `building` | `build.md` |
 | `verifying` | `verify.md` |
 | `done` | 결과(보고서 경로, 합친 브랜치)만 알린다 |
+
+`done`은 그때 완료했다는 기록이다. 지금도 그대로인지 말하려면 `node <pact>/scripts/verification.mjs check <명세> <프로젝트>`가 통과해야 한다. 옛 명세에 검수 기록(`.pact/<run-id>/verification.json`)이 없거나 그 뒤 코드가 바뀌었으면 옛 보고서는 보여 주되 지금도 완료라고 말하지 않는다. 완료 판정은 verify의 `finish`만 한다. `set-status done`은 막혀 있다.
 
 다른 일을 부탁한 것이면 아래 크기 가늠으로 간다. 어느 쪽인지 애매하면 기본안(이어 하기)을 붙여 한 줄로 묻는다.
 

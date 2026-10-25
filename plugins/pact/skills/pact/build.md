@@ -4,8 +4,10 @@
 
 ## 0. 들어오기 전에
 
-- 명세 status가 `draft`면 build하지 않는다. 승인을 받지 않은 것이니 `probe.md` 5로 돌아간다.
-- `node <pact>/scripts/spec.mjs run-dir <명세>`로 run-dir을 얻는다. `<run-dir>/wt`가 이미 있으면 이어 하는 중이다(중단됐거나 verify에서 되돌아왔다). 1·2를 건너뛰고 `<run-dir>/plan.md`와 `<run-dir>/tasks/*-report.md`를 읽은 뒤, 남은 작업이나 verify가 넘긴 실패부터 3으로 이어 간다.
+- 명세 status가 `draft`면 build하지 않는다. 승인을 받지 않은 것이니 `probe.md` 5에서 명세를 마저 쓰고 6에서 승인을 받는다.
+- `node <pact>/scripts/spec.mjs run-dir <명세>`로 run-dir을 얻는다. 명세 파일명(날짜 포함, 확장자 제외)이 `<run-id>`다. 예: `2026-10-25-출결.md` → `.pact/2026-10-25-출결/`, 브랜치 `pact/2026-10-25-출결`.
+- 예전 방식의 `.pact/<주제>/` 폴더(보고서, 사진)는 그대로 둔다. 그 안에 `wt`가 남아 있으면 `run-dir`이 멈춘다. 어느 명세의 작업인지 확인하고 사용자에게 알린 뒤에 정리한다.
+- `<run-dir>/wt`가 이미 있으면 이어 하는 중이다(중단됐거나 verify에서 되돌아왔다). 폴더만 보고 믿지 않고 `<run-dir>/plan.md` 머리의 명세 경로가 이번 명세와 같은지, `git -C <run-dir>/wt branch --show-current`가 `pact/<run-id>`인지 본다. 맞으면 1·2를 건너뛰고 `plan.md`와 `<run-dir>/tasks/*-report.md`를 읽은 뒤 남은 작업이나 verify가 넘긴 실패부터 3으로 이어 간다. 다르면 멈추고 알린다.
 
 ## 1. 작업 공간 준비
 
@@ -15,11 +17,11 @@
    - 명세 말고 다른 `changed`가 있으면 그 목록을 알리고 멈춘다. 사용자의 작업을 섞지 않기 위해서다.
    - 다른 `untracked`는 worktree로 섞이지 않으니 멈추지 않는다.
 2. `node <pact>/scripts/spec.mjs set-status <명세> building`
-3. `git worktree add <run-dir>/wt -b pact/<slug>`로 격리된 작업 공간을 만든다. 코드는 모두 이 worktree에서 바뀐다. 명세 파일은 메인 작업 트리에 있는 것만 고친다.
+3. `git worktree add <run-dir>/wt -b pact/<run-id>`로 격리된 작업 공간을 만든다. 코드는 모두 이 worktree에서 바뀐다. 명세 파일은 메인 작업 트리에 있는 것만 고친다. worktree를 만들지 못하면 멈추고 알린다. 메인 작업 트리에서 대신 작업하지 않는다.
 
 ## 2. 작업 나누기
 
-명세를 작업으로 나눠 `<run-dir>/plan.md`에 적는다. 작업마다 목표, 관련 명세 항목, 완료 기준 명령을 적는다. 이 목록은 당신이 쓰는 것이다. 사용자에게 보여 주고 확인받지 않는다.
+명세를 작업으로 나눠 `<run-dir>/plan.md`에 적는다. 맨 위에 명세의 절대 경로, 브랜치 `pact/<run-id>`, 시작할 때의 HEAD를 적는다. verify가 이 HEAD를 기준으로 그 사이 메인에 다른 변경이 들어왔는지 본다. 작업마다 목표, 관련 명세 항목, 완료 기준 명령을 적는다. 이 목록은 당신이 쓰는 것이다. 사용자에게 보여 주고 확인받지 않는다.
 
 작업은 혼자 테스트할 수 있는 단위로 자른다. 설정, 뼈대, 문서 같은 준비는 그것이 필요한 작업에 넣는다.
 
@@ -34,6 +36,8 @@
 3. `pact:reviewer`에 지시, worker 보고서 경로, base/head SHA, 관련 명세 항목을 넘긴다.
 4. 판정이 `고칠 것 있음`이면 같은 worker에 SendMessage로 지적을 넘긴다. 새 worker를 띄우지 않는다. SendMessage의 답은 알림으로 온다. 확인하려고 다시 묻거나 기다리는 명령을 돌리지 않는다.
 5. worker가 고치면 같은 reviewer에 SendMessage로 고친 커밋 범위를 넘겨 한 번 더 검토받는다. 이 두 번째 검토에서도 고칠 것이 있으면 당신이 직접 고치고 완료 기준 명령을 돌린 뒤 넘어간다. 세 번째 검토는 없다. 첫 판정이 `통과`면 사소 지적이 있어도 다시 검토하지 않는다.
+
+당신이 직접 고친 커밋도 verify의 검수 범위에 든다. 검토 두 번 상한은 그대로다.
 
 ## BLOCKED가 오면
 

@@ -4,6 +4,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { gitState } from '../scripts/git-state.mjs';
 
@@ -47,4 +49,31 @@ test('CLI prints the state as JSON', () => {
   const r = spawnSync('node', [CLI, tmp()], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), { repo: false, branch: null, dirty: false, changed: [], untracked: [] });
+});
+
+test('a failed git status is an error, never a clean repository', () => {
+  const d = tmp();
+  git(d, 'init', '-q', '-b', 'main');
+  writeFileSync(path.join(d, '.git', 'index'), 'broken index');
+  assert.throws(() => gitState(d), /git status.*실패/);
+  const r = spawnSync('node', [CLI, d], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /git status.*실패/);
+});
+
+test('a git status spawn error is not converted into a clean repository', () => {
+  const d = tmp();
+  git(d, 'init', '-q', '-b', 'main');
+  const original = childProcess.spawnSync;
+  childProcess.spawnSync = (command, args, options) => args[0] === 'status'
+    ? { error: Object.assign(new Error('synthetic spawn failure'), { code: 'ENOENT' }), status: null, stdout: '' }
+    : original(command, args, options);
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => gitState(d), /git status.*실패.*synthetic spawn failure/);
+  } finally {
+    childProcess.spawnSync = original;
+    syncBuiltinESMExports();
+  }
 });

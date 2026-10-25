@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { judgeChecks, compactConversation, buildRound, saveRound, listRounds, importLegacy, fingerprint, guidelineHash } from './behavior/runs.mjs';
+import { judgeChecks, compactConversation, buildRound, saveRound, listRounds, importLegacy, fingerprint, guidelineHash, judgmentFingerprint } from './behavior/runs.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const made = [];
@@ -288,4 +288,66 @@ test('CLI: runs.mjs import-legacy <out-dir> prints the result and is idempotent'
   assert.equal(readdirSync(path.join(out, 'runs')).length, 1);
   assert.equal(listRounds(out)[0].attempts[0].results[2].pass, true); // agentNotInvoked는 작업 폴더 없이도 판정된다
   assert.equal(spawnSync('node', [script, 'nope'], { encoding: 'utf8' }).status, 2);
+});
+
+function executionWorld() {
+  const root = tmp();
+  const pact = path.join(root, 'pact');
+  for (const dir of ['skills', 'agents', 'scripts', 'tests/behavior/fixtures/fx']) mkdirSync(path.join(pact, dir), { recursive: true });
+  writeFileSync(path.join(pact, 'skills', 'task.md'), 'task instructions');
+  writeFileSync(path.join(pact, 'scripts', 'probe.mjs'), 'export const probe = 1;');
+  writeFileSync(path.join(pact, 'tests/behavior', 'run.mjs'), 'runner v1');
+  writeFileSync(path.join(pact, 'tests/behavior/fixtures/fx', 'input.txt'), 'fixture v1');
+  return { pact, fixture: path.join(pact, 'tests/behavior/fixtures/fx'), options: { execution: { model: 'test-model-a', cli: { path: '/fake/claude', digest: 'cli-a' } } } };
+}
+
+test('execution fingerprint invalidates both variants on fixture bytes, paths, model, CLI identity and runner code', () => {
+  for (const variant of ['pact', 'control']) {
+    const w = executionWorld();
+    const fp = (options = w.options) => fingerprint(w.pact, scenario, variant, options);
+    const original = fp();
+    writeFileSync(path.join(w.fixture, 'input.txt'), 'fixture v2');
+    const fixtureChanged = fp();
+    assert.notEqual(fixtureChanged, original, 'changed input bytes must rerun the model');
+    writeFileSync(path.join(w.fixture, 'same-bytes-new-path.txt'), 'fixture v2');
+    assert.notEqual(fp(), fixtureChanged, 'fixture path set is an execution input');
+    assert.notEqual(fp({ execution: { ...w.options.execution, model: 'test-model-b' } }), fp(), 'model changes cannot reuse another model response');
+    assert.notEqual(fp({ execution: { ...w.options.execution, cli: { path: '/fake/claude', digest: 'cli-b' } } }), fp(), 'CLI identity changes must rerun');
+    const beforeRunner = fp();
+    writeFileSync(path.join(w.pact, 'tests/behavior/run.mjs'), 'runner v2');
+    assert.notEqual(fp(), beforeRunner, 'runner behavior changes must rerun');
+    const beforeProbe = fp();
+    writeFileSync(path.join(w.pact, 'scripts/probe.mjs'), 'export const probe = 2;');
+    assert.notEqual(fp(), beforeProbe, 'helpers available to the model are execution inputs');
+    assert.match(original, /^pact-exec-v2:/, 'new execution stamps cannot be confused with legacy stamps');
+  }
+});
+
+test('checks-only changes retain execution fingerprint; judgment provenance is separate', () => {
+  const w = executionWorld();
+  for (const variant of ['pact', 'control']) {
+    const before = fingerprint(w.pact, scenario, variant, w.options);
+    const changedChecks = { ...scenario, checks: [{ kind: 'replyMatch', pattern: 'new assertion' }] };
+    assert.equal(fingerprint(w.pact, changedChecks, variant, w.options), before);
+  }
+  const round = buildRound({ kind: 'new', at: new Date(), scenarios: [scenario], variants: ['control'], runs: 1, attempts: [attempt('control', 1, true)] });
+  assert.equal(typeof round.judge?.fingerprint, 'string', 'saved verdicts name the judgment implementation');
+});
+
+test('fixture ordering is stable and judgment-code changes only change verdict provenance', () => {
+  const a = executionWorld();
+  const b = executionWorld();
+  for (const [world, names] of [[a, ['z.txt', 'a.txt']], [b, ['a.txt', 'z.txt']]]) {
+    for (const name of names) writeFileSync(path.join(world.fixture, name), name);
+  }
+  for (const variant of ['pact', 'control']) {
+    assert.equal(fingerprint(a.pact, scenario, variant, a.options), fingerprint(b.pact, scenario, variant, b.options));
+  }
+  const judgeFile = path.join(a.pact, 'tests/behavior/judge.mjs');
+  writeFileSync(judgeFile, 'judge v1');
+  const executionBefore = fingerprint(a.pact, scenario, 'control', a.options);
+  const judgmentBefore = judgmentFingerprint(a.pact);
+  writeFileSync(judgeFile, 'judge v2');
+  assert.equal(fingerprint(a.pact, scenario, 'control', a.options), executionBefore);
+  assert.notEqual(judgmentFingerprint(a.pact), judgmentBefore);
 });

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseSpec, lintSpec, setStatus, slugify, newSpecPath } from '../scripts/spec.mjs';
+import { parseSpec, lintSpec, setStatus, slugify, newSpecPath, specRunDir } from '../scripts/spec.mjs';
 import { ensureRunDir } from '../scripts/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -127,12 +127,12 @@ test('CLI: new creates a spec from the template, lint and set-status work on it'
   assert.match(lint.stdout, /F1: 태그가 없습니다/);
 });
 
-test('CLI: run-dir prints .pact/<slug>/ for a spec and creates it', () => {
+test('CLI: run-dir preserves the complete spec basename and creates it', () => {
   const d = tmp();
   const file = spawnSync('node', [CLI, 'new', d, '출결 대시보드'], { encoding: 'utf8' }).stdout.trim();
   const r = spawnSync('node', [CLI, 'run-dir', file], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), path.join(d, '.pact', '출결-대시보드'));
+  assert.equal(r.stdout.trim(), path.join(d, '.pact', path.basename(file, '.md')));
   assert.ok(existsSync(path.join(d, '.pact', '.gitignore')));
 });
 
@@ -165,5 +165,44 @@ test('CLI: run-dir of a same-day duplicate spec gets its own -2 folder', () => {
   spawnSync('node', [CLI, 'new', d, '출결']);
   const second = spawnSync('node', [CLI, 'new', d, '출결'], { encoding: 'utf8' }).stdout.trim();
   assert.ok(second.endsWith('-출결-2.md'), second);
-  assert.equal(spawnSync('node', [CLI, 'run-dir', second], { encoding: 'utf8' }).stdout.trim(), path.join(d, '.pact', '출결-2'));
+  assert.equal(spawnSync('node', [CLI, 'run-dir', second], { encoding: 'utf8' }).stdout.trim(), path.join(d, '.pact', path.basename(second, '.md')));
+});
+
+test('different dates for the same topic have independent run directories', () => {
+  const d = tmp();
+  const first = path.join(d, 'docs', 'pact', '2026-10-10-출결.md');
+  const second = path.join(d, 'docs', 'pact', '2026-10-11-출결.md');
+  const firstRun = specRunDir(first);
+  writeFileSync(path.join(firstRun, 'results.json'), 'first run');
+  const secondRun = specRunDir(second);
+  assert.notEqual(firstRun, secondRun);
+  assert.equal(firstRun, path.join(d, '.pact', '2026-10-10-출결'));
+  assert.equal(secondRun, path.join(d, '.pact', '2026-10-11-출결'));
+  assert.equal(readFileSync(path.join(firstRun, 'results.json'), 'utf8'), 'first run');
+  assert.equal(existsSync(path.join(secondRun, 'results.json')), false);
+});
+
+test('completed legacy artifacts stay untouched while a dated run is created', () => {
+  const d = tmp();
+  const legacy = ensureRunDir(d, '출결');
+  writeFileSync(path.join(legacy, 'report.html'), 'old report');
+  const run = specRunDir(path.join(d, 'docs', 'pact', '2026-10-11-출결.md'));
+  assert.equal(run, path.join(d, '.pact', '2026-10-11-출결'));
+  assert.equal(readFileSync(path.join(legacy, 'report.html'), 'utf8'), 'old report');
+});
+
+test('CLI refuses an unverified legacy worktree without reusing or moving it', () => {
+  const d = tmp();
+  const legacy = ensureRunDir(d, '출결');
+  mkdirSync(path.join(legacy, 'wt'));
+  writeFileSync(path.join(legacy, 'wt', 'keep.txt'), 'legacy source');
+  const spec = path.join(d, 'docs', 'pact', '2026-10-11-출결.md');
+  const r = spawnSync('node', [CLI, 'run-dir', spec], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /기존.*작업 공간/);
+  assert.ok(r.stderr.includes(path.join(legacy, 'wt')));
+  assert.match(r.stderr, /원래 명세/);
+  assert.equal(readFileSync(path.join(legacy, 'wt', 'keep.txt'), 'utf8'), 'legacy source');
+  assert.equal(existsSync(path.join(d, '.pact', '2026-10-11-출결')), false);
 });

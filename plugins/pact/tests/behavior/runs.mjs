@@ -41,13 +41,44 @@ export function guidelineHash(pactDir) {
   return h.digest('hex').slice(0, 16);
 }
 
-// 보내는 턴이나 pact 지침이 바뀌면 옛 transcript는 다시 쓰지 않는다(검사만 바뀐 것은 다시 판정하면 됨). 대조군은 지침과 상관없다.
-export function fingerprint(pactDir, scenario, variant) {
+export const EXECUTION_CONTRACT = 'pact-exec-v2';
+
+function treeFiles(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => entry.isDirectory() ? treeFiles(path.join(dir, entry.name)) : [path.join(dir, entry.name)])
+    .sort();
+}
+
+function hashFiles(hash, base, files) {
+  for (const file of [...files].sort()) {
+    const name = path.relative(base, file).split(path.sep).join('/');
+    const bytes = existsSync(file) ? readFileSync(file) : null;
+    hash.update(JSON.stringify([name, bytes?.length ?? null]));
+    if (bytes) hash.update(bytes);
+  }
+}
+
+// 실행 입력만 묶는다. checks/판정기 변경은 같은 응답을 다시 판정할 수 있다.
+export function fingerprint(pactDir, scenario, variant, { execution = {}, fixtureDir, runnerFiles } = {}) {
   const { checks, ...asSent } = scenario;
-  const h = createHash('sha256').update(JSON.stringify(asSent));
-  if (variant === 'control') return h.digest('hex').slice(0, 16);
-  for (const f of guidelineFiles(pactDir)) h.update(readFileSync(f));
-  return h.digest('hex').slice(0, 16);
+  const h = createHash('sha256').update(JSON.stringify({ contract: EXECUTION_CONTRACT, variant, scenario: asSent, execution }));
+  const fixture = fixtureDir ?? path.join(pactDir, 'tests', 'behavior', 'fixtures', scenario.fixture);
+  hashFiles(h, fixture, treeFiles(fixture));
+  hashFiles(h, pactDir, runnerFiles ?? [
+    path.join(pactDir, 'tests', 'behavior', 'run.mjs'),
+    path.join(pactDir, 'tests', 'behavior', 'runs.mjs'),
+    path.join(pactDir, '.claude-plugin', 'plugin.json'),
+    ...treeFiles(path.join(pactDir, 'scripts')),
+  ]);
+  if (variant === 'pact') hashFiles(h, pactDir, guidelineFiles(pactDir));
+  return `${EXECUTION_CONTRACT}:${h.digest('hex')}`;
+}
+
+export function judgmentFingerprint(pactDir = PACT) {
+  const h = createHash('sha256').update('pact-judge-v1');
+  hashFiles(h, pactDir, [path.join(pactDir, 'tests', 'behavior', 'judge.mjs')]);
+  return `pact-judge-v1:${h.digest('hex')}`;
 }
 
 // ---- 판정 ----
@@ -108,7 +139,7 @@ export function compactConversation(transcript) {
 // ---- 판 만들기·쓰기·읽기 ----
 const isFailed = (a) => !a.limited && a.results.some((r) => r.pass === false);
 
-export function buildRound({ kind, at, scenarios, variants, runs, pactFingerprint, attempts, label }) {
+export function buildRound({ kind, at, scenarios, variants, runs, pactFingerprint, attempts, label, execution }) {
   const round = {
     version: 1,
     at: new Date(at).toISOString(),
@@ -119,6 +150,8 @@ export function buildRound({ kind, at, scenarios, variants, runs, pactFingerprin
     runs,
     // pact를 돌리지 않은 판(대조군만)에는 지침 지문이 의미 없다.
     pact: { fingerprint: variants.includes('pact') ? pactFingerprint ?? null : null },
+    ...(execution ? { execution } : {}),
+    judge: { fingerprint: judgmentFingerprint() },
     defs: Object.fromEntries(scenarios.map((s) => [s.name, { scene: s.scene, fixture: s.fixture, turns: s.turns, checks: s.checks }])),
     attempts: attempts.map((a) => ({
       scenario: a.scenario.name,

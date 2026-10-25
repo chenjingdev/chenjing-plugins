@@ -49,7 +49,7 @@
 
 기능은 말로 정하고, 구조는 보고 정한다. 지도 전체에서 이번에 만들 것을 질문 여러 개 대신 체크리스트 한 장으로 받는다.
 
-1. 주제가 정해졌으면 명세 파일을 만든다: `node <pact>/scripts/spec.mjs new <프로젝트> <주제>`. 출력된 경로가 이번 명세다. 실행 폴더는 `node <pact>/scripts/spec.mjs run-dir <명세>`로 만든다(`.pact/<slug>/`, git에 안 올라간다).
+1. 주제가 정해졌으면 명세 파일을 만든다: `node <pact>/scripts/spec.mjs new <프로젝트> <주제>`. 출력된 경로가 이번 명세다. 실행 폴더는 `node <pact>/scripts/spec.mjs run-dir <명세>`로 만든다(`.pact/<run-id>/`, git에 안 올라간다).
 2. 항목 JSON을 쓴다: `{"title": "<주제>", "items": [{"group": "<갈래>", "label": "…", "note": "…"}, {"group": "<갈래>", "label": "…", "suggested": true, "reason": "…"}]}`. `group`은 지도의 갈래 이름이다. 사용자가 말했거나 내려가며 고른 기능은 그냥 두고(체크됨), 지도에 있던 다른 아이디어와 당신이 더하자고 하는 기능은 `suggested`와 한 줄 이유를 단다(체크 해제, `(제안)` 표시).
 3. `node <pact>/scripts/checklist.mjs render <items.json> <run-dir>`
 4. 페이지를 열기 전에 채팅으로 먼저 알린다. 브라우저에 체크리스트 페이지가 열린다는 것, 무엇을 고르는 페이지인지, 체크해 둔 것과 제안 항목을 한 줄씩, 페이지 대신 채팅으로 답해도 된다는 것이다. 말없이 열린 페이지는 사용자가 알아채지 못한다.
@@ -64,7 +64,7 @@
 
 1. 구조의 축 하나를 고른다. 예: 첫 화면에 무엇이 오나, 이동 방식, 주 동작이 무엇인가.
 2. 기능은 같고 구조만 다른 저충실도 스케치 2~3장을 `<run-dir>/sketches/<A|B|C>.html`로 그린다. 장식 없이 구조만 보이게 한다.
-3. `<run-dir>/sketches.json`(`{"title", "axis", "sketches": [{"key": "A", "caption": "…", "file": "sketches/A.html"}]}`)을 쓰고 `node <pact>/scripts/gallery.mjs <run-dir>`로 갤러리를 만들어 `open`으로 연다.
+3. `<run-dir>/sketches.json`(`{"title": "<주제>", "axis": "<구조의 축>", "sketches": [{"key": "A", "caption": "…", "file": "sketches/A.html"}]}`)을 쓰고 `node <pact>/scripts/gallery.mjs <run-dir>`로 갤러리를 만들어 `open`으로 연다.
 4. 판정 질문 하나를 한다: 어느 쪽이 맞는지, 섞을 부분이 있는지.
 5. "전부 아님"이면 가장 어긋난 지점을 한 번 묻고 2라운드를 그린다. 라운드는 최대 2번이다. 2라운드에서도 정해지지 않으면 가장 가까운 것을 고르고 남은 차이를 `## 확인 필요`에 적는다.
 6. 고른 스케치와 판정을 명세 `## 구조 판정`에 적는다. 고른 스케치 파일만 남기고 나머지 스케치 파일은 지운다. build는 판정과 고른 스케치를 입력으로 처음부터 짓는다. 스케치 코드를 그대로 쓰지 않는다.
