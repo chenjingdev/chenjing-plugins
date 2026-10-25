@@ -3,7 +3,7 @@ import { test, expect, mock } from 'claude-code/testing'
 import { fakeSession, turnOn } from './testkit'
 
 import type { Ask, Book } from '../types'
-import { answeredIds, answerMark, apply, carryKey, endMarkOf, END_MARKS, withEndMark, contextText, judgePrompt, labeledAsks, lastExchange, mayAsk, mergeCarried, parseJudgment, readCarried, restore, isHuman, settingsFrom, supersede, tailText, toCarry, waiting } from './open-asks'
+import { answeredIds, answerMark, apply, applyJudgment, asksBack, carryKey, endMarkOf, END_MARKS, exchangeOf, freshIds, withEndMark, withExchange, contextText, judgePrompt, keepHead, labeledAsks, lastExchange, mayAsk, merge, mergeCarried, nearlySame, parseJudgment, readCarried, restore, isHuman, settingsFrom, supersede, tailText, toCarry, waiting } from './open-asks'
 
 const ask = (id: number, text: string, skips = 0, turn = 1): Ask => ({ id, text, turn, at: 0, skips })
 const empty: Book = { items: [], closed: [], seq: 0 }
@@ -21,7 +21,7 @@ test('answers without a question skip the model when nothing is open', () => {
 })
 
 test('judgment parsing tolerates fences and drops junk', () => {
-  expect(parseJudgment('```json\n{"closed":[1,"2",0,-1],"new":["A할까요?"," ",3]}\n```')).toEqual({ closed: [1, 2], changed: [], added: ['A할까요?'] })
+  expect(parseJudgment('```json\n{"closed":[1,"2",0,-1],"new":["A할까요?"," ",3]}\n```')).toEqual({ closed: [1, 2], merged: [], clear: [], changed: [], added: ['A할까요?'] })
   expect(parseJudgment('{"closed":[1],"changed":[{"n":1,"text":"X"},{"n":2,"text":" Y? "},{"n":3},"z"]}')?.changed).toEqual([{ n: 2, text: 'Y?' }])
   expect(parseJudgment('모르겠어요')).toBe(undefined)
   expect(parseJudgment('{"closed": [1,}')).toBe(undefined)
@@ -35,11 +35,12 @@ test('question and look lines go up as they are, outside code blocks; what was d
   expect(labeledAsks('물을 것:   ')).toEqual([])
 })
 
-test('the judge is told which items were already taken from this answer, and not to make questions of what was done differently', () => {
-  const p = judgePrompt([], 'q', 'a', 1, ['볼 것: X'])
-  expect(p).toContain('- 볼 것: X')
-  expect(p).toContain('"볼 것:"으로 시작하는 항목은')
+test('the judge sees the items this answer asked among the others, the turns before as context, and not to make questions of what was done differently', () => {
+  const p = judgePrompt([ask(1, 'A?', 1, 1), ask(2, '볼 것: X', 0, 3)], 'q', 'a', 3, new Set([2]), [{ request: '앞 요청', answer: '앞 답' }])
+  expect(p).toContain('2. 볼 것: X (이번 답에서 물음)')
+  expect(p).toContain('[앞선 대화: 맥락을 알기 위한 것이다. 여기서 질문을 뽑지 않는다]\n사용자: 앞 요청\nClaude: 앞 답')
   expect(p).toContain('"다르게 한 것:" 줄(한 일을 알리기만 한다)은 넣지 않는다')
+  expect(judgePrompt([], 'q', 'a', 1)).not.toContain('[앞선 대화')
 })
 test('an unanswered question counts a skip; an answered one closes', () => {
   const b: Book = { items: [ask(1, 'A를 적용할까요?'), ask(2, 'B로 갈까요?')], closed: [], seq: 2 }
@@ -254,4 +255,91 @@ test('a question whose situation changed is rewritten in place, keeping its id, 
   expect(next.items.map(a => [a.id, a.text])).toEqual([[1, 'A와 B 중 무엇으로 할까요?'], [2, 'D를 켤까요?']])
   expect(apply(b, [], [], [], 2, 0, false, new Map([[1, 'D를 켤까요']])).items[0]?.text).toBe('A·B·C 중 무엇으로 할까요?')
   expect(judgePrompt([ask(1, 'A?', 1, 1)], 'q', 'a', 2)).toContain('changed:')
+})
+
+// 0.7.9까지는 "↩ 항목 → 이건 뭔데?"로 되물어도 항목이 닫혀서, Claude가 다시 묻지 않으면 그 질문이 사라졌다
+test('an answer that only asks back is not an answer, so its item stays open', () => {
+  for (const t of ['이건 뭔데?', '뭔소리지', '아직 뭔소리인지 모르겠다', '무슨 말이야', '왜 그걸 해야 해?', 'eli5']) expect(asksBack(t)).toBe(true)
+  for (const t of ['ㅇㅇ', '그거 하는게 나을듯?', '1회성 아님?', '아니 B로 해', '뭐든 상관없어']) expect(asksBack(t)).toBe(false)
+  const items = [ask(1, 'debate를 옮길까요?'), ask(2, 'B로 갈까요?')]
+  expect(answeredIds(items, '↩ debate를 옮길까요? → 이건 뭔데?\n↩ B로 갈까요? → ㅇㅇ')).toEqual([2])
+})
+
+test('judgment parsing keeps the last whole object and puts each number in one place', () => {
+  const j = parseJudgment(
+    '{"closed":[]}\nWait — 고친 출력:\n{"closed":[1],"merged":[{"n":[1,2,3],"text":" 합친 {글} "},{"n":[3,4],"text":"X"},{"n":[2]}],"clear":[{"n":4,"text":"채운 글"},{"n":5,"text":"Y"}],"changed":[{"n":5,"text":"Z"},{"n":6,"text":"W"}]}',
+  )
+  expect(j).toEqual({ closed: [1], merged: [{ n: [2, 3], text: '합친 {글}' }], clear: [{ n: 4, text: '채운 글' }, { n: 5, text: 'Y' }], changed: [{ n: 6, text: 'W' }], added: [] })
+})
+
+test('a rewrite keeps the look and last-session heads, and a wording-only change counts as the same text', () => {
+  expect(keepHead('볼 것: 패널', '패널을 봐 주세요')).toBe('볼 것: 패널을 봐 주세요')
+  expect(keepHead('지난 세션: A?', '지난 세션: B?')).toBe('지난 세션: B?')
+  expect(keepHead('A?', 'B?')).toBe('B?')
+  expect(keepHead('볼 것: 패널', ' ')).toBe('')
+  expect(nearlySame('alibaba 명세를 지금 쓰기 시작할까요?', 'alibaba 명세를  지금 쓰기 시작할까요')).toBe(true)
+  expect(nearlySame('이 주소를 넣은 채로 저장할까요?', 'https://login.chenjing.org/login/google/callback 을 넣은 채로 저장할까요?')).toBe(false)
+  expect(nearlySame('', 'A')).toBe(false)
+})
+
+test('items that ask the same thing merge into the first one in its place, with the newest turn and the fewest skips', () => {
+  const b: Book = { items: [ask(1, 'A로 할까요?', 2, 1), ask(2, 'C를 켤까요?', 0, 2), ask(3, 'A로 바꿀까요? 추천은 A', 0, 3)], closed: [], seq: 3 }
+  expect(merge(b, [{ ids: [1, 3], text: 'A로 바꿀까요? 추천은 A예요' }]).items.map(a => [a.id, a.text, a.turn, a.skips])).toEqual([
+    [1, 'A로 바꿀까요? 추천은 A예요', 3, 0],
+    [2, 'C를 켤까요?', 2, 0],
+  ])
+  // 판정의 글이 비었거나 다른 항목과 같으면 가장 나중에 물은 글을 쓴다
+  expect(merge(b, [{ ids: [1, 3], text: '' }]).items[0]?.text).toBe('A로 바꿀까요? 추천은 A')
+  expect(merge(b, [{ ids: [1, 3], text: 'C를 켤까요' }]).items[0]?.text).toBe('A로 바꿀까요? 추천은 A')
+  // 옆 패널에 답을 써 둔 항목을 남기고, 둘 다 써 두었으면 합치지 않는다
+  expect(merge(b, [{ ids: [1, 3], text: 'X?' }], id => id === 3).items.map(a => a.id)).toEqual([2, 3])
+  expect(merge(b, [{ ids: [1, 3], text: 'X?' }], () => true)).toBe(b)
+  // 한 답에서 따로 물은 질문끼리, 볼 것과 질문은 합치지 않는다
+  expect(merge(b, [{ ids: [2, 3], text: 'X?' }], undefined, new Set([2, 3]))).toBe(b)
+  const look: Book = { items: [ask(1, '볼 것: 패널'), ask(2, '패널을 볼까요?')], closed: [], seq: 2 }
+  expect(merge(look, [{ ids: [1, 2], text: 'X' }])).toBe(look)
+  const carried: Book = { items: [ask(1, '지난 세션: A?'), ask(2, '지난 세션: A로 할까요?')], closed: [], seq: 2 }
+  expect(merge(carried, [{ ids: [1, 2], text: 'A로 할까요?' }]).items.map(a => a.text)).toEqual(['지난 세션: A로 할까요?'])
+})
+
+test('a judgment leaves what this answer asked open, ignores wording-only rewrites of earlier items, and fills in unclear new ones', () => {
+  const list = [ask(1, '이 주소를 넣은 채로 저장할까요?', 0, 2), ask(2, 'alibaba 명세를 지금 쓰기 시작할까요?', 1, 1), ask(3, 'D를 켤까요?', 1, 1)]
+  const fresh = freshIds(list, ['이 주소를 넣은 채로  저장할까요?'])
+  expect([...fresh]).toEqual([1])
+  const j = { closed: [1, 3], merged: [], clear: [{ n: 1, text: 'https://login.chenjing.org/cb 를 넣은 채로 저장할까요?' }], changed: [{ n: 2, text: 'alibaba 명세를 지금 쓰기 시작할까요' }], added: [] }
+  const next = applyJudgment({ items: list, closed: [], seq: 3 }, list, fresh, j, 2, 0, true)
+  expect(next.items.map(a => [a.id, a.text, a.skips])).toEqual([
+    [1, 'https://login.chenjing.org/cb 를 넣은 채로 저장할까요?', 0],
+    [2, 'alibaba 명세를 지금 쓰기 시작할까요?', 2],
+  ])
+  expect(next.closed.map(c => c.text)).toEqual(['D를 켤까요?'])
+})
+
+test('the judge keeps the two turns before as context, without repeats', () => {
+  const x = exchangeOf('고쳐 줘', '고쳤어요.\n\n설명: 길게 설명.\n\n물을 것: A?')
+  expect(x).toEqual({ request: '고쳐 줘', answer: '고쳤어요.' })
+  expect(exchangeOf(undefined, 'a').request).toBe('(알림 등으로 시작된 턴)')
+  expect(withExchange(withExchange([], x), x)).toEqual([x])
+  const l = withExchange(withExchange([x], { request: 'b', answer: 'B' }), { request: 'c', answer: 'C' })
+  expect(l.map(y => y.request)).toEqual(['b', 'c'])
+})
+
+// 2026-10-25 사용자 "중복질문은 합치는 기능도 있었으면 좋겠다. 그리고 모르는건 다시 맥락파악해서 적고"
+test('a question asked back stays open, and when Claude asks it again in plain words the two become one', async ($, on) => {
+  fakeSession(on)
+  const clock = mock.clock(on)
+  let reply = '{"closed":[],"new":[]}'
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('prompt.submit', (_$, e) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
+  on('model.complete', () => ({ value: { isAnswered: true, text: reply, usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }))
+  const asks = async () => (await $.command.run({ command: 'baton-side', args: 'list', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })).text
+  await turnOn($)
+  await $.turn.complete({ answer: '했어요.\n\n물을 것: 자동 분리를 끌까요?', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' })
+  await clock.settle()
+  await $.prompt.submit({ text: '↩ 자동 분리를 끌까요? → 이건 뭔데?', origin: { kind: 'plugin', name: 'side-panel', asUser: true }, wait: false })
+  expect(await asks()).toContain('내 차례 1개\n1. 자동 분리를 끌까요?')
+  reply = '{"closed":[],"merged":[{"n":[1,2],"text":"작업과 관계없는 질문을 곁대화로 보내는 자동 분리를 끌까요? 끄면 모두 본 대화로 가요."}]}'
+  await $.turn.complete({ answer: '자동 분리는 작업과 관계없는 질문을 곁대화로 보내는 기능이에요.\n\n물을 것: 곁질문 자동 분리를 끌까요?', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't2' })
+  await clock.settle()
+  expect(await asks()).toContain('내 차례 1개\n1. 작업과 관계없는 질문을 곁대화로 보내는 자동 분리를 끌까요? 끄면 모두 본 대화로 가요.')
 })

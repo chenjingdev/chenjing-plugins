@@ -89,8 +89,11 @@ test('user-turn lines leave one note in the body', () => {
   expect(turnNote('- **볼 것:** D')).toBe('↩ 볼 것 1 → 옆 패널 내 차례 (/baton-side)')
 })
 
-test('the rule tells the turn lines to stand alone', () => {
-  expect(ruleText()).toContain('본문을 가리키는 말을 쓰지 않는다')
+test('the rule tells the turn lines to stand alone, and to ask only what the person alone can answer', () => {
+  expect(ruleText()).toContain('본문을 가리키는 말이나 사용자가 모를 내부 이름만으로 쓰지 않는다')
+  expect(ruleText()).toContain('대상 이름과 왜 묻는지를 넣고')
+  expect(ruleText()).toContain('물을 것은 사용자만 정하거나 알 수 있는 것만 쓴다')
+  expect(ruleText()).toContain('그 질문을 쉬운 말로 고쳐 다시 묻는다')
 })
 
 test('/baton-e picks the last answer, /baton-e 2 the one before', () => {

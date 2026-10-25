@@ -1,12 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type {EngineInterface, On, PluginOptions } from 'claude-code'
 
+import { splitBlocks } from './answer-blocks'
 import { enter, isKnown, isLive, SESSIONS, settle } from './live'
-import type { Ask, AsksStats as Stats, Book } from '../types'
+import type { Ask, AsksStats as Stats, Book, Exchange } from '../types'
 
 // Claude가 사용자에게 넘긴 일(물을 것·볼 것)을 모아 두고, 입력창 아래 줄 끝에 개수를 보인다. 목록은 옆 패널의 내 차례(side-panel).
 // 다르게 한 것은 답할 것이 없는 알림이라 모으지 않는다: 본문에 남는다(answer-blocks).
-// 턴이 끝날 때마다 작은 모델이 판정한다: 이번 메시지로 답한 질문은 닫고, 상황이 바뀐 질문은 고쳐 쓰고, 이번 답의 새 질문은 더한다.
+// 턴이 끝날 때마다 작은 모델이 판정한다: 이번 메시지로 답한 질문은 닫고, 같은 것을 묻는 질문은 하나로 합치고, 상황이 바뀌었거나 글만으로 알 수 없는 질문은 고쳐 쓰고, 이번 답의 새 질문은 더한다.
+// 합치기와 고쳐 쓰기는 0.7.10에서 더했다(2026-10-25 사용자 "중복질문은 합치는 기능도 있었으면 좋겠다. 그리고 모르는건 다시 맥락파악해서 적고, 대충 질문 올리는 일은 없엇으면 좋겠음").
+// 지난 16일 baton 세션 12개에서 같은 질문이 말만 바뀌어 다시 올라온 일이 열 번 넘게 있었다: 대개 사용자가 "뭔소리지"라고 되물어 Claude가 쉬운 말로 다시 물었는데, 옛 질문이 닫히지 않고 남았다.
+// 패널로 답한 항목 75개 중 20개쯤은 "이건 뭔데?" "뭘 바꿨음?" 같은 되물음이었다. 판정이 쓴 질문은 60자 제한 때문에 무엇을·왜가 빠진 것이 많았다
 
 const BOOK = { plugin: 'baton', key: 'book' } as const
 const TURN = { plugin: 'baton', key: 'turn' } as const
@@ -14,6 +18,9 @@ const LAST = { plugin: 'baton', key: 'lastRequest' } as const
 const HUMAN = { plugin: 'baton', key: 'humanTurn' } as const
 const STATS = { plugin: 'baton', key: 'asksStats' } as const
 const JUDGED = { plugin: 'baton', key: 'judgedAnswer' } as const
+const RECENT = { plugin: 'baton', key: 'recentTurns' } as const
+// 옆 패널이 항목 id별로 쥔 써 둔 답(side-panel): 합칠 때 답을 써 둔 항목을 남긴다
+const KEEP = { plugin: 'baton', key: 'sideKeep' } as const
 export const EMPTY: Book = { items: [], closed: [], seq: 0 }
 // 이 세션에서 지난 세션 항목을 이미 가져왔는지, 세션이 끝날 때 쓸 작업 폴더
 let importedFor = ''
@@ -23,6 +30,7 @@ const turn = atom(TURN, 0)
 const lastRequest = atom(LAST, '')
 const humanTurn = atom(HUMAN, false)
 const stats = atom(STATS, { judged: 0, failed: 0 })
+const recent = atom(RECENT, [])
 
 export type Settings = { model: 'sonnet' | 'haiku' }
 
@@ -38,15 +46,28 @@ export function isHuman(origin: { kind?: string; asUser?: boolean } | undefined)
   return origin.kind === 'plugin' && origin.asUser === true
 }
 
-// "↩ 항목 → 답" 줄로 답한 항목(옆 패널의 [답하기]가 입력창에 붙인 줄): 판정을 기다리지 않고 바로 닫는다
+// 패널로 보낸 답이 되물음인지: 모르겠다는 말이 있거나, 무엇·왜를 묻고 물음표로 끝난다.
+// 물음표만 보지 않는 것은 "~하는게 나을듯?" "1회성 아님?"처럼 물음표로 끝나는 답·반대가 많아서다(2026-10-25 패널로 답한 항목 75개)
+const CONFUSED = /뭔\s?(?:소리|말|뜻|데|쇠)|뭐(?:야|임)|머야|무슨\s?(?:소리|말|뜻|질문|얘기|상관)|모르겠|이해\s?(?:가\s?)?(?:안|못)|헷갈|eli5/i
+const WHAT = /뭐|뭘|뭔|왜|어떻게|어디|언제|누가|무슨|어느|몇/
+
+export function asksBack(answer: string): boolean {
+  const t = answer.trim()
+  return CONFUSED.test(t) || (/[?？]$/.test(t) && WHAT.test(t))
+}
+
+// "↩ 항목 → 답" 줄로 답한 항목(옆 패널의 [답하기]가 입력창에 붙인 줄): 판정을 기다리지 않고 바로 닫는다.
+// 답이 되물음("이건 뭔데?" "아직 뭔소리인지 모르겠다")이면 닫지 않는다: Claude가 설명한 뒤 판정이 그 설명을 넣어 고쳐 쓴다.
+// 0.7.9까지는 되물어도 닫혀서, Claude가 다시 묻지 않으면 그 질문이 사라졌다
 export function answeredIds(items: readonly Ask[], text: string): number[] {
   const ids: number[] = []
   for (const raw of text.split('\n')) {
     const l = raw.trim()
     if (!l.startsWith('↩')) continue
     const rest = l.slice(1).trim()
-    const hit = items.find(a => rest.startsWith(`${a.text} → `) && rest.slice(a.text.length + 3).trim() !== '')
-    if (hit && !ids.includes(hit.id)) ids.push(hit.id)
+    const said = (a: Ask) => rest.slice(a.text.length + 3).trim()
+    const hit = items.find(a => rest.startsWith(`${a.text} → `) && said(a) !== '')
+    if (hit && !asksBack(said(hit)) && !ids.includes(hit.id)) ids.push(hit.id)
   }
   return ids
 }
@@ -67,18 +88,35 @@ const sameKey = (s: string) => s.replace(/[\s?？.!,·…"'“”]/g, '')
 export const JUDGE_SYSTEM =
   '너는 대화에서 Claude가 사용자에게 넘긴 일(질문, 볼 것) 가운데 아직 끝나지 않은 것을 관리한다. 대화에 없는 내용을 만들지 않는다. JSON 한 줄만 출력한다.'
 
-export function judgePrompt(open: readonly Ask[], request: string | undefined, answer: string, turnNo: number, taken: readonly string[] = []): string {
-  const list = open.length
-    ? open
-        .map((a, i) => `${i + 1}. ${a.text} (${a.skips === 0 ? '직전 답에서 물음' : `${Math.max(1, turnNo - a.turn)}턴 전에 물었고 아직 답 없음`})`)
-        .join('\n')
-    : '(없음)'
+// 판정에 맥락으로 붙이는 앞선 턴: 사용자 메시지와 답의 요약(설명·사용자 차례 줄을 뺀 첫 덩어리)
+export function exchangeOf(request: string | undefined, answer: string): Exchange {
+  return { request: shorten(request ?? '(알림 등으로 시작된 턴)', 300), answer: shorten(splitBlocks(answer).answer || answer, 700) }
+}
+
+// 다시 불러온 뒤 같은 턴을 다시 판정해도 겹치지 않게 같은 것은 빼고 붙인다. 앞선 두 턴만 둔다
+export function withExchange(list: readonly Exchange[], x: Exchange): Exchange[] {
+  return [...list.filter(y => y.request !== x.request || y.answer !== x.answer), x].slice(-2)
+}
+
+// 판정에 보이는 목록에는 이번 답에서 물은 항목도 넣는다: 앞의 질문을 다시 물었으면 합치고, 글만으로 알 수 없으면 고쳐 쓰게 한다.
+// fresh: 그 항목들의 id. 이번 메시지로 닫힐 수 없어서 판정에 그렇게 알린다
+export function judgePrompt(
+  items: readonly Ask[],
+  request: string | undefined,
+  answer: string,
+  turnNo: number,
+  fresh: ReadonlySet<number> = new Set(),
+  before: readonly Exchange[] = [],
+): string {
+  const when = (a: Ask) =>
+    fresh.has(a.id) ? '이번 답에서 물음' : a.skips === 0 ? '직전 답에서 물음' : `${Math.max(1, turnNo - a.turn)}턴 전에 물었고 아직 답 없음`
+  const list = items.length ? items.map((a, i) => `${i + 1}. ${a.text} (${when(a)})`).join('\n') : '(없음)'
   return [
-    '[아직 끝나지 않은 항목]',
+    '[내 차례: 사용자가 옆 패널에서 보는 항목]',
     list,
-    '',
-    '[이번 답에서 이미 잡은 항목: new에 넣지 않는다]',
-    taken.length ? taken.map(t => `- ${t}`).join('\n') : '(없음)',
+    ...(before.length
+      ? ['', '[앞선 대화: 맥락을 알기 위한 것이다. 여기서 질문을 뽑지 않는다]', ...before.map(x => `사용자: ${x.request}\nClaude: ${x.answer}`)]
+      : []),
     '',
     '[이번 사용자 메시지]',
     request === undefined ? '(없음: 알림 등으로 시작된 턴)' : request.slice(0, 1500),
@@ -86,34 +124,87 @@ export function judgePrompt(open: readonly Ask[], request: string | undefined, a
     '[이번 Claude 답]',
     answer.replace(CODE, '[코드 블록]').slice(0, 6000),
     '',
-    '세 가지를 판정하라.',
-    'closed: 위 목록에서 이번 턴으로 끝난 질문의 번호. 사용자가 답했거나 골랐거나 거절·보류한 것, Claude가 이번 답에서 이미 처리한 것, 상황이 바뀌어 더 물을 필요가 없어진 것. "ㅇㅇ" "ㄱㄱ" "해봐"처럼 짧은 답은 직전 답의 질문에 대한 답으로 본다. 사용자가 다른 얘기를 했거나 그 질문에 대해 되묻기만 했으면 닫지 않는다. "볼 것:"으로 시작하는 항목은 사용자가 이번 메시지를 보냈고 그 항목에 되묻거나 반대하지 않았으면 닫는다.',
-    'new: 이번 Claude 답에서 사용자가 답하거나 골라야 다음으로 넘어가는데 "물을 것:" 줄로 쓰지 않은 질문. "할까요?" "어느 쪽으로 할까요?" 같은 것. 수사적 질문, 이번 메시지에서 이미 답한 것, 목록이나 이미 잡은 항목에 있는 것, "다르게 한 것:" 줄(한 일을 알리기만 한다)은 넣지 않는다. 최대 3개. 각각 60자 안에서, 이것만 봐도 무엇에 관한 질문인지 알도록 대상 이름을 넣고, 원문보다 단정하지 않게 쓴다.',
-    'changed: 위 목록에서 닫을 것은 아니지만 이번 턴으로 내용이 바뀐 질문(선택지가 줄었거나, 전제가 바뀌었거나, 이미 정해진 부분이 생긴 것)의 번호와 지금 상황에 맞게 고쳐 쓴 글. 60자 안에서 대상 이름을 넣는다. 그대로 맞으면 넣지 않는다. closed에 넣은 번호는 넣지 않는다.',
-    '출력 형식: {"closed":[번호],"changed":[{"n":번호,"text":"고친 질문"}],"new":["질문"]}',
+    '옆 패널은 대화와 떨어져 있어서, 사용자는 항목 글만 보고 답한다. 다섯 가지를 판정하라.',
+    'closed: 이번 턴으로 끝난 항목의 번호("이번 답에서 물음"은 넣지 않는다). 사용자가 답했거나 골랐거나 거절·보류한 것, Claude가 이번 답에서 이미 처리한 것, Claude가 그 안을 거두었거나 상황이 바뀌어 더 물을 필요가 없어진 것. "ㅇㅇ" "ㄱㄱ" "해봐"처럼 짧은 답은 직전 답의 질문에 대한 답으로 본다. 사용자가 다른 얘기를 했거나, 그 항목을 모르겠다고 하거나 되묻기만 했으면 닫지 않는다.',
+    'merged: 같은 결정을 묻는 항목의 묶음. 하나에 답하면 다른 것도 답이 되는 것만 합친다: 같은 질문을 말만 바꿔 다시 물은 것, 한 항목이 다른 항목에 들어 있는 것. 대상이 같아도 정할 것이 다르면 합치지 않는다. 이번 답에서 물은 항목끼리는 합치지 않는다(Claude가 일부러 나눠 물었다). "볼 것:" 항목과 질문은 합치지 않는다. 합친 글은 가장 나중에 물은 글을 바탕으로, 앞 항목에만 있던 그 결정의 선택지·이유를 더해 쓴다. 다른 결정의 내용은 넣지 않는다.',
+    'clear: "이번 답에서 물음" 항목을 하나씩 대화를 못 본 사람 눈으로 읽는다. 대화를 가리키는 말("이 주소" "이 토큰" "1번" "B안" "① 줄" "위 방법")이 있거나 대상이 빠져서 그 글만으로는 무엇을 정하거나 보라는지 알 수 없으면, 이번 답에서 찾아 채운 글을 넣는다. 그 글만으로 알 수 있으면 넣지 않는다.',
+    'changed: 앞서 물은 항목이 둘 중 하나일 때만 번호와 고친 글을 넣는다. ① 상황이 바뀌었다(선택지가 줄었거나, 전제가 바뀌었거나, 이미 정해진 부분이 생겼다). ② 사용자가 그 항목을 모르겠다고 하거나 되물었고, Claude가 이번 답에서 설명했다: 그 설명을 넣어 쉬운 말로 다시 쓴다. 사용자가 그 항목에 답하거나 지시했으면 고치지 말고 closed에 넣는다. 말투를 다듬거나 진행 상황을 덧붙이려고 고치지 않는다.',
+    'new: 이번 Claude 답에서 사용자가 답하거나 골라야 다음으로 넘어가는데 "물을 것:" 줄로 쓰지 않은 질문("할까요?" "어느 쪽으로 할까요?" 같은 것). 수사적 질문, 이번 메시지에서 이미 답한 것, 목록에 있는 것과 같은 것을 묻는 것, "다르게 한 것:" 줄(한 일을 알리기만 한다)은 넣지 않는다. 최대 3개.',
+    'merged·clear·changed·new의 글: 그 글만 보고 답할 수 있게 쓴다. 무엇을 정하는지와 왜 묻는지를 대상 이름과 함께 넣고, 고르는 질문이면 선택지를, 추천이 있으면 추천도 넣는다. 사용자가 모를 내부 이름(함수, 파일, 단계 번호)만으로 쓰지 말고 쉬운 말로 쓴다. 글은 사용자에게 묻는 질문(볼 것은 볼 것)이다: 사용자가 한 말, 판정한 까닭, 다른 항목의 번호를 적지 않는다. 대화에 없는 내용을 만들지 않고 원문보다 단정하지 않게, 한두 문장 150자 안으로 쓴다.',
+    '한 번호는 closed·merged·clear·changed 가운데 한 곳에만 넣는다.',
+    '출력 형식: {"closed":[번호],"merged":[{"n":[번호,번호],"text":"합친 글"}],"clear":[{"n":번호,"text":"채운 글"}],"changed":[{"n":번호,"text":"고친 글"}],"new":["질문"]}',
   ].join('\n')
 }
 
-export type Judgment = { closed: number[]; changed: { n: number; text: string }[]; added: string[] }
+// clear: 이번 답에서 물은 항목 가운데 글만으로 알 수 없어 채운 것, changed: 앞서 물은 항목 가운데 상황이 바뀌었거나 되물어서 고친 것
+export type Judgment = {
+  closed: number[]
+  merged: { n: number[]; text: string }[]
+  clear: { n: number; text: string }[]
+  changed: { n: number; text: string }[]
+  added: string[]
+}
 
-export function parseJudgment(text: string): Judgment | undefined {
-  const m = text.match(/\{[\s\S]*\}/)
-  if (!m) return undefined
-  try {
-    const j = JSON.parse(m[0]) as { closed?: unknown; changed?: unknown; new?: unknown }
-    const closed = Array.isArray(j.closed) ? j.closed.map(Number).filter(n => Number.isInteger(n) && n > 0) : []
-    const changed = Array.isArray(j.changed)
-      ? j.changed
-          .map(x => ({ n: Number((x as { n?: unknown })?.n), text: String((x as { text?: unknown })?.text ?? '').trim() }))
-          .filter(x => Number.isInteger(x.n) && x.n > 0 && x.text && !closed.includes(x.n))
-      : []
-    const added = Array.isArray(j.new)
-      ? j.new.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean).slice(0, 3)
-      : []
-    return { closed, changed, added }
-  } catch {
-    return undefined
+// 글 속의 JSON 객체 가운데 마지막으로 온전한 것. 판정 모델이 JSON을 쓴 뒤 "Wait — 고친 출력:"과 함께 하나를 더 쓸 때가 있다(2026-10-25 시험에서 115번 중 4번)
+function lastObject(text: string): unknown {
+  const found: string[] = []
+  let depth = 0
+  let start = 0
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (c === '\\') escaped = true
+      else if (c === '"') inString = false
+    } else if (c === '"' && depth > 0) inString = true
+    else if (c === '{') {
+      if (depth === 0) start = i
+      depth++
+    } else if (c === '}' && depth > 0 && --depth === 0) found.push(text.slice(start, i + 1))
   }
+  for (const s of found.reverse()) {
+    try {
+      return JSON.parse(s)
+    } catch {
+      // 앞의 것을 본다
+    }
+  }
+  return undefined
+}
+
+// 한 번호는 한 곳에만 쓴다: 닫는 번호는 합치지 않고, 앞 묶음에 든 번호는 다음 묶음과 고쳐 쓰기에서 뺀다
+export function parseJudgment(text: string): Judgment | undefined {
+  const j = lastObject(text) as { closed?: unknown; merged?: unknown; clear?: unknown; changed?: unknown; new?: unknown } | undefined
+  if (!j || typeof j !== 'object') return undefined
+  const closed = Array.isArray(j.closed) ? j.closed.map(Number).filter(n => Number.isInteger(n) && n > 0) : []
+  const used = new Set(closed)
+  const merged: Judgment['merged'] = []
+  for (const x of Array.isArray(j.merged) ? j.merged : []) {
+    const raw = (x as { n?: unknown })?.n
+    const n = [...new Set((Array.isArray(raw) ? raw : []).map(Number))].filter(k => Number.isInteger(k) && k > 0 && !used.has(k))
+    if (n.length < 2) continue
+    for (const k of n) used.add(k)
+    merged.push({ n, text: String((x as { text?: unknown })?.text ?? '').trim() })
+  }
+  const rewrites = (raw: unknown) => {
+    const out: { n: number; text: string }[] = []
+    for (const x of Array.isArray(raw) ? raw : []) {
+      const n = Number((x as { n?: unknown })?.n)
+      const t = String((x as { text?: unknown })?.text ?? '').trim()
+      if (!Number.isInteger(n) || n <= 0 || !t || used.has(n)) continue
+      used.add(n)
+      out.push({ n, text: t })
+    }
+    return out
+  }
+  const clear = rewrites(j.clear)
+  const changed = rewrites(j.changed)
+  const added = Array.isArray(j.new)
+    ? j.new.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean).slice(0, 3)
+    : []
+  return { closed, merged, clear, changed, added }
 }
 
 // 사용자 차례 줄(물을 것·볼 것)은 모델 판정을 기다리지 않고 바로 띠에 올린다. 다르게 한 것 줄은 올리지 않는다
@@ -130,8 +221,41 @@ export function labeledAsks(answer: string): string[] {
   return out.slice(0, 5)
 }
 
+// 고쳐 쓴 글에 원래 글의 머리말("볼 것:", "지난 세션:")이 빠졌으면 붙인다: 볼 것은 다음 답에서 닫히고, 지난 세션 표시는 어디서 온 질문인지 알린다
+const HEAD = /^(?:볼 것\s*[:：]|지난 세션\s*[:：])\s*/
+
+export function keepHead(was: string, text: string): string {
+  const head = was.match(HEAD)?.[0] ?? ''
+  const t = text.trim()
+  return !t || !head || HEAD.test(t) ? t : `${head}${t}`
+}
+
+const pairsOf = (s: string) => {
+  const t = s.replace(/[\s?？.!,·…"'“”()]/g, '')
+  const out = new Set<string>()
+  for (let i = 0; i + 1 < t.length; i++) out.add(t.slice(i, i + 2))
+  return out
+}
+
+// 두 글이 말투만 다른지: 붙은 두 글자 묶음이 85% 넘게 겹친다.
+// 판정 모델은 같은 질문을 턴마다 조금씩 다시 써서 글이 자꾸 바뀌었다(2026-10-25 시험에서 고쳐 쓰기 47번 중 13번이 이만큼 겹쳤고, 그중 11번은 말투나 진행 상황만 바꿨다)
+export function nearlySame(a: string, b: string): boolean {
+  const x = pairsOf(a)
+  const y = pairsOf(b)
+  if (!x.size || !y.size) return false
+  let both = 0
+  for (const p of x) if (y.has(p)) both++
+  return (2 * both) / (x.size + y.size) >= 0.85
+}
+
+// 판정이 고쳐 쓰거나 합친 글로 받을 것: 300자(항목 글 상한)를 넘으면 자르지 않고 받지 않는다. 자르면 끝에 오는 묻는 말이 잘린다
+function judgeText(text: string): string {
+  const t = text.replace(/\s+/g, ' ').trim()
+  return t.length <= 300 ? t : ''
+}
+
 // seen: 판정 모델이 본 질문 id. 그중 닫히지 않은 것은 사람 턴이 한 번 지나갈 때마다 skips가 는다.
-// changed: 상황이 바뀌어 고쳐 쓴 글(id별). id를 그대로 두어 옆 패널에 써 둔 답이 남고, 다른 항목과 같아지면 고치지 않는다
+// changed: 상황이 바뀌었거나 글만으로 알 수 없어 고쳐 쓴 글(id별). id를 그대로 두어 옆 패널에 써 둔 답이 남는다. 다른 항목과 같아지거나 너무 길면 고치지 않는다
 export function apply(
   b: Book,
   seen: readonly number[],
@@ -150,7 +274,7 @@ export function apply(
       closed.push({ text: a.text, at: now })
       continue
     }
-    const t = changed.has(a.id) ? shorten(changed.get(a.id) ?? '') : ''
+    const t = changed.has(a.id) ? judgeText(keepHead(a.text, changed.get(a.id) ?? '')) : ''
     const next = t && !others(a.id).has(sameKey(t)) ? { ...a, text: t } : a
     items.push(countSkips && seen.includes(a.id) ? { ...next, skips: next.skips + 1 } : next)
   }
@@ -163,6 +287,72 @@ export function apply(
     items.push({ id: ++seq, text, turn: turnNo, at: now, skips: 0 })
   }
   return { items: items.slice(-12), closed: closed.slice(-10), seq }
+}
+
+const isNotice = (a: Ask) => /^(볼 것|다르게 한 것):/.test(a.text)
+
+// 같은 것을 묻는 항목 묶음(ids)을 하나로 합친다. 남는 것은 가장 먼저 들어온 항목이라 패널에서 자리가 그대로다.
+// 옆 패널은 써 둔 답을 항목 id별로 쥐어서(hasDraft), 답을 써 둔 항목이 있으면 그 항목을 남기고 둘 이상이면 합치지 않는다.
+// 글은 판정이 합친 글(비었거나 너무 길면 가장 나중에 물은 글)이고, 모두 같은 머리말(볼 것·지난 세션)이면 그 머리말을 둔다.
+// 물은 턴은 가장 나중 것이다: 방금 다시 물은 질문은 답 없이 지나간 질문이 아니다.
+// 볼 것과 질문이 섞인 묶음, 이번 답에서 물은 항목(fresh)이 둘 이상인 묶음은 합치지 않는다: 볼 것은 다음 답에서 닫히는 알림이고,
+// 한 답에서 따로 물은 질문은 Claude가 일부러 나눈 것이다(2026-10-25 시험에서 "시험용 컨테이너를 지울까요?"와 "CLI 문제를 고칠까요?"가 합쳐졌다)
+export function merge(
+  b: Book,
+  groups: readonly { ids: readonly number[]; text: string }[],
+  hasDraft: (id: number) => boolean = () => false,
+  fresh: ReadonlySet<number> = new Set(),
+): Book {
+  let items = b.items
+  for (const g of groups) {
+    const members = items.filter(a => g.ids.includes(a.id))
+    const drafted = members.filter(a => hasDraft(a.id))
+    if (members.length < 2 || drafted.length > 1) continue
+    if (new Set(members.map(isNotice)).size > 1 || members.filter(a => fresh.has(a.id)).length > 1) continue
+    const keep = drafted[0] ?? members.reduce((x, y) => (y.id < x.id ? y : x))
+    const last = members.reduce((x, y) => (y.turn > x.turn || (y.turn === x.turn && y.id > x.id) ? y : x))
+    const said = judgeText(members.every(a => HEAD.test(a.text)) ? keepHead(keep.text, g.text) : g.text)
+    const others = new Set(items.filter(a => !g.ids.includes(a.id)).map(a => sameKey(a.text)))
+    const text = said && !others.has(sameKey(said)) ? said : last.text
+    const one: Ask = { ...keep, text, turn: last.turn, skips: Math.min(...members.map(a => a.skips)) }
+    items = items.filter(a => a.id === keep.id || !g.ids.includes(a.id)).map(a => (a.id === keep.id ? one : a))
+  }
+  return items === b.items ? b : { ...b, items }
+}
+
+// 이번 답의 사용자 차례 줄로 올라간 항목의 id
+export function freshIds(items: readonly Ask[], taken: readonly string[]): Set<number> {
+  const keys = new Set(taken.map(t => sameKey(shorten(t))))
+  return new Set(items.filter(a => keys.has(sameKey(a.text))).map(a => a.id))
+}
+
+// 판정을 내 차례에 옮긴다. list: 판정에 보인 항목(번호 순), fresh: 그중 이번 답에서 물은 항목.
+// 이번 답에서 물은 항목은 이번 메시지로 닫지 않고, 답 없이 지나간 횟수(skips)도 세지 않는다. 그사이 패널에서 지운 항목은 건드리지 않는다
+export function applyJudgment(
+  b: Book,
+  list: readonly Ask[],
+  fresh: ReadonlySet<number>,
+  j: Judgment,
+  turnNo: number,
+  now: number,
+  countSkips: boolean,
+  hasDraft?: (id: number) => boolean,
+): Book {
+  const idOf = (n: number) => list[n - 1]?.id
+  const closedIds = j.closed.map(idOf).filter((id): id is number => id !== undefined && !fresh.has(id))
+  // 앞서 물은 항목의 고쳐 쓰기는 말투만 달라졌으면 받지 않는다(nearlySame). 글만으로 알 수 없어 채운 것(clear)은 몇 글자만 바뀌어도 받는다: "이 주소"를 주소로 바꾸는 것도 그렇다
+  const changed = new Map<number, string>()
+  for (const c of j.changed) {
+    const a = list[c.n - 1]
+    if (a && !nearlySame(a.text, c.text)) changed.set(a.id, c.text)
+  }
+  for (const c of j.clear) {
+    const a = list[c.n - 1]
+    if (a) changed.set(a.id, c.text)
+  }
+  const groups = j.merged.map(m => ({ ids: m.n.map(idOf).filter((id): id is number => id !== undefined), text: m.text }))
+  const seen = list.filter(a => !fresh.has(a.id)).map(a => a.id)
+  return merge(apply(b, seen, closedIds, j.added, turnNo, now, countSkips, changed), groups, hasDraft, fresh)
 }
 
 // 답을 못 한 질문은 세션이 끝날 때 $.store에 작업 폴더별로 남기고, 그 폴더의 다음 세션이 가져간다
@@ -228,7 +418,6 @@ export function restore(b: Book, back: readonly Ask[]): Book {
 
 // "볼 것"은 알림이라 다음 답이 나오면 닫는다(0.7.2까지 모은 "다르게 한 것"도 이때 닫힌다). 답을 기다리는 건 "물을 것"뿐이다
 export function supersede(b: Book, now: number): Book {
-  const isNotice = (a: Ask) => /^(볼 것|다르게 한 것):/.test(a.text)
   const gone = b.items.filter(isNotice)
   if (!gone.length) return b
   return { ...b, items: b.items.filter(a => !isNotice(a)), closed: [...b.closed, ...gone.map(a => ({ text: a.text, at: now }))].slice(-10) }
@@ -274,6 +463,7 @@ export function answerMark(answer: string): string {
 // request가 undefined면 사람이 쓴 메시지가 없는 턴이다. countSkips가 false면 닫고 더하기만 한다(같은 턴을 다시 판정할 때)
 async function judge($: EngineInterface, s: Settings, answer: string, request: string | undefined, countSkips: boolean) {
   await judgeOnce($, s, answer, request, countSkips)
+  await update($, recent, (l: Exchange[]) => withExchange(l, exchangeOf(request, answer)))
   // 끝까지 간 판정만 적는다(판정 모델이 답하지 못한 것도 끝난 것이다). 다시 불러올 때 되짚는 건 불러오기에 끊긴 판정뿐이다
   await $.state.set(JUDGED, answerMark(answer))
 }
@@ -282,31 +472,26 @@ async function judgeOnce($: EngineInterface, s: Settings, answer: string, reques
   const { value: turnNo = 0 } = await $.state.get(TURN)
   const taken = labeledAsks(answer)
   await update($, book, (cur: Book): Book => apply(supersede(cur, Date.now()), [], [], taken, turnNo, Date.now(), false))
-  // 판정은 이번 답 전부터 열려 있던 항목만 본다: 방금 올린 사용자 차례 줄은 이번 메시지로 닫힐 수 없다
-  const takenKeys = new Set(taken.map(t => sameKey(shorten(t))))
   const { value: b = EMPTY } = await $.state.get(BOOK)
-  const open = b.items.filter(a => !takenKeys.has(sameKey(a.text)))
-  if (!open.length && !mayAsk(answer)) return
+  if (!b.items.length && !mayAsk(answer)) return
+  const fresh = freshIds(b.items, taken)
+  const { value: before = [] } = await $.state.get(RECENT)
+  // 합치거나 고쳐 쓴 글이 길어서(한두 문장) 400이던 상한을 늘렸다
   const r = await $.model.complete({
     model: s.model,
     effort: 'low',
-    maxTokens: 400,
-    timeoutMs: 30000,
+    maxTokens: 1500,
+    timeoutMs: 45000,
     system: JUDGE_SYSTEM,
-    prompt: judgePrompt(open, request, answer, turnNo, taken),
+    prompt: judgePrompt(b.items, request, answer, turnNo, fresh, before),
   })
   const j = r.isAnswered ? parseJudgment(r.text) : undefined
   await update($, stats, (x: Stats): Stats => (j ? { ...x, judged: x.judged + 1 } : { ...x, failed: x.failed + 1 }))
   // 판정이 없으면 닫지도 세지도 않는다
-  const closedIds = j ? j.closed.map(n => open[n - 1]?.id).filter((id): id is number => id !== undefined) : []
-  const changed = new Map<number, string>()
-  for (const c of j?.changed ?? []) {
-    const id = open[c.n - 1]?.id
-    if (id !== undefined) changed.set(id, c.text)
-  }
-  const added = j ? j.added : []
-  const seen = open.map(a => a.id)
-  await update($, book, (cur: Book): Book => apply(cur, seen, closedIds, added, turnNo, Date.now(), countSkips && request !== undefined && j !== undefined, changed))
+  if (!j) return
+  const { value: keep } = await $.state.get(KEEP)
+  const drafted = new Set(Object.keys(keep?.drafts ?? {}).map(Number))
+  await update($, book, (cur: Book): Book => applyJudgment(cur, b.items, fresh, j, turnNo, Date.now(), countSkips && request !== undefined, id => drafted.has(id)))
 }
 
 // 모듈을 다시 불러오면 그 전에 시작된 판정이 사라질 수 있다. 불러올 때 마지막 턴을 한 번 더 판정한다(같은 질문은 다시 더하지 않는다)

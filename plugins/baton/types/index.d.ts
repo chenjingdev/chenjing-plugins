@@ -2,6 +2,8 @@ export type Ask = { id: number; text: string; turn: number; at: number; skips: n
 export type Closed = { text: string; at: number }
 export type Book = { items: Ask[]; closed: Closed[]; seq: number }
 export type AsksStats = { judged: number; failed: number }
+// 판정에 맥락으로 붙이는 앞선 턴 하나: 사용자 메시지와 답의 요약
+export type Exchange = { request: string; answer: string }
 export type SideStats = { checked: number; side: number; failed: number; totalMs: number }
 
 // 곁대화 한 번과, 다시 불러와도 남기는 곁대화와 써 둔 답(drafts: 내 차례 항목 id별로 아직 보내지 않은 답. 0.7.2~0.7.3에는 없었다)
@@ -42,6 +44,8 @@ declare module 'claude-code' {
       // 판정을 마친 마지막 답의 지문(open-asks answerMark): 다시 불러온 뒤 같은 답을 또 판정하지 않는다
       judgedAnswer: string
       asksStats: AsksStats
+      // 판정이 맥락으로 보는 앞선 두 턴(open-asks exchangeOf)
+      recentTurns: Exchange[]
       sideEnabled: boolean
       lastSide: string
       sideStats: SideStats
