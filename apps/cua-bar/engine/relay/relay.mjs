@@ -59,10 +59,12 @@ const MAX_REQUEST_BYTES = 1024;
 const ACTIVITY_LIMIT_BYTES = 256 * 1024;
 const ACTIVITY_KEEP_LINES = 200;
 // Why a failed call failed, as its activity line says it; the Claude bridge uses the same words (host_mcp.failure).
-const FAILURES = ['timeout', 'screen_locked', 'error'];
+const FAILURES = ['timeout', 'screen_locked', 'unlock_failed', 'error'];
 const JS_TIMEOUT_MS = 30000;         // how long cua_repl runs js when a call gives no timeout_ms
 // What the computer-use service says, in every one of its refusals, when the Mac's lock stopped a call.
 const LOCKED_MARKERS = ['The Mac is locked', 'screenLocked'];
+// ...and when it is because its automatic unlock tried and failed, or has used up its tries in this lock (F8).
+const UNLOCK_FAILED_MARKER = 'automatic unlock could not unlock it';
 // The engine's settings in the state directory (`codex-cua settings`), and how much error text a line keeps;
 // the Claude bridge uses the same (bridge_records).
 const SETTINGS_FILE = 'settings.json';
@@ -477,10 +479,13 @@ function relay(child) {
     return [response.error?.message, ...content.map(item => item?.text)].filter(value => typeof value === 'string');
   }
 
-  // Why a call failed, as one word. `screen_locked` when the answer (a result, or a JSON-RPC error) says the Mac's
-  // lock stopped the call, `timeout` when js ran for all the time it had, else `error`.
+  // Why a call failed, as one word. `unlock_failed` when the answer (a result, or a JSON-RPC error) says the service's
+  // automatic unlock could not unlock the Mac, `screen_locked` when it says the Mac's lock stopped the call otherwise,
+  // `timeout` when js ran for all the time it had, else `error`.
   function failure(entry, response, ms) {
-    if (answerTexts(response).some(value => LOCKED_MARKERS.some(marker => value.includes(marker)))) return 'screen_locked';
+    const texts = answerTexts(response);
+    if (texts.some(value => value.includes(UNLOCK_FAILED_MARKER))) return 'unlock_failed';
+    if (texts.some(value => LOCKED_MARKERS.some(marker => value.includes(marker)))) return 'screen_locked';
     if (entry.tool === 'js' && ms >= entry.limit) return 'timeout';
     return 'error';
   }

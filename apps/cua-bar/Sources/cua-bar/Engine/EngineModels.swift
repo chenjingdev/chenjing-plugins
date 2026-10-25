@@ -39,12 +39,15 @@ struct EngineStatus: Equatable, Sendable {
 enum AgentKind: Equatable, Hashable, Sendable {
     case claude
     case codex
+    /// A line of the 기록 tab the engine wrote itself: its restart of the computer-use service for a locked Mac (F8).
+    case engine
     case other(String)
 
     init(raw: String?) {
         switch raw?.lowercased() {
         case "claude": self = .claude
         case "codex": self = .codex
+        case "engine": self = .engine
         default: self = .other(raw ?? "")
         }
     }
@@ -53,6 +56,7 @@ enum AgentKind: Equatable, Hashable, Sendable {
         switch self {
         case .claude: "Claude"
         case .codex: "Codex"
+        case .engine: "CUA Bar"
         case .other(let name): name.isEmpty ? "AI" : name
         }
     }
@@ -246,8 +250,8 @@ struct ActivityEntry: Equatable, Sendable {
     var ms: Int?
     /// The folder the writer worked in when it wrote the line; nil for an older writer's line.
     var cwd: String?
-    /// Why a failed call failed, in one of the engine's words (`timeout`, `screen_locked`, `error`); nil for a call
-    /// that worked and for an older writer's line.
+    /// Why a failed call failed, in one of the engine's words (`timeout`, `screen_locked`, `unlock_failed`, `error`);
+    /// nil for a call that worked and for an older writer's line.
     var error: String?
     /// What a failed call's answer said, one line, while 오류 문구 남기기 is on; nil otherwise.
     var errorText: String?

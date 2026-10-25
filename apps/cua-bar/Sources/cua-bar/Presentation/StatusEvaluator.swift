@@ -375,7 +375,7 @@ enum StatusEvaluator {
         let agent = AgentKind(raw: id.split(separator: "-").first.map(String.init))
         switch agent {
         case .claude, .codex: return agent.label
-        case .other: return "AI"
+        case .engine, .other: return "AI"
         }
     }
 

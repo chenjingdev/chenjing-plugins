@@ -21,7 +21,7 @@ ACTIVITY_LOCK = 'activity.lock'
 ACTIVITY_MAX_BYTES = 256*1024
 ACTIVITY_KEEP_LINES = 200
 # The words a failed call's activity line may give for why it failed (host_mcp.failure and the relay make them).
-FAILURES = ('timeout', 'screen_locked', 'error')
+FAILURES = ('timeout', 'screen_locked', 'unlock_failed', 'error')
 # The engine's settings in the state directory (`codex-cua settings`); the relay reads the same file.
 SETTINGS_FILE = 'settings.json'
 SETTINGS_MAX_BYTES = 4096

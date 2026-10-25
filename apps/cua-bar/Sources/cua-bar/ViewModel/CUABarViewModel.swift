@@ -124,6 +124,8 @@ final class CUABarViewModel: ObservableObject {
     var afterRead: (@MainActor (EngineStatus?) async -> Void)?
     /// The automatic cleanup that is running, if any. Never two at a time.
     private(set) var automaticCleanupTask: Task<Void, Never>?
+    /// The engine's `unlock-reset` the model asked for after an automatic unlock failed (F8), while it runs.
+    private(set) var unlockResetTask: Task<Void, Never>?
 
     private let engine: any EngineClient
     private let appVersion: String?
@@ -156,6 +158,7 @@ final class CUABarViewModel: ObservableObject {
     private var placedTimers: [ResultPlace: Task<Void, Never>] = [:]
     private var cleanupPlanner = CleanupPlanner()
     private var notificationPlanner = NotificationPlanner()
+    private var unlockPlanner = UnlockRecoveryPlanner()
     /// Work the model started on its own; each removes itself when it is done.
     private var backgroundTasks: [UUID: Task<Void, Never>] = [:]
     private var didRequestAuthorization = false
@@ -461,6 +464,7 @@ final class CUABarViewModel: ObservableObject {
         // Cleanup first: the notifications look at what it has tried.
         startAutomaticCleanupIfNeeded()
         postDueNotifications(now: now)
+        restartUnlockIfNeeded(now: now)
         relaunchIfQuit(status, now: now)
     }
 
@@ -917,6 +921,24 @@ final class CUABarViewModel: ObservableObject {
         }
     }
 
+    /// F8: after a call failed because the computer-use service's automatic unlock could not unlock the Mac, asks the
+    /// engine to restart the service. The engine decides whether it is needed and keeps to five restarts a lock; the
+    /// person hears once a lock when they did not help. A restart is a line in 기록, so the status is read again.
+    private func restartUnlockIfNeeded(now: Date) {
+        guard unlockResetTask == nil, let status = lastStatus, unlockPlanner.due(in: status, now: now) else { return }
+        unlockResetTask = Task { [weak self] in
+            guard let self else { return }
+            let result = try? await self.engine.unlockReset()
+            self.unlockResetTask = nil
+            guard let result else { return }
+            if self.unlockPlanner.tells(result) {
+                let notification = AppNotification.unlockGaveUp(restarts: result.restarts)
+                self.runInBackground { [notifier] in _ = await notifier.post(notification) }
+            }
+            if result.ok { await self.refresh() }
+        }
+    }
+
     /// True while the automatic cleanup runs and this action would touch what it is releasing:
     /// 모두 정리, a row's 정리 or 탭 풀기 of one connection the cleanup releases, and a Claude
     /// session's 탭 풀기. Restart, setup and the rest release nothing the cleanup does and do not wait.
@@ -943,7 +965,7 @@ final class CUABarViewModel: ObservableObject {
     /// So an update never takes the window from someone looking at it and never cuts off what the app was asked to do.
     var isQuietForUpdate: Bool {
         !isPopoverOpen && inFlight.isEmpty && !isCleaningUp && automaticCleanupTask == nil
-            && pendingRelaunch == nil && !setupActivity.isRunning && !isProbing
+            && pendingRelaunch == nil && !setupActivity.isRunning && !isProbing && unlockResetTask == nil
     }
 
     /// What the status card says beside its button: what 다시 켜기 cuts off, since the button runs without a question.
@@ -1064,10 +1086,12 @@ final class CUABarViewModel: ObservableObject {
     func waitForBackgroundWork() async {
         while true {
             let cleanup = automaticCleanupTask
+            let unlock = unlockResetTask
             let reading = refreshTask
             let tasks = Array(backgroundTasks.values)
-            if cleanup == nil, reading == nil, tasks.isEmpty { return }
+            if cleanup == nil, unlock == nil, reading == nil, tasks.isEmpty { return }
             await cleanup?.value
+            await unlock?.value
             await reading?.value
             for task in tasks { await task.value }
         }

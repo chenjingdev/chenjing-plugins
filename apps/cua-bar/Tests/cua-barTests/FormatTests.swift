@@ -122,7 +122,7 @@ struct FormatTests {
         #expect(Format.milliseconds(nil) == "—")
     }
 
-    @Test(arguments: [("timeout", "시간 초과"), ("screen_locked", "화면 잠김"), ("error", nil), ("new word", nil)] as [(String, String?)])
+    @Test(arguments: [("timeout", "시간 초과"), ("screen_locked", "화면 잠김"), ("unlock_failed", "잠금 해제 실패"), ("error", nil), ("new word", nil)] as [(String, String?)])
     func whyACallFailed(word: String, expected: String?) {
         #expect(Format.failure(word) == expected)
     }
@@ -138,6 +138,9 @@ struct FormatTests {
         #expect(AgentKind.codex.label == "Codex")
         #expect(AgentKind.other("cmux-cua").label == "cmux-cua")
         #expect(AgentKind.other("").label == "AI")
+        // The engine's own line in 기록 (a restart of the computer-use service) is the app's doing.
+        #expect(AgentKind.engine.label == "CUA Bar")
+        #expect(AgentKind(raw: "engine") == .engine)
         #expect(AgentKind(raw: "CLAUDE") == .claude)
         #expect(AgentKind(raw: nil) == .other(""))
     }

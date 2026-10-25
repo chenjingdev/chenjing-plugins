@@ -611,15 +611,30 @@ struct PopoverContentTests {
         var status = try Fixtures.status("status-problem")
         let entry = status.activity[1]
         #expect(entry.ok == false)
-        status.activity = ["timeout", "screen_locked", "error", nil, "something new"].map { word in
+        status.activity = ["timeout", "screen_locked", "unlock_failed", "error", nil, "something new"].map { word in
             var line = entry
             line.error = word
             return line
         }
-        #expect(content(of: status).activity.rows.map(\.failureText) == ["시간 초과", "화면 잠김", nil, nil, nil])
+        #expect(content(of: status).activity.rows.map(\.failureText) == ["시간 초과", "화면 잠김", "잠금 해제 실패", nil, nil, nil])
         // A call that worked has no reason, whatever its line says.
         status.activity = [ActivityEntry(tool: "js", ok: true, ms: 5, error: "timeout")]
         #expect(content(of: status).activity.rows.map(\.failureText) == [nil])
+    }
+
+    @Test func theEnginesOwnRestartIsARowOfTheAppsOwn() throws {
+        // F8: the engine's line has no connection and no folder; it is CUA Bar's, whatever connection is listed.
+        var status = try Fixtures.status("status-problem")
+        status.activity = [
+            ActivityEntry(at: Fixtures.now.addingTimeInterval(-3), agent: .engine, tool: "unlock_reset", ok: true, ms: 412),
+            ActivityEntry(at: Fixtures.now.addingTimeInterval(-9), agent: .engine, tool: "unlock_reset", ok: false, ms: 10_020, error: "error"),
+        ]
+        let rows = content(of: status).activity.rows
+        #expect(rows.map(\.agent) == [.engine, .engine])
+        #expect(rows.map(\.agent.label) == ["CUA Bar", "CUA Bar"])
+        #expect(rows.map(\.tool) == ["CUA 서비스 다시 켜기", "CUA 서비스 다시 켜기"])
+        #expect(rows.map(\.folder) == ["—", "—"])
+        #expect(rows.map(\.failureText) == [nil, nil])
     }
 
     @Test func aFailedRowShowsWhatItsAnswerSaidAndTheTabCarriesTheSwitch() throws {
@@ -668,6 +683,7 @@ struct PopoverContentTests {
         #expect(Format.tool("js") == "화면 조작")
         #expect(Format.tool("turn_ended") == "차례 끝 · 탭 풀기")
         #expect(Format.tool("js_reset") == "런타임 초기화")
+        #expect(Format.tool("unlock_reset") == "CUA 서비스 다시 켜기")
         #expect(Format.tool("list_tabs") == "list_tabs")
         #expect(Format.tool(nil) == "—")
     }

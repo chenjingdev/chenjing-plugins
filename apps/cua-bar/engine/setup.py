@@ -30,7 +30,8 @@ LOGIN_SCRIPT = 'codex-cua-login-env'
 FALLBACK_ENV = 'CODEX_CUA_FALLBACK_NATIVE'
 ROOT_RESOLVED_FLAG = '--root-resolved'
 # Commands of the menu bar app's engine (engine_cli.py): one JSON object on stdout.
-ENGINE_COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'settings', 'diagnose')
+ENGINE_COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'unlock-reset', 'settings',
+                   'diagnose')
 # The app ends a connection test it gives up on (its time ran out, or the person left) with SIGTERM and, two seconds
 # later, SIGKILL. A test that is cut short has that long for its cleanup: the host gets this long to take the thread
 # back, ps and lsof have this long between them, and the runtime is not waited for.

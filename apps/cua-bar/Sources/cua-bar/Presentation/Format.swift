@@ -114,6 +114,7 @@ enum Format {
         case "js"?: "화면 조작"
         case "turn_ended"?: "차례 끝 · 탭 풀기"
         case "js_reset"?: "런타임 초기화"
+        case "unlock_reset"?: "CUA 서비스 다시 켜기"
         case let name?: name
         }
     }
@@ -124,6 +125,7 @@ enum Format {
         switch word {
         case "timeout"?: "시간 초과"
         case "screen_locked"?: "화면 잠김"
+        case "unlock_failed"?: "잠금 해제 실패"
         default: nil
         }
     }

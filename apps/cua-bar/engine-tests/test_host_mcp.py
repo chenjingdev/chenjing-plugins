@@ -210,6 +210,18 @@ class FailureWordTests(unittest.TestCase):
         self.assertEqual(bridge.failure('js', {}, {'code': -10020, 'message': 'screenLocked'}, 10), 'screen_locked')
         self.assertEqual(bridge.failure('js_reset', {}, result, 10), 'screen_locked')
 
+    def test_an_automatic_unlock_that_could_not_unlock_the_mac_is_a_word_of_its_own(self):
+        # CUA Bar restarts the computer-use service for it (F8); a person's input that paused the unlock is the lock.
+        failed = {'content': [{'type': 'text', 'text': 'The Mac is locked and automatic unlock could not unlock it. Ask '
+                                                       'the user to unlock the Mac manually before continuing.'}],
+                  'isError': True}
+        paused = {'content': [{'type': 'text', 'text': 'The Mac is locked and automatic unlock is paused because physical '
+                                                       'input was detected. Ask the user to unlock the Mac manually.'}],
+                  'isError': True}
+        self.assertEqual(bridge.failure('js', {}, failed, 15000), 'unlock_failed')
+        self.assertEqual(bridge.failure('js', {}, {'message': failed['content'][0]['text']}, 200), 'unlock_failed')
+        self.assertEqual(bridge.failure('js', {}, paused, 10), 'screen_locked')
+
     def test_js_that_ran_for_all_its_time_timed_out(self):
         answer = {'content': [], 'isError': True}
         self.assertEqual(bridge.failure('js', {'code': 'x', 'timeout_ms': 5000}, answer, 5000), 'timeout')

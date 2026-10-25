@@ -43,6 +43,9 @@ protocol EngineClient: Sendable {
     func stopGroup(_ group: StopGroup, force: Bool) async throws -> GroupStopResult
     /// `restart-codex`: a normal quit (never a force quit), then Codex is opened again.
     func restartCodex() async throws -> RestartResult
+    /// `unlock-reset` (F8): the engine restarts the computer-use service when the Mac is locked and its automatic unlock
+    /// has no try left, at most five times a lock (SIGTERM, never a kill); otherwise it changes nothing and says why.
+    func unlockReset() async throws -> UnlockResetResult
     /// `settings --error-text on|off`: whether a failed call's line keeps what its answer said, from the next failure on.
     func setErrorText(_ keep: Bool) async throws -> SettingsResult
     /// `diagnose`: plain text that is safe to paste into a chat.

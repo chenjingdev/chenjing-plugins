@@ -60,6 +60,16 @@ struct RestartResult: Equatable, Sendable {
     var reason: String?
 }
 
+/// `unlock-reset` (F8): whether the engine restarted the computer-use service for a locked Mac whose automatic unlock
+/// had just failed. `reason` says why not (`limit` once `limit` restarts in this lock did not help); `restarts` counts
+/// this lock's, the one just made included.
+struct UnlockResetResult: Equatable, Sendable {
+    var ok = false
+    var reason: String?
+    var restarts = 0
+    var limit = 0
+}
+
 /// `settings --error-text on|off`: what the engine now keeps (`unwritable` when its folder is not this user's).
 struct SettingsResult: Equatable, Sendable {
     var ok = false
@@ -149,6 +159,17 @@ extension RestartResult: Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ok = c.lenientBool(.ok) ?? false
         reason = c.lenientString(.reason)
+    }
+}
+
+extension UnlockResetResult: Decodable {
+    private enum CodingKeys: String, CodingKey { case ok, reason, restarts, limit }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ok = c.lenientBool(.ok) ?? false
+        reason = c.lenientString(.reason)
+        restarts = c.lenientInt(.restarts) ?? 0
+        limit = c.lenientInt(.limit) ?? 0
     }
 }
 

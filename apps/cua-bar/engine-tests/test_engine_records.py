@@ -378,14 +378,15 @@ class ActivityTests(EngineCase):
         writer = 'bridge-4242-%d' % (NOW-900)
         self.state.activity([
             State.line(writer, 60, ok=False, error='timeout'), State.line(writer, 50, ok=False, error='screen_locked'),
+            State.line(writer, 45, ok=False, error='unlock_failed'),
             State.line(writer, 40, ok=False, error='error'), State.line(writer, 30, ok=False),     # an older writer's
             State.line(writer, 20, ok=False, error='The Mac is locked'), State.line(writer, 10, ok=False, error=7),
             State.line(writer, 5, ok=True, error='timeout')])
         lines = self.read()
         # A value that does not fit costs the line nothing but that value, and a call that worked has no reason.
         self.assertEqual([(item['ok'], item['error']) for item in lines], [
-            (False, 'timeout'), (False, 'screen_locked'), (False, 'error'), (False, None), (False, None), (False, None),
-            (True, None)])
+            (False, 'timeout'), (False, 'screen_locked'), (False, 'unlock_failed'), (False, 'error'), (False, None),
+            (False, None), (False, None), (True, None)])
 
     def test_a_failed_call_s_line_keeps_its_error_text_only_as_a_text(self):
         writer = 'bridge-4242-%d' % (NOW-900)

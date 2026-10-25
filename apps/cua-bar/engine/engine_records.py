@@ -21,10 +21,12 @@ from engine_core import SESSION_ID, parse_iso
 SUBDIR = {'bridge': 'bridges', 'relay': 'relays'}
 FILENAME = {'bridge': 'bridge.json', 'relay': 'relay.json'}
 NAME = re.compile(r'^(bridge|relay)-[A-Za-z0-9_-]{1,64}$')
-WRITER = re.compile(r'^(bridge|relay)-([0-9]{1,10})-([0-9]{1,12})$')
+# A line's writer: a bridge, a relay, or the engine's own `unlock-reset` (engine_unlock), by pid and start.
+WRITER = re.compile(r'^(bridge|relay|engine)-([0-9]{1,10})-([0-9]{1,12})$')
 TOOL = re.compile(r'^[A-Za-z0-9_.:-]{1,64}$')
-# Why a failed call failed, as a writer of 0.8.4 on says it (bridge_records.FAILURES, the relay's FAILURES).
-FAILURES = frozenset(('timeout', 'screen_locked', 'error'))
+# Why a failed call failed, as a writer of 0.8.4 on says it (bridge_records.FAILURES, the relay's FAILURES);
+# `unlock_failed` from 0.8.5 on.
+FAILURES = frozenset(('timeout', 'screen_locked', 'unlock_failed', 'error'))
 # The settings the bridge and the relay read (bridge_records.SETTINGS_FILE, the relay's SETTINGS_FILE), and how much
 # error text a line keeps (their ERROR_TEXT_LIMIT).
 SETTINGS_FILE = 'settings.json'

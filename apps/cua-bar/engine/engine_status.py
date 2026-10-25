@@ -405,6 +405,10 @@ class View:
                 session_bridge.setdefault(session, record.connection_id)
         self.newest = {}
         for line in activity:
+            if line['writer'].startswith('engine-'):
+                # The engine's own line (a restart of the computer-use service, F8): no connection's, no call.
+                self.activity.append((line, None, 'engine'))
+                continue
             conn = self.by_writer.get(line['writer'])
             if conn is not None:
                 target, agent = conn.id, conn.agent
@@ -690,7 +694,8 @@ class View:
                 recent.append((conn.last_call, conn))
         recent.sort(key=lambda item: (-item[0], item[1].pid))
         last = _later(*[conn.last_call for conn in self.connections],
-                      *[line['at'] for line, _, _ in self.activity if line['tool'] != 'turn_ended'])
+                      *[line['at'] for line, target, _ in self.activity
+                        if target is not None and line['tool'] != 'turn_ended'])
         return {'active_connection_id': recent[0][1].id if recent else None, 'last_call_at': iso(last)}
 
     def _activity(self, error_text=False):

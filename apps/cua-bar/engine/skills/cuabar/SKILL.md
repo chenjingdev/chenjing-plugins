@@ -39,12 +39,22 @@ runtime; do not invent APIs from ordinary Node.js or Playwright examples.
   (CUA Bar's 다시 켜기, or ⌘Q and reopen once the Codex work is done); never
   quit or force-quit Codex yourself. Retry discovery after reconnecting; do not
   replay uncertain clicks or submits.
+- If a call fails because the Mac is locked and its automatic unlock could not
+  unlock it (the error says "automatic unlock could not unlock it"), CUA Bar
+  restarts the computer-use service so that the next call tries the automatic
+  unlock again, up to five times in one lock. Wait about 30 seconds and call
+  again, at most five times; make each a call that only looks, such as
+  `await cua.getState();`, and go on with the task once one works. If the last
+  one still fails, or an error says automatic unlock is paused because physical
+  input was detected, that the request cannot be associated with a ChatGPT
+  thread, or only that the Mac is locked, stop and ask the user to unlock the
+  Mac. Never try to unlock the Mac or restart the service yourself.
 - Never replace a connection failure with a separately launched CUA engine,
   model proxy, changed permissions or automatic approval. Keep request
   payloads, screenshots and secrets out of diagnostic output.
-- Do not run `codex-cua release`, `release-session`, `stop` or `restart-codex`
-  yourself and never pass `--user`; point the user to the CUA Bar button or the
-  command instead.
+- Do not run `codex-cua release`, `release-session`, `stop`, `restart-codex` or
+  `unlock-reset` yourself and never pass `--user`; point the user to the CUA Bar
+  button or the command instead.
 
 Codex's native engine handles operations, but Claude chooses the commands and
 does not inherit an existing Codex chat or its complete harness instructions.

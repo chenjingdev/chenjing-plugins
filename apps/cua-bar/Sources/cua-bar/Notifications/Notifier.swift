@@ -9,6 +9,9 @@ enum NotificationKind: String, Equatable, Sendable {
     case updateFailed
     /// The app has just replaced itself with a newer version (F4); posted once, by the new version when it starts.
     case updated
+    /// The computer-use service was restarted as often as one lock allows and its automatic unlock still could not
+    /// unlock the Mac (F8); once a lock.
+    case unlockGaveUp
 }
 
 enum NotificationButton: String, Equatable, Sendable {
@@ -55,6 +58,14 @@ extension AppNotification {
         AppNotification(
             key: "updated-\(version)", kind: .updated, title: UpdateNotice.headline(for: version), body: UpdateNotice.consequence)
     }
+
+    /// F8: `restarts` restarts of the computer-use service did not let its automatic unlock unlock the Mac. Only a person
+    /// can now; clicking it opens 기록, where the restarts are.
+    static func unlockGaveUp(restarts: Int) -> AppNotification {
+        AppNotification(
+            key: "unlock-gave-up", kind: .unlockGaveUp, title: "Mac 잠금을 자동으로 풀지 못했어요",
+            body: "CUA 서비스를 \(restarts)번 다시 켰지만 자동 잠금 해제가 되지 않았어요. 맥에서 직접 잠금을 풀어 주세요.")
+    }
 }
 
 /// What the person did with a notification, already turned into what the app should do.
@@ -76,6 +87,7 @@ enum NotificationResponse: Equatable, Sendable {
         case (.body, .lingeringLease): .openPopover(.connections)
         case (.body, .updateFailed): .openPopover(nil)
         case (.body, .updated): .openPopover(nil)
+        case (.body, .unlockGaveUp): .openPopover(.activity)
         case (.button(.restartCodex), .codexWithoutHost): .restartCodex(key: key)
         default: nil
         }

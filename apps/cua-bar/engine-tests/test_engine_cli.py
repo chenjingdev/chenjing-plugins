@@ -50,7 +50,7 @@ class ArgumentTests(CliCase):
         parser_text = io.StringIO()
         with contextlib.redirect_stdout(parser_text), self.assertRaises(SystemExit):
             setup.main(['--help'])
-        for name in ('status', 'release', 'release-session', 'stop', 'restart-codex', 'settings', 'diagnose',
+        for name in ('status', 'release', 'release-session', 'stop', 'restart-codex', 'unlock-reset', 'settings', 'diagnose',
                      '--connection', '--ended', '--session', '--user', '--group', '--force', '--error-text'):
             self.assertIn(name, parser_text.getvalue())
         self.assertEqual(setup.ENGINE_COMMANDS, engine_cli.COMMANDS)
@@ -63,7 +63,8 @@ class ArgumentTests(CliCase):
                           ('release-session', '--session', 'a', '--force'), ('restart-codex', '--ended'),
                           ('diagnose', '--session', 'a'), ('settings',), ('settings', '--error-text', 'maybe'),
                           ('settings', '--error-text', 'on', '--force'), ('status', '--error-text', 'on'),
-                          ('restart-codex', '--error-text', 'off')):
+                          ('restart-codex', '--error-text', 'off'), ('unlock-reset', '--force'),
+                          ('unlock-reset', '--connection', 'a')):
             self.rejected(*arguments)
 
     def test_the_options_of_the_engine_do_not_leak_into_the_older_commands(self):

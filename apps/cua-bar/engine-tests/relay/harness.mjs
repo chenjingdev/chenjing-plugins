@@ -183,6 +183,9 @@ function handle(line) {
   // As the computer-use service refuses while the Mac is locked.
   if (code === 'locked') return reply({content: [{type: 'text', text: 'SkyComputerUseError: The Mac is locked. Unlock it before reading accessibility text.'}], isError: true});
   if (code === 'locked-rpc') return out({jsonrpc: '2.0', id: m.id, error: {code: -10020, message: 'The Mac is locked. Ask the user to unlock it.'}});
+  // ...when its automatic unlock tried and failed (or has no try left), and when a person's input paused it.
+  if (code === 'unlock-failed') return reply({content: [{type: 'text', text: 'The Mac is locked and automatic unlock could not unlock it. Ask the user to unlock the Mac manually before continuing.'}], isError: true});
+  if (code === 'unlock-paused') return reply({content: [{type: 'text', text: 'The Mac is locked and automatic unlock is paused because physical input was detected. Ask the user to unlock the Mac manually before continuing.'}], isError: true});
   if (code === 'rpc-error') return out({jsonrpc: '2.0', id: m.id, error: {code: -32000, message: 'boom'}});
   // An error of several lines, then the script's console line and the guidance Codex adds to a thread's first answer.
   if (code.startsWith('fail-lines:')) return reply({content: [{type: 'image', data: 'x'}, {type: 'text', text: ' \n'},

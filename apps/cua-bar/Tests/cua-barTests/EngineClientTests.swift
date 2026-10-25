@@ -123,6 +123,23 @@ struct EngineClientTests {
         #expect(runner.calls.map(\.arguments) == [["restart-codex", "--json"]])
     }
 
+    @Test func unlockReset() async throws {
+        let runner = ScriptedRunner(stdout: #"{"ok": false, "reason": "limit", "restarts": 5, "limit": 5, "locked_at": "2026-10-25T10:00:00Z"}"#)
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        let result = try await client.unlockReset()
+        #expect(result == UnlockResetResult(ok: false, reason: "limit", restarts: 5, limit: 5))
+        #expect(runner.calls.map(\.arguments) == [["unlock-reset", "--json"]])
+        #expect(runner.calls.map(\.timeout) == [.seconds(90)])
+    }
+
+    @Test func anUnlockResetAnswerMissingItsCountsStillReads() async throws {
+        let runner = ScriptedRunner(stdout: #"{"ok": true, "restarts": "two"}"#)
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        #expect(try await client.unlockReset() == UnlockResetResult(ok: true, reason: nil, restarts: 0, limit: 0))
+    }
+
     @Test(arguments: [true, false])
     func setErrorText(keep: Bool) async throws {
         let runner = ScriptedRunner(stdout: #"{"ok": true, "reason": null, "error_text": \#(keep)}"#)
@@ -242,6 +259,8 @@ struct EngineClientTests {
         #expect(EngineTimeouts().releaseEndedPerConnection >= .seconds(2 * (2 + 13)))
         // restart-codex at worst: 10 s, 30 s for the quit, 15 s, 15 s, 20 s for the reopen (P4).
         #expect(EngineTimeouts().restartCodex >= .seconds(10 + 30 + 15 + 15 + 20))
+        // unlock-reset at worst: 15 s for running calls, 10 s for the service to go, and 5 s for each system tool.
+        #expect(EngineTimeouts().unlockReset >= .seconds(15 + 10 + 4 * 5))
     }
 
     @Test func theLoadOfReleaseEndedIsCountedFromTheStatus() throws {

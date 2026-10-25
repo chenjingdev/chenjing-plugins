@@ -234,6 +234,9 @@ struct NotificationPlannerTests {
         #expect(NotificationResponse.make(tap: .body, kind: .lingeringLease, key: "lease:a") == .openPopover(.connections))
         #expect(NotificationResponse.make(tap: .body, kind: .updateFailed, key: "update-failed-0.7.1") == .openPopover(nil))
         #expect(NotificationResponse.make(tap: .dismissed, kind: .updateFailed, key: "update-failed-0.7.1") == nil)
+        // Restarts that did not unlock the Mac open 기록, where they are (F8).
+        #expect(NotificationResponse.make(tap: .body, kind: .unlockGaveUp, key: "unlock-gave-up") == .openPopover(.activity))
+        #expect(NotificationResponse.make(tap: .dismissed, kind: .unlockGaveUp, key: "unlock-gave-up") == nil)
         #expect(NotificationResponse.make(tap: .button(.restartCodex), kind: .codexWithoutHost, key: "codex:1") == .restartCodex(key: "codex:1"))
         #expect(NotificationResponse.make(tap: .button(.restartCodex), kind: .lingeringLease, key: "lease:a") == nil)
         #expect(NotificationResponse.make(tap: .dismissed, kind: .codexWithoutHost, key: "codex:1") == nil)

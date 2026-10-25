@@ -39,6 +39,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         case stopConnection(String, force: Bool)
         case stopGroup(StopGroup, force: Bool)
         case restartCodex
+        case unlockReset
         case setErrorText(Bool)
         case diagnose
         case probe(seconds: Int)
@@ -62,6 +63,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var stopConnectionQueue: [Result<StopResult, EngineError>] = []
         var stopGroup = GroupStopResult(ok: true, stopped: 0, failed: 0, results: [])
         var restartCodex = RestartResult(ok: true, reason: nil)
+        /// Answers to successive `unlockReset` calls, first one first; when it runs dry the service needed nothing.
+        var unlockResetQueue: [UnlockResetResult] = []
         /// nil: the switch is set as asked, and the status says so from then on.
         var settings: SettingsResult?
         var diagnosis = "CUA diagnosis (fake)\n"
@@ -151,6 +154,15 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
 
     func restartCodex() async throws -> RestartResult {
         try await begin(.restartCodex, isAction: true).restartCodex
+    }
+
+    func unlockReset() async throws -> UnlockResetResult {
+        _ = try await begin(.unlockReset, isAction: true)
+        return lock.withLock {
+            script.unlockResetQueue.isEmpty
+                ? UnlockResetResult(ok: false, reason: "not_needed", restarts: 0, limit: 5)
+                : script.unlockResetQueue.removeFirst()
+        }
     }
 
     func setErrorText(_ keep: Bool) async throws -> SettingsResult {

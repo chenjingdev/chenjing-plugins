@@ -348,17 +348,22 @@ test('a failed call\'s line says why in one word: the Mac\'s lock, all of js\'s 
   const {fixture, client} = await boot(t);
   await client.call('locked', turn('s-why', 't1'));
   await client.call('locked-rpc', turn('s-why', 't1'));
+  await client.call('unlock-failed', turn('s-why', 't1'));
+  await client.call('unlock-paused', turn('s-why', 't1'));
   await client.call('fail-after:80', turn('s-why', 't1'), {arguments: {code: 'fail-after:80', timeout_ms: 40}});
   await client.call('fail-after:5', turn('s-why', 't1'), {arguments: {code: 'fail-after:5', timeout_ms: 5000}});
   await client.call('fail', turn('s-why', 't1'));
   await client.call('rpc-error', turn('s-why', 't1'));
   await client.call('fine', turn('s-why', 't1'), {arguments: {code: 'fine', timeout_ms: 1}});
   const lines = activityLines(fixture);
+  // The service's automatic unlock that could not unlock the Mac is a word of its own: CUA Bar restarts the service
+  // for it (F8). A person's input that paused the unlock is just the lock.
   assert.deepEqual(lines.map(line => [line.ok, line.error]), [
-    [false, 'screen_locked'], [false, 'screen_locked'], [false, 'timeout'], [false, 'error'], [false, 'error'],
-    [false, 'error'], [true, undefined]]);
-  const file = fs.readFileSync(path.join(fixture.state, 'activity.jsonl'), 'utf8');
-  for (const said of ['Unlock', 'timed out', 'boom', 'failed']) assert.ok(!file.includes(said), said);
+    [false, 'screen_locked'], [false, 'screen_locked'], [false, 'unlock_failed'], [false, 'screen_locked'],
+    [false, 'timeout'], [false, 'error'], [false, 'error'], [false, 'error'], [true, undefined]]);
+  // What the answers said is in no line: only the words are (`unlock_failed` is one, so 'failed' is looked for as said).
+  const file = fs.readFileSync(path.join(fixture.state, 'activity.jsonl'), 'utf8').replaceAll('"unlock_failed"', '');
+  for (const said of ['Unlock', 'unlock it', 'physical input', 'timed out', 'boom', 'failed']) assert.ok(!file.includes(said), said);
 });
 
 test('a failed call\'s line keeps what its answer says went wrong, in one clipped line, only while settings.json asks for it', async t => {

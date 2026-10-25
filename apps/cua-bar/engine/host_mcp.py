@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.4'
+VERSION = '0.8.5'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -42,6 +42,8 @@ _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
 JS_TIMEOUT_MS = 30000           # how long cua_repl runs js when a call gives no timeout_ms
 # What the computer-use service says, in every one of its refusals, when the Mac's lock stopped a call.
 LOCKED_MARKERS = ('The Mac is locked', 'screenLocked')
+# ...and when it is because its automatic unlock tried and failed, or has used up its tries in this lock (F8).
+UNLOCK_FAILED_MARKER = 'automatic unlock could not unlock it'
 
 
 def utc_now():
@@ -74,9 +76,14 @@ def error_texts(answer):
 def failure(name, arguments, answer, ms):
     """Why a call failed, as one word for the activity log (the relay uses the same words).
 
-    `screen_locked` when the answer (a result, or a JSON-RPC error) says the Mac's lock stopped the call, `timeout`
-    when js ran for all the time it had, else `error`, also when there was no answer at all."""
-    if any(marker in text for text in answer_texts(answer) for marker in LOCKED_MARKERS):
+    `unlock_failed` when the answer (a result, or a JSON-RPC error) says the service's automatic unlock could not
+    unlock the Mac, `screen_locked` when it says the Mac's lock stopped the call otherwise (a person's input paused
+    the automatic unlock, or there was nothing to unlock for), `timeout` when js ran for all the time it had, else
+    `error`, also when there was no answer at all."""
+    texts = answer_texts(answer)
+    if any(UNLOCK_FAILED_MARKER in text for text in texts):
+        return 'unlock_failed'
+    if any(marker in text for text in texts for marker in LOCKED_MARKERS):
         return 'screen_locked'
     if name == 'js':
         limit = arguments.get('timeout_ms') if isinstance(arguments, dict) else None

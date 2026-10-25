@@ -1,4 +1,5 @@
-"""The engine commands behind `codex-cua`: status, release, release-session, stop, restart-codex, settings and diagnose.
+"""The engine commands behind `codex-cua`: status, release, release-session, stop, restart-codex, unlock-reset, settings
+and diagnose.
 
 Every command prints exactly one JSON object and exits 0 even when the action itself failed ("ok": false);
 diagnose prints plain text. A non-zero exit means the command could not run at all. Output shapes and reasons
@@ -9,10 +10,11 @@ import sys
 
 from engine_core import Context
 
-COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'settings', 'diagnose')
+COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'unlock-reset', 'settings', 'diagnose')
 # Which of the option flags each command accepts.
 OPTIONS = {'status': (), 'release': ('connection', 'ended'), 'release-session': ('session', 'user'),
-           'stop': ('connection', 'group', 'force'), 'restart-codex': (), 'settings': ('error_text',), 'diagnose': ()}
+           'stop': ('connection', 'group', 'force'), 'restart-codex': (), 'unlock-reset': (),
+           'settings': ('error_text',), 'diagnose': ()}
 
 
 def validate(args, error):
@@ -43,6 +45,9 @@ def execute(ctx, args):
     if args.command == 'restart-codex':
         from engine_actions import restart_codex
         return restart_codex(ctx)
+    if args.command == 'unlock-reset':
+        from engine_unlock import unlock_reset
+        return unlock_reset(ctx)
     if args.command == 'settings':
         from engine_records import write_settings
         return write_settings(ctx.state_dir, ctx.uid, args.error_text == 'on')

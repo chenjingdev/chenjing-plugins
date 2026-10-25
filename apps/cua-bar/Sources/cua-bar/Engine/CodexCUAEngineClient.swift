@@ -22,6 +22,9 @@ struct EngineTimeouts: Equatable, Sendable {
     var releaseEndedPerSession: Duration = .seconds(90)
     var groupStop: Duration = .seconds(180)
     var restartCodex: Duration = .seconds(120)
+    /// `unlock-reset`: up to 15 s for running calls to end, the process list and the service's signature, then 10 s for
+    /// the service to go; each system tool may take its own 5 s besides.
+    var unlockReset: Duration = .seconds(90)
     /// `settings`: one small file written under the engine's lock, which waits 5 s at most.
     var settings: Duration = .seconds(15)
     var diagnose: Duration = .seconds(30)
@@ -87,6 +90,10 @@ struct CodexCUAEngineClient: EngineClient {
 
     func restartCodex() async throws -> RestartResult {
         try await json(RestartResult.self, ["restart-codex", "--json"], timeout: timeouts.restartCodex)
+    }
+
+    func unlockReset() async throws -> UnlockResetResult {
+        try await json(UnlockResetResult.self, ["unlock-reset", "--json"], timeout: timeouts.unlockReset)
     }
 
     func setErrorText(_ keep: Bool) async throws -> SettingsResult {
