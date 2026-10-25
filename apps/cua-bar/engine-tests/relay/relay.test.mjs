@@ -324,7 +324,7 @@ test('activity lines hold the tool name, success and duration, and nothing of wh
   assert.equal(lines.length, 7, 'one line per tools/call, none for tools/list or the end of a turn nobody opened');
   const writer = 'relay-' + record.pid + '-' + record.started_at;
   for (const line of lines) {
-    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd']);
+    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd', ...(line.ok ? [] : ['error'])]);
     assert.match(line.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
     assert.equal(line.writer, writer);
     assert.equal(line.cwd, record.cwd, 'the folder, as the record names it');
@@ -344,6 +344,51 @@ test('activity lines hold the tool name, success and duration, and nothing of wh
 const activityLines = fixture => fs.readFileSync(path.join(fixture.state, 'activity.jsonl'), 'utf8')
   .split('\n').filter(Boolean).map(line => JSON.parse(line));
 
+test('a failed call\'s line says why in one word: the Mac\'s lock, all of js\'s time, or something else', async t => {
+  const {fixture, client} = await boot(t);
+  await client.call('locked', turn('s-why', 't1'));
+  await client.call('locked-rpc', turn('s-why', 't1'));
+  await client.call('fail-after:80', turn('s-why', 't1'), {arguments: {code: 'fail-after:80', timeout_ms: 40}});
+  await client.call('fail-after:5', turn('s-why', 't1'), {arguments: {code: 'fail-after:5', timeout_ms: 5000}});
+  await client.call('fail', turn('s-why', 't1'));
+  await client.call('rpc-error', turn('s-why', 't1'));
+  await client.call('fine', turn('s-why', 't1'), {arguments: {code: 'fine', timeout_ms: 1}});
+  const lines = activityLines(fixture);
+  assert.deepEqual(lines.map(line => [line.ok, line.error]), [
+    [false, 'screen_locked'], [false, 'screen_locked'], [false, 'timeout'], [false, 'error'], [false, 'error'],
+    [false, 'error'], [true, undefined]]);
+  const file = fs.readFileSync(path.join(fixture.state, 'activity.jsonl'), 'utf8');
+  for (const said of ['Unlock', 'timed out', 'boom', 'failed']) assert.ok(!file.includes(said), said);
+});
+
+test('a failed call\'s line keeps what its answer says went wrong, in one clipped line, only while settings.json asks for it', async t => {
+  const {fixture, client} = await boot(t);
+  const settings = path.join(fixture.state, 'settings.json');
+  const ask = (value, mode = 0o600) => {
+    fs.writeFileSync(settings, typeof value === 'string' ? value : JSON.stringify(value));
+    fs.chmodSync(settings, mode);
+  };
+  await client.call('fail', turn('s-text', 't1'));                                  // nobody asked yet
+  ask({schema_version: 1, error_text: true});
+  await client.call('rpc-error', turn('s-text', 't1'));
+  await client.call('locked', turn('s-text', 't1'));
+  await client.call('fail-lines:600', turn('s-text', 't1'));
+  await client.call('fine', turn('s-text', 't1'));
+  ask({error_text: true}, 0o644);                                                    // others could have written it
+  await client.call('fail', turn('s-text', 't1'));
+  ask({error_text: 'yes'});
+  await client.call('fail', turn('s-text', 't1'));
+  ask({schema_version: 1, error_text: false});
+  await client.call('fail', turn('s-text', 't1'));
+  const joined = 'first line second line ' + 'y'.repeat(600);
+  assert.deepEqual(activityLines(fixture).map(line => [line.ok, line.error_text]), [
+    [false, undefined], [false, 'boom'],
+    [false, 'SkyComputerUseError: The Mac is locked. Unlock it before reading accessibility text.'],
+    [false, [...joined].slice(0, 499).join('') + '…'], [true, undefined], [false, undefined], [false, undefined],
+    [false, undefined]]);
+  assert.equal([...activityLines(fixture)[3].error_text].length, 500);
+});
+
 test('every activity line of a runtime that a bridge started carries the bridge\'s name, as the record does', async t => {
   const owner = 'bridge-4242-1792345678';
   const {fixture, client} = await boot(t, {env: {CODEX_CUA_OWNER: owner}});
@@ -355,7 +400,7 @@ test('every activity line of a runtime that a bridge started carries the bridge\
   assert.deepEqual(lines.map(line => [line.tool, line.session_id, line.ok]), [
     ['js', 's-own', true], ['js', 's-own', false], ['js_reset', null, true], ['turn_ended', 's-own', true]]);
   for (const line of lines) {
-    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd', 'owner']);
+    assert.deepEqual(Object.keys(line), ['at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd', 'owner', ...(line.ok ? [] : ['error'])]);
     assert.equal(line.owner, owner);
     // The folder too, so the 기록 tab still names it once the conversation and its records are gone.
     assert.equal(line.cwd, process.cwd(), 'the folder the record names');

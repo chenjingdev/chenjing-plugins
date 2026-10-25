@@ -63,9 +63,7 @@ struct ReviewRound2Tests {
         let ended = try #require(rig.model.content?.connections.tidy?.rows.compactMap(\.endedRow).first)
         #expect(ended.button.action == .tidy(status.connections[0].id))
         // It stops it at once, normally.
-        let task = rig.model.send(ended.button.action)
-        #expect(rig.model.confirmationPrompt == nil)
-        await task?.value
+        await rig.model.send(ended.button.action)?.value
         #expect(rig.engine.calls.filter { $0 != .status }.last == .stopConnection(status.connections[0].id, force: false))
     }
 
@@ -120,7 +118,6 @@ struct ReviewRound2Tests {
         #expect(rig.model.send(.tidy(ended)) == nil)
         #expect(rig.model.placedResults[.connection(ended)] == Self.busy)
         #expect(rig.model.banner == nil, "nothing under the card for a press on a line")
-        #expect(rig.model.pending == nil, "no question either")
         #expect(await rig.model.perform(.tidyAll) == Self.busy)
 
         gate.open()
@@ -135,9 +132,9 @@ struct ReviewRound2Tests {
 
     // MARK: 5. 모두 정리 goes on after an error (see TidyTests)
 
-    // MARK: 6. Stale questions are withdrawn
+    // MARK: 6. What was kept for a line goes with it (the refusal itself is in ReleaseRefusalTests)
 
-    /// The idle Claude connection whose tabs the engine refuses to release (twice).
+    /// The idle Claude connection whose tabs the engine refuses to release.
     private static let target = "claude-12345-1792320000"
 
     private func idleStatus() throws -> EngineStatus {
@@ -154,46 +151,9 @@ struct ReviewRound2Tests {
         return await Rig(try idleStatus(), engine: engine)
     }
 
-    @Test func theRetryQuestionGoesWhenItsConnectionLeavesTheList() async throws {
-        let rig = try await refusing()
-        rig.model.setPopoverOpen(true)
-        await rig.model.send(.releaseConnection(Self.target))?.value
-        #expect(rig.model.pending?.kind == .retryRelease)
-        var later = try idleStatus()
-        later.connections.removeAll { $0.id == Self.target }
-        rig.engine.setStatus(later)
-        await rig.model.refresh()
-        #expect(rig.model.pending == nil)
-        #expect(await rig.model.confirmPending() == nil)
-    }
-
-    @Test func theRetryQuestionGoesWhenItsConnectionEnds() async throws {
-        let rig = try await refusing()
-        rig.model.setPopoverOpen(true)
-        await rig.model.send(.releaseConnection(Self.target))?.value
-        #expect(rig.model.pending?.kind == .retryRelease)
-        var later = try idleStatus()
-        let index = try #require(later.connections.firstIndex { $0.id == Self.target })
-        later.connections[index].state = .ended
-        rig.engine.setStatus(later)
-        await rig.model.refresh()
-        #expect(rig.model.pending == nil, "it is asked under a live line only; the ended line has its own 정리")
-    }
-
-    @Test func theRetryQuestionGoesWhenTheStatusCannotBeRead() async throws {
-        let rig = try await refusing()
-        rig.model.setPopoverOpen(true)
-        await rig.model.send(.releaseConnection(Self.target))?.value
-        #expect(rig.model.pending?.kind == .retryRelease)
-        rig.engine.setStatusError(.engineMissing)
-        await rig.model.refresh()
-        #expect(rig.model.pending == nil)
-    }
-
-    @Test func aRefusalWhileThePopoverIsClosedShowsTheRowStateInsteadOfAQuestion() async throws {
+    @Test func aRefusalWhileThePopoverIsClosedIsSaidOnTheRowAsWhenItIsOpen() async throws {
         let rig = try await refusing()
         await rig.model.send(.releaseConnection(Self.target))?.value
-        #expect(rig.model.pending == nil, "a question in a closed popover would be stale when it opens")
         #expect(rig.model.refusedReleaseIDs == [Self.target])
         // The line says it by itself (its label), so no banner and no extra line say it again.
         #expect(rig.model.banner == nil)
@@ -202,67 +162,43 @@ struct ReviewRound2Tests {
         #expect(row.retryButton.title == "탭 풀기")
     }
 
-    @Test func theWorkingReleaseQuestionGoesWhenItsConnectionLeavesOrTheStatusCannotBeRead() async throws {
-        let rig = await Rig(try Fixtures.status("status-problem"))
-        rig.model.send(.releaseConnection(Self.target)) // active: it may be working, so it asks
-        #expect(rig.model.pending != nil)
-        var later = try Fixtures.status("status-problem")
-        later.connections.removeAll { $0.id == Self.target }
+    @Test func aRefusedConnectionThatEndsHasOnlyItsEndedLine() async throws {
+        let rig = try await refusing()
+        rig.model.setPopoverOpen(true)
+        await rig.model.send(.releaseConnection(Self.target))?.value
+        var later = try idleStatus()
+        let index = try #require(later.connections.firstIndex { $0.id == Self.target })
+        later.connections[index].state = .ended
         rig.engine.setStatus(later)
         await rig.model.refresh()
-        #expect(rig.model.pending == nil)
-
-        let second = await Rig(try Fixtures.status("status-problem"))
-        second.model.send(.releaseConnection(Self.target))
-        #expect(second.model.pending != nil)
-        second.engine.setStatusError(.engineMissing)
-        await second.model.refresh()
-        #expect(second.model.pending == nil)
-        #expect(second.actionCalls.isEmpty)
+        // Its line moved to 손볼 것, whose button is 정리; no live line says it was refused.
+        let content = try #require(rig.model.content)
+        #expect(!content.connections.groups.flatMap(\.rows).contains { $0.id == Self.target })
+        let ended = try #require(content.connections.tidy?.rows.compactMap(\.endedRow).first { $0.id == Self.target })
+        #expect(ended.button.action == .tidy(Self.target))
     }
 
-    @Test func aReleaseOrTidyOfAConnectionThatIsNoLongerListedNeitherAsksNorRuns() async throws {
+    @Test func aReleaseOrTidyOfAConnectionThatIsNoLongerListedDoesNotRun() async throws {
         let rig = await Rig(try Fixtures.status("status-problem"))
         for action: CUAAction in [.releaseConnection("claude-1-1"), .tidy("claude-1-1")] {
             #expect(rig.model.send(action) == nil)
-            #expect(rig.model.pending == nil)
             #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "그 연결은 이제 목록에 없어요"))
             rig.model.dismissBanner()
         }
         #expect(rig.actionCalls.isEmpty)
     }
 
-    @Test func theRestartQuestionGoesWhenTheStatusCannotBeReadOrCodexHasItsHost() async throws {
-        let rig = await Rig(try codexProblem())
-        rig.model.send(.restartCodex)
-        #expect(rig.model.pending != nil)
-        var healthy = try codexProblem()
-        healthy.host.state = .ready
-        rig.engine.setStatus(healthy)
-        await rig.model.refresh()
-        #expect(rig.model.pending == nil, "restarting now would only cut work off")
-
-        let second = await Rig(try codexProblem())
-        second.model.send(.restartCodex)
-        #expect(second.model.pending != nil)
-        second.engine.setStatusError(.engineMissing)
-        await second.model.refresh()
-        #expect(second.model.pending == nil)
-        #expect(!second.engine.calls.contains(.restartCodex))
-    }
-
-    // MARK: 7. An action that has to ask does not run without a status to ask from
+    // MARK: 7. An action on what the status shows (and 다시 켜기, which answers it) does not run without a status
 
     @Test(arguments: [
         CUAAction.restartCodex, .releaseConnection("claude-12345-1792320000"), .tidy("claude-4001-1792300000"), .tidyAll,
     ])
-    func withoutAStatusAnActionThatMustAskDoesNotRun(action: CUAAction) async throws {
+    func withoutAStatusAnActionOnWhatItShowsDoesNotRun(action: CUAAction) async throws {
         let engine = FakeEngineClient()
         engine.setStatusError(.timeout)
         let rig = await Rig(EngineStatus(), engine: engine)
         #expect(rig.model.content == nil)
         #expect(rig.model.send(action) == nil)
-        #expect(rig.model.pending == nil)
         #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "상태를 읽은 뒤 다시 눌러 주세요"))
         #expect(rig.actionCalls.isEmpty)
     }

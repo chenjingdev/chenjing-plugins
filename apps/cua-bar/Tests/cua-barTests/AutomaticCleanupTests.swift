@@ -157,7 +157,6 @@ struct AutomaticCleanupTests {
         await rig.model.refresh()
         await rig.model.waitForBackgroundWork()
         #expect(rig.model.banner == nil)
-        #expect(rig.model.pending == nil, "and it does not start the retry question either")
         #expect(rig.model.refusedReleaseIDs.isEmpty)
     }
 

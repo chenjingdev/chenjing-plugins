@@ -9,18 +9,14 @@ struct PopoverView: View {
 
     var body: some View {
         VStack(spacing: 10) {
+            // The card's button asks nothing: what it cuts off is beside it.
             StatusCardView(
                 summary: model.summary,
                 fixIsRunning: model.fixIsBusy,
-                fixHelp: model.fixHelp
+                fixHelp: model.fixHelp,
+                fixNote: model.fixNote
             ) {
                 if let fix = model.summary.fix { model.send(fix) }
-            }
-
-            // Only the question that comes from the card's own button; a question about a line is under that line.
-            if let prompt = model.cardConfirmationPrompt {
-                ConfirmationView(prompt: prompt, confirm: { model.confirm() }, cancel: { model.cancelPending() })
-                    .transition(.opacity)
             }
 
             if let banner = model.banner {
@@ -42,7 +38,6 @@ struct PopoverView: View {
         .padding(Theme.padding)
         .frame(width: Theme.popoverWidth)
         .animation(.easeOut(duration: 0.15), value: model.banner)
-        .animation(.easeOut(duration: 0.15), value: model.pending)
     }
 
     @ViewBuilder private var tabContent: some View {
@@ -54,6 +49,7 @@ struct PopoverView: View {
             // runs: it is taken away then, and the result says so when it could not be.
             ActivityTabView(
                 content: model.activityContent, copying: model.inFlight.contains(.copyDiagnosis),
+                errorTextPending: model.errorTextPending, setErrorText: { model.send(.keepErrorText($0)) },
                 note: maintenance.flatMap { $0.removal.isRunning ? nil : $0.loginItem.line },
                 result: model.placedResults[.diagnosis], maintenance: maintenance,
                 notifications: model.notificationPermission, turnOnNotifications: { await model.turnOnNotifications() }

@@ -86,6 +86,31 @@ class RecordsTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual([json.loads(line)['n'] for line in path.read_text().splitlines()], [0, 1, 2])
 
+    def test_the_error_text_is_kept_only_when_a_private_settings_file_says_so(self):
+        self.assertFalse(records.keeps_error_text(self.root))
+        path = self.root/records.SETTINGS_FILE
+        for content, mode, kept in (('{"schema_version": 1, "error_text": true}', 0o600, True),
+                                    ('{"schema_version": 1, "error_text": false}', 0o600, False),
+                                    ('{"error_text": "yes"}', 0o600, False), ('{broken', 0o600, False), ('[true]', 0o600, False),
+                                    ('{"error_text": true}', 0o644, False)):
+            path.write_text(content)
+            path.chmod(mode)
+            self.assertEqual(records.keeps_error_text(self.root), kept, (content, oct(mode)))
+        path.chmod(0o600)
+        path.rename(self.root/'real.json')
+        path.symlink_to(self.root/'real.json')
+        self.assertFalse(records.keeps_error_text(self.root), 'a link is not followed')
+
+    def test_the_error_text_is_one_line_and_clipped(self):
+        self.assertIsNone(records.error_text([]))
+        self.assertIsNone(records.error_text(['', '  \n', None, 7]))
+        self.assertEqual(records.error_text(['TypeError: x\n    at <anonymous>:1:1', ' second\ttext ']),
+                         'TypeError: x at <anonymous>:1:1 second text')
+        clipped = records.error_text(['가'*(records.ERROR_TEXT_LIMIT+10)])
+        self.assertEqual(len(clipped), records.ERROR_TEXT_LIMIT)
+        self.assertTrue(clipped.endswith('…'))
+        self.assertEqual(records.error_text(['a'*records.ERROR_TEXT_LIMIT]), 'a'*records.ERROR_TEXT_LIMIT)
+
     def test_a_symlink_in_place_of_the_activity_file_is_never_followed(self):
         target = self.root/'elsewhere'
         target.write_text('')

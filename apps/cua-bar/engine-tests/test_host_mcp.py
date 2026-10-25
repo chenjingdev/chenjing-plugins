@@ -199,6 +199,50 @@ class ClosedStderrTests(unittest.TestCase):
         self.assertEqual(stream.getvalue(), 'cua: owned_thread_unsubscribe_confirmed\n')
 
 
+class FailureWordTests(unittest.TestCase):
+    """The one word an activity line keeps for why a call failed; the relay's failure() says the same."""
+
+    def test_the_mac_s_lock_is_read_from_a_result_or_a_json_rpc_error(self):
+        result = {'content': [{'type': 'image', 'data': 'x'},
+                              {'type': 'text', 'text': 'The Mac is locked and this Computer Use request cannot be associated with a ChatGPT thread.'}],
+                  'isError': True}
+        self.assertEqual(bridge.failure('js', {}, result, 10), 'screen_locked')
+        self.assertEqual(bridge.failure('js', {}, {'code': -10020, 'message': 'screenLocked'}, 10), 'screen_locked')
+        self.assertEqual(bridge.failure('js_reset', {}, result, 10), 'screen_locked')
+
+    def test_js_that_ran_for_all_its_time_timed_out(self):
+        answer = {'content': [], 'isError': True}
+        self.assertEqual(bridge.failure('js', {'code': 'x', 'timeout_ms': 5000}, answer, 5000), 'timeout')
+        self.assertEqual(bridge.failure('js', {'code': 'x', 'timeout_ms': 5000}, answer, 4999), 'error')
+        self.assertEqual(bridge.failure('js', {'code': 'x'}, None, 30000), 'timeout', 'without timeout_ms js has 30 s')
+        self.assertEqual(bridge.failure('js', {'code': 'x'}, None, 29999), 'error')
+        for limit in (True, 0, -1, '5000', 5000.5):
+            self.assertEqual(bridge.failure('js', {'timeout_ms': limit}, None, 30000), 'timeout', repr(limit))
+        self.assertEqual(bridge.failure('js_reset', {}, None, 10**6), 'error', 'only js has a time limit')
+
+    def test_anything_else_is_an_error(self):
+        for answer in (None, 'text', [], {}, {'content': 'not a list', 'message': 7}, {'content': [None, {'text': 7}]}):
+            self.assertEqual(bridge.failure('js', {}, answer, 10), 'error', repr(answer))
+
+    def test_the_texts_of_an_answer_are_its_error_message_or_its_content_s_texts(self):
+        self.assertEqual(bridge.answer_texts({'code': -32000, 'message': 'boom'}), ['boom'])
+        self.assertEqual(bridge.answer_texts({'content': [{'type': 'image', 'data': 'x'}, {'type': 'text', 'text': 'a'},
+                                                          {'type': 'text', 'text': 7}, None], 'isError': True}), ['a'])
+        for answer in (None, 'text', [], {}, {'content': 'not a list'}):
+            self.assertEqual(bridge.answer_texts(answer), [], repr(answer))
+
+    def test_what_an_answer_says_went_wrong_is_its_error_message_or_the_first_text_of_its_content(self):
+        # After the first text come the script's console lines, and on a thread's first answer Codex's CUA guidance.
+        self.assertEqual(bridge.error_texts({'code': -32000, 'message': 'boom'}), ['boom'])
+        self.assertEqual(bridge.error_texts({'content': [{'type': 'image', 'data': 'x'}, {'type': 'text', 'text': ' \n'},
+                                                         {'type': 'text', 'text': 'TypeError: nope'},
+                                                         {'type': 'text', 'text': 'a console line'},
+                                                         {'type': 'text', 'text': '## Computer Use'}], 'isError': True}),
+                         ['TypeError: nope'])
+        for answer in (None, 'text', [], {}, {'content': 'not a list'}, {'content': [None, {'text': 7}, {'text': ''}]}):
+            self.assertEqual(bridge.error_texts(answer), [], repr(answer))
+
+
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.stacks, self.adapters = [], []
@@ -375,6 +419,32 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                 'x-codex-turn-metadata': {'session_id': HOST_THREAD, 'turn_id': adapter.turn_id}}})
         self.assertNotIn('PRIVATE', json.dumps(logs))
         self.assertNotIn('foreign', json.dumps(sent))
+
+    async def test_a_failed_call_tells_the_activity_log_why_in_one_word(self):
+        locked = {'content': [{'type': 'text', 'text': 'SkyComputerUseError: The Mac is locked. Unlock it first.'}], 'isError': True}
+        failed = {'content': [{'type': 'text', 'text': 'PRIVATE_RESULT'}], 'isError': True}
+        for options, word in (({'result': locked}, 'screen_locked'), ({'result': failed}, 'error'),
+                              ({'mode': 'rpc_error'}, 'error'), ({}, None)):
+            with self.subTest(word=word, **options):
+                adapter, _, _, _, _ = self.fixture(**options)
+                seen = []
+                adapter.on_call = lambda *values: seen.append(values)
+                await self.initialize(adapter)
+                await adapter.handle(self.call())
+                self.assertEqual([(values[0], values[1], values[5]) for values in seen], [('js', word is None, word)])
+
+    async def test_a_failed_call_hands_the_activity_log_what_its_answer_says_went_wrong(self):
+        failed = {'content': [{'type': 'text', 'text': 'TypeError: nope'}, {'type': 'text', 'text': 'a console line'},
+                              {'type': 'text', 'text': '## Computer Use'}], 'isError': True}
+        for options, texts in (({'result': failed}, ['TypeError: nope']), ({'mode': 'rpc_error'}, ['PRIVATE_NATIVE_ERROR']),
+                               ({}, [])):
+            with self.subTest(**options):
+                adapter, _, _, _, _ = self.fixture(**options)
+                seen = []
+                adapter.on_call = lambda *values: seen.append(values)
+                await self.initialize(adapter)
+                await adapter.handle(self.call())
+                self.assertEqual([list(values[6]) for values in seen], [texts])
 
     async def test_original_json_rpc_error_is_preserved_without_logging_body(self):
         adapter, _, output, logs, _ = self.fixture(mode='rpc_error')

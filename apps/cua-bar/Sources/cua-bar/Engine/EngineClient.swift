@@ -43,6 +43,8 @@ protocol EngineClient: Sendable {
     func stopGroup(_ group: StopGroup, force: Bool) async throws -> GroupStopResult
     /// `restart-codex`: a normal quit (never a force quit), then Codex is opened again.
     func restartCodex() async throws -> RestartResult
+    /// `settings --error-text on|off`: whether a failed call's line keeps what its answer said, from the next failure on.
+    func setErrorText(_ keep: Bool) async throws -> SettingsResult
     /// `diagnose`: plain text that is safe to paste into a chat.
     func diagnose() async throws -> String
     /// `doctor --probe --json --timeout <seconds>`: one `cua.getState()` on a thread of its own against a Codex

@@ -123,6 +123,15 @@ struct EngineClientTests {
         #expect(runner.calls.map(\.arguments) == [["restart-codex", "--json"]])
     }
 
+    @Test(arguments: [true, false])
+    func setErrorText(keep: Bool) async throws {
+        let runner = ScriptedRunner(stdout: #"{"ok": true, "reason": null, "error_text": \#(keep)}"#)
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        #expect(try await client.setErrorText(keep) == SettingsResult(ok: true, reason: nil, errorText: keep))
+        #expect(runner.calls.map(\.arguments) == [["settings", "--error-text", keep ? "on" : "off", "--json"]])
+    }
+
     @Test func diagnoseReturnsThePlainText() async throws {
         let runner = ScriptedRunner(stdout: "CUA diagnosis\nhost: ready\n")
         let (client, home) = try client(runner)

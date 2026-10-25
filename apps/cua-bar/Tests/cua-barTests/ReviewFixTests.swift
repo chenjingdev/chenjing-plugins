@@ -183,7 +183,6 @@ struct ReviewFixTests {
         let started = rig.model.send(button.action)
         #expect(started != nil, "it runs at once")
         await started?.value
-        #expect(rig.model.pending == nil)
         #expect(rig.actionCalls == [.releaseSession("019a1b2c-0009", user: true)])
     }
 

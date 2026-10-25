@@ -24,7 +24,7 @@ from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, HOST_STOP_GRACE, IDLE_S
                          iso, is_probe_folder)
 from engine_inventory import (collect, is_app_server, is_cua_repl, mark_live, working_folders)
 from engine_records import (WRITER, bridge_name, control_socket, forget_released, load_records, prune, read_activity,
-                            read_released)
+                            read_released, read_settings)
 
 PRUNE_MIN_AGE = 60
 VERSION_NAME = re.compile(r'^[0-9A-Za-z._+-]{1,64}$')     # a Codex version, safe as a folder name
@@ -625,12 +625,14 @@ class View:
         plugin was not there yet when the host's launcher looked (`plugin_entry`), and a good copy is there now.
 
         Codex writes that copy for a new version of itself as it starts after an update, a few seconds after the
-        launcher has looked: the first start after a Codex update goes without the relay, and the next one has it.
-        `plugin_entry` has lasting causes too (a copy another user owns or others may write, one of another version, one
-        that says something else than Codex's settings), so the copy must look as the launcher wants it, as far as the
-        engine can tell, and have been written since the launcher started: a copy that was there before was refused for
-        one of those, and a restart would refuse it again. The launcher of the next start is newer than the copy, so
-        this never asks for a second restart, whatever the cause."""
+        launcher has looked. Since 0.8.4 the launcher takes the plugin inside the app while there is no copy, so the
+        first start after an update goes without the relay only when that template did not fit, or when the launcher
+        that started the host is older, and the next start has it. `plugin_entry` has lasting causes too (a copy
+        another user owns or others may write, one of another version, one that says something else than Codex's
+        settings), so the copy must look as the launcher wants it, as far as the engine can tell, and have been
+        written since the launcher started: a copy that was there before was refused for one of those, and a restart
+        would refuse it again. The launcher of the next start is newer than the copy, so this never asks for a second
+        restart, whatever the cause."""
         inv = self.inv
         if self.relay_reason() != 'plugin_entry' or not inv.app_version or not VERSION_NAME.match(inv.app_version):
             return False
@@ -691,10 +693,13 @@ class View:
                       *[line['at'] for line, _, _ in self.activity if line['tool'] != 'turn_ended'])
         return {'active_connection_id': recent[0][1].id if recent else None, 'last_call_at': iso(last)}
 
-    def _activity(self):
+    def _activity(self, error_text=False):
+        """The newest lines first. A line's error text only while the person asks for it: turned off, what was kept
+        before is no longer shown either."""
         ordered = sorted(enumerate(self.activity), key=lambda item: (item[1][0]['at'], item[0]), reverse=True)
         return [{'at': iso(line['at']), 'connection_id': target, 'agent': agent, 'tool': line['tool'],
-                 'ok': line['ok'], 'ms': line['ms'], 'cwd': line.get('cwd')}
+                 'ok': line['ok'], 'ms': line['ms'], 'cwd': line.get('cwd'), 'error': line.get('error'),
+                 'error_text': line.get('error_text') if error_text else None}
                 for _, (line, target, agent) in ordered[:ACTIVITY_LIMIT]]
 
     def maybe_left_json(self):
@@ -703,6 +708,7 @@ class View:
 
     def status_json(self):
         host = self.inv.host
+        settings = read_settings(self.ctx.state_dir, self.ctx.uid)
         return {'schema_version': SCHEMA_VERSION, 'generated_at': iso(self.now),
                 'plugin': {'version': self.ctx.plugin_version()},
                 'engine': {'version': self.ctx.plugin_version(), 'root': str(self.ctx.plugin_root),
@@ -718,7 +724,8 @@ class View:
                 'leases': {'readable': False, 'items': [], 'maybe_left': self.maybe_left_json()},
                 'other_tools': self._other_tools(),
                 'screen': self._screen(),
-                'activity': self._activity()}
+                'settings': settings,
+                'activity': self._activity(settings['error_text'])}
 
 
 def client_agent(command):

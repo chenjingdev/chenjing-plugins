@@ -178,6 +178,46 @@ class ReleasedMemoryTests(EngineCase):
         self.assertEqual(records.read_released(self.state.root, UID), {(self.WRITER, SESSION_A)})
 
 
+class SettingsTests(EngineCase):
+    def read(self):
+        return records.read_settings(self.state.root, UID)
+
+    def test_error_text_is_off_until_the_person_turns_it_on(self):
+        self.assertEqual(self.read(), {'error_text': False})
+        self.assertEqual(records.write_settings(self.state.root, UID, True), {'ok': True, 'reason': None, 'error_text': True})
+        self.assertEqual(self.read(), {'error_text': True})
+        path = self.state.root/records.SETTINGS_FILE
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+        self.assertEqual(json.loads(path.read_text()), {'schema_version': 1, 'error_text': True})
+        self.assertEqual(records.write_settings(self.state.root, UID, False), {'ok': True, 'reason': None, 'error_text': False})
+        self.assertEqual(self.read(), {'error_text': False})
+        self.assertEqual([item.name for item in self.state.root.iterdir() if item.name.startswith('.')], [])
+
+    def test_a_damaged_foreign_or_unsafe_file_reads_as_off(self):
+        for content in ('{broken', '[]', 'true', json.dumps({'error_text': 'yes'}), json.dumps({'error_text': 1}),
+                        '{"error_text": true, "x": "%s"}' % ('y'*records.SETTINGS_MAX_BYTES)):
+            self.state.settings(content)
+            self.assertEqual(self.read(), {'error_text': False}, content[:40])
+        self.state.settings({'error_text': True}, mode=0o644)
+        self.assertEqual(self.read(), {'error_text': False})           # others could have written it
+        self.state.settings({'error_text': True})
+        self.assertEqual(self.read(), {'error_text': True})
+        path = self.state.root/records.SETTINGS_FILE
+        path.rename(self.state.root/'real.json')
+        path.symlink_to(self.state.root/'real.json')
+        self.assertEqual(self.read(), {'error_text': False})           # a link is not followed
+
+    def test_a_state_directory_that_cannot_be_trusted_is_not_written_and_a_missing_one_is_made(self):
+        self.state.root.chmod(0o755)
+        self.assertEqual(records.write_settings(self.state.root, UID, True), {'ok': False, 'reason': 'unwritable'})
+        self.assertFalse((self.state.root/records.SETTINGS_FILE).exists())
+        self.state.root.chmod(0o700)
+        fresh = self.root/'fresh-state'
+        self.assertTrue(records.write_settings(fresh, UID, True)['ok'])
+        self.assertEqual(stat.S_IMODE(os.stat(fresh).st_mode), 0o700)
+        self.assertEqual(records.read_settings(fresh, UID), {'error_text': True})
+
+
 class ControlTests(EngineCase):
     def record(self, kind='bridge', pid=4242, started=NOW-900):
         directory = getattr(self.state, kind)('c1', pid, started)
@@ -333,6 +373,30 @@ class ActivityTests(EngineCase):
         # A value that does not fit costs the line nothing but that value: the line itself is still a call.
         self.assertEqual(len(lines), 7)
         self.assertEqual([item['owner'] for item in lines], [bridge, None, None, None, None, None, None])
+
+    def test_a_failed_call_s_line_says_why_only_in_a_known_word(self):
+        writer = 'bridge-4242-%d' % (NOW-900)
+        self.state.activity([
+            State.line(writer, 60, ok=False, error='timeout'), State.line(writer, 50, ok=False, error='screen_locked'),
+            State.line(writer, 40, ok=False, error='error'), State.line(writer, 30, ok=False),     # an older writer's
+            State.line(writer, 20, ok=False, error='The Mac is locked'), State.line(writer, 10, ok=False, error=7),
+            State.line(writer, 5, ok=True, error='timeout')])
+        lines = self.read()
+        # A value that does not fit costs the line nothing but that value, and a call that worked has no reason.
+        self.assertEqual([(item['ok'], item['error']) for item in lines], [
+            (False, 'timeout'), (False, 'screen_locked'), (False, 'error'), (False, None), (False, None), (False, None),
+            (True, None)])
+
+    def test_a_failed_call_s_line_keeps_its_error_text_only_as_a_text(self):
+        writer = 'bridge-4242-%d' % (NOW-900)
+        self.state.activity([
+            State.line(writer, 60, ok=False, error='error', error_text='TypeError: x is not a function'),
+            State.line(writer, 50, ok=False, error='error'), State.line(writer, 40, ok=False, error_text='   '),
+            State.line(writer, 30, ok=False, error_text=7), State.line(writer, 20, ok=True, error_text='kept by mistake'),
+            State.line(writer, 10, ok=False, error_text='x'*(records.ERROR_TEXT_LIMIT+50))])
+        lines = self.read()
+        self.assertEqual([item['error_text'] for item in lines[:5]], ['TypeError: x is not a function', None, None, None, None])
+        self.assertEqual(lines[5]['error_text'], 'x'*records.ERROR_TEXT_LIMIT, 'never longer than a writer keeps it')
 
     def test_only_the_tail_of_a_big_file_is_read_and_a_cut_first_line_is_skipped(self):
         old = records.ACTIVITY_TAIL_BYTES

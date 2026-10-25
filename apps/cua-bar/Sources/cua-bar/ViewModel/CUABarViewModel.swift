@@ -25,8 +25,8 @@ struct ActionResult: Equatable, Sendable {
 /// turns the answer into `summary` and `content`, and runs the buttons' actions.
 ///
 /// The engine is only ever awaited, so the main actor stays free while a command runs. A button
-/// calls `send(_:)`, which asks first when the action needs a confirmation (one at a time,
-/// inline in the popover) and otherwise runs it; `perform(_:)` runs an action with no question.
+/// calls `send(_:)`, which runs it with no question unless what it is aimed at is gone;
+/// `perform(_:)` runs an action as it is.
 /// After every read the model also cleans up what nobody can come back to (F5) and posts the two
 /// kinds of notification (F1, R16).
 @MainActor
@@ -62,11 +62,9 @@ final class CUABarViewModel: ObservableObject {
     @Published private(set) var content: PopoverContent?
     @Published private(set) var updatedAt: Date?
     @Published var selectedTab: PopoverTab = .connections {
-        // A question asked on a line of the list is not shown on 기록: it goes with the tab, as with the popover.
         // An answer on the tab left behind is said in the banner instead.
         didSet {
             guard selectedTab != oldValue else { return }
-            if pending?.action.connectionID != nil { cancelPending() }
             moveGonePlacesToTheBanner()
         }
     }
@@ -87,10 +85,8 @@ final class CUABarViewModel: ObservableObject {
     /// the popover (open when a leftover cannot be released one by one). Kept here because this
     /// toolchain has no `@State` (SwiftUIMacros is not in the Command Line Tools).
     @Published var guidanceOpenByUser: Bool?
-    /// The question waiting for an answer, if any. Only one at a time.
-    @Published private(set) var pending: PendingConfirmation?
-    /// Connections whose release the engine refused twice (R15): their row says so and its button,
-    /// still 탭 풀기, tries again without asking. A live AI is never stopped from here.
+    /// Connections whose release the engine refused because a tool call had not finished (R15): their row says
+    /// so, and its button, still 탭 풀기, tries again. A live AI is never stopped from here.
     @Published private(set) var refusedReleaseIDs: Set<String> = []
     /// The automatic cleanup (F5) is running: the buttons that would touch what it releases wait.
     @Published private(set) var isCleaningUp = false
@@ -158,7 +154,6 @@ final class CUABarViewModel: ObservableObject {
     private var loopGeneration = 0
     private var bannerTimer: Task<Void, Never>?
     private var placedTimers: [ResultPlace: Task<Void, Never>] = [:]
-    private var releaseRefusals: [String: Int] = [:]
     private var cleanupPlanner = CleanupPlanner()
     private var notificationPlanner = NotificationPlanner()
     /// Work the model started on its own; each removes itself when it is done.
@@ -240,6 +235,12 @@ final class CUABarViewModel: ObservableObject {
     /// What the 기록 tab shows. Without a status it still has 진단 복사, because that is when it is needed.
     var activityContent: ActivityContent {
         content?.activity ?? ActivityContent.placeholder(isLoading: summary.isPlaceholder)
+    }
+
+    /// The value 오류 문구 남기기 is being set to, while the engine sets it.
+    var errorTextPending: Bool? {
+        for action in inFlight { if case .keepErrorText(let keep) = action { return keep } }
+        return nil
     }
 
     // MARK: Summary
@@ -377,9 +378,6 @@ final class CUABarViewModel: ObservableObject {
             selectedTab = .connections
             wake()
             readNotificationPermission()
-        } else {
-            // A question belongs to the moment it was asked: closing the popover withdraws it.
-            cancelPending()
         }
     }
 
@@ -460,7 +458,6 @@ final class CUABarViewModel: ObservableObject {
         updatedAt = now
         forgetWhatIsGone(in: status)
         moveGonePlacesToTheBanner()
-        revalidatePending()
         // Cleanup first: the notifications look at what it has tried.
         startAutomaticCleanupIfNeeded()
         postDueNotifications(now: now)
@@ -520,15 +517,12 @@ final class CUABarViewModel: ObservableObject {
         failedSessionIDs = []
         sessionResults = [:]
         refusedReleaseIDs = []
-        releaseRefusals = [:]
         moveGonePlacesToTheBanner()
-        revalidatePending()
     }
 
     /// State kept for a connection or a session goes with it.
     private func forgetWhatIsGone(in status: EngineStatus) {
         let connections = Set(status.connections.map(\.id))
-        releaseRefusals = releaseRefusals.filter { connections.contains($0.key) }
         refusedReleaseIDs.formIntersection(connections)
         tabsReleasedIDs.formIntersection(connections)
         let sessions = Set(status.leases.items.compactMap(\.sessionID) + status.leases.maybeLeft.compactMap(\.sessionID))
@@ -570,109 +564,23 @@ final class CUABarViewModel: ObservableObject {
         continuation?.resume()
     }
 
-    // MARK: Confirmations (R15, R17, F1)
+    // MARK: Presses
 
-    /// What a pending question says; derived from the latest status so its count stays true.
-    var confirmationPrompt: ConfirmationPrompt? {
-        guard let pending else { return nil }
-        switch pending.kind {
-        case .retryRelease: return Confirmations.retryPrompt
-        case .standard: return Confirmations.prompt(for: pending.action, content: content)
-        }
-    }
-
-    /// The question under the status card: only one that comes from a button of the card (다시 켜기).
-    /// A question about a line of the list is asked on that line (`confirmationPrompt(forConnection:)`).
-    var cardConfirmationPrompt: ConfirmationPrompt? {
-        pending?.action.connectionID == nil ? confirmationPrompt : nil
-    }
-
-    /// The question asked on this connection's line, right under it; nil when it is about another.
-    func confirmationPrompt(forConnection id: String) -> ConfirmationPrompt? {
-        pending?.action.connectionID == id ? confirmationPrompt : nil
-    }
-
-    /// The question an action asks before it runs, or nil when the click is its own consent (or
-    /// when it cannot run now: see `send`).
-    func confirmation(for action: CUAAction) -> PendingConfirmation? {
-        guard case .ask = Confirmations.gate(for: action, content: content) else { return nil }
-        return PendingConfirmation(action: action, kind: .standard)
-    }
-
-    /// What a button calls: asks first when the action needs it, otherwise runs it. A new press
-    /// replaces a question that is still waiting. An action that has to ask but cannot (no status
-    /// to count from, its target gone) and one that would run beside the automatic cleanup do not
-    /// run; a banner says why. Returns what it started (nil when it asked or did not run).
+    /// What a button calls: it runs the action, with no question first. An action that answers what the status says
+    /// does not run without one (or once its line is gone), and one that would run beside the automatic cleanup
+    /// waits; a banner says why. Returns what it started (nil when it did not run).
     @discardableResult
     func send(_ action: CUAAction) -> Task<Void, Never>? {
-        pending = nil
         if waitsForAutomaticCleanup(action) {
             tell(Self.cleanupBusyOutcome, about: action)
             return nil
         }
-        switch Confirmations.gate(for: action, content: content) {
-        case .ask:
-            pending = PendingConfirmation(action: action, kind: .standard)
-            return nil
+        switch PressGates.gate(for: action, content: content) {
         case .refuse(let reason):
             tell(ActionOutcome(kind: .info, message: reason), about: action)
             return nil
         case .run:
             return Task { _ = await perform(action) }
-        }
-    }
-
-    /// The person said yes: run what was asked, unless the question went stale meanwhile (then it
-    /// is withdrawn, never answered).
-    @discardableResult
-    func confirmPending() async -> ActionOutcome? {
-        guard let question = pending else { return nil }
-        pending = nil
-        if isStale(question) {
-            forgetRefusal(of: question)
-            return nil
-        }
-        return await perform(question.action)
-    }
-
-    /// For the button.
-    @discardableResult
-    func confirm() -> Task<ActionOutcome?, Never> {
-        Task { await confirmPending() }
-    }
-
-    /// The person said no (or the popover closed): nothing runs.
-    func cancelPending() {
-        guard let question = pending else { return }
-        pending = nil
-        forgetRefusal(of: question)
-    }
-
-    /// Starting over after a withdrawn retry question is a new first try.
-    private func forgetRefusal(of question: PendingConfirmation) {
-        if question.kind == .retryRelease, case .retryRelease(let id) = question.action { releaseRefusals[id] = nil }
-    }
-
-    /// A question about something that is gone, or that no longer needs one, is withdrawn.
-    private func revalidatePending() {
-        guard let question = pending, isStale(question) else { return }
-        pending = nil
-        forgetRefusal(of: question)
-    }
-
-    /// Stale: the status cannot be read, the question's target left it, or the action would no
-    /// longer ask (its count fell to zero, the connection ended, Codex has its host again).
-    private func isStale(_ question: PendingConfirmation) -> Bool {
-        guard let content, let status = lastStatus else { return true }
-        switch question.action {
-        case .retryRelease(let id):
-            // Asked again under a live line only: one that ended meanwhile has its own 정리.
-            return !content.connections.groups.contains { $0.rows.contains { $0.id == id } }
-        case .restartCodex:
-            // The restart is the fix for Codex running without its host; with that over it would only cut work off.
-            return !codexRunsWithoutHost(in: status)
-        default:
-            return Confirmations.prompt(for: question.action, content: content) == nil
         }
     }
 
@@ -761,23 +669,14 @@ final class CUABarViewModel: ObservableObject {
         return outcome
     }
 
-    /// R15: a release the engine refuses because a tool call has not finished is asked about once
-    /// more; refused again, the row says so and its 탭 풀기 stays (a live AI is not stopped).
+    /// R15: a release the engine refuses because a tool call has not finished is said on its row, and the row's
+    /// 탭 풀기 stays to try again once the call is done (a live AI is not stopped).
     private func settle(_ action: CUAAction, _ result: ActionResult) -> (outcome: ActionOutcome, tellsIt: Bool) {
         switch action {
         case .releaseConnection(let id), .retryRelease(let id):
             guard result.reason == "request_in_flight", result.outcome.kind == .failure else {
-                releaseRefusals[id] = nil
                 refusedReleaseIDs.remove(id)
                 return (result.outcome, true)
-            }
-            releaseRefusals[id, default: 0] += 1
-            // A question in a closed popover would only be stale by the time it opens, and one on 기록 or 점검 would
-            // never be seen (it is asked under the row, and coming back to the list withdraws it): the row says it instead.
-            if case .releaseConnection = action, isPopoverOpen, selectedTab == .connections {
-                // The question is the message; no banner on top of it.
-                pending = PendingConfirmation(action: .retryRelease(id), kind: .retryRelease)
-                return (result.outcome, false)
             }
             // The line says it by itself from now on (`ConnectionRow.refusedNote`), so it is not told twice.
             refusedReleaseIDs.insert(id)
@@ -810,6 +709,9 @@ final class CUABarViewModel: ObservableObject {
                         pids: Set(codex.pids), appPath: codex.appPath, until: clock().addingTimeInterval(Self.relaunchWait))
                 }
                 return ActionResult(outcome: ActionMessages.restartCodex(result), reason: result.reason)
+            case .keepErrorText(let keep):
+                let result = try await engine.setErrorText(keep)
+                return ActionResult(outcome: ActionMessages.keepErrorText(result), reason: result.reason)
             case .copyDiagnosis:
                 let text = try await engine.diagnose()
                 notificationPermission = await notifier.permission()
@@ -862,7 +764,7 @@ final class CUABarViewModel: ObservableObject {
             // Gone from the status, or neither released nor stopped by the app: nothing to run.
             let listed = lastStatus?.connection(withID: id) != nil
                 || lastStatus?.otherTools.flatMap(\.clients).contains { $0.id == id } == true
-            let outcome = ActionOutcome(kind: .info, message: listed ? ActionMessages.cannotTidy : Confirmations.targetGone)
+            let outcome = ActionOutcome(kind: .info, message: listed ? ActionMessages.cannotTidy : PressGates.targetGone)
             return ActionResult(outcome: outcome, reason: nil)
         }
         let step = try await tidy(id, way)
@@ -979,6 +881,7 @@ final class CUABarViewModel: ObservableObject {
         case .releaseConnection, .retryRelease, .releaseSession: "탭을 풀지 못했어요"
         case .tidy, .tidyAll: "정리하지 못했어요"
         case .restartCodex: "Codex를 다시 켜지 못했어요"
+        case .keepErrorText: "오류 문구 설정을 바꾸지 못했어요"
         case .copyDiagnosis: "진단을 복사하지 못했어요"
         case .runSetup: "설정하지 못했어요"
         case .openCodex: "Codex를 열지 못했어요"
@@ -1041,6 +944,13 @@ final class CUABarViewModel: ObservableObject {
     var isQuietForUpdate: Bool {
         !isPopoverOpen && inFlight.isEmpty && !isCleaningUp && automaticCleanupTask == nil
             && pendingRelaunch == nil && !setupActivity.isRunning && !isProbing
+    }
+
+    /// What the status card says beside its button: what 다시 켜기 cuts off, since the button runs without a question.
+    /// nil for the other fixes.
+    var fixNote: String? {
+        guard summary.fix == .restartCodex else { return nil }
+        return content?.claudeWorksThroughCodex == true ? StatusEvaluator.restartCutsOffWithClaude : StatusEvaluator.restartCutsOff
     }
 
     /// What the status card's fix says on hover while it waits; nil otherwise.
@@ -1184,7 +1094,7 @@ final class CUABarViewModel: ObservableObject {
 
     private func isOnScreen(_ place: ResultPlace) -> Bool {
         switch place {
-        case .connection(let id): selectedTab == .connections && Confirmations.targetExists(id, in: content)
+        case .connection(let id): selectedTab == .connections && PressGates.targetExists(id, in: content)
         case .session(let id):
             selectedTab == .connections && content?.connections.tidy?.rows.contains { $0.leaseRow?.sessionID == id } == true
         case .tidyAll: selectedTab == .connections && content?.connections.tidy != nil

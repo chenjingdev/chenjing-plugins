@@ -752,11 +752,12 @@ class ActivityTests(RegisteredCase):
         self.assertEqual([(line['tool'], line['ok']) for line in lines], [('js', True), ('js_reset', False), ('turn_ended', True)])
         writer = 'bridge-%d-%d' % (control.pid, control.started_at)
         for line in lines:
-            self.assertEqual(set(line), {'at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd'})
+            self.assertEqual(set(line), {'at', 'writer', 'session_id', 'tool', 'ok', 'ms', 'cwd'} | (set() if line['ok'] else {'error'}))
             self.assertRegex(line['at'], ISO)
             self.assertEqual((line['writer'], line['session_id'], line['cwd']), (writer, 'thread-A', control.cwd))
             self.assertIs(type(line['ms']), int)
             self.assertGreaterEqual(line['ms'], 0)
+        self.assertEqual(lines[1]['error'], 'error', 'a failure that is neither the lock nor all of js\'s time')
         self.assertEqual(stat.S_IMODE((self.state/'activity.jsonl').stat().st_mode), 0o600)
         # Names, outcome and duration only: neither the code, the result, nor the failure text.
         self.assertNotIn(b'PRIVATE', (self.state/'activity.jsonl').read_bytes())
@@ -824,6 +825,9 @@ class ReconnectTests(RegisteredCase):
         second_socket = self.socket()
         old_turn = adapter.turn_id
         await adapter.handle(self.call())
+        settings = self.state/'settings.json'
+        settings.write_text('{"schema_version": 1, "error_text": true}')
+        settings.chmod(0o600)
         gate = host1.hold('js')
         flying = self.call()
         task = asyncio.create_task(adapter.handle(flying))
@@ -833,6 +837,9 @@ class ReconnectTests(RegisteredCase):
         await task
         # A fixed text, an error the AI can act on; the call is not sent again to anyone.
         self.assertEqual(self.reply(flying['id'])['error'], {'code': -32001, 'message': host_mcp.LOST_DURING_CALL})
+        # With the error text asked for, the call's line keeps that same text.
+        self.assertEqual([(line['ok'], line.get('error_text')) for line in self.activity()],
+                         [(True, None), (False, host_mcp.LOST_DURING_CALL)])
         await self.settle(lambda: self.record(control)['host'] is None)
         record = self.record(control)
         self.assertEqual((record['busy'], record['session_id'], record['turn_id']), (False, 'thread-A', old_turn))

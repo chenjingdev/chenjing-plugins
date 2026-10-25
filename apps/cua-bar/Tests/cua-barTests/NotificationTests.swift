@@ -435,7 +435,6 @@ struct NotificationViewModelTests {
         rig.notifier.tap(.restartCodex(key: key))
         await rig.model.waitForBackgroundWork()
         #expect(rig.actionCalls == [.restartCodex])
-        #expect(rig.model.pending == nil, "the notification was the question")
     }
 
     @Test func theRestartButtonSaysTheCardComesFirstWhenASetupProblemDoes() async throws {

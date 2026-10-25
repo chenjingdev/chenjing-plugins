@@ -179,7 +179,15 @@ function handle(line) {
   if (code.startsWith('sleep:')) return void setTimeout(() => reply(text('slept')), Number(code.slice(6)));
   if (code === 'hang') return;
   if (code === 'fail') return reply({content: [{type: 'text', text: 'failed'}], isError: true});
+  if (code.startsWith('fail-after:')) return void setTimeout(() => reply({content: [{type: 'text', text: 'timed out'}], isError: true}), Number(code.slice(11)));
+  // As the computer-use service refuses while the Mac is locked.
+  if (code === 'locked') return reply({content: [{type: 'text', text: 'SkyComputerUseError: The Mac is locked. Unlock it before reading accessibility text.'}], isError: true});
+  if (code === 'locked-rpc') return out({jsonrpc: '2.0', id: m.id, error: {code: -10020, message: 'The Mac is locked. Ask the user to unlock it.'}});
   if (code === 'rpc-error') return out({jsonrpc: '2.0', id: m.id, error: {code: -32000, message: 'boom'}});
+  // An error of several lines, then the script's console line and the guidance Codex adds to a thread's first answer.
+  if (code.startsWith('fail-lines:')) return reply({content: [{type: 'image', data: 'x'}, {type: 'text', text: ' \n'},
+    {type: 'text', text: 'first line\n  second\tline ' + 'y'.repeat(Number(code.slice(11)))}, {type: 'text', text: 'a console line'},
+    {type: 'text', text: '## Computer Use\n\nControl native apps'}], isError: true});
   if (code.startsWith('big:')) return reply(text('x'.repeat(Number(code.slice(4)))));
   if (code.startsWith('emit:')) return void process.stdout.write(Buffer.from(code.slice(5), 'base64'));
   if (code === 'ask') {out({jsonrpc: '2.0', id: 'server-1', method: 'elicitation/create', params: {message: 'ok?'}}); return reply(text('asked'));}

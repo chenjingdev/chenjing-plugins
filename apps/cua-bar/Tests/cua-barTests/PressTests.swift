@@ -2,10 +2,12 @@ import Foundation
 import Testing
 @testable import cua_bar
 
-/// F1 and the working-connection question: which buttons ask first, what they say, and that
-/// nothing reaches the engine until the person answers yes. 정리 and 모두 정리 ask nothing (R17).
+/// No button asks before it runs (the person's "이렇게 한번더 레이아웃 바꾸면서 재확인 받는게 맞는 방법인지
+/// 모르겠네", "저런식으로 뜨는 ux가 하나가 아닐텐데"): what a press cuts off is on screen before it, beside the
+/// card's 다시 켜기 or on the hover of a working connection's 탭 풀기. A press only runs against the status it was
+/// made from: a line that is gone, or no status at all, and it does not run.
 @MainActor
-struct ConfirmationTests {
+struct PressTests {
     private func problem() async throws -> Rig { await Rig(try Fixtures.status("status-problem")) }
 
     private func stopCalls(_ rig: Rig) -> [FakeEngineClient.Call] {
@@ -17,135 +19,94 @@ struct ConfirmationTests {
         }
     }
 
-    // MARK: Tidying asks nothing (R17)
+    private func row(_ id: String, in rig: Rig) throws -> ConnectionRow {
+        try #require(rig.model.content?.connections.groups.flatMap(\.rows).first { $0.id == id })
+    }
 
-    @Test func tidyAndTidyAllRunAtOnceWithoutAQuestion() async throws {
+    // MARK: Tidying (R17)
+
+    @Test func tidyAndTidyAllRunAtOnce() async throws {
         let rig = try await problem()
         let ended = "claude-4001-1792300000"
-        #expect(rig.model.confirmation(for: .tidy(ended)) == nil)
-        #expect(rig.model.confirmation(for: .tidyAll) == nil)
         let one = rig.model.send(.tidy(ended))
         #expect(one != nil, "it ran at once")
-        #expect(rig.model.pending == nil)
-        #expect(rig.model.confirmationPrompt == nil)
         await one?.value
-        #expect(stopCalls(rig) == [.stopConnection(ended, force: false)], "a normal stop; nothing is forced unasked")
+        #expect(stopCalls(rig) == [.stopConnection(ended, force: false)], "a normal stop; nothing is forced")
         let all = rig.model.send(.tidyAll)
         #expect(all != nil)
-        #expect(rig.model.pending == nil)
         await all?.value
     }
 
-    @Test func anEndedConnectionStopWhoseRowIsGoneNeverRunsUnasked() async throws {
+    @Test func anEndedConnectionStopWhoseRowIsGoneNeverRuns() async throws {
         let rig = try await problem()
         #expect(rig.model.send(.tidy("claude-1-1")) == nil)
-        #expect(rig.model.pending == nil)
         #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "그 연결은 이제 목록에 없어요"))
         #expect(rig.actionCalls.isEmpty)
     }
 
     // MARK: Releasing the tabs of a connection that may be working
 
+    static let workingHelp = "이 AI가 잡고 있는 브라우저 탭만 풀어요. 아직 일하는 중이면 하던 브라우저 작업이 끊겨요"
+
     @Test(arguments: ["claude-12345-1792320000", "codex-15888-1792319000"])
-    func releasingAnActiveConnectionAsksOnceForBothAgents(id: String) async throws {
+    func releasingAWorkingConnectionRunsAtOnceAndItsHoverSaysWhatItCutsOff(id: String) async throws {
         let rig = await Rig(try Fixtures.status("status-ready")) // both are active
-        #expect(rig.model.send(.releaseConnection(id)) == nil)
-        let prompt = try #require(rig.model.confirmationPrompt)
-        #expect(prompt.title.hasSuffix("의 탭을 풀까요?"))
-        #expect(prompt.detail == "이 연결이 잡고 있는 브라우저 탭만 풀어요. 연결은 그대로예요.")
-        #expect(prompt.warning == "이 대화가 아직 일하는 중이면 하던 브라우저 작업이 끊겨요")
-        #expect(prompt.confirmTitle == "탭 풀기")
-        #expect(rig.actionCalls.isEmpty)
-        await rig.model.confirmPending()
+        let row = try row(id, in: rig)
+        #expect(row.state.text == "사용 중")
+        #expect(row.button.help == Self.workingHelp)
+        let task = rig.model.send(.releaseConnection(id))
+        #expect(task != nil, "no question first")
+        await task?.value
         #expect(rig.actionCalls == [.releaseConnection(id)])
-        #expect(rig.model.pending == nil, "one question, then it runs")
     }
 
-    @Test func theQuestionNamesTheConnection() async throws {
-        let rig = await Rig(try Fixtures.status("status-ready"))
-        rig.model.send(.releaseConnection("codex-15888-1792319000"))
-        #expect(rig.model.confirmationPrompt?.title == "Codex · dev/new-chat의 탭을 풀까요?")
-    }
-
-    @Test func releasingAnIdleConnectionRunsAtOnce() async throws {
-        let rig = try await problem()
-        let idle = rig.model.send(.releaseConnection("codex-15888-1792319000")) // idle: asleep for 42 minutes
-        #expect(rig.model.pending == nil)
-        await idle?.value
-        #expect(rig.actionCalls.filter { if case .releaseConnection = $0 { true } else { false } }
-                == [.releaseConnection("codex-15888-1792319000")])
-    }
-
-    @Test func anActiveConnectionWhoseIdleTimeIsUnknownStillAsks() async throws {
+    @Test func anActiveConnectionWhoseIdleTimeIsUnknownWarnsOnHoverToo() async throws {
         var status = try Fixtures.status("status-ready")
         status.connections[0].idleSeconds = nil
         let rig = await Rig(status)
-        let row = try #require(rig.model.content?.connections.groups.flatMap(\.rows).first { $0.id == status.connections[0].id })
+        let row = try row(status.connections[0].id, in: rig)
         #expect(row.state.text == "알 수 없음", "it reads unknown, but the contract says active")
-        rig.model.send(.releaseConnection(row.id))
-        #expect(rig.model.confirmationPrompt?.warning == "이 대화가 아직 일하는 중이면 하던 브라우저 작업이 끊겨요")
+        #expect(row.button.help == Self.workingHelp)
     }
 
-    @Test func aConnectionThatIsNotInTheStatusGetsNoQuestion() async throws {
+    @Test func releasingAnIdleConnectionRunsAtOnceAndItsHoverSaysTheAIGoesOn() async throws {
+        var status = try Fixtures.status("status-ready")
+        status.connections[1].state = .idle // the Codex one, asleep for 42 minutes
+        status.connections[1].idleSeconds = 2520
+        let rig = await Rig(status)
+        let id = status.connections[1].id
+        #expect(try row(id, in: rig).button.help == "이 AI가 잡고 있는 브라우저 탭만 풀어요. AI는 화면 도구를 계속 써요")
+        await rig.model.send(.releaseConnection(id))?.value
+        #expect(rig.actionCalls.filter { if case .releaseConnection = $0 { true } else { false } } == [.releaseConnection(id)])
+    }
+
+    @Test func aConnectionThatIsNotInTheStatusIsNotReleased() async throws {
         let rig = await Rig(try Fixtures.status("status-ready"))
-        #expect(rig.model.confirmation(for: .releaseConnection("claude-1-1")) == nil)
+        #expect(rig.model.send(.releaseConnection("claude-1-1")) == nil)
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "그 연결은 이제 목록에 없어요"))
+        #expect(rig.actionCalls.isEmpty)
     }
 
-    @Test func aQuestionAboutAConnectionThatMeanwhileEndedIsWithdrawn() async throws {
-        let rig = await Rig(try Fixtures.status("status-ready"))
-        rig.model.send(.releaseConnection("claude-12345-1792320000"))
-        #expect(rig.model.pending != nil)
-        var later = try Fixtures.status("status-ready")
-        later.connections[0].state = .ended
-        rig.engine.setStatus(later)
-        await rig.model.refresh()
-        #expect(rig.model.pending == nil, "an ended connection needs no question")
-    }
+    // MARK: Restart Codex (F1 case 2): the press is the consent
 
-    // MARK: Clicks that are their own consent
-
-    @Test func theseClicksNeverAsk() async throws {
-        let rig = try await problem()
-        let actions: [CUAAction] = [
-            .tidy("claude-4001-1792300000"), .tidyAll, .releaseSession("019a1b2c-0009", user: true),
-            .releaseSession("019a1b2c-0009", user: false), .copyDiagnosis, .runSetup, .refresh, .openCodex,
-            .retryRelease("claude-4001-1792300000"), .releaseConnection("claude-4001-1792300000"),
-        ]
-        for action in actions { #expect(rig.model.confirmation(for: action) == nil, "\(action)") }
-    }
-
-    // MARK: Restart Codex (F1 case 2)
-
-    @Test func restartingCodexAsksWithTheLineAndCallsRestartOnlyAfterConfirming() async throws {
+    /// The person's "이렇게 한번더 레이아웃 바꾸면서 재확인 받는게 맞는 방법인지 모르겠네": the card already says what a
+    /// restart cuts off, beside the button, so a press restarts Codex without a second question under the card.
+    @Test func theCardsRestartAsksNothingAndSaysBesideItWhatItCutsOff() async throws {
         let rig = try await problem()
         let fix = try #require(rig.model.summary.fix)
         #expect(fix == .restartCodex)
-        #expect(rig.model.send(fix) == nil)
-        let prompt = try #require(rig.model.confirmationPrompt)
-        #expect(prompt.title == "Codex를 다시 켤까요?")
-        #expect(prompt.warning == "하던 Codex 작업이 끊겨요")
-        #expect(prompt.detail == "정상 종료한 뒤 다시 켜요. 강제로 끄지 않아요.")
-        #expect(prompt.confirmTitle == "다시 켜기")
-        #expect(!rig.engine.calls.contains(.restartCodex), "no restart until the answer")
-        await rig.model.confirmPending()
-        #expect(rig.engine.calls.contains(.restartCodex))
+        #expect(rig.model.fixNote == "하던 Codex 작업이 끊겨요")
+        let task = rig.model.send(fix)
+        #expect(task != nil, "it ran at once")
+        await task?.value
         #expect(rig.actionCalls == [.restartCodex])
-    }
-
-    @Test func cancellingTheRestartLeavesCodexAlone() async throws {
-        let rig = try await problem()
-        rig.model.send(.restartCodex)
-        rig.model.cancelPending()
-        #expect(!rig.engine.calls.contains(.restartCodex))
     }
 
     @Test func aCancelledQuitSaysSoAndDoesNothingMore() async throws {
         let rig = try await problem()
         rig.engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "quit_cancelled") }
-        rig.model.send(.restartCodex)
-        let outcome = await rig.model.confirmPending()
-        #expect(outcome == ActionOutcome(kind: .info, message: "Codex가 종료를 취소했어요"))
-        #expect(rig.model.banner?.outcome.message == "Codex가 종료를 취소했어요")
+        await rig.model.send(.restartCodex)?.value
+        #expect(rig.model.banner?.outcome == ActionOutcome(kind: .info, message: "Codex가 종료를 취소했어요"))
         #expect(rig.model.banner?.outcome.followUp == nil)
         #expect(rig.actionCalls == [.restartCodex], "nothing else happened")
         #expect(rig.opener.openedPaths.isEmpty)
@@ -154,8 +115,7 @@ struct ConfirmationTests {
     @Test func aFailedRelaunchOffersAButtonAndTheButtonOpensCodexOnlyWhenPressed() async throws {
         let rig = try await problem()
         rig.engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "relaunch_failed") }
-        rig.model.send(.restartCodex)
-        await rig.model.confirmPending()
+        await rig.model.send(.restartCodex)?.value
         let banner = try #require(rig.model.banner)
         #expect(banner.outcome.message == "Codex를 껐지만 다시 열지 못했어요")
         let followUp = try #require(banner.outcome.followUp)
@@ -164,7 +124,37 @@ struct ConfirmationTests {
         // The button is a click of its own: no question, and it opens the app the status names.
         await rig.model.send(followUp.action)?.value
         #expect(rig.opener.openedPaths == ["/Applications/ChatGPT.app"])
-        #expect(rig.model.pending == nil)
+    }
+
+    // MARK: The restart the card offers while nothing is broken
+
+    /// Codex's first start after its own update went without the relay; its host is ready and Claude works through it.
+    private func relayMissing() async throws -> Rig {
+        var status = try Fixtures.status("status-ready")
+        status.setup.relay = "inactive"
+        status.host.relayReason = "plugin_entry"
+        status.host.restartAddsRelay = true
+        return await Rig(status)
+    }
+
+    @Test func theRestartTheCardOffersSaysClaudesCUAGoesDownTooAndRunsAtOnce() async throws {
+        let rig = try await relayMissing()
+        #expect(rig.model.summary.problem == nil && rig.model.summary.icon == .ready)
+        let fix = try #require(rig.model.summary.fix)
+        #expect(fix == .restartCodex)
+        #expect(rig.model.fixNote == "하던 Codex 작업과 Claude 대화의 CUA 작업이 끊겨요")
+        await rig.model.send(fix)?.value
+        #expect(rig.actionCalls == [.restartCodex])
+    }
+
+    @Test func theOfferedRestartIsGoneOnceARestartWouldBringNothing() async throws {
+        let rig = try await relayMissing()
+        #expect(rig.model.summary.fix == .restartCodex)
+        // Codex was restarted meanwhile, by hand, and has the relay now.
+        rig.engine.setStatus(try Fixtures.status("status-ready"))
+        await rig.model.refresh()
+        #expect(rig.model.summary.fix == nil)
+        #expect(rig.model.fixNote == nil)
     }
 
     // MARK: A quit Codex took but had not finished (S10)
@@ -173,8 +163,7 @@ struct ConfirmationTests {
     private func quitPending() async throws -> Rig {
         let rig = try await problem()
         rig.engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "quit_pending") }
-        rig.model.send(.restartCodex)
-        await rig.model.confirmPending()
+        await rig.model.send(.restartCodex)?.value
         return rig
     }
 
@@ -273,40 +262,5 @@ struct ConfirmationTests {
         #expect(banner.outcome.message == "Codex를 껐지만 다시 열지 못했어요")
         #expect(banner.outcome.followUp == ActionOutcome.FollowUp(title: "Codex 열기", action: .openCodex))
         #expect(rig.opener.openedPaths.count == 1)
-    }
-
-    // MARK: One question at a time
-
-    @Test func aNewPressReplacesAQuestionThatIsStillWaiting() async throws {
-        let rig = try await problem()
-        rig.model.send(.restartCodex)
-        let first = try #require(rig.model.pending)
-        rig.model.send(.releaseConnection("claude-12345-1792320000")) // active: it asks too
-        let second = try #require(rig.model.pending)
-        #expect(first.id != second.id)
-        #expect(second.action == .releaseConnection("claude-12345-1792320000"))
-        // A press that needs no question withdraws the waiting one and runs.
-        let task = rig.model.send(.copyDiagnosis)
-        #expect(rig.model.pending == nil)
-        await task?.value
-        #expect(stopCalls(rig).isEmpty)
-    }
-
-    @Test func closingThePopoverWithdrawsTheQuestion() async throws {
-        let rig = try await problem()
-        rig.model.setPopoverOpen(true)
-        rig.model.send(.restartCodex)
-        #expect(rig.model.pending != nil)
-        rig.model.setPopoverOpen(false)
-        #expect(rig.model.pending == nil)
-        #expect(stopCalls(rig).isEmpty)
-    }
-
-    @Test func anUnreadableStatusWithdrawsTheQuestion() async throws {
-        let rig = try await problem()
-        rig.model.send(.restartCodex)
-        rig.engine.setStatusError(.engineMissing)
-        await rig.model.refresh()
-        #expect(rig.model.pending == nil, "restarting now would be a guess")
     }
 }

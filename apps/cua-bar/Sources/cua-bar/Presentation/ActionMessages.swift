@@ -118,6 +118,7 @@ enum ActionMessages {
         case "protected": "앱이 건드리지 않는 프로세스예요"
         case "unverified": "프로세스가 바뀌었거나 확인되지 않아 건드리지 않았어요"
         case "permission_denied": "종료할 권한이 없어요"
+        case "unwritable": "기록 폴더에 쓸 수 없어요"
         default: unknownReason
         }
     }
@@ -228,6 +229,14 @@ enum ActionMessages {
     }
 
     static let restarted = "Codex를 다시 켰어요"
+
+    // MARK: Settings
+
+    /// The switch itself shows what was set, so only a failure is said.
+    static func keepErrorText(_ result: SettingsResult) -> ActionOutcome {
+        if result.ok { return ActionOutcome(kind: .success, message: "") }
+        return ActionOutcome(kind: .failure, message: "오류 문구 설정을 바꾸지 못했어요 — \(reason(result.reason))")
+    }
 
     static let relaunchFailed = ActionOutcome(
         kind: .failure, message: "Codex를 껐지만 다시 열지 못했어요", followUp: .init(title: "Codex 열기", action: .openCodex))

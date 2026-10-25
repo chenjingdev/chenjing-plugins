@@ -54,7 +54,6 @@ struct TidyTests {
         }
         await rig.model.send(.tidy("codex-9-9"))?.value
         #expect(rig.actionCalls == [.stopConnection("codex-9-9", force: false), .stopConnection("codex-9-9", force: true)])
-        #expect(rig.model.pending == nil)
         #expect(rig.model.placedResults[.connection("codex-9-9")] == ActionOutcome(kind: .success, message: "정리했어요 — 제때 안 꺼져서 강제로 껐어요"))
     }
 
@@ -155,7 +154,6 @@ struct TidyTests {
             .stopConnection("cmux-13440-1", force: false),
         ], "newest ended first, the Claude session without --user, the orphan last; not the Codex chat, not the live cmux-cua")
         #expect(rig.model.placedResults[.tidyAll] == ActionOutcome(kind: .success, message: "4개 정리했어요"))
-        #expect(rig.model.pending == nil, "it asked nothing")
     }
 
     @Test func oneThatFailsDoesNotKeepTheRestFromBeingTried() async throws {

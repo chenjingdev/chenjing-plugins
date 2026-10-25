@@ -91,18 +91,16 @@ struct PopoverSnapshotTests {
         }
     }
 
-    /// A pending question under the status card (A2-popover-confirm.png): Codex without its host asks before a restart.
-    @Test func aPendingRestartConfirmationDraws() async throws {
+    /// The card's 다시 켜기 with what it cuts off beside it (A2-popover-restart.png): it is said before the press,
+    /// so the press asks nothing.
+    @Test func theCardsRestartSaysWhatItCutsOffBesideIt() async throws {
         let model = try await loadedModel("status-problem")
-        model.send(.restartCodex)
-        #expect(model.confirmationPrompt?.title == "Codex를 다시 켤까요?")
-        let withQuestion = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark))
+        #expect(model.fixNote == "하던 Codex 작업이 끊겨요")
+        let bitmap = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark))
         #expect(NSApplication.shared.windows.allSatisfy { !$0.isVisible })
-        model.cancelPending()
-        let without = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark))
-        #expect(withQuestion.pixelsHigh > without.pixelsHigh, "the question takes room of its own")
+        #expect(Snapshot.inkRatio(bitmap) > 0.15, "the render looks blank")
         if let directory = environment["CUABAR_SNAPSHOT_DIR"] {
-            try Snapshot.write(withQuestion, named: "A2-popover-confirm", to: directory)
+            try Snapshot.write(bitmap, named: "A2-popover-restart", to: directory)
         }
     }
 
@@ -119,24 +117,14 @@ struct PopoverSnapshotTests {
         idle.connections[1].state = .idle
         idle.connections[1].idleSeconds = 2000
 
-        // A refused release, asked about once more, then refused again: the row says so and keeps 탭 풀기.
+        // A refused release: the row says so and keeps 탭 풀기.
         var rig = await Rig(idle)
-        rig.engine.configure { $0.releaseConnectionQueue = [refused, refused] }
-        rig.model.setPopoverOpen(true) // a question appears only in an open popover
+        rig.engine.configure { $0.releaseConnectionQueue = [refused] }
         await rig.model.send(.releaseConnection(live))?.value
-        try draw("state-retry-question", rig.model)
-        await rig.model.confirmPending()
         try draw("state-refused-row", rig.model)
 
-        // Releasing the tabs of a working connection asks right under its line; restarting Codex asks under the card.
-        rig = await Rig(try Fixtures.status("status-problem"))
-        rig.model.send(.releaseConnection(live))
-        try draw("state-release-confirm", rig.model)
-        rig.model.send(.restartCodex)
-        try draw("state-restart-confirm", rig.model)
-        rig.model.cancelPending()
-
         // A line's button answers on the line, in one line.
+        rig = await Rig(try Fixtures.status("status-problem"))
         rig.engine.configure { $0.releaseConnection = ReleaseResult(ok: false, released: false, reason: "relay_unavailable", scopeCount: 0) }
         await rig.model.send(.releaseConnection("codex-15888-1792319000"))?.value
         #expect(rig.model.banner == nil)
@@ -144,8 +132,7 @@ struct PopoverSnapshotTests {
 
         // A restart whose relaunch failed: the message has its own button.
         rig.engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "relaunch_failed") }
-        rig.model.send(.restartCodex)
-        await rig.model.confirmPending()
+        await rig.model.send(.restartCodex)?.value
         try draw("state-relaunch-failed", rig.model)
 
         // Ended connections nobody can release: each line has 정리, and the head has 모두 정리.
@@ -180,12 +167,29 @@ struct PopoverSnapshotTests {
         ]
         rig = await Rig(status)
         try draw("state-leftover-leases", rig.model)
+
+        // With 오류 문구 남기기 on, a failed call's error text is under its row, in three lines at most.
+        status = try Fixtures.status("status-problem")
+        status.settings.errorText = true
+        status.activity[1].errorText = "Computer Use cannot act while the Mac is locked. Unlock it, then call again. "
+            + String(repeating: "The rest of the answer is long enough to need a fourth line. ", count: 4)
+        rig = await Rig(status)
+        rig.model.selectedTab = .activity
+        try draw("state-error-text", rig.model)
+
+        // A Codex that started without the relay: the card offers 다시 켜기, with what it cuts off beside it.
+        status = try Fixtures.status("status-ready")
+        status.setup.relay = "inactive"
+        status.host.relayReason = "plugin_entry"
+        status.host.restartAddsRelay = true
+        rig = await Rig(status)
+        #expect(rig.model.summary.fixLabel == StatusEvaluator.restartLabel)
+        #expect(rig.model.fixNote == StatusEvaluator.restartCutsOffWithClaude)
+        try draw("state-restart-offered", rig.model)
     }
 
-    /// The list drawn tall enough to show all of it: a working connection's question is right under its
-    /// line, and the answer to a line's button is one line on it.
-    @Test func aQuestionAndAnAnswerAreDrawnOnTheirOwnLines() async throws {
-        let live = "claude-12345-1792320000"
+    /// The list drawn tall enough to show all of it: the answer to a line's button is one line on it.
+    @Test func theAnswersAreDrawnOnTheirOwnLines() async throws {
         let rig = await Rig(try Fixtures.status("status-problem"))
         func tallList() throws -> some View {
             let connections = try #require(rig.model.content).connections
@@ -201,11 +205,6 @@ struct PopoverSnapshotTests {
             return bitmap
         }
         let plain = try draw("state-line-plain-tall")
-        rig.model.send(.releaseConnection(live))
-        let asked = try draw("state-line-question-tall")
-        #expect(Snapshot.inkRatio(asked) > Snapshot.inkRatio(plain), "the question is drawn in the list, under its line")
-        rig.model.cancelPending()
-
         rig.engine.configure { $0.releaseConnection = ReleaseResult(ok: false, released: false, reason: "relay_unavailable", scopeCount: 0) }
         await rig.model.send(.releaseConnection("codex-15888-1792319000"))?.value
         await rig.model.send(.tidy("claude-4001-1792300000"))?.value

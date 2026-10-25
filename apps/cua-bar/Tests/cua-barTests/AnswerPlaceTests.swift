@@ -4,10 +4,10 @@ import SwiftUI
 import Testing
 @testable import cua_bar
 
-/// Ask and answer next to the button that was pressed (the person's "위아래로 클릭을 왔다갔다 시키는게 ux적으로
-/// 맞는지 잘 모르겠네"): a question about a line is asked right under that line and not under the status
-/// card; the answer to a line's button is one line on it; 모두 정리 answers under the head of 손볼 것; 진단
-/// 복사 answers at the bottom of 기록. Only when that place is gone does the banner under the card say it.
+/// Answer next to the button that was pressed (the person's "위아래로 클릭을 왔다갔다 시키는게 ux적으로 맞는지
+/// 잘 모르겠네"): a press asks nothing, and the answer to a line's button is one line on it; 모두 정리 answers
+/// under the head of 손볼 것; 진단 복사 answers at the bottom of 기록. Only when that place is gone does the
+/// banner under the card say it.
 @MainActor
 struct AnswerPlaceTests {
     private static let active = "claude-12345-1792320000"
@@ -23,54 +23,24 @@ struct AnswerPlaceTests {
             startedAt: Fixtures.now.addingTimeInterval(-startedAgo), sessionID: "019a-\(id)", canRelease: true, canStop: true)
     }
 
-    // MARK: Questions
+    // MARK: Presses
 
-    @Test func aWorkingConnectionsQuestionIsAskedOnItsLineAndNotUnderTheCard() async throws {
+    @Test func aWorkingConnectionsReleaseRunsOnThePressAndAnswersOnItsLine() async throws {
         let rig = await Rig(try Fixtures.status("status-ready")) // both connections are active
-        #expect(rig.model.send(.releaseConnection(Self.active)) == nil, "it asks")
-        #expect(rig.model.cardConfirmationPrompt == nil, "nothing under the status card")
-        let prompt = try #require(rig.model.confirmationPrompt(forConnection: Self.active))
-        #expect(prompt.title == "Claude · dev/computer-use의 탭을 풀까요?")
-        #expect(prompt.confirmTitle == "탭 풀기")
-        #expect(rig.model.confirmationPrompt(forConnection: "codex-15888-1792319000") == nil, "only under its own line")
-        rig.model.cancelPending()
-        #expect(rig.model.confirmationPrompt(forConnection: Self.active) == nil)
+        await rig.model.send(.releaseConnection(Self.active))?.value
+        #expect(rig.actionCalls == [.releaseConnection(Self.active)])
+        #expect(rig.model.placedResults[.connection(Self.active)] == ActionOutcome(kind: .success, message: "탭을 풀었어요"))
+        #expect(rig.model.banner == nil, "not under the card")
     }
 
-    @Test func theCardsOwnQuestionStaysUnderTheCardAndNotOnAnyLine() async throws {
-        let rig = await Rig(try Fixtures.status("status-problem")) // Codex runs without its host: 다시 켜기
-        #expect(rig.model.send(.restartCodex) == nil)
-        #expect(rig.model.cardConfirmationPrompt?.title == "Codex를 다시 켤까요?")
-        for id in ["claude-12345-1792320000", "codex-15888-1792319000", "claude-4001-1792300000"] {
-            #expect(rig.model.confirmationPrompt(forConnection: id) == nil, "\(id)")
-        }
-    }
-
-    @Test func theQuestionAboutARefusedReleaseIsAskedOnItsLineToo() async throws {
+    @Test func aRefusedReleaseIsSaidOnItsLineAndNotUnderTheCard() async throws {
         let refused = ReleaseResult(ok: false, released: false, reason: "request_in_flight", scopeCount: 0)
-        var status = try Fixtures.status("status-ready")
-        status.connections[0].state = .idle // so the first press asks nothing and the engine refuses it
-        status.connections[0].idleSeconds = 2000
-        let rig = await Rig(status)
+        let rig = await Rig(try Fixtures.status("status-ready"))
         rig.engine.configure { $0.releaseConnectionQueue = [refused] }
         rig.model.setPopoverOpen(true)
         await rig.model.send(.releaseConnection(Self.active))?.value
-        #expect(rig.model.pending?.kind == .retryRelease)
-        #expect(rig.model.cardConfirmationPrompt == nil)
-        #expect(rig.model.confirmationPrompt(forConnection: Self.active)?.title == "AI가 하던 조작이 아직 안 끝났어요. 한 번 더 풀어 볼까요?")
-    }
-
-    @Test func aQuestionOnALineGoesWithTheTabItWasAskedOn() async throws {
-        let rig = await Rig(try Fixtures.status("status-ready"))
-        rig.model.send(.releaseConnection(Self.active))
-        #expect(rig.model.pending != nil)
-        rig.model.selectedTab = .activity // the question is on a line of the list, which is not shown now
-        #expect(rig.model.pending == nil)
-        // The card's own question is not about a line: it stays when the tab changes.
-        let problem = await Rig(try Fixtures.status("status-problem"))
-        problem.model.send(.restartCodex)
-        problem.model.selectedTab = .activity
-        #expect(problem.model.pending?.action == .restartCodex)
+        #expect(rig.model.refusedReleaseIDs == [Self.active], "its line says 작업이 끝나지 않아 못 풀었어요")
+        #expect(rig.model.banner == nil)
     }
 
     // MARK: Answers of a line
@@ -263,15 +233,14 @@ struct AnswerPlaceTests {
     @Test func theCardsOwnButtonsStillAnswerInTheBanner() async throws {
         let rig = await Rig(try Fixtures.status("status-problem"))
         rig.engine.configure { $0.restartCodex = RestartResult(ok: false, reason: "quit_cancelled") }
-        rig.model.send(.restartCodex)
-        await rig.model.confirmPending()
+        await rig.model.send(.restartCodex)?.value
         #expect(rig.model.banner?.outcome.message == "Codex가 종료를 취소했어요")
         #expect(rig.model.placedResults.isEmpty)
     }
 
     // MARK: On screen
 
-    @Test func aQuestionOnALineDoesNotGrowThePopoverAndTheCardsQuestionDoes() async throws {
+    @Test func theAnswerOnALineDoesNotGrowThePopover() async throws {
         let model = CUABarViewModel(
             engine: FakeEngineClient(status: try Fixtures.status("status-problem")), appVersion: "0.7.0",
             clock: { Fixtures.now }, calendar: Fixtures.utc, sleep: ManualSleeper().sleep)
@@ -279,14 +248,11 @@ struct AnswerPlaceTests {
         await model.waitForBackgroundWork()
         func height() -> CGFloat { fittingSize(PopoverView(model: model, quit: {})).height }
         let plain = height()
-        // A working connection's question is inside the list's own room, under its line.
-        model.send(.releaseConnection(Self.active))
-        #expect(model.confirmationPrompt(forConnection: Self.active) != nil)
+        // A working connection's 탭 풀기 asks nothing, and its answer is inside the list's own room, on its line.
+        await model.send(.releaseConnection(Self.active))?.value
+        #expect(model.placedResults[.connection(Self.active)] != nil)
+        #expect(model.banner == nil)
         #expect(abs(height() - plain) < 1, "under the card there is nothing new")
-        model.cancelPending()
-        // The card's question comes from the card's button and is under the card.
-        model.send(.restartCodex)
-        #expect(height() > plain + 40, "the restart question is under the card")
     }
 
     @Test func theDiagnosisAnswerAtTheBottomOfActivityDoesNotPushTheButtonsDown() async throws {

@@ -60,6 +60,13 @@ struct RestartResult: Equatable, Sendable {
     var reason: String?
 }
 
+/// `settings --error-text on|off`: what the engine now keeps (`unwritable` when its folder is not this user's).
+struct SettingsResult: Equatable, Sendable {
+    var ok = false
+    var reason: String?
+    var errorText: Bool?
+}
+
 extension ReleaseResult: Decodable {
     private enum CodingKeys: String, CodingKey { case ok, released, reason, scopeCount = "scope_count" }
     init(from decoder: Decoder) throws {
@@ -142,5 +149,15 @@ extension RestartResult: Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ok = c.lenientBool(.ok) ?? false
         reason = c.lenientString(.reason)
+    }
+}
+
+extension SettingsResult: Decodable {
+    private enum CodingKeys: String, CodingKey { case ok, reason, errorText = "error_text" }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ok = c.lenientBool(.ok) ?? false
+        reason = c.lenientString(.reason)
+        errorText = c.lenientBool(.errorText)
     }
 }

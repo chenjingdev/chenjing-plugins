@@ -2,62 +2,44 @@ import SwiftUI
 
 /// 연결: one list. Who uses the screen, then 손볼 것 with 모두 정리 above it, then the connections
 /// whose AI is alive, the other tools, and the folded guidance for tabs that stay blocked. Every row
-/// has the one button its state calls for; the same job is never pressed in two places. A question
-/// about a line is asked right under that line, and the answer to a line's button is one line on it.
+/// has the one button its state calls for; the same job is never pressed in two places. A press asks
+/// nothing, and the answer to a line's button is one line on it.
 struct ConnectionsTabView: View {
     var content: ConnectionsContent
     var failedSessionIDs: Set<String>
     @ObservedObject var model: CUABarViewModel
 
-    /// The question asked on a line, so the list can scroll to it: under a line near the bottom it
-    /// would be out of sight, and the press would seem to have done nothing.
-    private static let questionID = "question-on-a-line"
-
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 6) {
-                    ScreenLineView(screen: content.screen)
+        ScrollView {
+            VStack(spacing: 6) {
+                ScreenLineView(screen: content.screen)
 
-                    if let tidy = content.tidy {
-                        TidySectionView(tidy: tidy, failedSessionIDs: failedSessionIDs, model: model)
-                    }
-
-                    ForEach(content.groups) { group in
-                        SectionHeader(text: group.title)
-                        ForEach(group.rows) { row in
-                            ConnectionRowView(
-                                row: row, waiting: model.isWaiting(onConnection: row.id),
-                                waitingHelp: model.cleanupHelp(onConnection: row.id),
-                                refused: model.refusedReleaseIDs.contains(row.id),
-                                result: model.placedResults[.connection(row.id)]) { model.send($0) }
-                            if let prompt = model.confirmationPrompt(forConnection: row.id) {
-                                ConfirmationView(prompt: prompt, confirm: { model.confirm() }, cancel: { model.cancelPending() })
-                                    .id(Self.questionID)
-                                    .transition(.opacity)
-                            }
-                        }
-                    }
-
-                    if let empty = content.emptyText { EmptyLine(text: empty) }
-
-                    ForEach(content.tools) { tool in OtherToolView(tool: tool) }
-
-                    GuidanceView(
-                        guidance: content.guidance,
-                        isOpen: Binding(
-                            get: { model.guidanceOpenByUser ?? (content.guidance.needsAttention || !failedSessionIDs.isEmpty) },
-                            set: { model.guidanceOpenByUser = $0 }))
+                if let tidy = content.tidy {
+                    TidySectionView(tidy: tidy, failedSessionIDs: failedSessionIDs, model: model)
                 }
-                .padding(.vertical, 2)
-            }
-            .onChange(of: model.pending?.id) { _, id in
-                guard id != nil, let line = model.pending?.action.connectionID, model.confirmationPrompt(forConnection: line) != nil else { return }
-                // After this update, when the question is in the list.
-                Task { @MainActor in
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(Self.questionID) }
+
+                ForEach(content.groups) { group in
+                    SectionHeader(text: group.title)
+                    ForEach(group.rows) { row in
+                        ConnectionRowView(
+                            row: row, waiting: model.isWaiting(onConnection: row.id),
+                            waitingHelp: model.cleanupHelp(onConnection: row.id),
+                            refused: model.refusedReleaseIDs.contains(row.id),
+                            result: model.placedResults[.connection(row.id)]) { model.send($0) }
+                    }
                 }
+
+                if let empty = content.emptyText { EmptyLine(text: empty) }
+
+                ForEach(content.tools) { tool in OtherToolView(tool: tool) }
+
+                GuidanceView(
+                    guidance: content.guidance,
+                    isOpen: Binding(
+                        get: { model.guidanceOpenByUser ?? (content.guidance.needsAttention || !failedSessionIDs.isEmpty) },
+                        set: { model.guidanceOpenByUser = $0 }))
             }
+            .padding(.vertical, 2)
         }
     }
 }

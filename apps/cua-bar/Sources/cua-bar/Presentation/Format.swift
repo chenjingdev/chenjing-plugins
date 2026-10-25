@@ -118,6 +118,16 @@ enum Format {
         }
     }
 
+    /// Why a call failed, from the engine's word. A plain `error`, an older line's nothing and a word the app does not
+    /// know say no more than the row's 실패 does already.
+    static func failure(_ word: String?) -> String? {
+        switch word {
+        case "timeout"?: "시간 초과"
+        case "screen_locked"?: "화면 잠김"
+        default: nil
+        }
+    }
+
     /// `87ms`, `1.2초`, `12초`, `1분 5초`.
     static func milliseconds(_ ms: Int?) -> String {
         guard let ms else { return unknown }

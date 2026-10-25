@@ -198,11 +198,8 @@ struct CmuxConnectionTests {
     @Test func tidyStopsTheOrphanNormallyWithoutAskingFirstAndSaysPlainly() async throws {
         let rig = await Rig(try cmuxFixture())
         let button = try #require(try orphans(rig.model.content).first?.button)
-        #expect(rig.model.confirmation(for: button.action) == nil)
         let task = rig.model.send(button.action)
         #expect(task != nil, "it ran at once")
-        #expect(rig.model.pending == nil)
-        #expect(rig.model.confirmationPrompt == nil)
         await task?.value
         #expect(stopCalls(rig) == [.stopConnection(Self.orphan, force: false)], "that one connection, normal, nothing else")
         // No release step exists for cmux-cua: the engine says `released: false` with no reason, and it is a plain success.
@@ -220,7 +217,6 @@ struct CmuxConnectionTests {
         }
         await rig.model.send(.tidy(Self.orphan))?.value
         #expect(stopCalls(rig) == [.stopConnection(Self.orphan, force: false), .stopConnection(Self.orphan, force: true)])
-        #expect(rig.model.pending == nil, "no question, whatever it came to")
         #expect(rig.model.placedResults[.connection(Self.orphan)] == ActionOutcome(kind: .success, message: "정리했어요 — 제때 안 꺼져서 강제로 껐어요"))
     }
 

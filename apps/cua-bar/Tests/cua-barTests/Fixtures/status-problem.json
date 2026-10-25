@@ -42,7 +42,7 @@
   "screen": {"active_connection_id": null, "last_call_at": "2026-10-18T11:59:30Z"},
   "activity": [
     {"at": "2026-10-18T11:59:30Z", "connection_id": "claude-12345-1792320000", "agent": "claude", "tool": "js", "ok": true, "ms": 1234},
-    {"at": "2026-10-18T11:58:12Z", "connection_id": "claude-12345-1792320000", "agent": "claude", "tool": "click", "ok": false, "ms": 87},
+    {"at": "2026-10-18T11:58:12Z", "connection_id": "claude-12345-1792320000", "agent": "claude", "tool": "click", "ok": false, "ms": 87, "error": "screen_locked"},
     {"at": "2026-10-18T09:02:00Z", "connection_id": "claude-4001-1792300000", "agent": "claude", "tool": "get_window_state", "ok": true, "ms": 540}
   ]
 }

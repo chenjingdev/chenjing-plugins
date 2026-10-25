@@ -2,16 +2,15 @@ import Foundation
 
 /// The fixed lines of the remove action, called 앱 지우기. None carries text a command printed.
 enum RemovalMessages {
-    /// The button at the bottom of 기록, and the answer that does it.
-    static let buttonTitle = "앱 지우기…"
-    static let confirmTitle = "앱 지우기"
-    /// Asked once, inline, before anything is touched (R3, R15).
-    static let question = "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지워요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜져요. 열린 Claude 대화의 CUA도 끊겨요."
+    /// The button at the bottom of 기록. It asks nothing: what it does is on hover.
+    static let buttonTitle = "앱 지우기"
+    /// What 앱 지우기 does, on hover before the press (R3, R15).
+    static let help = "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지운 뒤 앱이 꺼져요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜지고, 열린 Claude 대화의 CUA도 끊겨요. Codex가 연결과 함께 켜져 있으면 아무것도 바꾸지 않아요."
     static let working = "되돌리는 중…"
     static let trashHint = "이 앱 파일은 이제 휴지통으로 옮겨도 돼요."
     /// Claude Code could not take the app's MCP server away (no `claude` command, it refused, or its file cannot be read).
     static let mcpStays = " Claude Code의 CUA 연결은 `claude mcp remove -s user cuabar`로 직접 지워 주세요."
-    /// What was taken out of Claude Code, said when the rest did not go as the question promised.
+    /// What was taken out of Claude Code, said when the rest did not go as the help promised.
     static let claudeRemoved = " Claude Code에 깐 CUA 연결과 스킬은 지웠어요."
     static let done = "연결 설정과 중계기를 되돌렸어요. " + trashHint
     static let nothingToUndo = "되돌릴 연결 설정이 없었어요. " + trashHint
@@ -34,19 +33,19 @@ enum RemovalMessages {
         switch phase {
         case .working:
             return StatusSummary(
-                icon: .working, stateLabel: confirmTitle, headline: working, nextStep: "끝나면 앱이 꺼져요",
+                icon: .working, stateLabel: buttonTitle, headline: working, nextStep: "끝나면 앱이 꺼져요",
                 tooltip: "CUA · 앱 지우는 중", accessibilityLabel: IconState.working.accessibilityDescription)
         case .finished:
             return StatusSummary(
-                icon: .ready, stateLabel: confirmTitle, headline: "되돌렸어요", nextStep: "곧 앱이 꺼져요",
+                icon: .ready, stateLabel: buttonTitle, headline: "되돌렸어요", nextStep: "곧 앱이 꺼져요",
                 tooltip: "CUA · 되돌렸어요", accessibilityLabel: IconState.ready.accessibilityDescription)
-        case .idle, .confirming, .refused:
+        case .idle, .refused:
             return nil
         }
     }
 }
 
-/// 앱 지우기 at the bottom of 기록 (R3, once called 제거): asks once, then in this order: looks for a running
+/// 앱 지우기 at the bottom of 기록 (R3, once called 제거): runs at once, in this order: looks for a running
 /// Codex host (which keeps everything as it is), takes away the MCP server and the skill the app put into
 /// Claude Code (only its own), runs `codex-cua uninstall` (the bound engine copy's `setup.sh uninstall` when the
 /// command is missing or not ours), takes the login item away, shows the result and quits. The remover
@@ -61,8 +60,6 @@ enum RemovalMessages {
 final class RemovalFlow: ObservableObject {
     enum Phase: Equatable {
         case idle
-        /// The question is on screen with its two buttons.
-        case confirming
         case working
         /// Undone; the text is the result, and the app quits in a moment.
         case finished(String)
@@ -78,7 +75,7 @@ final class RemovalFlow: ObservableObject {
     var isRunning: Bool {
         switch phase {
         case .working, .finished: true
-        case .idle, .confirming, .refused: false
+        case .idle, .refused: false
         }
     }
 
@@ -119,25 +116,20 @@ final class RemovalFlow: ObservableObject {
         self.showing = showing
     }
 
-    /// 앱 지우기 was pressed: ask.
-    func ask() {
-        switch phase {
-        case .idle, .refused: phase = .confirming
-        case .confirming, .working, .finished: break
-        }
-    }
-
-    /// 취소, or closing a refusal.
+    /// Closing a refusal.
     func dismiss() {
         switch phase {
-        case .confirming, .refused: phase = .idle
+        case .refused: phase = .idle
         case .idle, .working, .finished: break
         }
     }
 
-    /// 앱 지우기 was confirmed.
-    func confirm() async {
-        guard phase == .confirming else { return }
+    /// 앱 지우기 was pressed: it runs at once. A press while it already runs is nothing.
+    func remove() async {
+        switch phase {
+        case .idle, .refused: break
+        case .working, .finished: return
+        }
         if isSetupRunning() {
             phase = .refused(RemovalMessages.setupRunning)
             return

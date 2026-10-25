@@ -12,7 +12,7 @@ from engine_support import (ABSENT, APP_VERSION, ENGINE_PID, NOW, SESSION_A, SES
                             EngineCase, State, at)
 
 TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'engine', 'codex', 'host', 'setup', 'connections', 'leases',
-            'other_tools', 'screen', 'activity']
+            'other_tools', 'screen', 'settings', 'activity']
 CONNECTION_KEYS = ['id', 'agent', 'state', 'pid', 'owner_pid', 'owner_alive', 'cwd', 'started_at', 'memory_bytes',
                    'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop', 'holds']
 CMUX_CLIENT_KEYS = ['id', 'pid', 'mcp_pid', 'agent', 'cwd', 'started_at', 'can_stop']
@@ -50,6 +50,7 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})
         self.assertEqual(status['other_tools'], [])
         self.assertEqual(status['screen'], {'active_connection_id': None, 'last_call_at': None})
+        self.assertEqual(status['settings'], {'error_text': False})
         self.assertEqual(status['activity'], [])
         json.dumps(status)
 
@@ -1248,8 +1249,33 @@ class ActivityAndScreenTests(StatusCase):
             ('turn_ended', 'claude-4242-%d' % (NOW-900), 'claude', True, 22),
             ('js', 'claude-4242-%d' % (NOW-900), 'claude', True, 11)])
         self.assertEqual(activity[0]['at'], iso(at(70)))
-        self.assertEqual(sorted(activity[0]), ['agent', 'at', 'connection_id', 'cwd', 'ms', 'ok', 'tool'])
+        self.assertEqual(sorted(activity[0]), ['agent', 'at', 'connection_id', 'cwd', 'error', 'error_text', 'ms', 'ok',
+                                               'tool'])
         self.assertEqual(activity[0]['cwd'], None, 'an older writer\'s line names no folder')
+        self.assertEqual([item['error'] for item in activity], [None]*6, 'nor why a call failed')
+        self.assertEqual([item['error_text'] for item in activity], [None]*6)
+
+    def test_a_failed_call_s_line_says_why(self):
+        self.start_world()
+        self.state.activity([State.line('bridge-4242-%d' % (NOW-900), 30, SESSION_A, ok=False, error='screen_locked'),
+                             State.line('bridge-4242-%d' % (NOW-900), 20, SESSION_A, ok=False, error='timeout')])
+        self.assertEqual([item['error'] for item in self.status()['activity']], ['timeout', 'screen_locked'])
+
+    def test_a_failed_call_s_error_text_shows_only_while_the_person_asks_for_it(self):
+        self.start_world()
+        writer = 'bridge-4242-%d' % (NOW-900)
+        self.state.activity([State.line(writer, 30, SESSION_A, ok=False, error='error', error_text='ReferenceError: y'),
+                             State.line(writer, 20, SESSION_A, ok=False, error='timeout')])
+        status = self.status()
+        self.assertEqual(status['settings'], {'error_text': False})
+        self.assertEqual([item['error_text'] for item in status['activity']], [None, None])
+        self.state.settings({'schema_version': 1, 'error_text': True})
+        status = self.status()
+        self.assertEqual(status['settings'], {'error_text': True})
+        self.assertEqual([item['error_text'] for item in status['activity']], [None, 'ReferenceError: y'])
+        # Turned off again, what was kept is not shown either.
+        self.state.settings({'schema_version': 1, 'error_text': False})
+        self.assertEqual([item['error_text'] for item in self.status()['activity']], [None, None])
 
     def test_a_line_names_the_folder_its_writer_worked_in_after_the_connection_is_gone(self):
         """Most of the log is of conversations that have ended and been tidied away: their records are gone, and the

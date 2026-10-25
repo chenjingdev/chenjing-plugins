@@ -3,6 +3,7 @@
 Every helper may fail; the caller treats a failure as "no records". The CUA connection itself never fails because a
 record could not be written. Nothing written through here may carry tool arguments or results, js code or titles,
 URLs, page text, screenshots, environment values or tokens: callers pass identifiers, names, flags and times only.
+The one exception is the error text of a failed call, and only while the person asked for it (keeps_error_text).
 """
 import datetime
 import fcntl
@@ -19,6 +20,13 @@ ACTIVITY_FILE = 'activity.jsonl'
 ACTIVITY_LOCK = 'activity.lock'
 ACTIVITY_MAX_BYTES = 256*1024
 ACTIVITY_KEEP_LINES = 200
+# The words a failed call's activity line may give for why it failed (host_mcp.failure and the relay make them).
+FAILURES = ('timeout', 'screen_locked', 'error')
+# The engine's settings in the state directory (`codex-cua settings`); the relay reads the same file.
+SETTINGS_FILE = 'settings.json'
+SETTINGS_MAX_BYTES = 4096
+# How much of a failed call's error text its line keeps, in characters.
+ERROR_TEXT_LIMIT = 500
 
 
 def utc_now():
@@ -67,6 +75,37 @@ def write_json_atomic(path, value):
         except OSError:
             pass
         raise
+
+
+def keeps_error_text(state):
+    """Whether the person asked that a failed call's line keep its error text (settings.json, "error_text": true).
+
+    Read at each failure, so a change counts from the next one. A missing, foreign or unreadable file is a no."""
+    try:
+        descriptor = os.open(state/SETTINGS_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+    except OSError:
+        return False
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077
+                or info.st_size > SETTINGS_MAX_BYTES):
+            return False
+        value = json.loads(os.read(descriptor, SETTINGS_MAX_BYTES+1).decode('utf-8'))
+    except (OSError, ValueError, UnicodeError):
+        return False
+    finally:
+        os.close(descriptor)
+    return isinstance(value, dict) and value.get('error_text') is True
+
+
+def error_text(texts):
+    """What a failed call's line keeps of the texts its answer gave: one line, at most ERROR_TEXT_LIMIT characters.
+
+    None when there is no text. The relay clips the same way."""
+    joined = ' '.join(' '.join(text.split()) for text in texts if isinstance(text, str) and text.strip())
+    if not joined:
+        return None
+    return joined if len(joined) <= ERROR_TEXT_LIMIT else joined[:ERROR_TEXT_LIMIT-1]+'…'
 
 
 def append_activity(state, entry, max_bytes=ACTIVITY_MAX_BYTES, keep=ACTIVITY_KEEP_LINES):

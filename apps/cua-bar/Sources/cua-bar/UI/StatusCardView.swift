@@ -1,13 +1,15 @@
 import SwiftUI
 
 /// The top of the popover: the state, one line about what to do next, and the one button that
-/// fixes the problem when there is one.
+/// fixes the problem when there is one (or 다시 켜기, when a restart of Codex would bring something).
 struct StatusCardView: View {
     var summary: StatusSummary
     /// The fix is running, or waits for the Codex a restart asked to quit; the button waits.
     var fixIsRunning: Bool
     /// Why it waits, on hover (Codex가 꺼지기를 기다리는 중이에요); nil for none.
     var fixHelp: String?
+    /// What the button cuts off, beside it (하던 Codex 작업이 끊겨요): the press is the consent; nil for none.
+    var fixNote: String? = nil
     var fix: () -> Void
 
     /// Neutral until the first answer, so the card never says "ready" before it is known.
@@ -51,10 +53,16 @@ struct StatusCardView: View {
                 }
                 if let label = summary.fixLabel, summary.fix != nil {
                     HStack(spacing: 8) {
+                        if let note = fixNote {
+                            Text(note)
+                                .font(.system(size: 11))
+                                .foregroundStyle(summary.icon == .problem ? Theme.orangeText : Color.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         Spacer(minLength: 0)
                         if fixIsRunning { ProgressView().controlSize(.small) }
                         Button(action: fix) { Text(label).font(.system(size: 12, weight: .semibold)) }
-                            .buttonStyle(FixButtonStyle())
+                            .buttonStyle(FixButtonStyle(fill: Theme.fixFill(for: summary.icon)))
                             .disabled(fixIsRunning)
                             .help(fixHelp ?? "")
                     }

@@ -23,8 +23,8 @@ enum ResultPlace: Hashable, Sendable {
 
 /// Everything a button in the popover can ask for. A row has one button for its state: 탭 풀기 on a
 /// connection whose AI is alive and on a leftover lease, 정리 on an ended connection or a cmux-cua
-/// connection nobody owns any more. `CUABarViewModel.send(_:)` asks first when the action needs a
-/// confirmation, and `perform(_:)` runs it.
+/// connection nobody owns any more. `CUABarViewModel.send(_:)` runs it unless what it is aimed at is
+/// gone (it never asks), and `perform(_:)` runs it.
 enum CUAAction: Hashable, Sendable {
     // Engine actions (contract: "Actions").
     /// 탭 풀기 on a live connection: `release --connection`. Only the browser tabs it holds are
@@ -41,6 +41,8 @@ enum CUAAction: Hashable, Sendable {
     /// 모두 정리: every 정리 the list offers at once, with the leftover leases of Claude conversations.
     case tidyAll
     case restartCodex
+    /// 오류 문구 남기기 on 기록: `settings --error-text on|off`. The switch is its own consent and asks nothing.
+    case keepErrorText(Bool)
     case copyDiagnosis
 
     // Fix buttons that are more than one engine call, or not an engine call at all.

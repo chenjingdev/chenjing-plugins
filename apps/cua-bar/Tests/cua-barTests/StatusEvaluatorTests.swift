@@ -72,10 +72,12 @@ struct StatusEvaluatorTests {
         #expect(summary.problem == nil, "nothing is broken: no alarm and no notification")
         #expect(summary.nextStep == "Codex를 다시 켜면 새 설정이 적용돼요")
         #expect(summary.warning == "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 탭을 풀 수 없을 수 있어요")
+        #expect(summary.fix == .restartCodex && summary.fixLabel == "다시 켜기", "the person restarts it when Codex is free")
         // A Codex that is no longer running needs no restart.
         status.codex.running = false
         status.codex.pids = []
         #expect(evaluate(status).warning == nil)
+        #expect(evaluate(status).fix == nil)
     }
 
     @Test func aCodexThatStartedWithoutTheRelayAfterItsUpdateSaysARestartBringsIt() throws {
@@ -89,6 +91,7 @@ struct StatusEvaluatorTests {
         #expect(summary.icon == .ready && summary.problem == nil)
         #expect(summary.nextStep == "Codex를 다시 켜면 중계기가 붙어요")
         #expect(summary.warning == "Codex가 업데이트 직후 중계기 없이 켜져서, Codex 대화의 연결은 목록에 보이지 않고 탭도 풀 수 없어요")
+        #expect(summary.fix == .restartCodex && summary.fixLabel == "다시 켜기")
         // An older launcher is the bigger reason, and its restart brings the relay too.
         status.host.startedBeforeSetup = true
         #expect(evaluate(status).nextStep == "Codex를 다시 켜면 새 설정이 적용돼요")
@@ -96,6 +99,7 @@ struct StatusEvaluatorTests {
         status.host.startedBeforeSetup = false
         status.host.restartAddsRelay = false
         #expect(evaluate(status).warning == nil && evaluate(status).nextStep == "없음")
+        #expect(evaluate(status).fix == nil)
         status.host.restartAddsRelay = true
         status.codex.running = false
         status.codex.pids = []
@@ -110,8 +114,19 @@ struct StatusEvaluatorTests {
         #expect(summary.icon == .working)
         #expect(summary.nextStep == "Codex를 다시 켜면 새 설정이 적용돼요")
         #expect(summary.warning == "갱신 전에 켜진 Codex라 그 연결은 상태를 모르거나 탭을 풀 수 없을 수 있어요")
+        #expect(summary.fix == .restartCodex, "the button stays too, with what it cuts off beside it")
         status.host.startedBeforeSetup = false
         #expect(evaluate(status).nextStep == "없음")
+        #expect(evaluate(status).fix == nil)
+    }
+
+    @Test func aProblemComesBeforeTheRestartTheCardOffers() throws {
+        var status = try healthy()
+        status.host.restartAddsRelay = true
+        status.connections[0].state = .ended
+        let summary = evaluate(status)
+        #expect(summary.problem?.kind == .endedConnections)
+        #expect(summary.fix == nil, "the ended line has its own 정리; no 다시 켜기 beside it")
     }
 
     @Test func endedConnectionsAreNotCountedAsConnected() throws {
@@ -217,8 +232,7 @@ struct StatusEvaluatorTests {
         ProblemCase(name: "claude_conflict", kind: .claudeConflict, title: "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요",
              nextStep: "점검 탭에서 치우는 방법을 보세요", fix: nil, fixLabel: nil),
         ProblemCase(name: "codex_without_host", kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요",
-             nextStep: "다시 켜면 Claude가 붙어요", fix: .restartCodex, fixLabel: "다시 켜기",
-             warning: "하던 Codex 작업이 끊길 수 있어요"),
+             nextStep: "다시 켜면 Claude가 붙어요", fix: .restartCodex, fixLabel: "다시 켜기"),
         // The setup leaves somebody else's launchd value alone, so 고치기 could not change it: no button.
         ProblemCase(name: "login_environment_conflict", kind: .loginEnvironmentConflict, title: "Codex 로그인 설정이 다른 값과 겹쳐요",
              nextStep: "점검 탭에서 겹치는 값과 치우는 방법을 보세요", fix: nil, fixLabel: nil),

@@ -39,13 +39,16 @@ struct ButtonSpec: Equatable, Identifiable, Sendable {
 
 extension ButtonSpec {
     /// 탭 풀기 on a connection whose AI is alive: only the tabs it holds, the connection stays.
-    static func releaseTabs(of id: String, isEnabled: Bool) -> ButtonSpec {
+    /// `working`: the connection may still be in the middle of something (사용 중, or 알 수 없음). The press asks
+    /// nothing, so the help says what it cuts off.
+    static func releaseTabs(of id: String, isEnabled: Bool, working: Bool = false) -> ButtonSpec {
         ButtonSpec(
             title: "탭 풀기", action: .releaseConnection(id), isEnabled: isEnabled,
             // A button that is off says why when the pointer rests on it.
-            help: isEnabled
-                ? "이 AI가 잡고 있는 브라우저 탭만 풀어요. AI는 화면 도구를 계속 써요"
-                : "탭을 풀 길이 확인되지 않은 연결이에요. 중계기가 없거나 기록이 없을 때 그래요")
+            help: !isEnabled
+                ? "탭을 풀 길이 확인되지 않은 연결이에요. 중계기가 없거나 기록이 없을 때 그래요"
+                : working ? "이 AI가 잡고 있는 브라우저 탭만 풀어요. 아직 일하는 중이면 하던 브라우저 작업이 끊겨요"
+                : "이 AI가 잡고 있는 브라우저 탭만 풀어요. AI는 화면 도구를 계속 써요")
     }
 
     /// 정리 of an ended connection or of a cmux-cua connection nobody owns; off when the app can do neither
@@ -74,11 +77,15 @@ extension ButtonSpec {
 struct PopoverContent: Equatable, Sendable {
     var connections: ConnectionsContent
     var activity: ActivityContent
+    /// A Claude conversation works or holds something through the Codex host that is ready: a restart of Codex takes
+    /// its CUA down too (its next call starts again on the new Codex).
+    var claudeWorksThroughCodex = false
 
     /// `tabsReleased`: the ended connections the app may only release, whose tabs it released in this run.
     init(status: EngineStatus, now: Date, calendar: Calendar = .current, tabsReleased: Set<String> = []) {
         connections = ConnectionsContent(status: status, now: now, calendar: calendar, tabsReleased: tabsReleased)
         activity = ActivityContent(status: status, now: now, calendar: calendar)
+        claudeWorksThroughCodex = status.host.state == .ready && connections.groups.contains { $0.agent == .claude }
     }
 }
 
@@ -134,7 +141,7 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         let settled = TidyPlan.isSettled(connection, tabsReleased: tabsReleased)
         button = connection.state == .ended
             ? .tidy(connection.id, way: way, settled: settled)
-            : .releaseTabs(of: connection.id, isEnabled: connection.canRelease)
+            : .releaseTabs(of: connection.id, isEnabled: connection.canRelease, working: connection.state != .idle)
         hint = connection.state != .ended ? nil : settled ? Self.tabsReleasedHint : way == nil ? Self.cannotTidyHint : nil
         retryButton = ButtonSpec(
             title: "탭 풀기", action: .retryRelease(connection.id), isEnabled: connection.canRelease,
@@ -446,6 +453,10 @@ struct ActivityRow: Equatable, Identifiable, Sendable {
     var tool: String
     var ok: Bool?
     var durationText: String
+    /// Why the call failed, when the line says so in a word worth showing ("시간 초과", "화면 잠김").
+    var failureText: String? = nil
+    /// What the failed call's answer said, while 오류 문구 남기기 is on.
+    var failureDetail: String? = nil
 }
 
 struct ActivityContent: Equatable, Sendable {
@@ -453,6 +464,11 @@ struct ActivityContent: Equatable, Sendable {
     var emptyText: String?
     /// 진단 복사: runs `diagnose` and puts its text on the pasteboard. It sits at the bottom of the tab.
     var copyButton = ActivityContent.diagnosisButton
+    /// 오류 문구 남기기 as the engine keeps it; nil (no switch) while there is no status to read it from.
+    var keepsErrorText: Bool? = nil
+
+    static let errorTextTitle = "오류 문구 남기기"
+    static let errorTextHelp = "켜면 그 뒤로 실패한 호출의 오류 문구를 이 맥의 기록에 남겨 실패 줄 아래에 보여요. 화면의 글자가 섞일 수 있어 처음엔 꺼져 있고, 진단 복사에는 넣지 않아요"
 
     static let diagnosisButton = ButtonSpec(
         title: "진단 복사", action: .copyDiagnosis, help: "진단 내용을 복사해요. 화면과 요청 내용은 들어 있지 않아요")
@@ -465,10 +481,11 @@ struct ActivityContent: Equatable, Sendable {
             copyButton: diagnosisButton)
     }
 
-    init(rows: [ActivityRow], emptyText: String?, copyButton: ButtonSpec) {
+    init(rows: [ActivityRow], emptyText: String?, copyButton: ButtonSpec, keepsErrorText: Bool? = nil) {
         self.rows = rows
         self.emptyText = emptyText
         self.copyButton = copyButton
+        self.keepsErrorText = keepsErrorText
     }
 
     init(status: EngineStatus, now: Date, calendar: Calendar) {
@@ -484,8 +501,11 @@ struct ActivityContent: Equatable, Sendable {
                 // The line's own folder names it after its connection has gone (most of the log); an older line has
                 // only the connection's, while it is listed.
                 folder: Format.folder(entry.cwd ?? connection?.cwd), tool: Format.tool(entry.tool), ok: entry.ok,
-                durationText: Format.milliseconds(entry.ms))
+                durationText: Format.milliseconds(entry.ms),
+                failureText: entry.ok == false ? Format.failure(entry.error) : nil,
+                failureDetail: entry.ok == false ? entry.errorText : nil)
         }
         emptyText = rows.isEmpty ? PopoverTab.activity.emptyText : nil
+        keepsErrorText = status.settings.errorText
     }
 }

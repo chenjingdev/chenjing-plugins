@@ -3,8 +3,8 @@ import SwiftUI
 import Testing
 @testable import cua_bar
 
-/// The bottom line (time, new version, 끝내기) and the bottom of 기록 (진단 복사, 알림 켜기, 앱 지우기
-/// with its question, the login item line) together, and the diagnosis the person copies.
+/// The bottom line (time, new version, 끝내기) and the bottom of 기록 (진단 복사, 알림 켜기, 앱 지우기 and
+/// its result, the login item line) together, and the diagnosis the person copies.
 @MainActor
 struct FooterTests {
     private struct Kit {
@@ -18,7 +18,10 @@ struct FooterTests {
 
     /// The site names 0.8.0 and this app is 0.7.0. `failing`: the update to it fails (the installer that stands in for
     /// the real one says so), which is what puts the button there; otherwise it simply has not been made yet.
-    private func kit(failing: Bool = true, app: String = "0.7.0", loginItem: LoginItemStatus = .enabled) -> Kit {
+    /// `hostRunning`: Codex runs with its host, so 앱 지우기 is refused and says why.
+    private func kit(
+        failing: Bool = true, app: String = "0.7.0", loginItem: LoginItemStatus = .enabled, hostRunning: Bool = false
+    ) -> Kit {
         let suite = DefaultsSuite()
         let log = EventLog()
         let updater = AppUpdater(
@@ -26,7 +29,13 @@ struct FooterTests {
             installer: FakeInstaller(failing ? .failed(.checksum) : .deferred), defaults: suite.defaults, quit: {})
         updater.canReplaceNow = { true }
         let registrar = LoginItemRegistrar(service: FakeLoginItem(status: loginItem), defaults: suite.defaults)
-        let removal = RemovalFlow(engine: FakeEngineClient(), loginItem: registrar, quit: { log.add("quit") }, sleep: ManualSleeper().sleep)
+        var status = EngineStatus()
+        if hostRunning {
+            status.codex.running = true
+            status.host.state = .ready
+        }
+        let removal = RemovalFlow(
+            engine: FakeEngineClient(status: status), loginItem: registrar, quit: { log.add("quit") }, sleep: ManualSleeper().sleep)
         let opener = FakeOpener()
         return Kit(
             maintenance: Maintenance(updater: updater, removal: removal, loginItem: registrar, opener: opener),
@@ -100,11 +109,16 @@ struct FooterTests {
         let full = fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}))
         #expect(full.width <= row, "everything fits the line side by side")
         #expect(fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}).frame(width: row)).height < 30, "one line")
-        // Asking to remove the app puts nothing on this line: its question is at the bottom of 기록.
-        kit.removal.ask()
-        let asking = fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}).frame(width: row))
-        #expect(asking.height < 30)
-        kit.removal.dismiss()
+    }
+
+    @Test func aRefusedRemovalPutsNothingOnTheBottomLine() async {
+        let kit = kit(hostRunning: true)
+        defer { kit.suite.remove() }
+        let row = Theme.popoverWidth - 2 * Theme.padding
+        await kit.removal.remove()
+        #expect(kit.removal.phase == .refused(RemovalMessages.hostRunning))
+        // Its answer is at the bottom of 기록.
+        #expect(fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}).frame(width: row)).height < 30)
     }
 
     // MARK: The bottom of 기록
@@ -112,8 +126,7 @@ struct FooterTests {
     @Test func theRareButtonsAreNamedAsTheUserChoseThem() {
         #expect(ActivityContent.diagnosisButton.title == "진단 복사")
         #expect(NotificationsButton.title == "알림 켜기")
-        #expect(RemovalMessages.buttonTitle == "앱 지우기…")
-        #expect(RemovalMessages.confirmTitle == "앱 지우기")
+        #expect(RemovalMessages.buttonTitle == "앱 지우기", "no …: a press asks nothing")
     }
 
     private func bottom(
@@ -141,31 +154,31 @@ struct FooterTests {
         defer { kit.suite.remove() }
         let plain = fittingSize(bottom(kit, .off, maintenance: false)).width
         let full = fittingSize(bottom(kit, .allowed)).width
-        #expect(full > plain + 40, "앱 지우기… joins 진단 복사: \(plain) vs \(full)")
+        #expect(full > plain + 40, "앱 지우기 joins 진단 복사: \(plain) vs \(full)")
         // 알림 켜기 needs the opener that maintenance carries, so it is not there without it.
         #expect(fittingSize(bottom(kit, .off, maintenance: false)).width == plain)
     }
 
-    @Test func theRemoveQuestionIsAtTheBottomOfActivityAndAddsOnlyItsOwnCard() {
-        let kit = kit()
+    @Test func aRefusedRemovalIsAtTheBottomOfActivityAndAddsOnlyItsOwnCard() async {
+        let kit = kit(hostRunning: true)
         defer { kit.suite.remove() }
         let width = Theme.popoverWidth - 2 * Theme.padding
         func size() -> CGSize { fittingSize(bottom(kit, .off, note: "로그인 때 자동 실행: 켜짐").frame(width: width)) }
         let idle = size()
         #expect(idle.height > 20 && idle.height < 70, "buttons and the login line: \(idle)")
 
-        kit.removal.ask()
-        let asking = size()
-        #expect(asking.height > idle.height + 40, "the question and its two buttons are on screen")
-        #expect(asking.height < 200)
+        await kit.removal.remove()
+        let refused = size()
+        #expect(refused.height > idle.height + 20, "why it changed nothing is on screen, with 닫기")
+        #expect(refused.height < 200)
         kit.removal.dismiss()
-        #expect(abs(size().height - idle.height) < 1, "and gone again when cancelled")
+        #expect(abs(size().height - idle.height) < 1, "and gone again when closed")
     }
 
     // MARK: Layout
 
-    @Test func thePopoverKeepsItsSizeWhenTheRemoveQuestionOpensInActivity() async throws {
-        let kit = kit()
+    @Test func thePopoverKeepsItsSizeWhenARemovalRefusalShowsInActivity() async throws {
+        let kit = kit(hostRunning: true)
         defer { kit.suite.remove() }
         await kit.updater.check()
         let model = try await model()
@@ -175,12 +188,12 @@ struct FooterTests {
         let idle = popover(kit.maintenance)
         #expect(idle.width == Theme.popoverWidth)
         #expect(abs(idle.height - without.height) < 6, "no jump when the extras are added: \(without) vs \(idle)")
-        kit.removal.ask()
-        let asking = popover(kit.maintenance)
-        #expect(asking.width == Theme.popoverWidth)
-        #expect(abs(asking.height - idle.height) < 6, "the question sits inside the tab's own room: \(idle) vs \(asking)")
-        #expect(asking.height < 760, "still fits a laptop screen: \(asking)")
-        // The list tab never shows it: it has no such buttons to ask from.
+        await kit.removal.remove()
+        let refused = popover(kit.maintenance)
+        #expect(refused.width == Theme.popoverWidth)
+        #expect(abs(refused.height - idle.height) < 6, "the refusal sits inside the tab's own room: \(idle) vs \(refused)")
+        #expect(refused.height < 760, "still fits a laptop screen: \(refused)")
+        // The list tab never shows it: 앱 지우기 is not there.
         model.selectedTab = .connections
         #expect(abs(popover(kit.maintenance).height - idle.height) < 6)
     }
@@ -199,11 +212,9 @@ struct FooterTests {
             heights[name] = fittingSize(RemovalNoticeView(removal: flow).frame(width: width)).height
         }
         record("idle")
-        flow.ask()
-        record("confirming")
         let gate = AsyncGate()
         engine.configure { $0.actionGate = gate }
-        let running = Task { await flow.confirm() }
+        let running = Task { await flow.remove() }
         #expect(await waitUntil { engine.calls.contains(.uninstall) })
         record("working")
         gate.open()
@@ -212,7 +223,7 @@ struct FooterTests {
         sleeper.releaseAll()
         await running.value
         #expect(heights["idle"] == 0, "nothing is drawn while idle")
-        for state in ["confirming", "working", "finished"] { #expect((heights[state] ?? 0) > 20, "\(state): \(heights[state] ?? 0)") }
+        for state in ["working", "finished"] { #expect((heights[state] ?? 0) > 20, "\(state): \(heights[state] ?? 0)") }
         #expect(log.events == ["quit"])
     }
 
@@ -304,8 +315,5 @@ struct FooterTests {
         model.selectedTab = .activity
         try picture("A3-footer-activity")
         try picture("A3-footer-activity-dark", dark: true)
-        kit.removal.ask()
-        try picture("A3-footer-confirm")
-        kit.removal.dismiss()
     }
 }

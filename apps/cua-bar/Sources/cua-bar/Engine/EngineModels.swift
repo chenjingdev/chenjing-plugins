@@ -17,6 +17,8 @@ struct EngineStatus: Equatable, Sendable {
     var leases = Leases()
     var otherTools: [OtherTool] = []
     var screen = ScreenInfo()
+    /// What the person chose on the app's switches; an engine from before 0.8.4 names none (all off).
+    var settings = EngineSettings()
     var activity: [ActivityEntry] = []
 
     func connection(withID id: String?) -> Connection? {
@@ -229,6 +231,12 @@ struct ScreenInfo: Equatable, Sendable {
     var lastCallAt: Date?
 }
 
+/// `settings`: what the engine keeps for the person's switches (`codex-cua settings`).
+struct EngineSettings: Equatable, Sendable {
+    /// 오류 문구 남기기: a failed call's line keeps what its answer said.
+    var errorText = false
+}
+
 struct ActivityEntry: Equatable, Sendable {
     var at: Date?
     var connectionID: String?
@@ -238,6 +246,11 @@ struct ActivityEntry: Equatable, Sendable {
     var ms: Int?
     /// The folder the writer worked in when it wrote the line; nil for an older writer's line.
     var cwd: String?
+    /// Why a failed call failed, in one of the engine's words (`timeout`, `screen_locked`, `error`); nil for a call
+    /// that worked and for an older writer's line.
+    var error: String?
+    /// What a failed call's answer said, one line, while 오류 문구 남기기 is on; nil otherwise.
+    var errorText: String?
 }
 
 // MARK: - Decoding
@@ -246,7 +259,7 @@ extension EngineStatus: Decodable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version", generatedAt = "generated_at"
         case engine, codex, host, setup, connections, leases
-        case otherTools = "other_tools", screen, activity
+        case otherTools = "other_tools", screen, settings, activity
     }
 
     init(from decoder: Decoder) throws {
@@ -261,6 +274,7 @@ extension EngineStatus: Decodable {
         leases = c.lenient(Leases.self, forKey: .leases) ?? Leases()
         otherTools = c.lenientArray(OtherTool.self, forKey: .otherTools)
         screen = c.lenient(ScreenInfo.self, forKey: .screen) ?? ScreenInfo()
+        settings = c.lenient(EngineSettings.self, forKey: .settings) ?? EngineSettings()
         activity = c.lenientArray(ActivityEntry.self, forKey: .activity)
     }
 }
@@ -430,9 +444,17 @@ extension ScreenInfo: Decodable {
     }
 }
 
+extension EngineSettings: Decodable {
+    private enum CodingKeys: String, CodingKey { case errorText = "error_text" }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        errorText = c.lenientBool(.errorText) ?? false
+    }
+}
+
 extension ActivityEntry: Decodable {
     private enum CodingKeys: String, CodingKey {
-        case at, connectionID = "connection_id", agent, tool, ok, ms, cwd
+        case at, connectionID = "connection_id", agent, tool, ok, ms, cwd, error, errorText = "error_text"
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -443,5 +465,7 @@ extension ActivityEntry: Decodable {
         ok = c.lenientBool(.ok)
         ms = c.lenientInt(.ms)
         cwd = c.lenientString(.cwd)
+        error = c.lenientString(.error)
+        errorText = c.lenientString(.errorText)
     }
 }

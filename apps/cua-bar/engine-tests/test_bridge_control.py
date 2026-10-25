@@ -59,6 +59,30 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(line['writer'], line['tool'], line['ms'], line['cwd']) for line in lines],
                          [(control.writer_id, 'js', 12, os.getcwd())])
 
+    async def test_the_line_of_a_failed_call_says_why_in_one_word(self):
+        control = await self.started()
+        control.record_call('js', False, 30001, 'session', False, 'timeout')
+        control.record_call('js', False, 5, 'session', False, 'PRIVATE words')
+        control.record_call('js', False, 5, 'session', False)
+        control.record_call('js', True, 5, 'session', False, 'timeout')
+        lines = [json.loads(line) for line in (control.state/'activity.jsonl').read_text().splitlines()]
+        self.assertEqual([line.get('error') for line in lines], ['timeout', 'error', 'error', None])
+        self.assertNotIn('error', lines[3])
+        self.assertNotIn('PRIVATE', (control.state/'activity.jsonl').read_text())
+
+    async def test_the_line_of_a_failed_call_keeps_its_error_text_only_while_the_person_asks_for_it(self):
+        control = await self.started()
+        control.record_call('js', False, 5, 'session', False, 'error', ['ReferenceError: PRIVATE is not defined'])
+        settings = control.state/'settings.json'
+        settings.write_text('{"schema_version": 1, "error_text": true}')
+        settings.chmod(0o600)
+        control.record_call('js', False, 5, 'session', False, 'error', ['ReferenceError: y\n  at line 1', ''])
+        control.record_call('js', False, 5, 'session', False, 'error', [])
+        control.record_call('js', True, 5, 'session', False, None, ['not kept for a call that worked'])
+        lines = [json.loads(line) for line in (control.state/'activity.jsonl').read_text().splitlines()]
+        self.assertEqual([line.get('error_text') for line in lines], [None, 'ReferenceError: y at line 1', None, None])
+        self.assertNotIn('PRIVATE', (control.state/'activity.jsonl').read_text(), 'nothing before it was asked for')
+
     async def test_default_location_is_the_private_codex_cua_bridges_directory(self):
         control = await self.started()
         state = self.home/'Library/Caches/codex-cua'

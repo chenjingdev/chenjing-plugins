@@ -84,49 +84,25 @@ struct RemovalTests {
         return status
     }
 
-    // MARK: Asking first
+    // MARK: The press
 
-    @Test func nothingHappensUntilTheQuestionIsAnswered() async {
+    @Test func theButtonSaysWhatItsPressDoesAndNothingHappensBeforeIt() {
         let rig = rig()
         defer { rig.suite.remove() }
         #expect(rig.flow.phase == .idle)
-        rig.flow.ask()
-        #expect(rig.flow.phase == .confirming)
-        #expect(rig.log.events.isEmpty, "asking changes nothing")
+        #expect(rig.log.events.isEmpty)
         #expect(rig.engine.calls.isEmpty)
-    }
-
-    @Test func theQuestionIsTheOneThePersonIsGiven() {
-        #expect(RemovalMessages.question == "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지워요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜져요. 열린 Claude 대화의 CUA도 끊겨요.")
-        #expect(RemovalMessages.question.contains("열린 Claude 대화의 CUA도 끊겨요"))
-    }
-
-    @Test func cancellingLeavesEverythingAsItWas() async {
-        let rig = rig()
-        defer { rig.suite.remove() }
-        rig.flow.ask()
-        rig.flow.dismiss()
-        #expect(rig.flow.phase == .idle)
-        await rig.flow.confirm() // nothing is being asked any more
-        #expect(rig.flow.phase == .idle)
-        #expect(rig.log.events.isEmpty)
-    }
-
-    @Test func confirmingWithoutAskingDoesNothing() async {
-        let rig = rig()
-        defer { rig.suite.remove() }
-        await rig.flow.confirm()
-        #expect(rig.log.events.isEmpty)
-        #expect(rig.flow.phase == .idle)
+        #expect(RemovalMessages.buttonTitle == "앱 지우기")
+        #expect(RemovalMessages.help == "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지운 뒤 앱이 꺼져요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜지고, 열린 Claude 대화의 CUA도 끊겨요. Codex가 연결과 함께 켜져 있으면 아무것도 바꾸지 않아요.")
+        #expect(RemovalMessages.help.contains("열린 Claude 대화의 CUA도 끊겨요"))
     }
 
     // MARK: The removal
 
-    @Test func confirmUninstallsThenTakesTheLoginItemAwayThenShowsTheResultThenQuits() async {
+    @Test func aPressUninstallsThenTakesTheLoginItemAwayThenShowsTheResultThenQuits() async {
         let rig = rig()
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 }, "it waits for the result to be read")
         #expect(rig.log.events == ["uninstall", "unregister login item"], "not quit yet")
         #expect(rig.flow.phase == .finished(RemovalMessages.done))
@@ -145,8 +121,7 @@ struct RemovalTests {
     @Test func lookingAtWhatRunsAndTheUninstallCommandAreTheOnlyEngineCallsAndCodexIsNeverTouched() async {
         let rig = rig()
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         rig.sleeper.releaseAll()
         await removal.value
@@ -158,8 +133,7 @@ struct RemovalTests {
     @Test func whatTheAppPutIntoClaudeCodeGoesFirstThenTheEngineThenTheLoginItem() async {
         let rig = rig(claude: ClaudeIntegration.Removal())
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         #expect(rig.log.events == ["remove from claude", "uninstall", "unregister login item"])
         #expect(rig.flow.phase == .finished(RemovalMessages.done))
@@ -171,8 +145,7 @@ struct RemovalTests {
     @Test func aRunningCodexHostKeepsEverythingAsItIsClaudeCodeTooBecauseItIsLookedAtFirst() async {
         let rig = rig(status: hostRunning(), claude: ClaudeIntegration.Removal())
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        await rig.flow.confirm()
+        await rig.flow.remove()
         #expect(rig.flow.phase == .refused(RemovalMessages.hostRunning))
         #expect(rig.log.events.isEmpty, "no MCP server or skill taken away, nothing uninstalled, the login item stays")
         #expect(rig.engine.calls == [.status])
@@ -181,8 +154,7 @@ struct RemovalTests {
     @Test func anMCPServerThatClaudeCodeWouldNotTakeAwayIsToldWithTheCommandToRun() async {
         let rig = rig(claude: ClaudeIntegration.Removal(mcpStays: true))
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         #expect(rig.flow.phase == .finished(RemovalMessages.done + RemovalMessages.mcpStays))
         #expect(RemovalMessages.mcpStays.contains("claude mcp remove -s user cuabar"))
@@ -194,8 +166,7 @@ struct RemovalTests {
         for error in [EngineError.engineMissing, .setupNeeded(installPath: "/x")] {
             let rig = rig(uninstallError: error)
             defer { rig.suite.remove() }
-            rig.flow.ask()
-            let removal = Task { await rig.flow.confirm() }
+            let removal = Task { await rig.flow.remove() }
             #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
             #expect(rig.flow.phase == .finished(RemovalMessages.nothingToUndo))
             rig.sleeper.releaseAll()
@@ -217,8 +188,7 @@ struct RemovalTests {
             engine: CodexCUAEngineClient(locator: CommandLocator(home: home.url), runner: runner),
             loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: log), defaults: suite.defaults),
             quit: { log.add("quit") }, sleep: ManualSleeper().sleep)
-        flow.ask()
-        await flow.confirm()
+        await flow.remove()
         #expect(flow.phase == .refused(RemovalMessages.failed))
         #expect(log.events.isEmpty, "the login item stays and the app does not quit")
         #expect(runner.calls == [.init(
@@ -238,8 +208,7 @@ struct RemovalTests {
             engine: CodexCUAEngineClient(locator: CommandLocator(home: home.url), runner: runner),
             loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: log), defaults: suite.defaults),
             quit: { log.add("quit") }, sleep: sleeper.sleep)
-        flow.ask()
-        let removal = Task { await flow.confirm() }
+        let removal = Task { await flow.remove() }
         #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
         #expect(flow.phase == .finished(RemovalMessages.nothingToUndo))
         sleeper.releaseAll()
@@ -258,8 +227,7 @@ struct RemovalTests {
         let registrar = LoginItemRegistrar(service: stubborn, defaults: suite.defaults)
         let sleeper = ManualSleeper()
         let flow = RemovalFlow(engine: engine, loginItem: registrar, quit: { log.add("quit") }, sleep: sleeper.sleep)
-        flow.ask()
-        let removal = Task { await flow.confirm() }
+        let removal = Task { await flow.remove() }
         #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
         #expect(flow.phase == .finished(RemovalMessages.done + RemovalMessages.loginItemStays))
         sleeper.releaseAll()
@@ -267,20 +235,18 @@ struct RemovalTests {
         #expect(log.events == ["quit"])
     }
 
-    @Test func aSecondConfirmWhileItRunsDoesNotRunItTwice() async {
+    @Test func aSecondPressWhileItRunsDoesNotRunItTwice() async {
         let rig = rig()
         defer { rig.suite.remove() }
-        rig.flow.ask()
         let gate = AsyncGate()
         rig.engine.configure { $0.actionGate = gate }
         defer { gate.open() }
-        let first = Task { await rig.flow.confirm() }
+        let first = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.engine.calls.contains(.uninstall) })
         #expect(rig.flow.phase == .working)
-        await rig.flow.confirm()
-        rig.flow.ask()
+        await rig.flow.remove()
         rig.flow.dismiss()
-        #expect(rig.flow.phase == .working, "asking or dismissing does nothing while it runs")
+        #expect(rig.flow.phase == .working, "pressing again or dismissing does nothing while it runs")
         gate.open()
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         rig.sleeper.releaseAll()
@@ -298,8 +264,7 @@ struct RemovalTests {
         let sleeper = ManualSleeper()
         let flow = RemovalFlow(
             engine: engine, loginItem: registrar, quit: { log.add("quit") }, sleep: sleeper.sleep, onRemoved: { log.add("stop reading") })
-        flow.ask()
-        let removal = Task { await flow.confirm() }
+        let removal = Task { await flow.remove() }
         #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
         #expect(log.events == ["uninstall", "unregister login item", "stop reading"])
         sleeper.releaseAll()
@@ -322,13 +287,12 @@ struct RemovalTests {
         let flow = RemovalFlow(
             engine: FakeEngineClient(), loginItem: registrar, quit: { log.add("quit") }, sleep: sleeper.sleep,
             showing: cards(shown))
-        flow.ask()
-        let removal = Task { await flow.confirm() }
+        let removal = Task { await flow.remove() }
         #expect(await waitUntil { sleeper.requestedDurations.count == 1 })
-        #expect(shown.events == ["none", "\(RemovalMessages.working), fix none", "되돌렸어요, fix none"])
+        #expect(shown.events == ["\(RemovalMessages.working), fix none", "되돌렸어요, fix none"])
         sleeper.releaseAll()
         await removal.value
-        #expect(shown.events.count == 3)
+        #expect(shown.events.count == 2)
     }
 
     @Test func aRefusalGivesTheCardBackToTheStatus() async {
@@ -338,10 +302,9 @@ struct RemovalTests {
         let flow = RemovalFlow(
             engine: rig.engine, loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: rig.log), defaults: rig.suite.defaults),
             quit: { rig.log.add("quit") }, sleep: rig.sleeper.sleep, showing: cards(shown))
-        flow.ask()
-        await flow.confirm()
+        await flow.remove()
         #expect(flow.phase == .refused(RemovalMessages.hostRunning))
-        #expect(shown.events == ["none", "\(RemovalMessages.working), fix none", "none"])
+        #expect(shown.events == ["\(RemovalMessages.working), fix none", "none"])
     }
 
     // MARK: Refusal
@@ -356,8 +319,7 @@ struct RemovalTests {
         let flow = RemovalFlow(
             engine: engine, loginItem: registrar, quit: { log.add("quit") }, sleep: ManualSleeper().sleep,
             isSetupRunning: { true }, onRemoved: { log.add("stop reading") })
-        flow.ask()
-        await flow.confirm()
+        await flow.remove()
         #expect(flow.phase == .refused("연결을 설정하는 중이라 지금은 못 해요. 끝난 뒤에 다시 해 주세요"))
         #expect(log.events.isEmpty, "nothing was touched")
         #expect(engine.calls.isEmpty)
@@ -366,8 +328,7 @@ struct RemovalTests {
     @Test func aRunningCodexHostRefusesAndNothingElseChanges() async {
         let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: "A Codex host is running; quit normally before uninstalling"), status: hostRunning())
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        await rig.flow.confirm()
+        await rig.flow.remove()
         #expect(rig.flow.phase == .refused("Codex를 정상 종료한 뒤 다시 해 주세요"))
         #expect(rig.log.events.isEmpty, "not even the remover ran: the login item stays and the app does not quit")
         #expect(rig.sleeper.requestedDurations.isEmpty)
@@ -378,28 +339,28 @@ struct RemovalTests {
     @Test func theRefusalCanBeClosedAndAskedAgain() async {
         let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: ""), status: hostRunning())
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        await rig.flow.confirm()
+        await rig.flow.remove()
         rig.flow.dismiss()
         #expect(rig.flow.phase == .idle)
         // Codex was quit normally; the next try works.
         rig.engine.configure { $0.uninstallError = nil }
         rig.engine.setStatus(EngineStatus())
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         rig.sleeper.releaseAll()
         await removal.value
         #expect(rig.log.events == ["uninstall", "unregister login item", "quit"])
     }
 
-    @Test func askingAgainStraightFromARefusalIsAllowed() async {
+    @Test func pressingAgainStraightFromARefusalLooksAgain() async {
         let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: ""), status: hostRunning())
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        await rig.flow.confirm()
-        rig.flow.ask()
-        #expect(rig.flow.phase == .confirming)
+        await rig.flow.remove()
+        #expect(rig.flow.phase == .refused(RemovalMessages.hostRunning))
+        rig.engine.setStatus(EngineStatus()) // the host is gone now
+        await rig.flow.remove()
+        #expect(rig.flow.phase == .refused(RemovalMessages.failed), "it ran again, and this time the remover answered")
+        #expect(rig.engine.calls.filter { $0 == .uninstall }.count == 1)
     }
 
     @Test(arguments: [HostState.ready, .starting, .stopping])
@@ -409,8 +370,7 @@ struct RemovalTests {
         status.codex.running = false
         let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: ""), status: status)
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        await rig.flow.confirm()
+        await rig.flow.remove()
         #expect(rig.flow.phase == .refused(RemovalMessages.hostRunning))
     }
 
@@ -420,8 +380,7 @@ struct RemovalTests {
         status.codex.running = true
         let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: ""), status: status)
         defer { rig.suite.remove() }
-        rig.flow.ask()
-        await rig.flow.confirm()
+        await rig.flow.remove()
         #expect(rig.flow.phase == .refused(RemovalMessages.hostRunning))
     }
 
@@ -434,8 +393,7 @@ struct RemovalTests {
         }()] {
             let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: "SECRET-STDERR token=abc"), status: status)
             defer { rig.suite.remove() }
-            rig.flow.ask()
-            await rig.flow.confirm()
+            await rig.flow.remove()
             #expect(rig.flow.phase == .refused("앱을 지우지 못했어요 — 연결 설정은 그대로 남아 있을 수 있어요"))
             #expect(rig.log.events == ["uninstall"])
         }
@@ -454,8 +412,7 @@ struct RemovalTests {
         let flow = RemovalFlow(
             engine: engine, loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: log), defaults: suite.defaults),
             quit: { log.add("quit") }, sleep: ManualSleeper().sleep)
-        flow.ask()
-        await flow.confirm()
+        await flow.remove()
         #expect(flow.phase == .refused(RemovalMessages.failed))
     }
 
@@ -466,8 +423,7 @@ struct RemovalTests {
         let rig = rig(uninstallError: .commandFailed(exitCode: 1, message: "A Codex host is running"), claude: ClaudeIntegration.Removal(removedAnything: true))
         defer { rig.suite.remove() }
         rig.engine.setStatusError(error)
-        rig.flow.ask()
-        await rig.flow.confirm()
+        await rig.flow.remove()
         #expect(rig.flow.phase == .refused(RemovalMessages.statusUnreadable))
         #expect(rig.log.events.isEmpty, "no MCP server or skill taken away, nothing uninstalled, the login item stays: \(error)")
         #expect(rig.engine.calls == [.status])
@@ -481,8 +437,7 @@ struct RemovalTests {
         let rig = rig(uninstallError: .engineMissing, claude: ClaudeIntegration.Removal(removedAnything: true))
         defer { rig.suite.remove() }
         rig.engine.setStatusError(.engineMissing)
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         #expect(rig.log.events == ["remove from claude", "uninstall", "unregister login item"])
         // What was taken out of Claude Code is said, so "nothing to undo" is not all that was done.
@@ -495,8 +450,7 @@ struct RemovalTests {
         let rig = rig(uninstallError: .engineMissing, claude: ClaudeIntegration.Removal())
         defer { rig.suite.remove() }
         rig.engine.setStatusError(.engineMissing)
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         #expect(rig.flow.phase == .finished(RemovalMessages.nothingToUndo))
         rig.sleeper.releaseAll()
@@ -507,8 +461,7 @@ struct RemovalTests {
         let rig = rig(claude: ClaudeIntegration.Removal(removedAnything: true))
         defer { rig.suite.remove() }
         rig.engine.setStatusError(.setupNeeded(installPath: "/x"))
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         #expect(rig.log.events == ["uninstall", "remove from claude", "unregister login item"], "the remover looks at the host itself")
         #expect(rig.flow.phase == .finished(RemovalMessages.done))
@@ -525,8 +478,7 @@ struct RemovalTests {
         let rig = rig(claude: ClaudeIntegration.Removal(removedAnything: true))
         defer { rig.suite.remove() }
         rig.engine.setStatusError(error)
-        rig.flow.ask()
-        let removal = Task { await rig.flow.confirm() }
+        let removal = Task { await rig.flow.remove() }
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         #expect(rig.log.events == ["uninstall", "remove from claude", "unregister login item"], "\(error)")
         #expect(rig.flow.phase == .finished(RemovalMessages.done))
@@ -541,8 +493,7 @@ struct RemovalTests {
             claude: ClaudeIntegration.Removal(removedAnything: true))
         defer { rig.suite.remove() }
         rig.engine.setStatusError(error)
-        rig.flow.ask()
-        await rig.flow.confirm()
+        await rig.flow.remove()
         #expect(rig.flow.phase == .refused(RemovalMessages.failed))
         #expect(rig.log.events == ["uninstall"], "Claude Code's part and the login item are untouched: \(error)")
     }
@@ -553,8 +504,7 @@ struct RemovalTests {
             claude: ClaudeIntegration.Removal(removedAnything: true))
         defer { rig.suite.remove() }
         rig.engine.setStatusError(.setupNeeded(installPath: "/x"))
-        rig.flow.ask()
-        await rig.flow.confirm()
+        await rig.flow.remove()
         #expect(rig.flow.phase == .refused(RemovalMessages.failed), "the status cannot say a host runs, so it is the generic line")
         #expect(rig.log.events == ["uninstall"], "Claude Code's part and the login item are untouched")
     }
@@ -582,8 +532,7 @@ struct RemovalTests {
                 engine: engine, loginItem: LoginItemRegistrar(service: LoggingLoginItem(log: log), defaults: suite.defaults),
                 claude: LoggingClaude(log: log, removal: ClaudeIntegration.Removal(removedAnything: true)),
                 quit: { log.add("quit") }, sleep: ManualSleeper().sleep)
-            flow.ask()
-            await flow.confirm()
+            await flow.remove()
             #expect(flow.phase == .refused(hostCameUp ? RemovalMessages.hostRunningAfterClaude : RemovalMessages.failedAfterClaude))
             #expect(log.events == ["remove from claude", "uninstall"])
         }
@@ -598,8 +547,7 @@ struct RemovalTests {
             for status in [hostRunning(), EngineStatus()] {
                 let rig = rig(uninstallError: error, status: status)
                 defer { rig.suite.remove() }
-                rig.flow.ask()
-                await rig.flow.confirm()
+                await rig.flow.remove()
                 guard case .refused(let text) = rig.flow.phase else {
                     Issue.record("expected a refusal for \(error)")
                     continue

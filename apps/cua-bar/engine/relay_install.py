@@ -362,11 +362,16 @@ def _plain(value, depth=0):
 
 
 def _bundled_plugin_entry(installation, definition, environment, home):
-    """The bundled plugin's own entry for the server, found where `mcp get` finds it.
+    """The bundled plugin's own entry for the server, found where `mcp get` finds it, and whether it is the app's
+    template of that entry (True) rather than Codex's copy of it.
 
     `mcp get` leaves out omit_tools_from and tools, which belong to the definition and shape what Codex's own
     threads see. They are taken from the plugin's .mcp.json, but only when that file is of the very plugin
     version this app bundles and agrees with everything `mcp get` shows. Anything else: refuse.
+
+    Codex writes its copy of a new version of the plugin as it first starts after updating itself, seconds after the
+    launcher has looked. While there is no copy of this version at all, the plugin inside the app, which Codex makes
+    the copy from, stands in for it (see _hidden_fields). A copy that is there but does not fit is still refused.
     """
     try:
         with (installation.app_path/'Contents/Info.plist').open('rb') as source:
@@ -380,9 +385,14 @@ def _bundled_plugin_entry(installation, definition, environment, home):
                 or env.get('BROWSER_USE_CODEX_APP_VERSION', version) != version):
             raise RelayRefused('plugin_entry')
         directory = Path(codex_home)/'plugins/cache'/PLUGIN_MARKETPLACE/PLUGIN_NAME/version
+        template = not os.path.lexists(directory)
+        if template:
+            directory = installation.app_path/'Contents/Resources/plugins'/PLUGIN_MARKETPLACE/'plugins'/PLUGIN_NAME
+        # An app installed by an installer belongs to root, and its files are as safe as the user's own.
+        owners = (os.getuid(), 0) if template else (os.getuid(),)
         for name in ('.codex-plugin/plugin.json', '.mcp.json'):
             info = (directory/name).lstat()
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022:
+            if not stat.S_ISREG(info.st_mode) or info.st_uid not in owners or stat.S_IMODE(info.st_mode) & 0o022:
                 raise RelayRefused('plugin_entry')
         manifest = json.loads((directory/'.codex-plugin/plugin.json').read_text())
         loaded = json.loads((directory/'.mcp.json').read_text())
@@ -395,18 +405,23 @@ def _bundled_plugin_entry(installation, definition, environment, home):
     if (not isinstance(manifest, dict) or manifest.get('name') != PLUGIN_NAME or manifest.get('version') != version
             or not isinstance(entry, dict)):
         raise RelayRefused('plugin_entry')
-    return entry
+    return entry, template
 
 
-def _hidden_fields(definition, entry):
-    """omit_tools_from and tools from the plugin entry, after checking the entry says what `mcp get` says."""
+def _hidden_fields(definition, entry, template=False):
+    """omit_tools_from and tools from the plugin entry, after checking the entry says what `mcp get` says.
+
+    The app's template does not say how to start the runtime: Codex fills command, args, env, env_vars and enabled in
+    as it writes its copy and keeps the rest of the entry as it is. So a template is held to the rest only."""
     if set(entry) - PLUGIN_ENTRY_FIELDS:
         raise RelayRefused('plugin_entry')
     transport = definition['transport']
-    same = (entry.get('command') == transport['command'] and entry.get('args') == transport['args']
-            and entry.get('env') == transport['env']
-            and entry.get('env_vars', []) == transport.get('env_vars', [])
-            and entry.get('enabled', True) is True
+    starts_the_same = template or (
+        entry.get('command') == transport['command'] and entry.get('args') == transport['args']
+        and entry.get('env') == transport['env']
+        and entry.get('env_vars', []) == transport.get('env_vars', [])
+        and entry.get('enabled', True) is True)
+    same = (starts_the_same
             and entry.get('enabled_tools') == definition.get('enabled_tools')
             and entry.get('disabled_tools') == definition.get('disabled_tools')
             and entry.get('startup_timeout_sec') == definition.get('startup_timeout_sec')
@@ -504,7 +519,7 @@ def _plan(native, arguments, environment, plugin_root, home, run):
     index = subcommand_index(arguments)
     root_flags, own_flags = config_flags(arguments[:index]), config_flags(arguments[index + 1:])
     definition = bundled_definition(read_definition(native, root_flags + own_flags, environment, run), installation.cua_root)
-    hidden = _hidden_fields(definition, _bundled_plugin_entry(installation, definition, environment, home))
+    hidden = _hidden_fields(definition, *_bundled_plugin_entry(installation, definition, environment, home))
     state = environment.get(ENV_STATE)
     state = state if isinstance(state, str) and os.path.isabs(state) else None
     override, env, table = build_override(definition, hidden, launcher, state)

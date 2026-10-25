@@ -230,16 +230,27 @@ class State:
         os.chmod(path, 0o600)
 
     @staticmethod
-    def line(writer, seconds_ago, session=None, tool='js', ok=True, ms=1000, owner=None, cwd=None):
+    def line(writer, seconds_ago, session=None, tool='js', ok=True, ms=1000, owner=None, cwd=None, error=None,
+             error_text=None):
         """One activity line. `owner` is the name of the bridge a relay's runtime serves; a line without it is an older
         relay's, or a Codex runtime's, and has no such key at all. So is `cwd`, the writer's folder, for an older
-        writer's line."""
+        writer's line, `error`, why a failed call failed, and `error_text`, what its answer said."""
         line = {'at': iso(at(seconds_ago)), 'writer': writer, 'session_id': session, 'tool': tool, 'ok': ok, 'ms': ms}
         if owner is not None:
             line['owner'] = owner
         if cwd is not None:
             line['cwd'] = cwd
+        if error is not None:
+            line['error'] = error
+        if error_text is not None:
+            line['error_text'] = error_text
         return line
+
+    def settings(self, value, mode=0o600):
+        """settings.json as `codex-cua settings` writes it (a dict), or any text."""
+        path = self.root/'settings.json'
+        path.write_text(value if isinstance(value, str) else json.dumps(value))
+        os.chmod(path, mode)
 
     def names(self, kind):
         return sorted(item.name for item in (self.root/(kind+'s')).iterdir())

@@ -150,6 +150,24 @@ struct EngineModelsTests {
         #expect(activity.map(\.cwd) == ["/Users/x/dev/a", nil])
     }
 
+    @Test func aFailedActivityLineKeepsWhyItFailed() throws {
+        let json = #"{"activity": [{"tool": "js", "ok": false, "ms": 30001, "error": "timeout"}, {"tool": "js", "ok": false, "error": 7}, {"tool": "js", "ok": false}]}"#
+        let activity = try JSONDecoder().decode(EngineStatus.self, from: Data(json.utf8)).activity
+        #expect(activity.map(\.error) == ["timeout", nil, nil])
+    }
+
+    @Test func aFailedActivityLineKeepsWhatItsAnswerSaidAndTheSettingsSayWhetherToKeepIt() throws {
+        let json = #"{"settings": {"error_text": true}, "activity": [{"tool": "js", "ok": false, "error": "error", "error_text": "TypeError: x"}, {"tool": "js", "ok": false, "error_text": 7}]}"#
+        let status = try JSONDecoder().decode(EngineStatus.self, from: Data(json.utf8))
+        #expect(status.settings.errorText)
+        #expect(status.activity.map(\.errorText) == ["TypeError: x", nil])
+        // An engine from before 0.8.4 names no settings, and anything unreadable is off.
+        for settings in ["", #", "settings": null"#, #", "settings": {"error_text": "yes"}"#, #", "settings": []"#] {
+            let older = try JSONDecoder().decode(EngineStatus.self, from: Data(#"{"schema_version": 1\#(settings)}"#.utf8))
+            #expect(older.settings.errorText == false, "\(settings)")
+        }
+    }
+
     @Test func whyAHostWentWithoutTheRelayAndWhetherARestartBringsItAreRead() throws {
         func host(_ fields: String) throws -> HostInfo {
             let json = #"{"host": {"state": "ready", "since": null, \#(fields)}}"#

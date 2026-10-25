@@ -122,6 +122,15 @@ struct FormatTests {
         #expect(Format.milliseconds(nil) == "—")
     }
 
+    @Test(arguments: [("timeout", "시간 초과"), ("screen_locked", "화면 잠김"), ("error", nil), ("new word", nil)] as [(String, String?)])
+    func whyACallFailed(word: String, expected: String?) {
+        #expect(Format.failure(word) == expected)
+    }
+
+    @Test func whyACallFailedIsNothingWithoutAWord() {
+        #expect(Format.failure(nil) == nil)
+    }
+
     // MARK: Agent names
 
     @Test func agentLabels() {

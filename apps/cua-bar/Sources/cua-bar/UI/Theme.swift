@@ -79,8 +79,16 @@ enum Theme {
 
     /// Fill of the fix button: a darker orange so white text on it stays readable (about 4.5:1).
     static let fixFill = Color(red: 0.76, green: 0.34, blue: 0.0)
-    /// Fill of a confirm button that cuts work off (force stop): a deep red, white text stays readable.
-    static let destructiveFill = Color(red: 0.70, green: 0.14, blue: 0.14)
+
+    /// Fill of the card's button in the card's own color: a problem's fix is orange, and the 다시 켜기 a ready or
+    /// working card offers is a darker green or blue (white text about 5:1).
+    static func fixFill(for state: IconState) -> Color {
+        switch state {
+        case .ready: Color(red: 0.10, green: 0.50, blue: 0.22)
+        case .working: Color(red: 0.0, green: 0.40, blue: 0.82)
+        case .problem: fixFill
+        }
+    }
 
     static let rowFill = Color.primary.opacity(0.055)
     static let rowStroke = Color.primary.opacity(0.06)

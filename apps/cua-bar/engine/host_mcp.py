@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.2'
+VERSION = '0.8.4'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -39,10 +39,52 @@ TURN_ENDED_WITHOUT_HOST = ('The Codex host connection was lost, so the CUA turn 
 NOTHING_TO_END = 'No CUA turn of this connection is open, so there was nothing to end.'
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
+JS_TIMEOUT_MS = 30000           # how long cua_repl runs js when a call gives no timeout_ms
+# What the computer-use service says, in every one of its refusals, when the Mac's lock stopped a call.
+LOCKED_MARKERS = ('The Mac is locked', 'screenLocked')
 
 
 def utc_now():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def answer_texts(answer):
+    """The texts of a failed call's answer: a JSON-RPC error's message, or those of a result's content."""
+    texts = []
+    if isinstance(answer, dict):
+        texts.append(answer.get('message'))
+        content = answer.get('content')
+        if isinstance(content, list):
+            texts.extend(item.get('text') for item in content if isinstance(item, dict))
+    return [text for text in texts if isinstance(text, str)]
+
+
+def error_texts(answer):
+    """What a failed call's answer says went wrong, for its activity line: a JSON-RPC error's message, or the first
+    text of a result's content that is not blank. The texts after it are the script's console lines and the guidance
+    Codex adds to a thread's first answer."""
+    if not isinstance(answer, dict):
+        return []
+    content = answer.get('content')
+    texts = [item.get('text') for item in content if isinstance(item, dict)] if isinstance(content, list) else []
+    first = next((text for text in texts if isinstance(text, str) and text.strip()), None)
+    return [text for text in (answer.get('message'), first) if isinstance(text, str)]
+
+
+def failure(name, arguments, answer, ms):
+    """Why a call failed, as one word for the activity log (the relay uses the same words).
+
+    `screen_locked` when the answer (a result, or a JSON-RPC error) says the Mac's lock stopped the call, `timeout`
+    when js ran for all the time it had, else `error`, also when there was no answer at all."""
+    if any(marker in text for text in answer_texts(answer) for marker in LOCKED_MARKERS):
+        return 'screen_locked'
+    if name == 'js':
+        limit = arguments.get('timeout_ms') if isinstance(arguments, dict) else None
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            limit = JS_TIMEOUT_MS
+        if ms >= limit:
+            return 'timeout'
+    return 'error'
 
 
 class BridgeFailure(Exception):
@@ -660,7 +702,9 @@ class HostMcp:
             self.last_call_at = utc_now()
         self.changed()
 
-    def finish_call(self, name, ok, started, scope, relay):
+    def finish_call(self, name, ok, started, scope, relay, error='error', texts=()):
+        """A tool call came back. `error` is the activity log's word for why a failed one failed (see failure), `texts`
+        what its answer says went wrong (error_texts): the log keeps them only when the person asked for it."""
         self.active_tool_calls -= 1
         if name != 'turn_ended':
             self.last_call_at = utc_now()
@@ -671,7 +715,8 @@ class HostMcp:
         callback = self.on_call
         if callback is not None:
             try:
-                callback(name, ok, int((time.monotonic()-started)*1000), scope['session_id'], relay)
+                callback(name, ok, int((time.monotonic()-started)*1000), scope['session_id'], relay,
+                         None if ok else error, () if ok else texts)
             except Exception:
                 pass
 
@@ -690,17 +735,25 @@ class HostMcp:
             self.begin_call()
         finally:
             self.turn_lock.release()
-        ok = False
+        ok, answer = False, None
         try:
-            result = await rpc.request('mcpServer/tool/call', self.tool_request(name, arguments, scope))
-            ok = isinstance(result, dict) and not result.get('isError')
-            return result
-        except BridgeFailure:
+            answer = await rpc.request('mcpServer/tool/call', self.tool_request(name, arguments, scope))
+            ok = isinstance(answer, dict) and not answer.get('isError')
+            return answer
+        except RpcFailure as refusal:
+            answer = refusal.error
+            raise
+        except BridgeFailure as lost:
+            # The bridge's own fixed text is what the AI is told, so it is the answer the activity log may keep.
             if rpc.closed:
+                answer = {'message': LOST_DURING_CALL}
                 raise BridgeFailure(LOST_DURING_CALL) from None
+            answer = {'message': str(lost)}
             raise
         finally:
-            self.finish_call(name, ok, started, scope, relay)
+            ms = int((time.monotonic()-started)*1000)
+            self.finish_call(name, ok, started, scope, relay, None if ok else failure(name, arguments, answer, ms),
+                             () if ok else error_texts(answer))
 
     async def end_scope(self, scope, timeout=None):
         """Ask the runtime to end one exact (session, turn) pair; returns (confirmed, result).

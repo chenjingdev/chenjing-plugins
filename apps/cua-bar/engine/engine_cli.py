@@ -1,4 +1,4 @@
-"""The engine commands behind `codex-cua`: status, release, release-session, stop, restart-codex and diagnose.
+"""The engine commands behind `codex-cua`: status, release, release-session, stop, restart-codex, settings and diagnose.
 
 Every command prints exactly one JSON object and exits 0 even when the action itself failed ("ok": false);
 diagnose prints plain text. A non-zero exit means the command could not run at all. Output shapes and reasons
@@ -9,25 +9,27 @@ import sys
 
 from engine_core import Context
 
-COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'diagnose')
+COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'settings', 'diagnose')
 # Which of the option flags each command accepts.
 OPTIONS = {'status': (), 'release': ('connection', 'ended'), 'release-session': ('session', 'user'),
-           'stop': ('connection', 'group', 'force'), 'restart-codex': (), 'diagnose': ()}
+           'stop': ('connection', 'group', 'force'), 'restart-codex': (), 'settings': ('error_text',), 'diagnose': ()}
 
 
 def validate(args, error):
     """error(message) must not return (argparse's parser.error ends the process with status 2)."""
     given = {'connection': args.connection, 'ended': args.ended, 'session': args.session, 'user': args.user,
-             'group': args.group, 'force': args.force}
+             'group': args.group, 'force': args.force, 'error_text': getattr(args, 'error_text', None)}
     for name, value in given.items():
         if value and name not in OPTIONS[args.command]:
-            error('--%s is not used by %s' % (name, args.command))
+            error('--%s is not used by %s' % (name.replace('_', '-'), args.command))
     if args.command == 'release' and bool(args.connection) == bool(args.ended):
         error('release needs exactly one of --connection ID or --ended')
     if args.command == 'release-session' and not args.session:
         error('release-session needs --session ID')
     if args.command == 'stop' and bool(args.connection) == bool(args.group):
         error('stop needs exactly one of --connection ID or --group all|claude|codex')
+    if args.command == 'settings' and getattr(args, 'error_text', None) not in ('on', 'off'):
+        error('settings needs --error-text on|off')
 
 
 def execute(ctx, args):
@@ -41,6 +43,9 @@ def execute(ctx, args):
     if args.command == 'restart-codex':
         from engine_actions import restart_codex
         return restart_codex(ctx)
+    if args.command == 'settings':
+        from engine_records import write_settings
+        return write_settings(ctx.state_dir, ctx.uid, args.error_text == 'on')
     if args.command == 'release-session':
         from engine_release import release_session_command
         return release_session_command(ctx, args.session, user=args.user)

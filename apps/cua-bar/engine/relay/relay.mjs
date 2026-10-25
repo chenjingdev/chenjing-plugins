@@ -17,11 +17,14 @@
 //     of the engine's own short-lived threads (a connection test, `codex-cua doctor --probe`, or a targeted release,
 //     `release-session`; see PROBE_FOLDER): neither is a conversation's call,
 //   - never takes a turn_ended for a use of the screen: it ends a turn (the AI's own, or a release asked for through
-//     a Claude bridge, which the relay cannot tell apart), so it is a line in the activity log but no last_call_at.
+//     a Claude bridge, which the relay cannot tell apart), so it is a line in the activity log but no last_call_at,
+//   - says in the activity line of a failed call why it failed, in one word of FAILURES (see failure()), and keeps
+//     what its answer says went wrong (error_text, see errorText()) while the person asked for it in settings.json.
 // The format of those files is documented in the engine records description of the plugin.
 //
 // Nothing the user did is written down: no tool arguments or results, no code, titles, URLs, page text or
-// environment values. stderr only ever carries fixed strings.
+// environment values. The one exception is a failed call's error text, kept only as said above. stderr only ever
+// carries fixed strings.
 //
 // Safety rules: this file must never be the reason the runtime does not start. If anything fails before the
 // runtime is spawned, the runtime is started directly instead. If the state directory is unusable the relay runs
@@ -55,6 +58,16 @@ const ABANDONED_KEEP = 64;           // ids of our own requests that gave up, re
 const MAX_REQUEST_BYTES = 1024;
 const ACTIVITY_LIMIT_BYTES = 256 * 1024;
 const ACTIVITY_KEEP_LINES = 200;
+// Why a failed call failed, as its activity line says it; the Claude bridge uses the same words (host_mcp.failure).
+const FAILURES = ['timeout', 'screen_locked', 'error'];
+const JS_TIMEOUT_MS = 30000;         // how long cua_repl runs js when a call gives no timeout_ms
+// What the computer-use service says, in every one of its refusals, when the Mac's lock stopped a call.
+const LOCKED_MARKERS = ['The Mac is locked', 'screenLocked'];
+// The engine's settings in the state directory (`codex-cua settings`), and how much error text a line keeps;
+// the Claude bridge uses the same (bridge_records).
+const SETTINGS_FILE = 'settings.json';
+const SETTINGS_MAX_BYTES = 4096;
+const ERROR_TEXT_LIMIT = 500;
 const O_EXLOCK = 0x20;               // Darwin: open(2) takes flock(2)'s exclusive lock atomically
 
 const args = process.argv.slice(2);
@@ -168,7 +181,7 @@ function relay(child) {
   const text = value => typeof value === 'string' && value.length > 0 && value.length <= 200;
 
   // ---------------------------------------------------------------- records (all optional)
-  let records = null;            // {dir, file, socketPath, activity, lock, startedAt, appServerPid, controlPath, ownerRunning}
+  let records = null;            // {dir, file, socketPath, activity, lock, settings, startedAt, appServerPid, controlPath, ownerRunning}
   let persistTimer = null;
 
   // `stderr`: 'pipe' keeps what ps says there for the caller (in the error it throws), never for this relay's stderr.
@@ -232,6 +245,7 @@ function relay(child) {
     records = {
       dir, file: path.join(dir, 'relay.json'), socketPath: path.join(dir, 'control.sock'), controlPath: path.join(dir, 'control.sock'),
       activity: path.join(stateRoot, 'activity.jsonl'), lock: path.join(stateRoot, 'activity.lock'),
+      settings: path.join(stateRoot, SETTINGS_FILE),
       startedAt: mine.startedAt, appServerPid: info.get(rootPid)?.ppid ?? null,
     };
   }
@@ -291,9 +305,11 @@ function relay(child) {
     if (!records) return;
     const tool = typeof entry.tool === 'string' && /^[\w.:-]{1,64}$/.test(entry.tool) ? entry.tool : 'unknown';
     // `owner` is only there when a bridge named itself; without it (Codex's own runtime) the line is what it always was.
+    const ok = entry.ok === true;
     const line = JSON.stringify({at: iso(), writer: 'relay-' + me + '-' + records.startedAt,
-      session_id: text(entry.sessionId) ? entry.sessionId : null, tool, ok: entry.ok === true, ms: entry.ms,
-      cwd: folder(), ...(owner ? {owner} : {})}) + '\n';
+      session_id: text(entry.sessionId) ? entry.sessionId : null, tool, ok, ms: entry.ms,
+      cwd: folder(), ...(owner ? {owner} : {}), ...(ok ? {} : {error: FAILURES.includes(entry.error) ? entry.error : 'error'}),
+      ...(ok || typeof entry.errorText !== 'string' ? {} : {error_text: entry.errorText})}) + '\n';
     let fd;
     try {
       fd = fs.openSync(records.activity, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW, 0o600);
@@ -303,6 +319,23 @@ function relay(child) {
       fd = undefined;
       if (size > ACTIVITY_LIMIT_BYTES) rotateActivity();
     } catch {
+      if (fd !== undefined) try {fs.closeSync(fd);} catch {/* closed */}
+    }
+  }
+
+  // Whether the person asked that a failed call's line keep its error text (settings.json, "error_text": true). Read at
+  // each failure, so a change counts from the next one; a missing, foreign or unreadable file is a no.
+  function keepsErrorText() {
+    let fd;
+    try {
+      fd = fs.openSync(records.settings, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      const info = fs.fstatSync(fd);
+      if (!info.isFile() || info.uid !== process.getuid() || (info.mode & 0o077) !== 0 || info.size > SETTINGS_MAX_BYTES) return false;
+      const value = JSON.parse(fs.readFileSync(fd, 'utf8'));
+      return value !== null && typeof value === 'object' && value.error_text === true;
+    } catch {
+      return false;
+    } finally {
       if (fd !== undefined) try {fs.closeSync(fd);} catch {/* closed */}
     }
   }
@@ -416,8 +449,9 @@ function relay(child) {
       if (!routine && !isEnd) lastCallAt = iso();
       if (key !== null) {
         callsInFlight += 1;
+        const limit = message.params?.arguments?.timeout_ms;
         pending.set(key, {kind: 'call', tool: name, sessionId: scope?.session_id ?? pair?.session_id ?? null, pair, routine,
-          started: Date.now()});
+          started: Date.now(), limit: Number.isInteger(limit) && limit >= 1 ? limit : JS_TIMEOUT_MS});
       }
       if (scope) openScope(scope); else schedulePersist();
     } else if (message.method === 'tools/list') {
@@ -436,6 +470,38 @@ function relay(child) {
   }
 
   const confirmed = response => response.error === undefined && response.result !== undefined && response.result?.isError !== true;
+
+  // The texts of a failed call's answer: a JSON-RPC error's message, or those of a result's content.
+  function answerTexts(response) {
+    const content = Array.isArray(response.result?.content) ? response.result.content : [];
+    return [response.error?.message, ...content.map(item => item?.text)].filter(value => typeof value === 'string');
+  }
+
+  // Why a call failed, as one word. `screen_locked` when the answer (a result, or a JSON-RPC error) says the Mac's
+  // lock stopped the call, `timeout` when js ran for all the time it had, else `error`.
+  function failure(entry, response, ms) {
+    if (answerTexts(response).some(value => LOCKED_MARKERS.some(marker => value.includes(marker)))) return 'screen_locked';
+    if (entry.tool === 'js' && ms >= entry.limit) return 'timeout';
+    return 'error';
+  }
+
+  // What a failed call's answer says went wrong: a JSON-RPC error's message, or the first text of a result's content
+  // that is not blank. The texts after it are the script's console lines and the guidance Codex adds to a thread's
+  // first answer.
+  function errorTexts(response) {
+    const content = Array.isArray(response.result?.content) ? response.result.content : [];
+    const first = content.map(item => item?.text).find(value => typeof value === 'string' && value.trim());
+    return [response.error?.message, first].filter(value => typeof value === 'string');
+  }
+
+  // What a failed call's line keeps of its answer while the person asked for it: one line, at most ERROR_TEXT_LIMIT
+  // characters, or undefined (no text, or not asked).
+  function errorText(response) {
+    const joined = errorTexts(response).map(value => value.split(/\s+/).filter(Boolean).join(' ')).filter(Boolean).join(' ');
+    if (!joined || !keepsErrorText()) return undefined;
+    const characters = [...joined];
+    return characters.length <= ERROR_TEXT_LIMIT ? joined : characters.slice(0, ERROR_TEXT_LIMIT - 1).join('') + '…';
+  }
 
   // True when the line was the answer to a request of our own and must not reach the client.
   function inspectResponse(line) {
@@ -463,7 +529,9 @@ function relay(child) {
       const ok = confirmed(message);
       if (!entry.routine) {
         if (entry.tool !== 'turn_ended') lastCallAt = iso();
-        activity({sessionId: entry.sessionId, tool: entry.tool, ok, ms: Date.now() - entry.started});
+        const ms = Date.now() - entry.started;
+        activity({sessionId: entry.sessionId, tool: entry.tool, ok, ms, error: ok ? undefined : failure(entry, message, ms),
+          errorText: ok ? undefined : errorText(message)});
       }
       if (ok && entry.pair) closeScope(entry.pair);
       schedulePersist();

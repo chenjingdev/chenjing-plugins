@@ -39,6 +39,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         case stopConnection(String, force: Bool)
         case stopGroup(StopGroup, force: Bool)
         case restartCodex
+        case setErrorText(Bool)
         case diagnose
         case probe(seconds: Int)
         case uninstall
@@ -61,6 +62,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var stopConnectionQueue: [Result<StopResult, EngineError>] = []
         var stopGroup = GroupStopResult(ok: true, stopped: 0, failed: 0, results: [])
         var restartCodex = RestartResult(ok: true, reason: nil)
+        /// nil: the switch is set as asked, and the status says so from then on.
+        var settings: SettingsResult?
         var diagnosis = "CUA diagnosis (fake)\n"
         /// What the connection test answers (or throws).
         var probe: Result<ProbeOutcome, EngineError> = .success(.checked)
@@ -148,6 +151,17 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
 
     func restartCodex() async throws -> RestartResult {
         try await begin(.restartCodex, isAction: true).restartCodex
+    }
+
+    func setErrorText(_ keep: Bool) async throws -> SettingsResult {
+        if let answer = try await begin(.setErrorText(keep), isAction: true).settings { return answer }
+        lock.withLock {
+            if case .success(var status) = script.status {
+                status.settings.errorText = keep
+                script.status = .success(status)
+            }
+        }
+        return SettingsResult(ok: true, reason: nil, errorText: keep)
     }
 
     func diagnose() async throws -> String {

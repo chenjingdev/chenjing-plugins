@@ -22,6 +22,8 @@ struct EngineTimeouts: Equatable, Sendable {
     var releaseEndedPerSession: Duration = .seconds(90)
     var groupStop: Duration = .seconds(180)
     var restartCodex: Duration = .seconds(120)
+    /// `settings`: one small file written under the engine's lock, which waits 5 s at most.
+    var settings: Duration = .seconds(15)
     var diagnose: Duration = .seconds(30)
     /// `doctor --probe --timeout <n>`: the engine ends its own test after `n` seconds and then cleans up for up to
     /// about 6 s more, so the app waits that long and 10 s over.
@@ -85,6 +87,10 @@ struct CodexCUAEngineClient: EngineClient {
 
     func restartCodex() async throws -> RestartResult {
         try await json(RestartResult.self, ["restart-codex", "--json"], timeout: timeouts.restartCodex)
+    }
+
+    func setErrorText(_ keep: Bool) async throws -> SettingsResult {
+        try await json(SettingsResult.self, ["settings", "--error-text", keep ? "on" : "off", "--json"], timeout: timeouts.settings)
     }
 
     func diagnose() async throws -> String {

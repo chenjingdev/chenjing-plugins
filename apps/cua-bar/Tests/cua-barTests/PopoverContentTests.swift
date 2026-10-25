@@ -75,9 +75,10 @@ struct PopoverContentTests {
         #expect(active.state == StateDisplay(kind: .inUse, text: "사용 중"))
         #expect(active.isBusy == false)
         #expect(active.canRelease)
+        // It is active, so its hover says what a press may cut off.
         #expect(active.button == ButtonSpec(
             title: "탭 풀기", action: .releaseConnection("claude-12345-1792320000"),
-            help: "이 AI가 잡고 있는 브라우저 탭만 풀어요. AI는 화면 도구를 계속 써요"))
+            help: "이 AI가 잡고 있는 브라우저 탭만 풀어요. 아직 일하는 중이면 하던 브라우저 작업이 끊겨요"))
 
         let resting = try #require(rows.first { $0.id == "codex-15888-1792319000" })
         #expect(resting.agent == .codex)
@@ -604,6 +605,45 @@ struct PopoverContentTests {
         // Unless the line names its own folder, as a writer of 0.8.2 on does: it outlives the connection.
         status.activity[0].cwd = "/Users/chenjing/dev/gone-project"
         #expect(content(of: status).activity.rows[0].folder == "dev/gone-project")
+    }
+
+    @Test func aFailedRowSaysWhyWhenTheLineSaysSoInAWordWorthShowing() throws {
+        var status = try Fixtures.status("status-problem")
+        let entry = status.activity[1]
+        #expect(entry.ok == false)
+        status.activity = ["timeout", "screen_locked", "error", nil, "something new"].map { word in
+            var line = entry
+            line.error = word
+            return line
+        }
+        #expect(content(of: status).activity.rows.map(\.failureText) == ["시간 초과", "화면 잠김", nil, nil, nil])
+        // A call that worked has no reason, whatever its line says.
+        status.activity = [ActivityEntry(tool: "js", ok: true, ms: 5, error: "timeout")]
+        #expect(content(of: status).activity.rows.map(\.failureText) == [nil])
+    }
+
+    @Test func aFailedRowShowsWhatItsAnswerSaidAndTheTabCarriesTheSwitch() throws {
+        var status = try Fixtures.status("status-problem")
+        #expect(content(of: status).activity.keepsErrorText == false)
+        #expect(content(of: status).activity.rows.map(\.failureDetail) == [nil, nil, nil])
+        status.settings.errorText = true
+        status.activity[1].errorText = "TypeError: Cannot read properties of undefined"
+        status.activity[0].errorText = "kept by mistake for a call that worked"
+        let activity = content(of: status).activity
+        #expect(activity.keepsErrorText == true)
+        #expect(activity.rows.map(\.failureDetail) == [nil, "TypeError: Cannot read properties of undefined", nil])
+        // Without a status there is no switch to show: its value is unknown.
+        #expect(ActivityContent.placeholder(isLoading: false).keepsErrorText == nil)
+    }
+
+    @Test func aRestartOfCodexCutsClaudesCUAOnlyWhileClaudeWorksThroughItsReadyHost() throws {
+        var status = try Fixtures.status("status-ready")
+        #expect(content(of: status).claudeWorksThroughCodex)
+        status.host.state = .closed
+        #expect(!content(of: status).claudeWorksThroughCodex, "no host: nothing of Claude's runs through Codex")
+        status = try Fixtures.status("status-ready")
+        status.connections.removeAll { $0.agent == .claude }
+        #expect(!content(of: status).claudeWorksThroughCodex)
     }
 
     @Test func activityRowsKeepTheEnginesNewestFirstOrderAndHaveUniqueIDs() throws {

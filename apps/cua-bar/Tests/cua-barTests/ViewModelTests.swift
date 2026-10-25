@@ -309,6 +309,8 @@ struct ViewModelTests {
         (.releaseSession("019a-1", user: true), .releaseSession("019a-1", user: true)),
         (.releaseSession("019a-1", user: false), .releaseSession("019a-1", user: false)),
         (.restartCodex, .restartCodex),
+        (.keepErrorText(true), .setErrorText(true)),
+        (.keepErrorText(false), .setErrorText(false)),
         (.copyDiagnosis, .diagnose),
     ])
     func eachActionIsOneEngineCallFollowedByAnImmediateRefresh(action: CUAAction, call: FakeEngineClient.Call) async throws {
@@ -490,6 +492,36 @@ struct ViewModelTests {
         let outcome = await model.perform(.copyDiagnosis)
         #expect(pasteboard.copied.isEmpty)
         #expect(outcome.kind == .failure)
+    }
+
+    @Test func theErrorTextSwitchShowsTheValueBeingSetUntilTheEngineHasItAndSaysNothingWhenItWorks() async throws {
+        let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
+        let gate = AsyncGate()
+        engine.configure { $0.actionGate = gate }
+        let model = makeModel(engine)
+        await model.refresh()
+        #expect(model.activityContent.keepsErrorText == false)
+        #expect(model.errorTextPending == nil)
+        let task = model.send(.keepErrorText(true))
+        #expect(task != nil, "the switch is its own consent")
+        #expect(await waitUntil { engine.calls.contains(.setErrorText(true)) })
+        #expect(model.errorTextPending == true, "the switch shows the new value and waits")
+        gate.open()
+        await task?.value
+        #expect(model.errorTextPending == nil)
+        #expect(model.activityContent.keepsErrorText == true, "read again at once")
+        #expect(model.banner == nil)
+    }
+
+    @Test func aSwitchTheEngineCouldNotSetSaysSoUnderTheCard() async throws {
+        let engine = FakeEngineClient(status: try Fixtures.status("status-ready"))
+        engine.configure { $0.settings = SettingsResult(ok: false, reason: "unwritable") }
+        let model = makeModel(engine)
+        await model.refresh()
+        let outcome = await model.perform(.keepErrorText(true))
+        #expect(outcome == ActionOutcome(kind: .failure, message: "오류 문구 설정을 바꾸지 못했어요 — 기록 폴더에 쓸 수 없어요"))
+        #expect(model.banner?.outcome == outcome)
+        #expect(model.activityContent.keepsErrorText == false)
     }
 
     @Test func aFailedTargetedReleaseOpensTheExtensionGuidanceAndASuccessClosesItAgain() async throws {

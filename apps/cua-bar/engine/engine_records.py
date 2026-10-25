@@ -23,6 +23,13 @@ FILENAME = {'bridge': 'bridge.json', 'relay': 'relay.json'}
 NAME = re.compile(r'^(bridge|relay)-[A-Za-z0-9_-]{1,64}$')
 WRITER = re.compile(r'^(bridge|relay)-([0-9]{1,10})-([0-9]{1,12})$')
 TOOL = re.compile(r'^[A-Za-z0-9_.:-]{1,64}$')
+# Why a failed call failed, as a writer of 0.8.4 on says it (bridge_records.FAILURES, the relay's FAILURES).
+FAILURES = frozenset(('timeout', 'screen_locked', 'error'))
+# The settings the bridge and the relay read (bridge_records.SETTINGS_FILE, the relay's SETTINGS_FILE), and how much
+# error text a line keeps (their ERROR_TEXT_LIMIT).
+SETTINGS_FILE = 'settings.json'
+SETTINGS_MAX_BYTES = 4096
+ERROR_TEXT_LIMIT = 500
 MAX_RECORD_BYTES = 256*1024
 ACTIVITY_TAIL_BYTES = 512*1024
 RELEASED_FILE = 'engine-released.json'
@@ -439,14 +446,59 @@ def prune(state_dir, uid, record, droppable=(), now=None, min_age=0):
         return delete_record_directory(fresh, uid)
 
 
+def read_settings(state_dir, uid):
+    """{"error_text": bool}: whether a failed call's activity line keeps its error text. Off unless the file says so."""
+    settings = {'error_text': False}
+    if not private_directory(state_dir, uid):
+        return settings
+    try:
+        descriptor = os.open(state_dir/SETTINGS_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+                             | getattr(os, 'O_NONBLOCK', 0))
+    except OSError:
+        return settings
+    try:
+        info = os.fstat(descriptor)
+        if not _private(info, uid, stat.S_ISREG) or info.st_size > SETTINGS_MAX_BYTES:
+            return settings
+        data = json.loads(os.read(descriptor, SETTINGS_MAX_BYTES+1).decode('utf-8'))
+    except (OSError, ValueError, UnicodeError):
+        return settings
+    finally:
+        os.close(descriptor)
+    settings['error_text'] = isinstance(data, dict) and data.get('error_text') is True
+    return settings
+
+
+def write_settings(state_dir, uid, error_text):
+    """`codex-cua settings --error-text on|off`: what the bridges and relays read at their next failure.
+
+    The state directory is made (0700) when there is none yet; one that is not this user's private directory is left
+    alone and the answer says `unwritable`."""
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    except OSError:
+        return {'ok': False, 'reason': 'unwritable'}
+    if not private_directory(state_dir, uid):
+        return {'ok': False, 'reason': 'unwritable'}
+    try:
+        with state_lock(state_dir):
+            _write_atomic(state_dir/SETTINGS_FILE, {'schema_version': 1, 'error_text': bool(error_text)})
+    except OSError:
+        return {'ok': False, 'reason': 'unwritable'}
+    return {'ok': True, 'reason': None, 'error_text': bool(error_text)}
+
+
 def read_activity(state_dir, uid):
     """Every valid line of activity.jsonl that the tail of the file holds, oldest first.
 
     A line is {"at", "writer", "session_id", "tool", "ok", "ms", "cwd"}, and a relay that a bridge started adds "owner",
     that bridge's name (None here for a line without one, or with a value that is no bridge's name: the line still
     counts). "cwd" is the folder the writer worked in, so the line still names it after the connection is gone; an older
-    writer's line has none, and anything but an absolute path is None too. Anything else in a line is ignored and a line
-    that does not fit is skipped, so a damaged file never breaks the status."""
+    writer's line has none, and anything but an absolute path is None too. A failed call's line says why in "error",
+    one word of FAILURES (None for an older writer's line, a word nobody knows, or a call that worked), and what its
+    answer said in "error_text" when the writer kept it (read_settings decides that; None otherwise, and for a call that
+    worked). Anything else in a line is ignored and a line that does not fit is skipped, so a damaged file never breaks
+    the status."""
     if not private_directory(state_dir, uid):
         return []
     try:
@@ -486,8 +538,10 @@ def read_activity(state_dir, uid):
                 or not isinstance(ms, (int, float)) or isinstance(ms, bool) or not 0 <= ms < 10**9
                 or not (session is None or _valid_session(session))):
             continue
-        cwd = item.get('cwd')
+        cwd, error, text = item.get('cwd'), item.get('error'), item.get('error_text')
         found.append({'at': at, 'writer': writer, 'session_id': session, 'tool': tool, 'ok': ok, 'ms': int(ms),
                       'owner': bridge_name(item.get('owner')),
-                      'cwd': cwd if isinstance(cwd, str) and os.path.isabs(cwd) and len(cwd) <= 1024 else None})
+                      'cwd': cwd if isinstance(cwd, str) and os.path.isabs(cwd) and len(cwd) <= 1024 else None,
+                      'error': error if not ok and isinstance(error, str) and error in FAILURES else None,
+                      'error_text': text[:ERROR_TEXT_LIMIT] if not ok and isinstance(text, str) and text.strip() else None})
     return found

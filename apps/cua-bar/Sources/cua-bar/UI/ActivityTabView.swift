@@ -1,10 +1,14 @@
 import SwiftUI
 
-/// 기록: the engine's recent calls (time, agent, folder, tool, result, duration), and at the very
-/// bottom what is pressed rarely: 진단 복사, 알림 켜기 while notifications cannot be shown, and 앱 지우기.
+/// 기록: the engine's recent calls (time, agent, folder, tool, result, duration), with the switch that keeps a failed
+/// call's error text, and at the very bottom what is pressed rarely: 진단 복사, 알림 켜기 while notifications cannot be
+/// shown, and 앱 지우기.
 struct ActivityTabView: View {
     var content: ActivityContent
     var copying: Bool
+    /// The value 오류 문구 남기기 is being set to; the switch shows it and waits until the engine has it.
+    var errorTextPending: Bool? = nil
+    var setErrorText: @MainActor @Sendable (Bool) -> Void = { _ in }
     /// A line about the app itself under the list (the login item).
     var note: String?
     /// What 진단 복사 just answered, right above the buttons (never in the banner, which would push them down).
@@ -24,6 +28,15 @@ struct ActivityTabView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                if let keeps = content.keepsErrorText {
+                    Toggle(isOn: Binding(get: { errorTextPending ?? keeps }, set: setErrorText)) {
+                        Text(ActivityContent.errorTextTitle).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(errorTextPending != nil)
+                    .help(ActivityContent.errorTextHelp)
+                }
             }
             if let empty = content.emptyText {
                 EmptyLine(text: empty)
@@ -45,9 +58,9 @@ struct ActivityTabView: View {
     }
 }
 
-/// The bottom of 기록: the question or result of 앱 지우기 and the result of 진단 복사 right above the
+/// The bottom of 기록: the progress or result of 앱 지우기 and the result of 진단 복사 right above the
 /// buttons, the login item line, and the buttons: 진단 복사, 알림 켜기 (only while notifications cannot
-/// be shown), 앱 지우기….
+/// be shown), 앱 지우기.
 struct ActivityBottomView: View {
     var copyButton: ButtonSpec
     var copying: Bool
@@ -117,23 +130,23 @@ struct NotificationsButton: View {
     }
 }
 
-/// 앱 지우기…: asks once, in a card above it, before it does anything.
+/// 앱 지우기: runs at once. What it does is on hover; its progress and result are in a card above it.
 struct RemoveButton: View {
     @ObservedObject var removal: RemovalFlow
 
     var body: some View {
-        // Hidden while the question or a result is on screen, which have their own buttons.
+        // Hidden while a result is on screen, which has its own button.
         if removal.phase == .idle {
-            Button(RemovalMessages.buttonTitle) { removal.ask() }
+            Button(RemovalMessages.buttonTitle) { Task { await removal.remove() } }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
-                .help("연결 설정과 중계기를 되돌려요")
+                .help(RemovalMessages.help)
         }
     }
 }
 
-/// The question before removing, its progress, and its result.
+/// The progress of 앱 지우기, and its result.
 struct RemovalNoticeView: View {
     @ObservedObject var removal: RemovalFlow
 
@@ -141,23 +154,6 @@ struct RemovalNoticeView: View {
         switch removal.phase {
         case .idle:
             EmptyView()
-        case .confirming:
-            RowCard(tint: .orange) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(RemovalMessages.question)
-                        .font(Theme.bodyFont)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 8) {
-                        Spacer(minLength: 0)
-                        Button("취소") { removal.dismiss() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        Button(RemovalMessages.confirmTitle) { Task { await removal.confirm() } }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                    }
-                }
-            }
         case .working:
             RowCard(tint: nil) {
                 HStack(spacing: 8) {
@@ -194,7 +190,7 @@ struct ActivityRowView: View {
     private var result: (symbol: String, color: Color, label: String) {
         switch row.ok {
         case true?: ("checkmark.circle.fill", .green, "성공")
-        case false?: ("xmark.circle.fill", .red, "실패")
+        case false?: ("xmark.circle.fill", .red, row.failureText.map { "실패, \($0)" } ?? "실패")
         case nil: ("questionmark.circle", .secondary, "결과 알 수 없음")
         }
     }
@@ -210,6 +206,9 @@ struct ActivityRowView: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(row.tool).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.tail)
+                    if let failure = row.failureText {
+                        Text(failure).font(.system(size: 11)).foregroundStyle(.red).lineLimit(1).fixedSize()
+                    }
                     Spacer(minLength: 4)
                     Text(row.durationText)
                         .font(.system(size: 11).monospacedDigit())
@@ -220,6 +219,15 @@ struct ActivityRowView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if let detail = row.failureDetail {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help(detail)
+                }
             }
         }
         .padding(.vertical, 5)

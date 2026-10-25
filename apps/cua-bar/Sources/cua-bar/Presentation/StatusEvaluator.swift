@@ -57,9 +57,12 @@ struct StatusSummary: Equatable, Sendable {
     var accessibilityLabel: String
     /// True before the first answer arrived; the icon is dimmed instead of claiming "ready".
     var isPlaceholder = false
+    /// Nothing is broken, but a restart of Codex would bring something (`restartNotice`): the card offers 다시 켜기
+    /// for the person to press when Codex is free. The app never restarts it on its own for this.
+    var restartOffered = false
 
-    var fix: CUAAction? { problem?.fix }
-    var fixLabel: String? { problem?.fixLabel }
+    var fix: CUAAction? { problem?.fix ?? (restartOffered ? .restartCodex : nil) }
+    var fixLabel: String? { problem?.fixLabel ?? (restartOffered ? StatusEvaluator.restartLabel : nil) }
 }
 
 /// What the app knows by itself besides the engine's answer: what Claude Code has of CUA, whether the
@@ -91,7 +94,8 @@ enum StatusEvaluator {
                 icon: .working, stateLabel: "작업 중", headline: sentence,
                 nextStep: restart?.step ?? "없음",
                 warning: restart?.warning, problem: nil,
-                tooltip: "CUA 작업 중 · \(sentence)", accessibilityLabel: IconState.working.accessibilityDescription)
+                tooltip: "CUA 작업 중 · \(sentence)", accessibilityLabel: IconState.working.accessibilityDescription,
+                restartOffered: restart != nil)
         }
         let counts = connectionCounts(in: status)
         let codexIsOffButStartable = status.codex.installed == true && !status.codex.running
@@ -102,7 +106,7 @@ enum StatusEvaluator {
                 ?? (codexIsOffButStartable ? "없음 — Claude 대화를 열면 Codex가 뒤에서 켜져요" : "없음"),
             warning: restart?.warning, problem: nil,
             tooltip: "CUA 준비됨 · " + (counts.isEmpty ? "연결 없음" : counts),
-            accessibilityLabel: IconState.ready.accessibilityDescription)
+            accessibilityLabel: IconState.ready.accessibilityDescription, restartOffered: restart != nil)
     }
 
     /// Codex runs and has no host, nor one on its way up or down. It is the card's problem only when nothing comes first.
@@ -117,7 +121,15 @@ enum StatusEvaluator {
     static let restartAddsRelayStep = "Codex를 다시 켜면 중계기가 붙어요"
     static let restartAddsRelayWarning = "Codex가 업데이트 직후 중계기 없이 켜져서, Codex 대화의 연결은 목록에 보이지 않고 탭도 풀 수 없어요"
 
-    /// What a restart of Codex would bring, said under the card while nothing is broken; nil when it brings nothing.
+    /// The card's button for a restart of Codex, for the problem and for the notice alike.
+    static let restartLabel = "다시 켜기"
+    /// What 다시 켜기 cuts off, said beside the button: the button runs without a question, so the card says it first.
+    static let restartCutsOff = "하던 Codex 작업이 끊겨요"
+    /// The same while a Claude conversation works or holds something through Codex (`claudeWorksThroughCodex`).
+    static let restartCutsOffWithClaude = "하던 Codex 작업과 Claude 대화의 CUA 작업이 끊겨요"
+
+    /// What a restart of Codex would bring, said under the card while nothing is broken, with 다시 켜기; nil when it
+    /// brings nothing.
     static func restartNotice(in status: EngineStatus) -> (step: String, warning: String)? {
         guard status.codex.running else { return nil }
         if status.host.startedBeforeSetup { return (restartAppliesStep, restartAppliesWarning) }
@@ -217,7 +229,7 @@ enum StatusEvaluator {
         if codexRunsWithoutItsHost(status) {
             return Problem(
                 kind: .codexWithoutHost, title: "Codex가 연결 없이 켜져 있어요", nextStep: "다시 켜면 Claude가 붙어요",
-                warning: "하던 Codex 작업이 끊길 수 있어요", fix: .restartCodex, fixLabel: "다시 켜기")
+                warning: nil, fix: .restartCodex, fixLabel: restartLabel)
         }
         if status.setup.loginEnvironment == "conflict" { return loginEnvironmentConflictProblem }
         if let conflict = conflictProblem(in: facts.claude) { return conflict }

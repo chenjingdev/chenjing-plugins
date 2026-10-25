@@ -89,14 +89,22 @@ class BridgeControl:
         except Exception:
             pass
 
-    def record_call(self, tool, ok, ms, session_id, relay):
-        """One activity line per tool call, only while no relay in front of the runtime writes it already."""
+    def record_call(self, tool, ok, ms, session_id, relay, error=None, texts=()):
+        """One activity line per tool call, only while no relay in front of the runtime writes it already.
+
+        The line of a failed call also says why, in one of the words of records.FAILURES, and keeps what its answer
+        said (`texts`, clipped to one line) while the person asked for it."""
         if relay or self.finished:
             return
+        entry = {'at': records.utc_now(), 'writer': self.writer_id, 'session_id': session_id, 'tool': tool,
+                 'ok': bool(ok), 'ms': int(ms), 'cwd': self.cwd}
+        if not ok:
+            entry['error'] = error if error in records.FAILURES else 'error'
+            text = records.error_text(texts)
+            if text is not None and records.keeps_error_text(self.state):
+                entry['error_text'] = text
         try:
-            records.append_activity(self.state, {'at': records.utc_now(), 'writer': self.writer_id,
-                                                 'session_id': session_id, 'tool': tool, 'ok': bool(ok), 'ms': int(ms),
-                                                 'cwd': self.cwd})
+            records.append_activity(self.state, entry)
         except Exception:
             pass
 

@@ -103,6 +103,20 @@ class Machine:
         (directory/'.mcp.json').write_text(json.dumps({'mcpServers': {'cua_repl': self.entry if entry is None else entry}}))
         return directory
 
+    def write_template(self, entry=None, manifest=None):
+        """The plugin inside the app, as Codex ships it: how to start the runtime is left for Codex to fill in."""
+        directory = self.app/'Contents/Resources/plugins/openai-bundled/plugins/unified-computer-use'
+        (directory/'.codex-plugin').mkdir(parents=True, exist_ok=True)
+        (directory/'.codex-plugin/plugin.json').write_text(json.dumps(manifest or {'name': 'unified-computer-use', 'version': self.version}))
+        template = {'command': 'node', 'args': [], 'enabled': False,
+                    **{k: v for k, v in self.entry.items() if k in ('enabled_tools', 'omit_tools_from', 'startup_timeout_sec', 'tools')}}
+        (directory/'.mcp.json').write_text(json.dumps({'mcpServers': {'cua_repl': template if entry is None else entry}}))
+        return directory
+
+    def remove_copy(self):
+        """As it is when Codex first starts after updating itself: no copy of this version yet."""
+        shutil.rmtree(self.codex_home/'plugins/cache/openai-bundled/unified-computer-use'/self.version)
+
     def plan(self, arguments=None, environment=None, cli=None):
         return relay_install.plan_relay(self.native, APP_ARGUMENTS if arguments is None else arguments,
                                         self.environment if environment is None else environment,
@@ -254,6 +268,21 @@ class PlanTests(MachineCase):
         plan, reason = self.machine.plan()
         self.assertIsNone(reason)
         self.assertEqual(set(parse_override(plan.override)[1]), {'command', 'args', 'env', 'enabled', 'enabled_tools', 'startup_timeout_sec'})
+
+    def test_before_codex_writes_its_copy_the_plugin_inside_the_app_stands_in(self):
+        with_copy, _ = self.machine.plan()
+        self.machine.remove_copy()
+        self.machine.write_template()
+        plan, reason = self.machine.plan()
+        self.assertIsNone(reason)
+        self.assertEqual(parse_override(plan.override), parse_override(with_copy.override))
+
+    def test_a_copy_of_this_version_wins_over_the_template(self):
+        self.machine.write_template(dict(self.machine.entry, command='node', args=[], enabled=False,
+                                         tools={'js': {'output_token_limit': 1}}))
+        plan, reason = self.machine.plan()
+        self.assertIsNone(reason)
+        self.assertEqual(parse_override(plan.override)[1]['tools'], {'js': {'output_token_limit': 25000}})
 
     def test_the_refreshed_stable_copy_is_what_the_override_points_at(self):
         self.assertFalse(self.machine.launcher.exists())
@@ -426,6 +455,38 @@ class RefusalTests(MachineCase):
                 damage()
                 self.refused('plugin_entry')
         self.assertEqual(base['mcpServers']['cua_repl']['omit_tools_from'], ['code_mode', 'deferred'])
+
+    def test_the_template_has_to_be_of_this_version_and_say_what_the_cli_shows(self):
+        template = dict(command='node', args=[], enabled=False, enabled_tools=self.machine.entry['enabled_tools'],
+                        omit_tools_from=['code_mode', 'deferred'], startup_timeout_sec=120, tools={'js': {'output_token_limit': 25000}})
+        problems = {
+            'no template either': lambda directory: shutil.rmtree(directory),
+            'manifest of another version': lambda directory: self.machine.write_template(manifest={'name': 'unified-computer-use', 'version': 'other'}),
+            'manifest of another plugin': lambda directory: self.machine.write_template(manifest={'name': 'other', 'version': 'fixture'}),
+            'entry file is not json': lambda directory: (directory/'.mcp.json').write_text('{'),
+            'entry file others can write': lambda directory: (directory/'.mcp.json').chmod(0o666),
+            'entry is a link': lambda directory: ((directory/'.mcp.json').unlink(), (directory/'.mcp.json').symlink_to(directory/'.codex-plugin/plugin.json')),
+            'template disagrees about the tools': lambda directory: self.machine.write_template(dict(template, enabled_tools=['js'])),
+            'template has a timeout the CLI does not show': lambda directory: self.machine.write_template({k: v for k, v in template.items() if k != 'startup_timeout_sec'}),
+            'template has a field nobody knows': lambda directory: self.machine.write_template(dict(template, supports_parallel_tool_calls=True)),
+            'tools hold something TOML cannot say': lambda directory: self.machine.write_template(dict(template, tools={'js': {'limit': None}})),
+        }
+        self.machine.remove_copy()
+        for label, damage in problems.items():
+            with self.subTest(label):
+                directory = self.machine.write_template()
+                self.assertIsNotNone(self.machine.plan()[0])
+                damage(directory)
+                self.refused('plugin_entry')
+                shutil.rmtree(directory, ignore_errors=True)
+
+    def test_a_copy_that_is_there_but_does_not_fit_is_refused_whatever_the_template_says(self):
+        self.machine.write_template()
+        directory = self.machine.write_plugin()
+        (directory/'.mcp.json').write_text('{')
+        self.refused('plugin_entry')
+        (directory/'.mcp.json').unlink()
+        self.refused('plugin_entry')
 
     def test_the_plugin_has_to_be_where_the_cli_found_it(self):
         self.machine.definition['transport']['env']['CODEX_HOME'] = '/somewhere/else'

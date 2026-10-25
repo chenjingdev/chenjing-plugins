@@ -30,7 +30,7 @@ LOGIN_SCRIPT = 'codex-cua-login-env'
 FALLBACK_ENV = 'CODEX_CUA_FALLBACK_NATIVE'
 ROOT_RESOLVED_FLAG = '--root-resolved'
 # Commands of the menu bar app's engine (engine_cli.py): one JSON object on stdout.
-ENGINE_COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'diagnose')
+ENGINE_COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'settings', 'diagnose')
 # The app ends a connection test it gives up on (its time ran out, or the person left) with SIGTERM and, two seconds
 # later, SIGKILL. A test that is cut short has that long for its cleanup: the host gets this long to take the thread
 # back, ps and lsof have this long between them, and the runtime is not waited for.
@@ -731,12 +731,13 @@ def main(arguments=None):
     parser.add_argument('--user', action='store_true')
     parser.add_argument('--group', choices=('all', 'claude', 'codex'))
     parser.add_argument('--force', action='store_true')
+    parser.add_argument('--error-text', choices=('on', 'off'))
     args, remainder = parser.parse_known_args(arguments)
     remainder += forwarded
     if not math.isfinite(args.timeout) or not 0 < args.timeout <= 60:
         parser.error('--timeout must be finite, positive and at most 60 seconds')
     if args.command not in ENGINE_COMMANDS and (args.connection or args.ended or args.session or args.user
-                                                or args.group or args.force):
+                                                or args.group or args.force or args.error_text):
         parser.error('unrecognized arguments')
     if sys.version_info < (3, 9) or sys.platform != 'darwin':
         raise RuntimeError('This plugin requires macOS and Python 3.9 or newer.')

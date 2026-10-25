@@ -494,17 +494,15 @@ struct AppUpdaterTests {
         let registrar = LoginItemRegistrar(service: FakeLoginItem(status: .enabled), defaults: suite.defaults)
         let flow = RemovalFlow(engine: engine, loginItem: registrar, quit: {}, sleep: sleeper.sleep)
         #expect(!flow.isRunning)
-        flow.ask()
-        #expect(!flow.isRunning, "a question on screen is the popover being open, which has its own check")
         let gate = AsyncGate()
         engine.configure { $0.actionGate = gate }
-        let confirming = Task { await flow.confirm() }
+        let removing = Task { await flow.remove() }
         #expect(await waitUntil { engine.calls.contains(.uninstall) })
         #expect(flow.isRunning)
         gate.open()
         #expect(await waitUntil { !sleeper.requestedDurations.isEmpty })
         #expect(flow.isRunning, "finished, and about to quit")
         sleeper.releaseAll()
-        await confirming.value
+        await removing.value
     }
 }

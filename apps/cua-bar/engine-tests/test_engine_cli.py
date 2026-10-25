@@ -50,8 +50,8 @@ class ArgumentTests(CliCase):
         parser_text = io.StringIO()
         with contextlib.redirect_stdout(parser_text), self.assertRaises(SystemExit):
             setup.main(['--help'])
-        for name in ('status', 'release', 'release-session', 'stop', 'restart-codex', 'diagnose', '--connection',
-                     '--ended', '--session', '--user', '--group', '--force'):
+        for name in ('status', 'release', 'release-session', 'stop', 'restart-codex', 'settings', 'diagnose',
+                     '--connection', '--ended', '--session', '--user', '--group', '--force', '--error-text'):
             self.assertIn(name, parser_text.getvalue())
         self.assertEqual(setup.ENGINE_COMMANDS, engine_cli.COMMANDS)
 
@@ -61,12 +61,15 @@ class ArgumentTests(CliCase):
                           ('status', '--force'), ('release', '--connection', 'a', '--force'),
                           ('release', '--ended', '--user'), ('stop', '--connection', 'a', '--user'),
                           ('release-session', '--session', 'a', '--force'), ('restart-codex', '--ended'),
-                          ('diagnose', '--session', 'a')):
+                          ('diagnose', '--session', 'a'), ('settings',), ('settings', '--error-text', 'maybe'),
+                          ('settings', '--error-text', 'on', '--force'), ('status', '--error-text', 'on'),
+                          ('restart-codex', '--error-text', 'off')):
             self.rejected(*arguments)
 
     def test_the_options_of_the_engine_do_not_leak_into_the_older_commands(self):
         for command in ('doctor', 'start', 'setup', 'uninstall', 'install'):
-            for option in (['--force'], ['--user'], ['--ended'], ['--group', 'all'], ['--session', 'x'], ['--connection', 'x']):
+            for option in (['--force'], ['--user'], ['--ended'], ['--group', 'all'], ['--session', 'x'], ['--connection', 'x'],
+                           ['--error-text', 'on']):
                 self.rejected(command, *option)
 
 
@@ -76,6 +79,13 @@ class JsonCommandTests(CliCase):
         status = self.run_json('status', '--json')
         self.assertEqual(status['schema_version'], 1)
         self.assertEqual(self.run_json('status')['schema_version'], 1)       # --json is not needed
+
+    def test_settings_turns_the_error_text_on_and_off_and_the_status_says_so(self):
+        self.machine.add(5, 1, '/bin/x')
+        self.assertEqual(self.run_json('settings', '--error-text', 'on', '--json'), {'ok': True, 'reason': None, 'error_text': True})
+        self.assertEqual(self.run_json('status')['settings'], {'error_text': True})
+        self.assertEqual(self.run_json('settings', '--error-text', 'off'), {'ok': True, 'reason': None, 'error_text': False})
+        self.assertEqual(self.run_json('status')['settings'], {'error_text': False})
 
     def test_work_folders_with_any_characters_survive_as_plain_ascii_json(self):
         self.start_world()
@@ -344,7 +354,7 @@ class RealProcessTests(unittest.TestCase):
         self.assertEqual((result.returncode, result.stderr), (0, ''))
         status = json.loads(result.stdout)
         self.assertEqual(list(status), ['schema_version', 'generated_at', 'plugin', 'engine', 'codex', 'host', 'setup',
-                                        'connections', 'leases', 'other_tools', 'screen', 'activity'])
+                                        'connections', 'leases', 'other_tools', 'screen', 'settings', 'activity'])
         self.assertEqual(status['engine'], {'version': status['plugin']['version'], 'root': str(PLUGIN),
                                             'launcher': str(self.home/'.local/share/codex-cua/engine/current/start-mcp.sh')})
         self.assertEqual(status['codex']['app_path'], str(self.app))
