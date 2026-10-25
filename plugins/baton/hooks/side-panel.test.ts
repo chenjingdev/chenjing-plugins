@@ -5,7 +5,7 @@ import type { Engine, TestBody } from 'claude-code/testing'
 
 type On = Parameters<TestBody>[1]
 
-import { answersText, classifyPrompt, focusAfter, forkPrompt, isHuman, isSide, recentWork, ringAfterDrop, settingsFrom, withAnswerLine, withSideCommand, worthChecking } from './side-panel'
+import { answersText, classifyPrompt, focusAfter, forkPrompt, isHuman, isSide, recentWork, ringAfterDrop, settingsFrom, withAnswerLine, withSideCommand, worthChecking, yesNo } from './side-panel'
 
 test('settings default to haiku with automatic routing off', () => {
   expect(settingsFrom({})).toEqual({ model: 'haiku', auto: false })
@@ -141,6 +141,57 @@ test('answers written in the panel are sent together as the person\'s words, and
   expect(await ui.find({ key: 'send-answers' })).toBe(undefined)
   expect(await ui.find({ key: 'todo-btn-1' })).toBe(undefined)
   expect(await ui.find({ text: '내 차례 0' })).not.toBe(undefined)
+})
+
+// 지난 대화의 물을 것에서 가져온 질문들
+test('[예]·[아니요] go on questions answered by yes or no, not on choices, open questions or things to look at', () => {
+  expect(yesNo('커밋해서 공개 저장소에 올리고, 이 Mac의 설치도 0.7.4로 올릴까요?')).toBe(true)
+  expect(yesNo('Docker에서 쓰지 않는 이미지와 빌드 캐시(약 90GB)를 지워서 이 맥 디스크(15GiB 남음)를 비울까요?')).toBe(true)
+  expect(yesNo('커밋·푸시할까요(팀원 플러그인 배포는 따로 말씀 주실 때 해요)?')).toBe(true)
+  expect(yesNo('worklog 벤치 결과표와 사례별 판정을 공유용 페이지로 만들까?')).toBe(true)
+  expect(yesNo('alibaba 명세를 지금 쓰기 시작해도 될지 알려 주세요.')).toBe(true)
+  expect(yesNo('지난 세션: 커밋할까요?')).toBe(true)
+  expect(yesNo('메일 자동화 메모를 대화 목록에서 뺄까요(추천, 자동화는 그대로), 아니면 memory.md에 남기게 할까요?')).toBe(false)
+  expect(yesNo('팀과 peer 이름이 다를 때 기본은 어느 쪽으로 할까요?')).toBe(false)
+  expect(yesNo('시험용 Open WebUI 컨테이너 `open-webui-test`를 계속 둘까요, 지울까요?')).toBe(false)
+  expect(yesNo('alibaba 스킬을 이 Mac에서만 부르나요, 다른 컴퓨터에서도 부르나요?')).toBe(false)
+  expect(yesNo('alibaba 스킬을 올릴 곳이 team-memory-system 조직인지, ubion-dev 조직인지 알려 주세요.')).toBe(false)
+  expect(yesNo('chenjing-mods의 새 이름을 baton, nunchi, butler, tikitaka 중 무엇으로 할지 정해 주세요.')).toBe(false)
+  expect(yesNo('뉴로멤2가 실제로 필요했던 가장 최근 장면 하나를 말해 주세요.')).toBe(false)
+  expect(yesNo('볼 것: 옆 패널의 긴 질문이 끝까지 보이나요?')).toBe(false)
+  expect(yesNo('`! op-away status`를 실행해 주세요.')).toBe(false)
+})
+
+// 2026-10-25 사용자 "대부분 묻는 질문이 yes or no로 답할 수 잇는건데 버튼을 넣어주라. 텍스트도 있으면서"
+test('[예]·[아니요] write that word as the answer without sending it, and the answer field stays for the rest', async ($, on) => {
+  const got: string[] = []
+  on('prompt.submit', (_$, e) => {
+    got.push(e.text)
+    return { text: e.text }
+  })
+  const ui = await seed($, on, ['커밋할까요?', '패널을 왼쪽에 둘까요, 오른쪽에 둘까요?', '볼 것: 패널이 넓어졌나요?'])
+  expect((await ui.find({ key: 'todo-yes-1' }))?.text).toBe('예')
+  expect((await ui.find({ key: 'todo-no-1' }))?.text).toBe('아니요')
+  expect(await ui.find({ key: 'todo-yes-2' })).toBe(undefined)
+  expect(await ui.find({ key: 'todo-yes-3' })).toBe(undefined)
+  // 링은 [예]가 아니라 [답하기]에서 시작한다
+  expect((await ui.find({ key: 'todo-btn-1' }))?.props.autoFocus).toBe(true)
+  expect((await ui.find({ key: 'todo-yes-1' }))?.props.autoFocus).toBe(undefined)
+  await ui.press({ key: 'todo-yes-1' })
+  expect(await ui.find({ text: '답: 예' })).not.toBe(undefined)
+  expect((await ui.find({ key: 'todo-btn-1' }))?.text).toContain('고치기')
+  await ui.press({ key: 'todo-no-1' })
+  expect(await ui.find({ text: '답: 예' })).toBe(undefined)
+  expect(await ui.find({ text: '답: 아니요' })).not.toBe(undefined)
+  expect(got).toEqual([])
+  // [고치기]는 고른 말을 담은 채 열려서 덧붙여 쓸 수 있다
+  await ui.press({ key: 'todo-btn-1' })
+  expect((await ui.find({ key: 'answer-1' }))?.props.value).toBe('아니요')
+  await ui.input({ key: 'answer-1', text: '아니요, 테스트 먼저' })
+  await ui.press({ key: 'todo-btn-2' })
+  await ui.input({ key: 'answer-2', text: '오른쪽' })
+  await ui.press({ key: 'send-answers' })
+  expect(got).toEqual(['↩ 커밋할까요? → 아니요, 테스트 먼저\n↩ 패널을 왼쪽에 둘까요, 오른쪽에 둘까요? → 오른쪽'])
 })
 
 test('an empty answer removes the draft', async ($, on) => {

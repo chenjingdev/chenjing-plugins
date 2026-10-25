@@ -9,6 +9,8 @@ import { answerMark, closeAnswered, EMPTY, restore, settingsFrom as asksSettings
 
 // 전체 화면 모드의 옆 패널 하나에 위는 "내 차례"(open-asks가 모은 할 일), 아래는 "곁대화"를 보여 준다.
 // 내 차례는 [답하기]를 누르면 그 질문 아래 입력칸에 답을 써 두었다가(Enter 저장), 모은 답을 한 번에 본 대화로 보낸다(s).
+// 예/아니요로 답할 질문에는 [예]·[아니요]도 단다: 누르면 그 말을 답으로 써 둘 뿐 보내지는 않는다(0.7.9. 2026-10-25 사용자 "대부분 묻는 질문이 yes or no로 답할 수 잇는건데 버튼을 넣어주라. 텍스트도 있으면서").
+// 바로 보내지 않는 것은 물을 것에 push·배포·지우기를 묻는 질문이 많아서(지난 16일 150개 중 41개), 잘못 누른 [예] 하나가 그 일을 시키기 때문이다(2026-10-06에는 모두 지우기가 잘못 눌려 다 지워졌다)
 // 0.7.2~0.7.3은 패널 입력칸에서 한글 조합이 깨져서(2026-10-10 "ㅌ튀어나와서", "기억ㅇ ㅣ섞인단") 답을 입력창에서 쓰게 했다.
 // 2026-10-11 사용자 "그전에 클릭해서 input채우는 경험이 좋앗던거 같음": 깨질 수 있다는 것을 알고 패널 입력칸을 골랐다.
 // 같은 날 tmux에서 패널 입력칸의 커서는 제자리에 놓였다. 쓰는 도중에 패널을 다시 그리는 것이 남은 의심이라, 쓰는 동안은 입력칸 값을 다시 넣지 않고 곁대화 답이 와도 다시 그리지 않는다.
@@ -225,6 +227,24 @@ export function answersText(list: readonly { q: string; a: string }[]): string {
     .filter(x => x.a.trim())
     .map(x => `↩ ${x.q} → ${x.a.trim()}`)
     .join('\n')
+}
+
+// [예]·[아니요]를 달 질문: 물음표가 있거나 "~할지 알려 주세요"인 질문 가운데, 고르는 질문("아니면", "어느", "~할까요, ~할까요?")과
+// 무엇을 묻는 질문("무엇", "말해 주세요")은 뺀다. 볼 것은 알림이라 뺀다.
+// 2026-10-25 지난 16일 대화의 물을 것 150개로 맞췄다: 예/아니요로 답할 질문 109개 중 105개에 달고, 고르거나 무엇을 묻는 질문 41개에는 하나도 달지 않았다.
+// 놓친 4개는 "왜 실패했는지 확인해도 될까요?"처럼 묻는 말이 안에 든 질문이다. 그 전 402개에서도 고르는 질문에 단 것은 없었다
+const NOTICE = /^(볼 것|다르게 한 것)\s*[:：]/
+const OPEN_WORD = /무엇|무슨|뭘|뭐|어느|어떤|어떻게|어디|언제|누구|누가|몇|얼마|왜/
+const CHOICE = /아니면|또는|중\s*(?:하나|무엇|어느|뭐|에서)|골라|정해\s?주/
+const TWO_ASKS = /(?:까요?|[나가]요|(?<![까가])지)\s*(?:\([^)]*\))?\s*[,，]/
+const TELL_ME = /(?:말해|알려)\s?주(?:세요|십시오|시겠어요|실래요|시면)/
+const WHETHER = /지\s*(?:를|도)?\s*(?:말해|알려)\s?주/
+
+export function yesNo(text: string): boolean {
+  const t = text.trim()
+  if (NOTICE.test(t) || !(/[?？]/.test(t) || WHETHER.test(t))) return false
+  if (OPEN_WORD.test(t) || CHOICE.test(t) || TWO_ASKS.test(t)) return false
+  return !TELL_ME.test(t) || WHETHER.test(t)
 }
 
 // 답을 저장한 뒤 링이 갈 곳: 아직 답이 없는 다음 항목의 [답하기], 다 썼으면 보내기 버튼
@@ -544,19 +564,30 @@ export function registerSide(on: On, options: PluginOptions): void {
                 </Box>,
               ]
             : []
+      // [예]·[아니요]는 [답하기] 앞에 둔다. 링은 그대로 [답하기]에서 시작한다: Enter 한 번이 [예]를 누르지 않게.
+      // 네 버튼이 한 줄에 42칸이라, 패널이 그보다 좁으면 [지우기]가 다음 줄로 내려간다
+      const quick = yesNo(a.text)
+        ? [
+            <Button key={`todo-yes-${a.id}`} label="예" dimColor onPress={() => saveAnswer($, a.id, '예', order)} />,
+            <Button key={`todo-no-${a.id}`} label="아니요" dimColor onPress={() => saveAnswer($, a.id, '아니요', order)} />,
+          ]
+        : []
       const actions = isEditing
         ? []
         : [
-            <Box key={`todo-acts-${a.id}`} flexDirection="row" gap={1} marginLeft={3}>
-              <Button
-                key={`todo-btn-${a.id}`}
-                label={draft === undefined ? '답하기' : '고치기'}
-                hotkey={String(i + 1)}
-                dimColor
-                {...(i === firstOpen ? { autoFocus: true as const } : {})}
-                onPress={() => void (Input ? startAnswer($, a.id) : answerTodo($, a.text)).catch(() => undefined)}
-              />
-              <Button key={`todo-del-${a.id}`} label="지우기" dimColor onPress={() => void dropTodo($, a).catch(() => undefined)} />
+            <Box key={`todo-acts-${a.id}`} flexDirection="row" flexWrap="wrap" columnGap={1} marginLeft={3}>
+              {[
+                ...quick,
+                <Button
+                  key={`todo-btn-${a.id}`}
+                  label={draft === undefined ? '답하기' : '고치기'}
+                  hotkey={String(i + 1)}
+                  dimColor
+                  {...(i === firstOpen ? { autoFocus: true as const } : {})}
+                  onPress={() => void (Input ? startAnswer($, a.id) : answerTodo($, a.text)).catch(() => undefined)}
+                />,
+                <Button key={`todo-del-${a.id}`} label="지우기" dimColor onPress={() => void dropTodo($, a).catch(() => undefined)} />,
+              ]}
             </Box>,
           ]
       return (
@@ -711,7 +742,7 @@ export function registerSide(on: On, options: PluginOptions): void {
     return {
       text: question
         ? '옆 패널의 곁대화에서 답해요.'
-        : '옆 패널을 열었어요. 위는 내 차례, 아래는 곁대화예요. 숫자를 누르면 그 질문 아래에 답 칸이 열려요: 쓰고 Enter로 저장, s로 모아 보내요. q는 곁질문, Esc는 입력창으로, ctrl+x tab은 다시 패널로.',
+        : '옆 패널을 열었어요. 위는 내 차례, 아래는 곁대화예요. 숫자를 누르면 그 질문 아래에 답 칸이 열려요: 쓰고 Enter로 저장, s로 모아 보내요. 예/아니요로 답할 질문은 [예]·[아니요]로 골라도 돼요. q는 곁질문, Esc는 입력창으로, ctrl+x tab은 다시 패널로.',
     }
   })
 }
