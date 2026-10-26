@@ -11,7 +11,8 @@ enum CheckFixtures {
     static func healthy() throws -> EngineStatus { try Fixtures.status("status-ready") }
 
     static func claudeReady() -> ClaudeSetupState {
-        ClaudeSetupState(claudeCodeFound: true, claudeCodePath: claudePath, mcp: .ready, skill: .ready)
+        ClaudeSetupState(
+            claudeCodeFound: true, claudeCodePath: claudePath, mcp: .ready, skill: .ready, permissions: PermissionReading(userRule: .allowed))
     }
 
     /// `codexMissing`: what the model knows when the engine cannot be asked (the app looked and there is no Codex), which
@@ -64,13 +65,13 @@ struct CheckContentTests {
 
     // MARK: Everything is fine
 
-    @Test func everythingFineGivesNineReadyLinesInTheOrderOfTheSpec() throws {
+    @Test func everythingFineGivesTenReadyLinesInTheOrderOfTheSpec() throws {
         let content = CheckFixtures.content(try status { _ in })
-        #expect(content.lines.map(\.item) == [.claudeCode, .mcp, .skill, .engine, .python, .wrapper, .relay, .loginItem, .host])
+        #expect(content.lines.map(\.item) == [.claudeCode, .mcp, .skill, .permissions, .engine, .python, .wrapper, .relay, .loginItem, .host])
         #expect(content.lines.map(\.title) == [
-            "Claude Code", "MCP", "스킬", "엔진", "파이썬 환경", "Codex 래퍼와 로그인 설정", "중계기", "앱 로그인 항목", "Codex 호스트와 연결 시험",
+            "Claude Code", "MCP", "스킬", "허락 규칙", "엔진", "파이썬 환경", "Codex 래퍼와 로그인 설정", "중계기", "앱 로그인 항목", "Codex 호스트와 연결 시험",
         ])
-        #expect(content.lines.map(\.status) == Array(repeating: .ready, count: 9))
+        #expect(content.lines.map(\.status) == Array(repeating: .ready, count: 10))
         #expect(content.problemCount == 0)
         #expect(content.headline == "점검 결과")
         #expect(content.lines.allSatisfy { !$0.detail.isEmpty })
@@ -169,7 +170,7 @@ struct CheckContentTests {
                 #expect(content.line(item)?.status == .waiting && content.line(item)?.detail == "Codex가 생기면 맞춰요", "\(item)")
             }
             #expect(content.problemCount == 1)
-            #expect(content.diagnosisLines.count == 9)
+            #expect(content.diagnosisLines.count == 10)
         }
     }
 
@@ -179,7 +180,7 @@ struct CheckContentTests {
         #expect(content.line(.claudeCode)?.status == .waiting)
         #expect(content.line(.host)?.detail == "위 카드에서 고쳐요")
         #expect(content.problemCount == 1)
-        claude.legacyPlugin = true
+        claude.legacyPlugins = [LegacyPlugin.id]
         let withPlugin = CheckFixtures.content(nil, error: .engineMissing, claude: claude, codexMissing: true)
         #expect(withPlugin.line(.mcp)?.detail == LegacyPlugin.notice, "a leftover with its own fix on the line is still told")
         #expect(withPlugin.problemCount == 2)
@@ -320,7 +321,7 @@ struct CheckContentTests {
 
     @Test func theOldPluginIsTwoCuasAndTheLineGivesTheCommandThatRemovesIt() throws {
         var claude = CheckFixtures.claudeReady()
-        claude.legacyPlugin = true
+        claude.legacyPlugins = [LegacyPlugin.id]
         let line = try #require(CheckFixtures.content(try status { _ in }, claude: claude).line(.mcp))
         #expect(line.status == .problem)
         #expect(line.detail == LegacyPlugin.notice)
@@ -598,7 +599,7 @@ struct CheckContentTests {
         #expect(slow.line(.engine)?.detail == "응답이 없어 확인하지 못했어요")
 
         let loading = CheckFixtures.content(nil)
-        #expect(loading.lines.filter { $0.item != .claudeCode && $0.item != .loginItem && $0.item != .mcp && $0.item != .skill }.allSatisfy { $0.status == .unknown && $0.detail == "확인하는 중이에요" })
+        #expect(loading.lines.filter { $0.item != .claudeCode && $0.item != .loginItem && $0.item != .mcp && $0.item != .skill && $0.item != .permissions }.allSatisfy { $0.status == .unknown && $0.detail == "확인하는 중이에요" })
     }
 
     @Test func anEngineOfAnotherVersionNamesBothVersionsInTheDiagnosis() throws {
@@ -617,13 +618,13 @@ struct CheckContentTests {
             login: LoginEnvironmentReading(agentLabel: nil, launchdValue: "/opt/other/codex-wrapper.sh"),
             probe: ProbeRecord(outcome: .timeout, at: Fixtures.now))
         let lines = content.diagnosisLines
-        #expect(lines.count == 9)
+        #expect(lines.count == 10)
         #expect(lines.map { $0.components(separatedBy: ":").first } == CheckItem.allCases.map { "점검 \($0.title)" })
         #expect(lines.allSatisfy { !$0.contains("\n") })
         #expect(lines[0] == "점검 Claude Code: 정상 — 경로 /Users/x/.local/bin/claude")
         #expect(lines[1].hasPrefix("점검 MCP: 문제"))
-        #expect(lines[5].contains("CODEX_CLI_PATH=/opt/other/codex-wrapper.sh"))
-        #expect(lines[8] == "점검 Codex 호스트와 연결 시험: 문제 — 켜져 있음, 연결 시험 timeout 12:00")
+        #expect(lines[6].contains("CODEX_CLI_PATH=/opt/other/codex-wrapper.sh"))
+        #expect(lines[9] == "점검 Codex 호스트와 연결 시험: 문제 — 켜져 있음, 연결 시험 timeout 12:00")
     }
 
     @Test func aValueThatIsNotOnePlainPathStaysOutOfTheDiagnosis() throws {

@@ -203,10 +203,12 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         guard let line = updateNotice.lineIfJustUpdated(to: running), let version = running else { return said }
         updateNotice.clear()
         guard outcome.message == InstallMessages.installed else { return said }
-        if let announce, await announce(AppNotification.updated(version).appending(probe: probe)) {
+        // What Claude Code still has of CUA's old names (F9) is read now, once: the update is when they stop matching.
+        let advice = UpdateAdvice.line(for: claude.leftovers())
+        if let announce, await announce(AppNotification.updated(version, advice: advice).appending(probe: probe)) {
             return InstallMessages.nothingToSay
         }
-        return ProbeMessages.attach(probe, to: ActionOutcome(kind: .success, message: line))
+        return ProbeMessages.attach(probe, to: ActionOutcome(kind: .success, message: UpdateAdvice.attach(advice, to: line)))
     }
 
     private func install() async -> Run {

@@ -33,6 +33,7 @@ struct CheckLineView: View {
         case .problem: ("exclamationmark.triangle.fill", .orange)
         case .waiting: ("clock", .secondary)
         case .unknown: ("questionmark.circle", .secondary)
+        case .advice: ("lightbulb", .secondary)
         }
     }
 
@@ -94,7 +95,7 @@ struct CheckStatusChip: View {
         switch status {
         case .ready: .green
         case .problem: .orange
-        case .waiting, .unknown: .secondary
+        case .waiting, .unknown, .advice: .secondary
         }
     }
 
@@ -102,7 +103,7 @@ struct CheckStatusChip: View {
         switch status {
         case .ready: Theme.greenText
         case .problem: Theme.orangeText
-        case .waiting, .unknown: .secondary
+        case .waiting, .unknown, .advice: .secondary
         }
     }
 

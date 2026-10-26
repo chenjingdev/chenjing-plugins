@@ -740,9 +740,11 @@ final class CUABarViewModel: ObservableObject {
                 }
                 let outcome = await runProbe(hostState: lastStatus?.host.state)
                 return ActionResult(outcome: probeAnswer(outcome), reason: nil)
-            case .copyCommand(let command, _):
+            case .copyCommand(let command, let item):
                 pasteboard.copy(command)
-                return ActionResult(outcome: ActionOutcome(kind: .success, message: "명령을 복사했어요"), reason: nil)
+                // The 허락 규칙 line hands over a rule for /permissions, not a command (R26).
+                let copied = item == .permissions ? "규칙을 복사했어요" : "명령을 복사했어요"
+                return ActionResult(outcome: ActionOutcome(kind: .success, message: copied), reason: nil)
             case .refresh:
                 return ActionResult(outcome: Self.quiet, reason: nil)
             }

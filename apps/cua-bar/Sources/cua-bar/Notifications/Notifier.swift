@@ -9,6 +9,8 @@ enum NotificationKind: String, Equatable, Sendable {
     case updateFailed
     /// The app has just replaced itself with a newer version (F4); posted once, by the new version when it starts.
     case updated
+    /// The same, with a line that sends the person to the 점검 tab (F9): clicking it opens that tab.
+    case updatedCheck
     /// The computer-use service was restarted as often as one lock allows and its automatic unlock still could not
     /// unlock the Mac (F8); once a lock.
     case unlockGaveUp
@@ -53,10 +55,11 @@ extension AppNotification {
     }
 
     /// The app was updated: "CUA Bar를 x.y.z로 올렸어요" and what that means for Claude conversations. Clicking it opens the
-    /// popover, like the others.
-    static func updated(_ version: VersionNumber) -> AppNotification {
+    /// popover, like the others; on the 점검 tab when `advice` (`UpdateAdvice`) is after the body (F9).
+    static func updated(_ version: VersionNumber, advice: String? = nil) -> AppNotification {
         AppNotification(
-            key: "updated-\(version)", kind: .updated, title: UpdateNotice.headline(for: version), body: UpdateNotice.consequence)
+            key: "updated-\(version)", kind: advice == nil ? .updated : .updatedCheck, title: UpdateNotice.headline(for: version),
+            body: UpdateAdvice.attach(advice, to: UpdateNotice.consequence))
     }
 
     /// F8: `restarts` restarts of the computer-use service did not let its automatic unlock unlock the Mac. Only a person
@@ -87,6 +90,7 @@ enum NotificationResponse: Equatable, Sendable {
         case (.body, .lingeringLease): .openPopover(.connections)
         case (.body, .updateFailed): .openPopover(nil)
         case (.body, .updated): .openPopover(nil)
+        case (.body, .updatedCheck): .openPopover(.check)
         case (.body, .unlockGaveUp): .openPopover(.activity)
         case (.button(.restartCodex), .codexWithoutHost): .restartCodex(key: key)
         default: nil

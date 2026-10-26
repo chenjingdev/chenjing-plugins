@@ -473,7 +473,7 @@ struct StatusEvaluatorTests {
 
     @Test func theOldPluginIsNotOnTheCard() throws {
         // It is told in the check tab (the model keeps it in `claudeSetup`), not by the icon or the card.
-        let facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .ready, skill: .ready, legacyPlugin: true))
+        let facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .ready, skill: .ready, legacyPlugins: [LegacyPlugin.id]))
         #expect(evaluate(try healthy(), facts: facts).problem == nil)
     }
 

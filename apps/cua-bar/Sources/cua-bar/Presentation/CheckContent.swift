@@ -2,13 +2,14 @@ import Foundation
 
 /// The lines of the 점검 tab, in the order the spec lists them (F3).
 enum CheckItem: String, CaseIterable, Hashable, Sendable {
-    case claudeCode, mcp, skill, engine, python, wrapper, relay, loginItem, host
+    case claudeCode, mcp, skill, permissions, engine, python, wrapper, relay, loginItem, host
 
     var title: String {
         switch self {
         case .claudeCode: "Claude Code"
         case .mcp: "MCP"
         case .skill: "스킬"
+        case .permissions: "허락 규칙"
         case .engine: "엔진"
         case .python: "파이썬 환경"
         case .wrapper: "Codex 래퍼와 로그인 설정"
@@ -27,6 +28,8 @@ enum CheckStatus: Equatable, Sendable {
     case waiting
     /// The app could not tell (no answer yet, a file it cannot read).
     case unknown
+    /// Nothing is wrong, and there is one thing the person may want to do (F9).
+    case advice
 
     var label: String {
         switch self {
@@ -34,21 +37,23 @@ enum CheckStatus: Equatable, Sendable {
         case .problem: "문제"
         case .waiting: "대기"
         case .unknown: "모름"
+        case .advice: "안내"
         }
     }
 }
 
-/// A command the person runs in a terminal. The app only hands it over (a copy button); it never runs it.
+/// A command the person runs in a terminal, or a rule they paste into Claude Code. The app only hands it over (a copy
+/// button); it never runs it.
 struct CheckCommand: Equatable, Identifiable, Sendable {
+    static let commandHelp = "명령을 복사해요. 터미널에 붙여 넣어 실행해 주세요. 앱이 대신 실행하지 않아요"
+
     var text: String
     var copy: ButtonSpec
     var id: String { text }
 
-    init(_ text: String, on item: CheckItem) {
+    init(_ text: String, on item: CheckItem, help: String = Self.commandHelp) {
         self.text = text
-        copy = ButtonSpec(
-            title: "복사", action: .copyCommand(text, on: item),
-            help: "명령을 복사해요. 터미널에 붙여 넣어 실행해 주세요. 앱이 대신 실행하지 않아요")
+        copy = ButtonSpec(title: "복사", action: .copyCommand(text, on: item), help: help)
     }
 }
 
@@ -115,6 +120,9 @@ struct CheckContent: Equatable, Sendable {
     static let moveSkillCommand = "mv ~/.claude/skills/cuabar ~/cuabar-skill-backup"
     static let unsetLauncherCommand = "launchctl unsetenv CODEX_CLI_PATH"
     static let agentFile = "~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist"
+    /// Where the one rule goes (R26): the user settings, so it holds in every folder.
+    static let allowRuleStep = "Claude Code에서 /permissions를 열고 허용(Allow)에 아래 규칙을 더한 뒤 User settings에 저장하면 어느 폴더에서든 묻지 않아요. 그러면 CUA 호출은 auto 모드 검사를 건너뛰어요"
+    static let allowRuleHelp = "규칙을 복사해요. Claude Code의 /permissions에 붙여 넣어 주세요. 앱이 설정 파일을 고치지 않아요"
 
     func line(_ item: CheckItem) -> CheckLine? { lines.first { $0.item == item } }
 
@@ -157,12 +165,17 @@ private struct Judge {
 
     func line(for item: CheckItem) -> CheckLine {
         if codexMissing, !showsConflict(item), let waiting = codexWaiting(item) {
-            return item == .mcp ? withLegacyPlugin(waiting) : waiting
+            return switch item {
+            case .mcp: withOldServers(waiting)
+            case .skill: withOldSkill(waiting)
+            default: waiting
+            }
         }
         return switch item {
         case .claudeCode: claudeCodeLine()
         case .mcp: mcpLine()
         case .skill: skillLine()
+        case .permissions: permissionsLine()
         case .engine: engineLine()
         case .python: pythonLine()
         case .wrapper: wrapperLine()
@@ -178,7 +191,7 @@ private struct Judge {
         switch item {
         case .engine, .mcp, .skill, .python, .wrapper, .relay:
             return CheckLine(item: item, status: .waiting, detail: "Codex가 생기면 맞춰요", facts: "Codex 없음")
-        case .claudeCode, .loginItem, .host:
+        case .claudeCode, .permissions, .loginItem, .host:
             return nil
         }
     }
@@ -266,28 +279,65 @@ private struct Judge {
             case .unknown: line = undecided(item, "~/.claude.json을 읽지 못했어요")
             }
         }
-        return withLegacyPlugin(line)
+        return withOldServers(line)
     }
 
-    /// The old plugin is a second CUA in a new Claude conversation: told on the MCP line, with the command that removes it.
-    private func withLegacyPlugin(_ line: CheckLine) -> CheckLine {
-        guard claude.legacyPlugin else { return line }
-        var changed = line
-        let help = "아래 명령으로 지워 주세요. 앱은 지우지 않아요"
-        if line.status == .problem {
-            changed.steps.append("\(LegacyPlugin.notice) — \(help)")
-        } else {
-            changed.status = .problem
-            changed.detail = LegacyPlugin.notice
-            changed.facts = "옛 cua 플러그인 있음"
-            changed.steps.append(help)
+    /// The old plugins and 0.8.0's `cua` server are a second CUA in a new Claude conversation: told on the MCP line, with
+    /// the commands that remove them.
+    private func withOldServers(_ line: CheckLine) -> CheckLine {
+        var told: [Leftover] = []
+        var commands: [CheckCommand] = []
+        if claude.legacyPlugin {
+            told.append(Leftover(notice: LegacyPlugin.notice, fact: "옛 cua 플러그인 있음"))
+            commands += claude.legacyPlugins.map { CheckCommand(LegacyPlugin.uninstallCommand(for: $0), on: .mcp) }
         }
-        changed.commands.append(CheckCommand(LegacyPlugin.removeCommand, on: .mcp))
-        if line.status == .problem { changed.facts = (line.facts ?? line.detail) + ", 옛 cua 플러그인 있음" }
+        if claude.oldServer {
+            told.append(Leftover(notice: OldName.serverNotice, fact: "옛 이름 cua MCP 있음"))
+            commands.append(CheckCommand(OldName.removeServerCommand, on: .mcp))
+        }
+        return with(told, commands, on: line)
+    }
+
+    /// 0.8.0's `cua` skill: told on the skill line, with the command that removes it.
+    private func withOldSkill(_ line: CheckLine) -> CheckLine {
+        guard claude.oldSkill else { return line }
+        return with(
+            [Leftover(notice: OldName.skillNotice, fact: "옛 이름 cua 스킬 있음")],
+            [CheckCommand(OldName.removeSkillCommand, on: .skill)], on: line)
+    }
+
+    private struct Leftover {
+        var notice: String
+        var fact: String
+    }
+
+    /// Leftovers told on a line: a line that is not a problem becomes one that says the first; the others, and all of
+    /// them on a line that already is one, are steps. The commands that remove them go last.
+    private func with(_ leftovers: [Leftover], _ commands: [CheckCommand], on line: CheckLine) -> CheckLine {
+        guard !leftovers.isEmpty else { return line }
+        let help = "아래 명령으로 지워 주세요. 앱은 지우지 않아요"
+        var changed = line
+        var facts = line.status == .problem ? [line.facts ?? line.detail] : []
+        for (index, leftover) in leftovers.enumerated() {
+            if index == 0, line.status != .problem {
+                changed.status = .problem
+                changed.detail = leftover.notice
+                changed.steps.append(help)
+            } else {
+                changed.steps.append("\(leftover.notice) — \(help)")
+            }
+            facts.append(leftover.fact)
+        }
+        changed.facts = facts.joined(separator: ", ")
+        changed.commands += commands
         return changed
     }
 
     private func skillLine() -> CheckLine {
+        withOldSkill(appsSkillLine())
+    }
+
+    private func appsSkillLine() -> CheckLine {
         let item = CheckItem.skill
         if let waiting = claudeWaiting(item) { return waiting }
         switch claude.skill {
@@ -304,6 +354,68 @@ private struct Judge {
                 commands: [CheckCommand(CheckContent.moveSkillCommand, on: item)])
         case .unknown: return undecided(item, "스킬 폴더를 읽지 못했어요")
         }
+    }
+
+    // MARK: Permission rules
+
+    /// What Claude Code's settings say of CUA's tools (F9): rules and hooks for the old names, and the one rule that
+    /// stops Claude Code asking (R26). It is not about what the install puts in, so it does not wait for Codex.
+    private func permissionsLine() -> CheckLine {
+        let item = CheckItem.permissions
+        if let waiting = claudeWaiting(item) { return waiting }
+        guard let reading = claude.permissions else { return undecided(item, "설정 파일을 아직 읽지 않았어요") }
+        if reading.unreadable {
+            return CheckLine(item: item, status: .unknown, detail: "~/.claude/settings.json을 읽지 못했어요", facts: "사용자 설정을 읽지 못함")
+        }
+        // Names, counts and modes only: the files' paths stay out of the copied diagnosis.
+        var steps: [String] = []
+        var facts: [String] = []
+        // A rule for the old names changes nothing once CUA is not asked about (R25).
+        let ruleFiles = reading.skipsAsking ? [] : reading.oldRuleFiles
+        if !ruleFiles.isEmpty {
+            steps.append("옛 이름의 허락 규칙: " + Self.listed(ruleFiles))
+            steps.append("그 규칙은 지우거나 mcp__cuabar로 바꿔 주세요")
+            facts.append("옛 이름 규칙 \(ruleFiles.count)곳")
+        }
+        if !reading.oldHookFiles.isEmpty {
+            steps.append("옛 이름의 훅: " + Self.listed(reading.oldHookFiles))
+            steps.append("훅의 matcher에 적힌 mcp__cua__·mcp__plugin_cua_cua__를 mcp__cuabar__로 바꿔 주세요")
+            facts.append("옛 이름 훅 \(reading.oldHookFiles.count)곳")
+        }
+        var commands: [CheckCommand] = []
+        if reading.needsAllowRule {
+            steps.append(CheckContent.allowRuleStep)
+            commands.append(CheckCommand(CuabarRule.allowAll, on: item, help: CheckContent.allowRuleHelp))
+        }
+        let rule = switch reading.userRule {
+        case .allowed: "사용자 설정이 cuabar 허용"
+        case .askedOrDenied: "사용자 설정에 cuabar 묻기·막기 규칙"
+        case .none: "사용자 설정에 cuabar 규칙 없음"
+        }
+        facts += [rule, "기본 모드 " + (reading.defaultMode ?? "정하지 않음")]
+        let said = facts.joined(separator: ", ")
+        if reading.hasOldNames {
+            return CheckLine(
+                item: item, status: .problem, detail: "옛 도구 이름이 적힌 설정이 있어요 — 지금 CUA에는 맞지 않아요",
+                facts: said, steps: steps, commands: commands)
+        }
+        if reading.needsAllowRule {
+            return CheckLine(
+                item: item, status: .advice, detail: "auto 모드에서도 CUA를 부를 때마다 물을 수 있어요",
+                facts: said, steps: steps, commands: commands)
+        }
+        let detail = switch reading.userRule {
+        case .allowed: "CUA를 부를 때 묻지 않아요"
+        case .askedOrDenied: "사용자 설정의 cuabar 규칙대로 해요"
+        case .none: "권한 확인을 건너뛰는 모드라 묻지 않아요"
+        }
+        return CheckLine(item: item, status: .ready, detail: detail, facts: said)
+    }
+
+    /// Up to two of the files, and how many more.
+    private static func listed(_ files: [String]) -> String {
+        let shown = files.prefix(2).joined(separator: ", ")
+        return files.count > 2 ? "\(shown) 외 \(files.count - 2)곳" : shown
     }
 
     // MARK: The engine, the Python environment, the wrapper, the relay

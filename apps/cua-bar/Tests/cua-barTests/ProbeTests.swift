@@ -285,6 +285,16 @@ struct ProbeModelTests {
         #expect(rig.model.banner?.outcome.message == "명령을 복사했어요")
     }
 
+    @Test func theRuleOfThePermissionsLineIsARuleNotACommand() async throws {
+        let rig = await Rig(try ready())
+        rig.model.selectedTab = .check
+        let outcome = await rig.model.perform(.copyCommand("mcp__cuabar", on: .permissions))
+        #expect(rig.pasteboard.copied == ["mcp__cuabar"])
+        #expect(outcome == ActionOutcome(kind: .success, message: "규칙을 복사했어요"))
+        #expect(rig.model.placedResults[.check(.permissions)] == outcome)
+        #expect(rig.actionCalls.isEmpty, "the app writes no settings file")
+    }
+
     // MARK: The diagnosis
 
     @Test func theCopiedDiagnosisCarriesTheCheckLinesBetweenTheEnginesTextAndTheNotificationLine() async throws {
@@ -296,10 +306,10 @@ struct ProbeModelTests {
         let lines = copied.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         #expect(lines.first == "CUA diagnosis" && lines[1] == "host: ready")
         let check = lines.filter { $0.hasPrefix("점검 ") }
-        #expect(check.count == 9)
+        #expect(check.count == 10)
         #expect(check.map { $0.components(separatedBy: ":").first } == CheckItem.allCases.map { "점검 \($0.title)" })
         #expect(check.last == "점검 Codex 호스트와 연결 시험: 정상 — 켜져 있음, 연결 시험 checked 12:00")
-        #expect(lines.drop { !$0.hasPrefix("점검 ") }.dropFirst(9).first == "알림: 켜짐")
+        #expect(lines.drop { !$0.hasPrefix("점검 ") }.dropFirst(10).first == "알림: 켜짐")
         // The names and states only: not a connection, a screen or a request.
         #expect(!check.joined().contains("019a1b2c"), "no session id")
         #expect(!check.joined().contains("computer-use"), "no working folder")
@@ -691,6 +701,6 @@ struct CopyTests {
         let diagnosis = board.copied[2]
         #expect(diagnosis.hasPrefix("CUA diagnosis\n"))
         #expect(diagnosis.contains("앱: CUA Bar 0.8.0\n로그인 때 자동 실행: "), "the app's lines are in the diagnosis")
-        #expect(diagnosis.split(separator: "\n").filter { $0.hasPrefix("점검 ") }.count == 9)
+        #expect(diagnosis.split(separator: "\n").filter { $0.hasPrefix("점검 ") }.count == 10)
     }
 }

@@ -416,7 +416,7 @@ struct CheckTabSnapshotTests {
         var conflictClaude = CheckFixtures.claudeReady()
         conflictClaude.mcp = .conflict
         conflictClaude.skill = .conflict
-        conflictClaude.legacyPlugin = true
+        conflictClaude.legacyPlugins = [LegacyPlugin.id]
         var brokenOnCard = try fine()
         brokenOnCard.engine.version = "0.6.0"
         brokenOnCard.setup.relay = "unavailable"
@@ -428,6 +428,18 @@ struct CheckTabSnapshotTests {
         off.host.state = .closed
         var unusable = CheckFixtures.claudeReady()
         unusable.claudeCodeUnusable = true
+        // F9: what 0.8.0 and the old plugins left, and settings that still name the old tools.
+        var oldNames = CheckFixtures.claudeReady()
+        oldNames.oldServer = true
+        oldNames.oldSkill = true
+        oldNames.legacyPlugins = LegacyPlugin.ids
+        oldNames.permissions = PermissionReading(
+            defaultMode: "auto", oldRuleFiles: ["~/dev/app/.claude/settings.local.json", "~/dev/web/.claude/settings.local.json", "~/dev/x/.claude/settings.json"],
+            oldHookFiles: ["~/.claude/settings.json"])
+        var oldRules = CheckFixtures.claudeReady()
+        oldRules.permissions = oldNames.permissions
+        var advice = CheckFixtures.claudeReady()
+        advice.permissions = PermissionReading(defaultMode: "auto")
         return [
             ("all-fine", await model(try fine())),
             ("probe-passed", await model(try fine(), probe: .checked)),
@@ -439,6 +451,9 @@ struct CheckTabSnapshotTests {
             ("no-claude-code", await model(try fine(), claude: .none)),
             ("claude-code-cannot-start", await model(try fine(), claude: unusable)),
             ("codex-off", await model(off)),
+            ("old-names", await model(try fine(), claude: oldNames)),
+            ("old-rules", await model(try fine(), claude: oldRules)),
+            ("allow-rule-advice", await model(try fine(), claude: advice)),
         ]
     }
 
@@ -473,7 +488,7 @@ struct CheckTabSnapshotTests {
         let model = try #require(try await states().first { $0.0 == "conflicts-and-old-plugin" }?.1)
         let content = model.checkContent
         #expect(content.problemCount == 2 + 0, "the MCP line (conflict and old plugin) and the skill line")
-        #expect(content.lines.count == 9)
+        #expect(content.lines.count == 10)
         #expect(PopoverTab.allCases.map(\.title).contains("점검"))
     }
 }

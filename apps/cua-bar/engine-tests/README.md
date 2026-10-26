@@ -1,6 +1,6 @@
 # Codex CUA 개발용 테스트
 
-CUA Bar에 담는 연결 엔진 `apps/cua-bar/engine`(0.8.5)의 회귀 시험이다. Python 시험 893개와 Node 시험 102개가 있고, 둘 다 저장소 루트에서 실행한다. Python 시험과 `node --test`는 1분쯤 걸리고, `node apps/cua-bar/engine-tests/relay`로 직접 돌리면 네 파일이 한 프로세스에서 차례로 돌아 1분 20초쯤 걸린다.
+CUA Bar에 담는 연결 엔진 `apps/cua-bar/engine`(0.8.6)의 회귀 시험이다. Python 시험 893개와 Node 시험 102개가 있고, 둘 다 저장소 루트에서 실행한다. Python 시험과 `node --test`는 1분쯤 걸리고, `node apps/cua-bar/engine-tests/relay`로 직접 돌리면 네 파일이 한 프로세스에서 차례로 돌아 1분 20초쯤 걸린다.
 
 ```sh
 python3 apps/cua-bar/engine-tests/run.py       # Python 시험 893개
