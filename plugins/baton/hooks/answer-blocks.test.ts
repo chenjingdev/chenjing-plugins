@@ -32,6 +32,16 @@ test('the rule asks for a summary of one conclusion line and a bold-named list, 
   expect(r).not.toContain('굵은 글씨와 제목은 쓰지 않는다')
 })
 
+// 2026-10-27 ~/AGENTS.md의 문장·형식 규칙을 옮겨 왔다
+test('the rule carries the sentence, Korean and format rules moved from AGENTS.md', () => {
+  const r = ruleText()
+  expect(r).toContain('80% of the way to ASD-STE100')
+  expect(r).toContain('"~되어지다" 같은 번역투 피동은 쓰지 않는다')
+  expect(r).toContain('같은 대상은 끝까지 같은 이름으로 부르고')
+  expect(r).toContain('사용자가 형식을 고르기를 기다리지 않되')
+  expect(r).toContain('기본은 글이다')
+})
+
 test('a summary list with bold names stays in the answer, and the user turn after the explanation still splits off', () => {
   const text = [
     '0.7.7부터 옆 패널에서 곁질문을 쓸 수 있어요.',
