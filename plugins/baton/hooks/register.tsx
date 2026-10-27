@@ -7,7 +7,7 @@ import { registerAsks } from './open-asks'
 import { registerSide } from './side-panel'
 
 // 네 mod를 한 플러그인으로 묶는다: answer-blocks(답 형식), open-asks(내 차례 모으기), side-panel(옆 패널), debate(토론).
-// 엔진은 register.tsx가 바뀌어야 다시 불러온다: 다른 파일만 고쳤으면 이 파일도 건드린다(0.7.11, ~/AGENTS.md의 문장·형식 규칙과 한국어 문장 규칙을 답 형식 규칙에 더함. 2026-10-27 사용자 "codex 상관없어 지워도됨").
+// 엔진은 register.tsx가 바뀌어야 다시 불러온다: 다른 파일만 고쳤으면 이 파일도 건드린다(0.7.12, 내 차례에서 답 없이 지나쳐 필요 없어진 질문을 닫고, 보낸 메시지로 답한 질문은 턴이 끝나기 전에 닫음. 2026-10-27 사용자 "side패널에 필요없는 결정내역들은 갱신해주기로 했던거 같았는데").
 // 대화형이고 /baton on으로 고른 세션에서만 켜는 것은 각 hook 첫 줄의 live($)/enter()가 맡는다(live.ts, entry.tsx).
 // 한 플러그인은 같은 이벤트를 matcher 없이 두 번 등록할 수 없어서, 여러 mod가 쓰는 이벤트(session.start, turn.complete, prompt.submit)는 matcher를 붙여 등록한다.
 export const register: Register = (on, options) => {

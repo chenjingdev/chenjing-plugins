@@ -1,6 +1,6 @@
 {
   "name": "baton",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "description": "답 형식(첫 문단·접히는 설명·내 차례), 내 차례 모으기, 옆 패널(내 차례·곁대화), 토론. /baton on으로 고른 터미널 대화형 세션에서만 켜진다. 명령: /baton, /baton-side, /baton-e, /baton-debate",
   "author": {
     "name": "chenjing"
@@ -10,7 +10,7 @@
     "judge_model": {
       "type": "string",
       "title": "내 차례 판정 모델",
-      "description": "턴이 끝날 때 이번 답의 새 질문을 뽑고, 사용자가 답한 질문을 닫고, 같은 질문을 합치고, 글만으로 알 수 없는 질문을 고쳐 쓰는 모델.",
+      "description": "사용자가 메시지를 보낼 때 그 메시지로 답한 질문을 닫고, 턴이 끝날 때 이번 답의 새 질문을 뽑고, 같은 질문을 합치고, 글만으로 알 수 없는 질문을 고쳐 쓰고, 답 없이 지나쳐 필요 없어진 질문을 닫는 모델.",
       "default": "sonnet",
       "options": [
         "sonnet",

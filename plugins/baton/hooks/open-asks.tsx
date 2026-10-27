@@ -11,6 +11,9 @@ import type { Ask, AsksStats as Stats, Book, Exchange } from '../types'
 // 합치기와 고쳐 쓰기는 0.7.10에서 더했다(2026-10-25 사용자 "중복질문은 합치는 기능도 있었으면 좋겠다. 그리고 모르는건 다시 맥락파악해서 적고, 대충 질문 올리는 일은 없엇으면 좋겠음").
 // 지난 16일 baton 세션 12개에서 같은 질문이 말만 바뀌어 다시 올라온 일이 열 번 넘게 있었다: 대개 사용자가 "뭔소리지"라고 되물어 Claude가 쉬운 말로 다시 물었는데, 옛 질문이 닫히지 않고 남았다.
 // 패널로 답한 항목 75개 중 20개쯤은 "이건 뭔데?" "뭘 바꿨음?" 같은 되물음이었다. 판정이 쓴 질문은 60자 제한 때문에 무엇을·왜가 빠진 것이 많았다
+// 0.7.12에서 둘을 더했다(2026-10-27 사용자 "side패널에 필요없는 결정내역들은 갱신해주기로 했던거 같았는데"). 답 없이 세 턴을 지나친 항목은 대화가 다른 일로 넘어갔으면 닫는다(stale).
+// 사용자가 메시지를 보내면 Claude 답을 기다리지 않고 그 메시지로 끝난 항목을 닫는다(judgeMessage). 0.7.11까지는 "다른 얘기를 하면 닫지 않는다"는 규칙 때문에 넘어간 질문이 끝까지 남았고,
+// 판정이 턴 끝에만 돌아서 입력창에 "ㄱㄱ"로 답한 질문도 긴 턴 내내 남았다(2026-10-27 agent-bar에서 8분 넘게)
 
 const BOOK = { plugin: 'baton', key: 'book' } as const
 const TURN = { plugin: 'baton', key: 'turn' } as const
@@ -98,6 +101,23 @@ export function withExchange(list: readonly Exchange[], x: Exchange): Exchange[]
   return [...list.filter(y => y.request !== x.request || y.answer !== x.answer), x].slice(-2)
 }
 
+// 판정 전에 답 없이 두 번 지나친 항목(이번 턴이 세 번째)은 "오래됨"으로 보인다: 대화가 다른 일로 넘어갔으면 판정이 닫는다(stale)
+export const STALE_SKIPS = 2
+
+function whenAsked(a: Ask, turnNo: number, fresh: ReadonlySet<number>): string {
+  if (fresh.has(a.id)) return '이번 답에서 물음'
+  if (a.skips === 0) return '직전 답에서 물음'
+  return `${Math.max(1, turnNo - a.turn)}턴 전에 물었고 아직 답 없음${a.skips >= STALE_SKIPS ? ' · 오래됨' : ''}`
+}
+
+function listText(items: readonly Ask[], turnNo: number, fresh: ReadonlySet<number> = new Set()): string {
+  return items.length ? items.map((a, i) => `${i + 1}. ${a.text} (${whenAsked(a, turnNo, fresh)})`).join('\n') : '(없음)'
+}
+
+function beforeText(before: readonly Exchange[]): string[] {
+  return before.length ? ['', '[앞선 대화: 맥락을 알기 위한 것이다. 여기서 질문을 뽑지 않는다]', ...before.map(x => `사용자: ${x.request}\nClaude: ${x.answer}`)] : []
+}
+
 // 판정에 보이는 목록에는 이번 답에서 물은 항목도 넣는다: 앞의 질문을 다시 물었으면 합치고, 글만으로 알 수 없으면 고쳐 쓰게 한다.
 // fresh: 그 항목들의 id. 이번 메시지로 닫힐 수 없어서 판정에 그렇게 알린다
 export function judgePrompt(
@@ -108,15 +128,10 @@ export function judgePrompt(
   fresh: ReadonlySet<number> = new Set(),
   before: readonly Exchange[] = [],
 ): string {
-  const when = (a: Ask) =>
-    fresh.has(a.id) ? '이번 답에서 물음' : a.skips === 0 ? '직전 답에서 물음' : `${Math.max(1, turnNo - a.turn)}턴 전에 물었고 아직 답 없음`
-  const list = items.length ? items.map((a, i) => `${i + 1}. ${a.text} (${when(a)})`).join('\n') : '(없음)'
   return [
     '[내 차례: 사용자가 옆 패널에서 보는 항목]',
-    list,
-    ...(before.length
-      ? ['', '[앞선 대화: 맥락을 알기 위한 것이다. 여기서 질문을 뽑지 않는다]', ...before.map(x => `사용자: ${x.request}\nClaude: ${x.answer}`)]
-      : []),
+    listText(items, turnNo, fresh),
+    ...beforeText(before),
     '',
     '[이번 사용자 메시지]',
     request === undefined ? '(없음: 알림 등으로 시작된 턴)' : request.slice(0, 1500),
@@ -124,21 +139,23 @@ export function judgePrompt(
     '[이번 Claude 답]',
     answer.replace(CODE, '[코드 블록]').slice(0, 6000),
     '',
-    '옆 패널은 대화와 떨어져 있어서, 사용자는 항목 글만 보고 답한다. 다섯 가지를 판정하라.',
+    '옆 패널은 대화와 떨어져 있어서, 사용자는 항목 글만 보고 답한다. 여섯 가지를 판정하라.',
     'closed: 이번 턴으로 끝난 항목의 번호("이번 답에서 물음"은 넣지 않는다). 사용자가 답했거나 골랐거나 거절·보류한 것, Claude가 이번 답에서 이미 처리한 것, Claude가 그 안을 거두었거나 상황이 바뀌어 더 물을 필요가 없어진 것. "ㅇㅇ" "ㄱㄱ" "해봐"처럼 짧은 답은 직전 답의 질문에 대한 답으로 본다. 사용자가 다른 얘기를 했거나, 그 항목을 모르겠다고 하거나 되묻기만 했으면 닫지 않는다.',
+    'stale: "오래됨" 표시가 붙은 항목(사용자가 답하지 않고 여러 턴을 지나친 것) 가운데, 대화가 다른 일로 넘어가 이제 답이 필요 없어진 것의 번호. 지금 하는 일이 아직 그 답을 기다리거나, 답이 없어서 다음 단계가 멈춰 있으면 넣지 않는다.',
     'merged: 같은 결정을 묻는 항목의 묶음. 하나에 답하면 다른 것도 답이 되는 것만 합친다: 같은 질문을 말만 바꿔 다시 물은 것, 한 항목이 다른 항목에 들어 있는 것. 대상이 같아도 정할 것이 다르면 합치지 않는다. 이번 답에서 물은 항목끼리는 합치지 않는다(Claude가 일부러 나눠 물었다). "볼 것:" 항목과 질문은 합치지 않는다. 합친 글은 가장 나중에 물은 글을 바탕으로, 앞 항목에만 있던 그 결정의 선택지·이유를 더해 쓴다. 다른 결정의 내용은 넣지 않는다.',
     'clear: "이번 답에서 물음" 항목을 하나씩 대화를 못 본 사람 눈으로 읽는다. 대화를 가리키는 말("이 주소" "이 토큰" "1번" "B안" "① 줄" "위 방법")이 있거나 대상이 빠져서 그 글만으로는 무엇을 정하거나 보라는지 알 수 없으면, 이번 답에서 찾아 채운 글을 넣는다. 그 글만으로 알 수 있으면 넣지 않는다.',
     'changed: 앞서 물은 항목이 둘 중 하나일 때만 번호와 고친 글을 넣는다. ① 상황이 바뀌었다(선택지가 줄었거나, 전제가 바뀌었거나, 이미 정해진 부분이 생겼다). ② 사용자가 그 항목을 모르겠다고 하거나 되물었고, Claude가 이번 답에서 설명했다: 그 설명을 넣어 쉬운 말로 다시 쓴다. 사용자가 그 항목에 답하거나 지시했으면 고치지 말고 closed에 넣는다. 말투를 다듬거나 진행 상황을 덧붙이려고 고치지 않는다.',
     'new: 이번 Claude 답에서 사용자가 답하거나 골라야 다음으로 넘어가는데 "물을 것:" 줄로 쓰지 않은 질문("할까요?" "어느 쪽으로 할까요?" 같은 것). 수사적 질문, 이번 메시지에서 이미 답한 것, 목록에 있는 것과 같은 것을 묻는 것, "다르게 한 것:" 줄(한 일을 알리기만 한다)은 넣지 않는다. 최대 3개.',
     'merged·clear·changed·new의 글: 그 글만 보고 답할 수 있게 쓴다. 무엇을 정하는지와 왜 묻는지를 대상 이름과 함께 넣고, 고르는 질문이면 선택지를, 추천이 있으면 추천도 넣는다. 사용자가 모를 내부 이름(함수, 파일, 단계 번호)만으로 쓰지 말고 쉬운 말로 쓴다. 글은 사용자에게 묻는 질문(볼 것은 볼 것)이다: 사용자가 한 말, 판정한 까닭, 다른 항목의 번호를 적지 않는다. 대화에 없는 내용을 만들지 않고 원문보다 단정하지 않게, 한두 문장 150자 안으로 쓴다.',
-    '한 번호는 closed·merged·clear·changed 가운데 한 곳에만 넣는다.',
-    '출력 형식: {"closed":[번호],"merged":[{"n":[번호,번호],"text":"합친 글"}],"clear":[{"n":번호,"text":"채운 글"}],"changed":[{"n":번호,"text":"고친 글"}],"new":["질문"]}',
+    '한 번호는 closed·stale·merged·clear·changed 가운데 한 곳에만 넣는다.',
+    '출력 형식: {"closed":[번호],"stale":[번호],"merged":[{"n":[번호,번호],"text":"합친 글"}],"clear":[{"n":번호,"text":"채운 글"}],"changed":[{"n":번호,"text":"고친 글"}],"new":["질문"]}',
   ].join('\n')
 }
 
 // clear: 이번 답에서 물은 항목 가운데 글만으로 알 수 없어 채운 것, changed: 앞서 물은 항목 가운데 상황이 바뀌었거나 되물어서 고친 것
 export type Judgment = {
   closed: number[]
+  stale: number[]
   merged: { n: number[]; text: string }[]
   clear: { n: number; text: string }[]
   changed: { n: number; text: string }[]
@@ -176,10 +193,12 @@ function lastObject(text: string): unknown {
 
 // 한 번호는 한 곳에만 쓴다: 닫는 번호는 합치지 않고, 앞 묶음에 든 번호는 다음 묶음과 고쳐 쓰기에서 뺀다
 export function parseJudgment(text: string): Judgment | undefined {
-  const j = lastObject(text) as { closed?: unknown; merged?: unknown; clear?: unknown; changed?: unknown; new?: unknown } | undefined
+  const j = lastObject(text) as { closed?: unknown; stale?: unknown; merged?: unknown; clear?: unknown; changed?: unknown; new?: unknown } | undefined
   if (!j || typeof j !== 'object') return undefined
   const closed = Array.isArray(j.closed) ? j.closed.map(Number).filter(n => Number.isInteger(n) && n > 0) : []
   const used = new Set(closed)
+  const stale = Array.isArray(j.stale) ? [...new Set(j.stale.map(Number))].filter(n => Number.isInteger(n) && n > 0 && !used.has(n)) : []
+  for (const n of stale) used.add(n)
   const merged: Judgment['merged'] = []
   for (const x of Array.isArray(j.merged) ? j.merged : []) {
     const raw = (x as { n?: unknown })?.n
@@ -204,7 +223,31 @@ export function parseJudgment(text: string): Judgment | undefined {
   const added = Array.isArray(j.new)
     ? j.new.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean).slice(0, 3)
     : []
-  return { closed, merged, clear, changed, added }
+  return { closed, stale, merged, clear, changed, added }
+}
+
+// 사용자가 메시지를 보낸 순간의 판정은 닫기만 한다. 새 질문·합치기·고쳐 쓰기·오래된 항목은 Claude 답이 끝날 때 판정한다
+export function messagePrompt(items: readonly Ask[], request: string, turnNo: number, before: readonly Exchange[] = []): string {
+  return [
+    '[내 차례: 사용자가 옆 패널에서 보는 항목]',
+    listText(items, turnNo),
+    ...beforeText(before),
+    '',
+    '[방금 보낸 사용자 메시지: Claude는 아직 답하지 않았다]',
+    request.slice(0, 1500),
+    '',
+    'closed: 이 메시지로 끝난 항목의 번호. 사용자가 답했거나 골랐거나 거절·보류한 것, 이 메시지로 정해져서 더 묻거나 볼 필요가 없어진 것. "ㅇㅇ" "ㄱㄱ" "해봐"처럼 짧은 답은 직전 답에서 물은 질문에 대한 답으로 본다. 사용자가 다른 얘기를 했거나, 그 항목을 모르겠다고 하거나 되묻기만 했으면 넣지 않는다. 애매하면 넣지 않는다: Claude가 답한 뒤에 한 번 더 판정한다.',
+    '출력 형식: {"closed":[번호]}',
+  ].join('\n')
+}
+
+// 메시지 판정이 닫은 번호를 지금 내 차례에 옮긴다. 판정하는 사이에 합쳐지거나 고쳐 써져 글이 바뀐 항목은 판정이 본 것과 달라서 닫지 않는다
+export function closeSeen(cur: Book, list: readonly Ask[], nums: readonly number[], turnNo: number, now: number): Book {
+  const ids = nums
+    .map(n => list[n - 1])
+    .filter((a): a is Ask => !!a && cur.items.some(c => c.id === a.id && c.text === a.text))
+    .map(a => a.id)
+  return ids.length ? apply(cur, [], ids, [], turnNo, now, false) : cur
 }
 
 // 사용자 차례 줄(물을 것·볼 것)은 모델 판정을 기다리지 않고 바로 띠에 올린다. 다르게 한 것 줄은 올리지 않는다
@@ -327,7 +370,8 @@ export function freshIds(items: readonly Ask[], taken: readonly string[]): Set<n
 }
 
 // 판정을 내 차례에 옮긴다. list: 판정에 보인 항목(번호 순), fresh: 그중 이번 답에서 물은 항목.
-// 이번 답에서 물은 항목은 이번 메시지로 닫지 않고, 답 없이 지나간 횟수(skips)도 세지 않는다. 그사이 패널에서 지운 항목은 건드리지 않는다
+// 이번 답에서 물은 항목은 이번 메시지로 닫지 않고, 답 없이 지나간 횟수(skips)도 세지 않는다. 그사이 패널에서 지운 항목은 건드리지 않는다.
+// 오래된 항목 닫기(stale)는 "오래됨"으로 보인 항목만 받고, 옆 패널에 답을 써 둔 항목은 받지 않는다: 답하려던 질문이다
 export function applyJudgment(
   b: Book,
   list: readonly Ask[],
@@ -339,7 +383,11 @@ export function applyJudgment(
   hasDraft?: (id: number) => boolean,
 ): Book {
   const idOf = (n: number) => list[n - 1]?.id
-  const closedIds = j.closed.map(idOf).filter((id): id is number => id !== undefined && !fresh.has(id))
+  const staleIds = j.stale
+    .map(n => list[n - 1])
+    .filter((a): a is Ask => !!a && !fresh.has(a.id) && a.skips >= STALE_SKIPS && !hasDraft?.(a.id))
+    .map(a => a.id)
+  const closedIds = [...j.closed.map(idOf).filter((id): id is number => id !== undefined && !fresh.has(id)), ...staleIds]
   // 앞서 물은 항목의 고쳐 쓰기는 말투만 달라졌으면 받지 않는다(nearlySame). 글만으로 알 수 없어 채운 것(clear)은 몇 글자만 바뀌어도 받는다: "이 주소"를 주소로 바꾸는 것도 그렇다
   const changed = new Map<number, string>()
   for (const c of j.changed) {
@@ -494,6 +542,26 @@ async function judgeOnce($: EngineInterface, s: Settings, answer: string, reques
   await update($, book, (cur: Book): Book => applyJudgment(cur, b.items, fresh, j, turnNo, Date.now(), countSkips && request !== undefined, id => drafted.has(id)))
 }
 
+// 사람이 보낸 메시지로 끝난 항목을 Claude 답을 기다리지 않고 닫는다. "↩ 항목 → 답" 줄만 있는 메시지는 closeAnswered가 이미 닫았다
+async function judgeMessage($: EngineInterface, s: Settings, text: string) {
+  if (!text.split('\n').some(l => l.trim() && !l.trim().startsWith('↩'))) return
+  const { value: b = EMPTY } = await $.state.get(BOOK)
+  if (!b.items.length) return
+  const { value: turnNo = 0 } = await $.state.get(TURN)
+  const { value: before = [] } = await $.state.get(RECENT)
+  const r = await $.model.complete({
+    model: s.model,
+    effort: 'low',
+    maxTokens: 400,
+    timeoutMs: 45000,
+    system: JUDGE_SYSTEM,
+    prompt: messagePrompt(b.items, text, turnNo, before),
+  })
+  const j = r.isAnswered ? parseJudgment(r.text) : undefined
+  await update($, stats, (x: Stats): Stats => (j ? { ...x, judged: x.judged + 1 } : { ...x, failed: x.failed + 1 }))
+  if (j?.closed.length) await update($, book, (cur: Book): Book => closeSeen(cur, b.items, j.closed, turnNo, Date.now()))
+}
+
 // 모듈을 다시 불러오면 그 전에 시작된 판정이 사라질 수 있다. 불러올 때 마지막 턴을 한 번 더 판정한다(같은 질문은 다시 더하지 않는다)
 async function catchUp($: EngineInterface, s: Settings) {
   const ex = lastExchange(await $.session.messages())
@@ -546,6 +614,8 @@ export function registerAsks(on: On, options: PluginOptions): void {
       return next(e)
     }
     await countHumanTurn($, e.text)
+    // 판정 모델을 기다리면 보내기가 늦어지므로 띄워 두기만 한다
+    void judgeMessage($, s, e.text).catch(() => undefined)
     const { value: b = EMPTY } = await $.state.get(BOOK)
     const list = waiting(b)
     if (!list.length) return next(e)

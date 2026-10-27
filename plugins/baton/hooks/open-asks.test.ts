@@ -3,7 +3,7 @@ import { test, expect, mock } from 'claude-code/testing'
 import { fakeSession, turnOn } from './testkit'
 
 import type { Ask, Book } from '../types'
-import { answeredIds, answerMark, apply, applyJudgment, asksBack, carryKey, endMarkOf, END_MARKS, exchangeOf, freshIds, withEndMark, withExchange, contextText, judgePrompt, keepHead, labeledAsks, lastExchange, mayAsk, merge, mergeCarried, nearlySame, parseJudgment, readCarried, restore, isHuman, settingsFrom, supersede, tailText, toCarry, waiting } from './open-asks'
+import { answeredIds, answerMark, apply, applyJudgment, asksBack, carryKey, closeSeen, endMarkOf, END_MARKS, exchangeOf, freshIds, withEndMark, withExchange, contextText, judgePrompt, keepHead, labeledAsks, lastExchange, mayAsk, merge, mergeCarried, messagePrompt, nearlySame, parseJudgment, readCarried, restore, isHuman, settingsFrom, supersede, tailText, toCarry, waiting } from './open-asks'
 
 const ask = (id: number, text: string, skips = 0, turn = 1): Ask => ({ id, text, turn, at: 0, skips })
 const empty: Book = { items: [], closed: [], seq: 0 }
@@ -21,7 +21,7 @@ test('answers without a question skip the model when nothing is open', () => {
 })
 
 test('judgment parsing tolerates fences and drops junk', () => {
-  expect(parseJudgment('```json\n{"closed":[1,"2",0,-1],"new":["A할까요?"," ",3]}\n```')).toEqual({ closed: [1, 2], merged: [], clear: [], changed: [], added: ['A할까요?'] })
+  expect(parseJudgment('```json\n{"closed":[1,"2",0,-1],"new":["A할까요?"," ",3]}\n```')).toEqual({ closed: [1, 2], stale: [], merged: [], clear: [], changed: [], added: ['A할까요?'] })
   expect(parseJudgment('{"closed":[1],"changed":[{"n":1,"text":"X"},{"n":2,"text":" Y? "},{"n":3},"z"]}')?.changed).toEqual([{ n: 2, text: 'Y?' }])
   expect(parseJudgment('모르겠어요')).toBe(undefined)
   expect(parseJudgment('{"closed": [1,}')).toBe(undefined)
@@ -269,7 +269,7 @@ test('judgment parsing keeps the last whole object and puts each number in one p
   const j = parseJudgment(
     '{"closed":[]}\nWait — 고친 출력:\n{"closed":[1],"merged":[{"n":[1,2,3],"text":" 합친 {글} "},{"n":[3,4],"text":"X"},{"n":[2]}],"clear":[{"n":4,"text":"채운 글"},{"n":5,"text":"Y"}],"changed":[{"n":5,"text":"Z"},{"n":6,"text":"W"}]}',
   )
-  expect(j).toEqual({ closed: [1], merged: [{ n: [2, 3], text: '합친 {글}' }], clear: [{ n: 4, text: '채운 글' }, { n: 5, text: 'Y' }], changed: [{ n: 6, text: 'W' }], added: [] })
+  expect(j).toEqual({ closed: [1], stale: [], merged: [{ n: [2, 3], text: '합친 {글}' }], clear: [{ n: 4, text: '채운 글' }, { n: 5, text: 'Y' }], changed: [{ n: 6, text: 'W' }], added: [] })
 })
 
 test('a rewrite keeps the look and last-session heads, and a wording-only change counts as the same text', () => {
@@ -306,7 +306,7 @@ test('a judgment leaves what this answer asked open, ignores wording-only rewrit
   const list = [ask(1, '이 주소를 넣은 채로 저장할까요?', 0, 2), ask(2, 'alibaba 명세를 지금 쓰기 시작할까요?', 1, 1), ask(3, 'D를 켤까요?', 1, 1)]
   const fresh = freshIds(list, ['이 주소를 넣은 채로  저장할까요?'])
   expect([...fresh]).toEqual([1])
-  const j = { closed: [1, 3], merged: [], clear: [{ n: 1, text: 'https://login.chenjing.org/cb 를 넣은 채로 저장할까요?' }], changed: [{ n: 2, text: 'alibaba 명세를 지금 쓰기 시작할까요' }], added: [] }
+  const j = { closed: [1, 3], stale: [], merged: [], clear: [{ n: 1, text: 'https://login.chenjing.org/cb 를 넣은 채로 저장할까요?' }], changed: [{ n: 2, text: 'alibaba 명세를 지금 쓰기 시작할까요' }], added: [] }
   const next = applyJudgment({ items: list, closed: [], seq: 3 }, list, fresh, j, 2, 0, true)
   expect(next.items.map(a => [a.id, a.text, a.skips])).toEqual([
     [1, 'https://login.chenjing.org/cb 를 넣은 채로 저장할까요?', 0],
@@ -342,4 +342,65 @@ test('a question asked back stays open, and when Claude asks it again in plain w
   await $.turn.complete({ answer: '자동 분리는 작업과 관계없는 질문을 곁대화로 보내는 기능이에요.\n\n물을 것: 곁질문 자동 분리를 끌까요?', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't2' })
   await clock.settle()
   expect(await asks()).toContain('내 차례 1개\n1. 작업과 관계없는 질문을 곁대화로 보내는 자동 분리를 끌까요? 끄면 모두 본 대화로 가요.')
+})
+
+// 0.7.11까지는 "다른 얘기를 하면 닫지 않는다"는 규칙 때문에 답 없이 넘어간 질문이 끝까지 남았다(2026-10-27 사용자 "side패널에 필요없는 결정내역들은 갱신해주기로 했던거 같았는데")
+test('a question passed over three times shows as old, only such a question closes as stale, and not when an answer is written for it', () => {
+  const list = [ask(1, 'A를 지울까요?', 2, 1), ask(2, 'B를 올릴까요?', 1, 3), ask(3, 'C를 켤까요?', 2, 1), ask(4, 'D를 고칠까요?', 0, 4)]
+  const p = judgePrompt(list, '다른 얘기', '다른 일을 했어요.', 4, new Set([4]))
+  expect(p).toContain('1. A를 지울까요? (3턴 전에 물었고 아직 답 없음 · 오래됨)')
+  expect(p).toContain('2. B를 올릴까요? (1턴 전에 물었고 아직 답 없음)')
+  expect(p).toContain('4. D를 고칠까요? (이번 답에서 물음)')
+  expect(p).toContain('stale: "오래됨" 표시가 붙은 항목')
+  expect(p).toContain('{"closed":[번호],"stale":[번호],')
+  const j = parseJudgment('{"closed":[3],"stale":[1,2,3,4,1]}')!
+  expect(j.stale).toEqual([1, 2, 4])
+  const next = applyJudgment({ items: list, closed: [], seq: 4 }, list, new Set([4]), j, 4, 0, true)
+  expect(next.items.map(a => a.id)).toEqual([2, 4])
+  expect(next.closed.map(c => c.text)).toEqual(['A를 지울까요?', 'C를 켤까요?'])
+  const drafted = applyJudgment({ items: list, closed: [], seq: 4 }, list, new Set([4]), { ...j, closed: [] }, 4, 0, true, id => id === 1)
+  expect(drafted.items.map(a => a.id)).toEqual([1, 2, 3, 4])
+})
+
+// 0.7.11까지는 판정이 턴 끝에만 돌아서, 입력창에 "ㄱㄱ"로 답한 질문이 긴 턴 내내 패널에 남았다(2026-10-27 agent-bar에서 8분 넘게)
+test('the message judge sees the items and the message only, and closes nothing that changed while it judged', () => {
+  const list = [ask(1, '버튼을 A·B·C 중 어디에 둘까요?', 0, 3), ask(2, '볼 것: 스케치 페이지', 0, 3), ask(3, 'D를 켤까요?', 1, 2)]
+  const p = messagePrompt(list, 'ㄱㄱ', 4, [{ request: '뭐라고?', answer: '버튼 위치를 고르는 말이었어요.' }])
+  expect(p).toContain('1. 버튼을 A·B·C 중 어디에 둘까요? (직전 답에서 물음)')
+  expect(p).toContain('3. D를 켤까요? (2턴 전에 물었고 아직 답 없음)')
+  expect(p).toContain('사용자: 뭐라고?\nClaude: 버튼 위치를 고르는 말이었어요.')
+  expect(p).toContain('[방금 보낸 사용자 메시지: Claude는 아직 답하지 않았다]\nㄱㄱ')
+  expect(p).toContain('출력 형식: {"closed":[번호]}')
+  const cur: Book = { items: [list[0]!, { ...list[1]!, text: '볼 것: 고친 글' }, list[2]!], closed: [], seq: 3 }
+  const next = closeSeen(cur, list, [1, 2, 7], 4, 0)
+  expect(next.items.map(a => a.id)).toEqual([2, 3])
+  expect(next.closed.map(c => c.text)).toEqual(['버튼을 A·B·C 중 어디에 둘까요?'])
+  expect(closeSeen(cur, list, [], 4, 0)).toBe(cur)
+})
+
+test('a reply typed in the input box closes the question it answers before the turn ends', async ($, on) => {
+  fakeSession(on)
+  const clock = mock.clock(on)
+  const prompts: string[] = []
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('prompt.submit', (_$, e) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
+  on('model.complete', (_$, e) => {
+    prompts.push(e.prompt)
+    const text = e.prompt.includes('[방금 보낸 사용자 메시지') ? '{"closed":[1]}' : '{"closed":[],"new":[]}'
+    return { value: { isAnswered: true, text, usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
+  })
+  const asks = async () => (await $.command.run({ command: 'baton-side', args: 'list', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 160 } })).text
+  await turnOn($)
+  await $.turn.complete({ answer: '세 안을 그렸어요.\n\n물을 것: 버튼을 A·B·C 중 어디에 둘까요?\n물을 것: README도 고칠까요?', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' })
+  await clock.settle()
+  expect(await asks()).toContain('내 차례 2개')
+  await $.prompt.submit({ text: 'ㄱㄱ', origin: { kind: 'composer' }, wait: false })
+  await clock.settle()
+  expect(prompts.filter(p => p.includes('[방금 보낸 사용자 메시지: Claude는 아직 답하지 않았다]\nㄱㄱ')).length).toBe(1)
+  expect(await asks()).toContain('내 차례 1개\n1. README도 고칠까요?')
+  // 패널의 "↩ 항목 → 답" 줄만 보낸 메시지는 그 줄로 이미 닫혀서 메시지 판정을 부르지 않는다
+  await $.prompt.submit({ text: '↩ README도 고칠까요? → ㅇㅇ', origin: { kind: 'plugin', name: 'side-panel', asUser: true }, wait: false })
+  await clock.settle()
+  expect(prompts.filter(p => p.includes('[방금 보낸 사용자 메시지')).length).toBe(1)
+  expect(await asks()).toContain('내 차례 없음')
 })
