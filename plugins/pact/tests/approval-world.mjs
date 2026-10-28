@@ -89,6 +89,21 @@ export const answers = (map, time) => ({
   message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_01', content: `Your questions have been answered: ${JSON.stringify(map)}` }] },
   toolUseResult: { questions: Object.keys(map).map((question) => ({ question, options: [] })), answers: map, annotations: {} },
 });
+// 에이전트가 일하는 도중에 사용자가 친 말: user 줄이 아니라 attachment 줄로만 남는다(이 컴퓨터의 진짜 기록에서 본 모양)
+export const queuedCommand = (prompt, time, extra = {}) => ({
+  type: 'attachment', ...base(time),
+  attachment: {
+    type: 'queued_command', prompt, source_uuid: randomUUID(), delivery_id: randomUUID(), commandMode: 'prompt',
+    origin: { kind: 'human' }, timestamp: time, humanTurn: true, ...extra,
+  },
+});
+// 같은 꼴이지만 하위 에이전트·작업이 보낸 알림(commandMode와 origin이 task-notification)
+export const queuedNotification = (text, time) => queuedCommand(`<task-notification>\n<summary>${text}</summary>\n</task-notification>`, time, {
+  commandMode: 'task-notification', origin: { kind: 'task-notification', producer: 'session-task' },
+});
+// 다른 세션이 보낸 말(origin이 peer)
+export const queuedPeer = (text, time, tag = 'agent-message') => queuedCommand(`<${tag} from="uds:/tmp/cc-socks/1.sock">${text}</${tag}>`, time, { origin: { kind: 'peer' } });
+export const hookAttachment = (time) => ({ type: 'attachment', ...base(time), attachment: { type: 'hook_success', hookName: 'SessionStart', content: '승인' } });
 export const assistant = (text, time) => ({ type: 'assistant', ...base(time), message: { role: 'assistant', content: [{ type: 'text', text }] } });
 export const toolResult = (text, time) => ({
   type: 'user', ...base(time), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_02', content: text }] },
@@ -134,8 +149,8 @@ export function cliEnv(world, extra = {}) {
   return env;
 }
 
-export function runCli(script, world, args, { env, cwd } = {}) {
-  const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: cliEnv(world, env), cwd: cwd ?? world.root });
+export function runCli(script, world, args, { env, cwd, input } = {}) {
+  const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: cliEnv(world, env), cwd: cwd ?? world.root, ...(input === undefined ? {} : { input }) });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 export const runSpec = (world, args, options) => runCli(SPEC_CLI, world, args, options);

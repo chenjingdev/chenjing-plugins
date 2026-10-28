@@ -106,8 +106,8 @@ test('probe.md keeps the conversation rules and calls its tools', () => {
     assert.ok(text.includes(s), s);
   }
   // 승인은 말이 아니라 기록이다: 사용자 말을 그대로 넣는 approve, 승인까지 맡긴다는 말만 넣는 delegate
-  assert.match(text, /spec\.mjs approve <명세> "<사용자 말>"/);
-  assert.match(text, /spec\.mjs delegate <명세> "<사용자 말>"/);
+  assert.match(text, /spec\.mjs approve <명세> - <<'EOF'/);
+  assert.match(text, /spec\.mjs delegate <명세> - <<'EOF'/);
   assert.doesNotMatch(text, /set-status <명세> approved/, 'approved는 승인 기록 없이 바꾸지 않는다');
 });
 
@@ -176,6 +176,10 @@ test('approval and delegation are recorded from the person\'s own words: an answ
   assert.match(probe, /"승인"처럼 짧은 말은 사용자 메시지 전체와 같아야 맞는다/);
   assert.match(probe, /질문 도구\(AskUserQuestion\)로 고른 답도 같다/);
   assert.match(probe, /이 질문은 spec-checker가 끝난 뒤에 한다/);
+  // 말은 표준 입력으로: 따옴표 안의 백틱·$가 셸에서 풀리지 않게
+  assert.match(probe, /말은 표준 입력으로 넘긴다\. 따옴표 붙인 heredoc이라 말 속의 백틱·`\$`·따옴표가 셸에서 풀리지 않는다/);
+  assert.match(probe, /status가 `draft`면 `approved`로 바꾼다/);
+  assert.doesNotMatch(probe, /approve <명세> "<사용자 말>"/, '큰따옴표 인자는 권하지 않는다');
   // 승인까지 맡긴다는 말만 delegate: 질문 하나의 답으로 온 "알아서"는 그 질문만 맡긴 것
   assert.match(probe, /승인까지 맡긴다는 말\("끝까지 알아서 해", "승인 없이 만들어"\)만 위임이다/);
   assert.match(probe, /"알아서", "네가 정해", "몰라", "기본안대로"는 그 질문만 맡긴 것이다/);
@@ -191,14 +195,17 @@ test('approval and delegation are recorded from the person\'s own words: an answ
   assert.match(read('skills/pact/build.md'), /status가 `draft`면 build하지 않는다/);
 });
 
-test('probe 5 teaches the risk mark, and what to do with the 참고: lines lint prints', () => {
+test('probe 5 teaches the risk mark in one line, and says nothing about risk words or 참고: lines (the code does not search words)', () => {
   const probe = read('skills/pact/probe.md');
+  assert.ok(probe.includes('- 위험 항목에는 표시를 단다.'));
   assert.ok(probe.includes('`[위험: 지우기|공개|비용]`'));
   assert.ok(probe.includes('`- F2 지난 학기 자료 비우기 [위험: 지우기] [사용자]`'));
   assert.match(probe, /표시가 있으면 위임으로는 만들기를 시작하지 못한다/);
-  assert.ok(probe.includes('lint의 위험 `참고:` 줄은 정말 위험 항목이면 표시를 달고 아니면 그대로 둔다'));
-  assert.match(probe, /`참고:`로 시작하는 줄은 문제가 아니다/);
-  assert.doesNotMatch(probe, /lint[^\n]*아무것도 출력하지 않아야/, 'lint가 참고를 출력하니 옛 문구는 맞지 않는다');
+  // lint는 문제 줄만 출력한다
+  assert.match(probe, /`node <pact>\/scripts\/spec\.mjs lint <명세>`가 아무것도 출력하지 않아야 한다\. 출력이 있으면 고친다\./);
+  assert.doesNotMatch(probe, /참고:/);
+  assert.doesNotMatch(probe, /위험 낱말/);
+  for (const file of ['skills/pact/SKILL.md', 'skills/pact/build.md', 'README.md']) assert.doesNotMatch(read(file), /위험 낱말이 있/, file);
   assert.match(read('skills/pact/SKILL.md'), /`\[위험: 지우기\|공개\|비용\]`/);
 });
 
@@ -207,7 +214,7 @@ test('build starts only from an approval or delegation record, and tells the wor
   assert.match(build, /승인이나 위임 기록\(`<run-dir>\/approvals\.jsonl`\)이 없으면 시작하지 못한다/);
   assert.match(build, /`spec\.mjs approve`로 기록한다/);
   assert.match(build, /승인이나 위임 기록이 없으면 거절한다/);
-  assert.match(build, /위임 기록이면 지금 명세를 다시 보고, 위험 항목/);
+  assert.match(build, /위임 기록이면 지금 명세를 다시 보고, 위험 항목\(`\[위험: …\]` 표시가 있는 기능·규칙 줄\)이 생겼으면 거절한다/);
   assert.match(build, /참고: 옛 판이라 승인 기록 없음/);
   assert.match(build, /frontmatter `pact: 1`/);
   assert.match(build, /run-dir은 `<프로젝트>\/\.pact\/<run-id>`의 절대 경로로 적는다/);
@@ -221,8 +228,13 @@ test('a new spec starts with pact: 2, and the README says how approval, delegati
   assert.match(read('skills/pact/spec-template.md'), /^---\npact: 2\n/);
   const readme = read('README.md');
   assert.ok(readme.includes('approvals.jsonl'));
-  assert.match(readme, /spec\.mjs approve  <명세> "<사용자 말>"/);
-  assert.match(readme, /spec\.mjs delegate <명세> "<사용자 말>"/);
+  assert.match(readme, /spec\.mjs approve <명세> - <<'EOF'/);
+  assert.match(readme, /spec\.mjs delegate <명세> - <<'EOF'/);
+  assert.match(readme, /따옴표 붙인 heredoc\(`-`\)으로 표준 입력에 넣는 쪽이 안전하다/);
+  assert.match(readme, /에이전트가 일하는 도중에 사용자가 친 말\(대화 기록에는 `attachment` 줄로 남는다\)은 사용자 말이다/);
+  assert.match(readme, /표시가 빠졌는지는 코드가 낱말로 찾지 않는다/);
+  assert.match(readme, /만드는 중이거나 검수 중이면 status는 그대로 두고 기록만 더한다/);
+  assert.match(readme, /이미 검수했는데도 기록이 없으면 훅이 돌지 않는 것이니/);
   assert.match(readme, /정리해서 10자 이하인 짧은 말\("승인"\)은 메시지 전체와 같아야 하고/);
   assert.match(readme, /`참고: 옛 판이라 승인 기록 없음`/);
   assert.match(readme, /`spec\.mjs new`는 `pact: 2`로 쓴다/);

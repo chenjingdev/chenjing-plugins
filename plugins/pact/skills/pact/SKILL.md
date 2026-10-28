@@ -77,7 +77,7 @@ Ruling 형식: `Ruling: <무엇을 정했나> — <왜> — <틀리면 무엇을
 
 ## 승인과 위임 기록
 
-승인과 위임은 말이 아니라 기록으로 남는다. `node <pact>/scripts/spec.mjs approve <명세> "<사용자 말>"`이 사용자가 한 말을 이 대화 기록의 사용자 메시지에서 찾아 맞춰 보고, 맞으면 `<run-dir>/approvals.jsonl`에 기록을 남기며 status를 `approved`로 바꾼다. 승인까지 맡긴다는 말만 `delegate`로 기록한다. 기록이 없으면 `set-status approved`·`building`, `pact:worker` 부르기, `verification.mjs snapshot`이 거절한다. `pact: 1`로 시작한 옛 명세는 기록 없이 이어 가고 `참고: 옛 판이라 승인 기록 없음`을 알린다. 하위 에이전트는 이 명령과 `set-status`를 부르지 못한다. 방법은 `probe.md` 6에 있다.
+승인과 위임은 말이 아니라 기록으로 남는다. `node <pact>/scripts/spec.mjs approve <명세> -`가 표준 입력으로 받은 사용자 말(넘기는 방법은 `probe.md` 6)을 이 대화 기록의 사용자 메시지에서 찾아 맞춰 보고, 맞으면 `<run-dir>/approvals.jsonl`에 기록을 남기며 status가 `draft`면 `approved`로 바꾼다. 승인까지 맡긴다는 말만 `delegate`로 기록한다. 기록이 없으면 `set-status approved`·`building`, `pact:worker` 부르기, `verification.mjs snapshot`이 거절한다. `pact: 1`로 시작한 옛 명세는 기록 없이 이어 가고 `참고: 옛 판이라 승인 기록 없음`을 알린다. 하위 에이전트는 이 명령과 `set-status`를 부르지 못한다.
 
 ## 말투
 

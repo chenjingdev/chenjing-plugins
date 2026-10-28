@@ -5,13 +5,20 @@
 //   (하위 에이전트 안에서도 같은 값이다). 프로젝트 이름은 대화를 처음 연 폴더에서 정해져 지금 cwd로는 알 수 없으므로
 //   projects/ 밑 폴더를 모두 본다.
 //
-// 사람 메시지(type이 user인 줄 중에서)는 이렇게 가려낸다. 이 컴퓨터의 진짜 기록 3057개에서 본 모양이다.
-//   사람 말   origin.kind가 human(promptSource는 typed·queued·suggestion_accepted·sdk 등 — 사람이 보낸 말이다)이거나, origin 칸이 없는
-//             옛 기록·claude -p의 말. 글 문자열이거나 글·그림 블록의 배열(그림이 붙은 말).
-//   뺀다      isMeta · isCompactSummary(지난 사용자 말을 인용해 담은 요약) · isSidechain(하위 에이전트 쪽 줄)
-//             origin이 task-notification(하위 에이전트가 쓴 글이 그대로 든다) · peer(다른 세션) · plugin 등 human이 아닌 것
-//             도구 결과(content가 tool_result 블록 배열), 명령 메시지(<command-name> 같은 태그로 시작), <system-reminder>·<local-command-…>
-//   예외      AskUserQuestion의 답은 그 줄의 toolUseResult.answers(질문 → 답)에 있다. 사람이 고른 말이라 인정한다.
+// 사람 메시지는 이렇게 가려낸다. 이 컴퓨터의 진짜 기록 3057개에서 본 모양이다.
+//   type이 user인 줄
+//     사람 말   origin.kind가 human(promptSource는 typed·queued·suggestion_accepted·sdk 등 — 사람이 보낸 말이다)이거나, origin 칸이 없는
+//               옛 기록·claude -p의 말. 글 문자열이거나 글·그림 블록의 배열(그림이 붙은 말).
+//     뺀다      isMeta · isCompactSummary(지난 사용자 말을 인용해 담은 요약) · isSidechain(하위 에이전트 쪽 줄)
+//               origin이 task-notification(하위 에이전트가 쓴 글이 그대로 든다) · peer(다른 세션) · plugin 등 human이 아닌 것
+//               도구 결과(content가 tool_result 블록 배열), 명령 메시지(<command-name> 같은 태그로 시작), <system-reminder>·<local-command-…>
+//     예외      AskUserQuestion의 답은 그 줄의 toolUseResult.answers(질문 → 답)에 있다. 사람이 고른 말이라 인정한다.
+//   type이 attachment인 줄 — 에이전트가 일하는 도중에 사용자가 친 말은 user 줄이 아니라 이 꼴로만 남는다:
+//     { type: 'attachment', uuid, timestamp, attachment: { type: 'queued_command', commandMode: 'prompt', origin: { kind: 'human' }, prompt } }
+//     사람 말   attachment.type이 queued_command, commandMode가 prompt, attachment.origin.kind가 human인 것. 글은 attachment.prompt
+//               (문자열이거나 글·그림 블록). uuid와 시각은 그 줄의 것이다.
+//     뺀다      같은 꼴이어도 commandMode가 task-notification이거나 origin이 task-notification·peer(<agent-message>,
+//               <cross-session-message>)인 것, 시스템 태그로 시작하는 글. queued_command가 아닌 attachment(hook_success 등)도 뺀다.
 import { readdirSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,7 +70,7 @@ export function transcriptFiles(env = process.env) {
 // ---------- 사람 메시지 가려내기 ----------
 
 // 사람이 친 말처럼 보이지 않는 시스템 글의 시작 태그. origin이 human이어도 슬래시 명령은 이런 태그로 온다.
-const SYSTEM_TAG = /^\s*<(?:command-[\w-]+|local-command-[\w-]+|bash-[\w-]+|system-reminder|task-notification|artifact-content[\w-]*|earlier_turns|cross-session-message|tools-used-before-summary)\b/;
+const SYSTEM_TAG = /^\s*<(?:command-[\w-]+|local-command-[\w-]+|bash-[\w-]+|system-reminder|task-notification|artifact-content[\w-]*|earlier_turns|cross-session-message|agent-message|tools-used-before-summary)\b/;
 
 // 글 문자열이거나 글·그림 블록뿐인 배열이면 그 글. 아니면(도구 결과 등) null.
 function plainText(content, allowBlocks) {
@@ -74,19 +81,36 @@ function plainText(content, allowBlocks) {
   return texts.length ? texts.join('\n') : null;
 }
 
-// 기록 파일에서 사람이 한 말을 쓴 순서대로: [{ uuid, time, text, line, via: 'typed'|'answer', question? }]
+// 기록 파일에서 사람이 한 말을 쓴 순서대로: [{ uuid, time, text, line, via: 'typed'|'queued'|'answer', question? }]
+// via: typed는 user 줄의 말, queued는 일하는 도중에 친 말(attachment 줄), answer는 AskUserQuestion의 답.
 // line은 파일 안의 줄 번호(1부터)다. 파일을 읽지 못하면 던진다.
 export function humanMessages(file) {
   const out = [];
   let line = 0;
   for (const raw of fileLines(file)) {
     line++;
-    if (!raw.includes('"user"')) continue; // type이 user인 줄만 읽는다(수십 MB 기록에서 나머지는 해석하지 않는다)
+    // user 줄과 일하는 도중에 친 말(queued_command)만 읽는다(수십 MB 기록에서 나머지는 해석하지 않는다)
+    if (!raw.includes('"user"') && !raw.includes('"queued_command"')) continue;
     let rec;
     try { rec = JSON.parse(raw); } catch { continue; } // 깨진 줄은 건너뛴다
-    if (!rec || rec.type !== 'user' || rec.isSidechain === true || rec.isMeta === true || rec.isCompactSummary === true) continue;
-    if (rec.promptSource === 'system') continue;
-    const base = { uuid: typeof rec.uuid === 'string' && rec.uuid ? rec.uuid : `line-${line}`, time: typeof rec.timestamp === 'string' ? rec.timestamp : null, line };
+    if (!rec || rec.isSidechain === true || rec.isMeta === true || rec.isCompactSummary === true) continue;
+    const base = {
+      uuid: typeof rec.uuid === 'string' && rec.uuid ? rec.uuid : `line-${line}`,
+      time: typeof rec.timestamp === 'string' ? rec.timestamp : (typeof rec.attachment?.timestamp === 'string' ? rec.attachment.timestamp : null),
+      line,
+    };
+
+    if (rec.type === 'attachment') {
+      const a = rec.attachment;
+      if (!a || typeof a !== 'object' || a.type !== 'queued_command' || a.commandMode !== 'prompt') continue;
+      if (!(a.origin && typeof a.origin === 'object' && a.origin.kind === 'human')) continue; // task-notification, peer …
+      const text = plainText(a.prompt, true);
+      if (text === null || !text.trim() || SYSTEM_TAG.test(text)) continue;
+      out.push({ ...base, text, via: 'queued' });
+      continue;
+    }
+
+    if (rec.type !== 'user' || rec.promptSource === 'system') continue;
     const result = rec.toolUseResult;
     if (result && typeof result === 'object' && result.answers && typeof result.answers === 'object' && !Array.isArray(result.answers)) {
       for (const [question, answer] of Object.entries(result.answers)) {

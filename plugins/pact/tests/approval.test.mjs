@@ -7,8 +7,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   tmp, T, typed, legacyUser, typedWithImage, answers, assistant, toolResult, taskNotification, compactSummary, commandMessage,
-  systemReminder, peerMessage, makeWorld, writeTranscript, addCheckerRecord, runSpec, specStatus, approvalEntries, assertRefused,
-  grantApproval, specText, SESSION, SPEC_CLI,
+  systemReminder, peerMessage, queuedCommand, queuedNotification, queuedPeer, makeWorld, writeTranscript, addCheckerRecord, cliEnv,
+  runSpec, specStatus, approvalEntries, assertRefused, grantApproval, specText, SESSION, SPEC_CLI,
 } from './approval-world.mjs';
 import { checkStart, readApprovals, runDirOfSpec, findSpecForRun, LEGACY_NOTE } from '../scripts/approval.mjs';
 
@@ -90,6 +90,32 @@ test('(a) a person\'s words with an image attached, and older records with no or
   }
 });
 
+test('(a) a "승인" typed while the agent was still working is a person\'s word although the transcript keeps it only as a queued_command attachment line', () => {
+  const w = makeWorld();
+  addCheckerRecord(w, T(5));
+  const mid = queuedCommand('승인', T(10));
+  writeTranscript(w, [assistant('명세를 검수했어요. 승인할까요?', T(8)), mid]);
+  const r = runSpec(w, ['approve', w.spec, '승인']);
+  assert.equal(r.status, 0, r.stderr);
+  const [entry] = approvalEntries(w);
+  assert.equal(entry.kind, 'approve');
+  assert.equal(entry.message, '승인');
+  assert.equal(entry.message_uuid, mid.uuid, 'uuid는 attachment 줄의 것이다');
+  assert.equal(entry.message_time, T(10));
+  assert.equal(entry.answer_question, null);
+  assert.equal(specStatus(w), 'approved');
+  // 일하는 도중에 친 말도 검수가 끝나기 전의 말이면 승인이 아니다
+  const early = makeWorld();
+  addCheckerRecord(early, T(5));
+  writeTranscript(early, [queuedCommand('승인', T(3))]);
+  assertRefused(runSpec(early, ['approve', early.spec, '승인']), /spec-checker가 끝난 뒤/);
+  // 짧은 말은 여기서도 메시지 전체와 같아야 한다
+  const inside = makeWorld();
+  addCheckerRecord(inside, T(5));
+  writeTranscript(inside, [queuedCommand('승인은 아직 아니야', T(10))]);
+  assertRefused(runSpec(inside, ['approve', inside.spec, '승인']), /짧은 말이라/);
+});
+
 // ---------- (b) 사람 말이 아닌 것은 승인 근거가 아니다 ----------
 
 test('(b) a quote that is not in a person\'s message is refused: never said, or found only in a notification, summary, reminder, command, tool result, assistant message or other session', () => {
@@ -104,6 +130,11 @@ test('(b) a quote that is not in a person\'s message is refused: never said, or 
     '다른 세션': (text) => [peerMessage(text, T(10))],
     '하위 에이전트 쪽 줄': (text) => [typed(text, T(10), { isSidechain: true })],
     '플러그인이 보낸 말': (text) => [typed(text, T(10), { origin: { kind: 'plugin' } })],
+    // 일하는 도중에 오는 attachment 줄이어도 사람 말이 아닌 것
+    '도중에 온 작업 알림': (text) => [queuedNotification(text, T(10))],
+    '도중에 온 다른 세션의 말(agent-message)': (text) => [queuedPeer(text, T(10))],
+    '도중에 온 다른 세션의 말(cross-session-message)': (text) => [queuedPeer(text, T(10), 'cross-session-message')],
+    'commandMode가 prompt가 아닌 attachment': (text) => [queuedCommand(text, T(10), { commandMode: 'task-notification' })],
   };
   for (const quote of ['승인', LONG]) {
     for (const [label, make] of Object.entries(sources)) {
@@ -201,6 +232,9 @@ test('(e) with no spec-checker record approve is refused, and an unreadable reco
   writeTranscript(w, [typed('승인', T(10))]);
   const line = assertRefused(runSpec(w, ['approve', w.spec, '승인']), /spec-checker 기록이 없다/);
   assert.match(line, /pact:spec-checker로 명세를 검수한 뒤/);
+  // 이미 검수했는데도 기록이 없으면 훅이 안 도는 것이다: 다시 불러도 같은 거절이 되풀이되니 까닭을 찾아 알리게 한다
+  assert.match(line, /이미 검수했는데도 기록이 없으면 훅이 돌지 않는 것이다/);
+  assert.match(line, /플러그인 데이터 폴더의 hook-error\.log를 보고 사용자에게 알린다\(log\/에 직접 쓰지 않는다\)/);
   assert.equal(specStatus(w), 'draft');
   assert.equal(existsSync(path.join(w.project, '.pact')), false, '거절하면 실행 폴더도 만들지 않는다');
   // 다른 에이전트의 기록만 있어도 spec-checker 기록이 아니다
@@ -245,7 +279,7 @@ test('(e) approving again needs a message newer than every message already recor
   assert.equal(entries[0].message_time, T(10));
   assert.equal(entries[1].message_time, T(20), '맞는 말이 둘이면 가장 최근 것을 쓴다');
   assert.notEqual(entries[1].message_uuid, entries[0].message_uuid);
-  assert.equal(specStatus(w), 'approved');
+  assert.equal(specStatus(w), 'building', '만드는 중이면 status는 그대로 두고 기록만 더한다');
   // 방금 쓴 메시지를 또 쓰면 거절
   assertRefused(runSpec(w, ['approve', w.spec, '승인']), /앞 승인 기록에 쓴 메시지/);
   assert.equal(approvalEntries(w).length, 2);
@@ -295,31 +329,65 @@ test('(f) delegate quotes are matched like approve quotes: a short quote must be
   assert.deepEqual(approvalEntries(w), []);
 });
 
-test('(f) delegate with a [위험: …] mark, or with a risk word and no mark, is refused and says to get an approval instead', () => {
+test('(f) delegate with a [위험: …] mark on an F or R line, a case of it or a folded one, is refused and says to get an approval instead', () => {
   const variants = {
-    '지우기 표시': { features: '- F2 지난 학기 자료 비우기 [위험: 지우기] [사용자]\n', pattern: /F2\(위험 표시\)/ },
-    '공개 표시(규칙)': { rules: '- R2 결과 페이지를 외부에 올린다 [위험: 공개] [AI 가정]\n', pattern: /R2\(위험 표시\)/ },
-    '표시 없는 낱말': { rules: '- R2 기록을 삭제한다 [AI 가정]\n', pattern: /R2\(낱말 삭제\)/ },
-    '케이스의 낱말': { features: '- F2 자료 정리 [사용자]\n  - 케이스: 오래된 자료 → 덮어쓰기 전에 묻는다\n', pattern: /F2\(낱말 덮어쓰\)/ },
-    '케이스의 표시': { features: '- F2 자료 정리 [사용자]\n  - 케이스: 오래된 자료 → 비운다 [위험: 지우기]\n', pattern: /F2\(위험 표시\)/ },
-    '접힌 칸': { rules: '\n<details><summary>그 밖의 AI 가정 1개</summary>\n\n- R2 결제 내역 보기 [AI 가정]\n\n</details>\n\n', pattern: /R2\(낱말 결제\)/ },
+    '지우기 표시': { id: 'F2', features: '- F2 지난 학기 자료 비우기 [위험: 지우기] [사용자]\n' },
+    '공개 표시(규칙)': { id: 'R2', rules: '- R2 결과 페이지를 외부에 올린다 [위험: 공개] [AI 가정]\n' },
+    '비용 표시': { id: 'F2', features: '- F2 유료 요금제로 올리기 [위험: 비용] [사용자: 검수 1]\n' },
+    '케이스의 표시': { id: 'F2', features: '- F2 자료 정리 [사용자]\n  - 케이스: 오래된 자료 → 비운다 [위험: 지우기]\n' },
+    '접힌 칸의 표시': { id: 'R2', rules: '\n<details><summary>그 밖의 AI 가정 1개</summary>\n\n- R2 결제 내역 보기 [위험: 비용] [AI 가정]\n\n</details>\n\n' },
+    '접힌 칸 케이스의 표시': { id: 'R2', rules: '\n<details><summary>그 밖의 AI 가정 1개</summary>\n\n- R2 결제 내역 보기 [AI 가정]\n  - 케이스: 실패 → 다시 [위험: 비용]\n\n</details>\n\n' },
+    // 콜론을 빠뜨린 표시도 표시다: 낱말 검사가 없으니 이것까지 놓치면 위험 항목이 위임으로 조용히 지나간다
+    '콜론 없는 표시': { id: 'F2', features: '- F2 자료 비우기 [위험 지우기] [사용자]\n' },
+    '하이픈 표시': { id: 'F2', features: '- F2 자료 비우기 [위험-지우기] [사용자]\n' },
+    '값 없는 표시': { id: 'R2', rules: '- R2 자료를 올린다 [위험] [AI 가정]\n' },
+    '케이스의 콜론 없는 표시': { id: 'F2', features: '- F2 자료 정리 [사용자]\n  - 케이스: 오래된 자료 → 비운다 [위험 지우기]\n' },
   };
   for (const [label, parts] of Object.entries(variants)) {
     const w = makeWorld({ features: parts.features, rules: parts.rules });
     writeTranscript(w, [typed('끝까지 알아서 해', T(0))]);
     const before = readFileSync(w.spec, 'utf8');
     const line = assertRefused(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']), /위험 항목이 있어 위임으로 기록하지 않는다/, label);
-    assert.match(line, parts.pattern, label);
+    assert.match(line, new RegExp(`${parts.id}에 \\[위험: …\\] 표시가 있다`), label);
     assert.match(line, /사용자의 승인을 받아 spec\.mjs approve/, `${label}: 승인을 받으라고 알린다`);
     assert.equal(specStatus(w), 'draft', label);
     assert.equal(readFileSync(w.spec, 'utf8'), before, label);
     assert.deepEqual(approvalEntries(w), [], label);
     assert.equal(existsSync(path.join(w.project, '.pact')), false, `${label}: 거절하면 실행 폴더도 만들지 않는다`);
   }
-  // 목적·범위·하지 않는 것의 낱말은 보지 않는다
-  const calm = makeWorld({ specBody: specText().replace('교수자가 출석을 빨리 확인한다.', '기록을 삭제하거나 공개하지 않는다.').replace('웹 화면 하나.', '배포 push 결제는 범위 밖.').replace('출석 처리 자체.', '- 유료 기능은 없다') });
+  // 위험 항목이 여럿이면 번호를 모두(많으면 앞의 넷과 개수로) 알린다
+  const many = makeWorld({ features: '- F2 비우기 [위험: 지우기] [사용자]\n- F3 올리기 [위험: 공개] [사용자]\n', rules: '- R2 결제 [위험: 비용] [AI 가정]\n- R3 지우기 [위험: 지우기] [AI 가정]\n- R4 올리기 [위험: 공개] [AI 가정]\n' });
+  writeTranscript(many, [typed('끝까지 알아서 해', T(0))]);
+  assertRefused(runSpec(many, ['delegate', many.spec, '끝까지 알아서 해']), /F2, F3, R2, R3 외 1개에 \[위험: …\] 표시가 있다/);
+  // 목적·범위·하지 않는 것의 표시는 보지 않는다(F·R 줄만 본다)
+  const calm = makeWorld({ specBody: specText().replace('교수자가 출석을 빨리 확인한다.', '기록을 지운다 [위험: 지우기]').replace('웹 화면 하나.', '외부 공개는 범위 밖 [위험: 공개]').replace('출석 처리 자체.', '- 유료 기능은 없다 [위험: 비용]') });
   writeTranscript(calm, [typed('끝까지 알아서 해', T(0))]);
   assert.equal(runSpec(calm, ['delegate', calm.spec, '끝까지 알아서 해']).status, 0);
+  // 한글이 이어지는 [위험성 높음]은 표시가 아니다(알 수 없는 태그로 lint가 알린다)
+  const word = makeWorld({ features: '- F2 자료 정리 [위험성 높음] [사용자]\n' });
+  writeTranscript(word, [typed('끝까지 알아서 해', T(0))]);
+  assert.equal(runSpec(word, ['delegate', word.spec, '끝까지 알아서 해']).status, 0);
+});
+
+test('(f) a risk word without a mark does not stop a delegation or the start: the code does not search words, the spec-checker reads the meaning', () => {
+  const w = makeWorld({
+    features: '- F2 지난 학기 기록을 삭제한다 [사용자]\n  - 케이스: 외부에 공개하고 결제한다 → 비용 발생\n',
+    rules: '- R2 오래된 파일은 제거하고 덮어쓰기 전에 묻는다. push는 하지 않는다 [AI 가정]\n\n<details><summary>그 밖의 AI 가정 1개</summary>\n\n- R3 유료 기능을 공유한다 [AI 가정]\n\n</details>\n\n',
+  });
+  writeTranscript(w, [typed('끝까지 알아서 해', T(0))]);
+  const r = runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(specStatus(w), 'approved');
+  assert.equal(approvalEntries(w)[0].kind, 'delegate');
+  // 시작할 때 명세를 다시 봐도 표시가 없으면 막지 않는다
+  const start = runSpec(w, ['set-status', w.spec, 'building']);
+  assert.equal(start.status, 0, start.stderr);
+  assert.equal(start.stdout, '');
+  assert.equal(specStatus(w), 'building');
+  // lint도 참고를 내지 않는다
+  const lint = runSpec(w, ['lint', w.spec]);
+  assert.equal(lint.status, 0);
+  assert.equal(lint.stdout, '');
 });
 
 test('(f) a risk item does not stop an approve: the person said it after seeing the spec', () => {
@@ -482,8 +550,8 @@ test('(f) a delegate record is looked at again when building starts: a risk item
   runSpec(w, ['set-status', w.spec, 'approved']);
 
   // 만드는 중에 명세에 위험 항목이 생겼다
-  writeFileSync(w.spec, specText({ status: 'approved', rules: '- R2 오래된 기록을 삭제한다 [AI 가정]\n' }));
-  const line = assertRefused(runSpec(w, ['set-status', w.spec, 'building']), /위임으로 시작하려는데 지금 명세에 위험 항목이 있다: R2\(낱말 삭제\)/);
+  writeFileSync(w.spec, specText({ status: 'approved', rules: '- R2 오래된 기록을 지운다 [위험: 지우기] [AI 가정]\n' }));
+  const line = assertRefused(runSpec(w, ['set-status', w.spec, 'building']), /위임으로 시작하려는데 지금 명세에 위험 항목이 있다: R2에 \[위험: …\] 표시가 있다/);
   assert.match(line, /사용자의 승인을 받아 spec\.mjs approve/);
   assert.equal(specStatus(w), 'approved');
   // 승인 기록이 없는 것과 달리 approved로는 바뀐다(만들기를 시작하는 것이 아니다)
@@ -536,6 +604,111 @@ test('(f) an AskUserQuestion-based record is matched again by its uuid and quest
   assertRefused(runSpec(w, ['set-status', w.spec, 'building']), /다시 찾지 못했다/);
 });
 
+test('(f) a delegation quoted from a message typed while the agent was working is matched again by the uuid of its attachment line', () => {
+  const w = makeWorld();
+  const mid = queuedCommand('끝까지 알아서 해', T(0));
+  writeTranscript(w, [mid]);
+  assert.equal(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']).status, 0);
+  const [entry] = approvalEntries(w);
+  assert.equal(entry.message_uuid, mid.uuid);
+  assert.equal(entry.message_time, T(0));
+  const start = runSpec(w, ['set-status', w.spec, 'building']);
+  assert.equal(start.status, 0, start.stderr);
+  runSpec(w, ['set-status', w.spec, 'approved']);
+  // 같은 uuid가 사람 말이 아닌 attachment가 되면(알림, 다른 세션의 말) 기록한 말이 아니다
+  for (const [label, make] of [
+    ['작업 알림', () => queuedNotification('끝까지 알아서 해', T(0))],
+    ['다른 세션', () => queuedPeer('끝까지 알아서 해', T(0))],
+    ['commandMode가 다르다', () => queuedCommand('끝까지 알아서 해', T(0), { commandMode: 'task-notification' })],
+  ]) {
+    writeTranscript(w, [{ ...make(), uuid: mid.uuid }]);
+    assertRefused(runSpec(w, ['set-status', w.spec, 'building']), /다시 찾지 못했다/, label);
+  }
+  // 글이 달라졌다
+  writeTranscript(w, [{ ...mid, attachment: { ...mid.attachment, prompt: '끝까지 알아서 하지 마' } }]);
+  assertRefused(runSpec(w, ['set-status', w.spec, 'building']), /메시지 글이 기록한 글과 다르다/);
+  writeTranscript(w, [mid]);
+  assert.equal(runSpec(w, ['set-status', w.spec, 'building']).status, 0);
+});
+
+test('approve and delegate move only a draft to approved; while building, verifying or done they add the record and leave the status alone', () => {
+  for (const kind of ['approve', 'delegate']) {
+    for (const [status, after] of [['draft', 'approved'], ['approved', 'approved'], ['building', 'building'], ['verifying', 'verifying'], ['done', 'done']]) {
+      const w = makeWorld({ status });
+      const words = kind === 'approve' ? '승인' : '끝까지 알아서 해';
+      if (kind === 'approve') addCheckerRecord(w, T(5));
+      writeTranscript(w, [typed(words, kind === 'approve' ? T(10) : T(1))]);
+      const before = readFileSync(w.spec, 'utf8');
+      const r = runSpec(w, [kind, w.spec, words]);
+      const label = `${kind} on ${status}`;
+      assert.equal(r.status, 0, `${label}: ${r.stderr}`);
+      assert.equal(specStatus(w), after, label);
+      assert.equal(approvalEntries(w).length, 1, `${label}: 기록은 더해진다`);
+      assert.equal(approvalEntries(w)[0].kind, kind, label);
+      if (status === 'draft') assert.match(r.stdout, /→ status approved$/m, label);
+      else {
+        assert.equal(readFileSync(w.spec, 'utf8'), before, `${label}: 명세는 그대로다`);
+        if (status === 'approved') assert.match(r.stdout, /→ status approved$/m, label);
+        else assert.match(r.stdout, new RegExp(`→ status는 ${status} 그대로$`, 'm'), label);
+      }
+    }
+  }
+  // 만드는 중에 다시 승인해도 이어 간다: 기록이 새로 생겼으니 set-status는 기록 쪽을 본다
+  const w = makeWorld({ status: 'building' });
+  addCheckerRecord(w, T(5));
+  writeTranscript(w, [typed('승인', T(10))]);
+  assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
+  assert.equal(specStatus(w), 'building');
+  assert.equal(runSpec(w, ['set-status', w.spec, 'verifying']).status, 0);
+});
+
+test('the quote may come from standard input (approve <명세> -) so that backticks, $, quotes and line breaks never meet the shell', () => {
+  const words = '`echo 해킹` 말고 $HOME 은 건드리지 말고 "큰따옴표"와 \'작은따옴표\'도 \\n 그대로 만들어 주세요';
+  const multi = '첫 줄이에요\n그리고 둘째 줄: 이대로 만들어 주세요';
+  for (const [kind, text] of [['approve', words], ['approve', multi], ['delegate', words]]) {
+    const w = makeWorld();
+    if (kind === 'approve') addCheckerRecord(w, T(5));
+    writeTranscript(w, [typed(text, kind === 'approve' ? T(10) : T(1))]);
+    // 표준 입력으로 곧바로
+    const direct = runSpec(w, [kind, w.spec, '-'], { input: `${text}\n` });
+    assert.equal(direct.status, 0, `${kind}: ${direct.stderr}`);
+    assert.equal(approvalEntries(w)[0].quote, text, '말이 그대로 기록된다(끝의 줄바꿈만 빠진다)');
+    assert.equal(approvalEntries(w)[0].message, text);
+    // 진짜 셸의 따옴표 붙인 heredoc: 백틱과 $가 풀리지 않는다
+    const w2 = makeWorld();
+    if (kind === 'approve') addCheckerRecord(w2, T(5));
+    writeTranscript(w2, [typed(text, kind === 'approve' ? T(10) : T(1))]);
+    const sh = spawnSync('sh', ['-c', `node "${SPEC_CLI}" ${kind} "${w2.spec}" - <<'EOF'\n${text}\nEOF\n`], { encoding: 'utf8', env: cliEnv(w2), cwd: w2.root });
+    assert.equal(sh.status, 0, `${kind} heredoc: ${sh.stderr}`);
+    assert.equal(approvalEntries(w2)[0].quote, text);
+    assert.equal(specStatus(w2), 'approved');
+  }
+  // 같은 말을 큰따옴표 인자로 셸에 넘기면 백틱과 $가 셸에서 풀려 다른 말이 된다: 사용자 메시지에 없다고 거절한다(그래서 문서는 heredoc을 권한다)
+  const w = makeWorld();
+  addCheckerRecord(w, T(5));
+  writeTranscript(w, [typed(words, T(10))]);
+  const quoted = spawnSync('sh', ['-c', `node "${SPEC_CLI}" approve "${w.spec}" "${words.replaceAll('"', '\\"')}"`], { encoding: 'utf8', env: cliEnv(w), cwd: w.root });
+  assert.equal(quoted.status, 1);
+  assert.match(quoted.stderr, /사용자 메시지에 없/);
+});
+
+test('standard input with nothing in it is refused with one line that says how to pass the words', () => {
+  const w = makeWorld();
+  addCheckerRecord(w, T(5));
+  writeTranscript(w, [typed('승인', T(10))]);
+  for (const input of ['', '   \n\n', undefined]) {
+    const line = assertRefused(runSpec(w, ['approve', w.spec, '-'], input === undefined ? {} : { input }), /표준 입력으로 받은 사용자 말이 비어 있다/);
+    assert.match(line, /spec\.mjs approve <명세> - <<'EOF' 다음 줄에 사용자 말을, 그다음 줄에 EOF를 적는다/);
+  }
+  assertRefused(runSpec(w, ['delegate', w.spec, '-'], { input: '\n' }), /표준 입력으로 받은 사용자 말이 비어 있다/);
+  assert.equal(specStatus(w), 'draft');
+  assert.deepEqual(approvalEntries(w), []);
+  // `-` 뒤에 낱말이 더 있으면 표준 입력을 읽지 않고 낱말을 잇는다("- 승인": 문장부호를 빼면 "승인")
+  const joined = runSpec(w, ['approve', w.spec, '-', '승인'], { input: '엉뚱한 말\n' });
+  assert.equal(joined.status, 0, joined.stderr);
+  assert.equal(approvalEntries(w)[0].quote, '- 승인');
+});
+
 // ---------- 기록 파일 ----------
 
 test('readApprovals skips broken lines and lines that are not records, and returns [] when there is no file', () => {
@@ -552,6 +725,35 @@ test('readApprovals skips broken lines and lines that are not records, and retur
   const r = runSpec(bad, ['set-status', bad.spec, 'building']);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /EISDIR/);
+  // Node 오류 글만 던지지 않고 까닭과 대신 할 일을 한 줄로 붙인다(R6)
+  const lines = r.stderr.split('\n').filter(Boolean);
+  assert.equal(lines.length, 1, r.stderr);
+  assert.match(lines[0], /approvals\.jsonl/);
+  assert.match(lines[0], /자리에 폴더가 있거나 폴더여야 할 자리에 파일이 있다/);
+  assert.match(lines[0], /승인 기록\(approvals\.jsonl\)·log\/ 자리면 손대지 말고 사용자에게 알린다/);
+});
+
+test('a missing spec, or a log/ that is a file, is refused with the Node message plus a reason and what to do on one line', () => {
+  const w = makeWorld();
+  addCheckerRecord(w, T(5));
+  writeTranscript(w, [typed('승인', T(10))]);
+  const missing = runSpec(w, ['approve', path.join(w.project, 'docs', 'pact', 'nope.md'), '승인']);
+  assert.equal(missing.status, 1);
+  const missingLines = missing.stderr.split('\n').filter(Boolean);
+  assert.equal(missingLines.length, 1, missing.stderr);
+  assert.match(missingLines[0], /^ENOENT: no such file or directory/);
+  assert.match(missingLines[0], /파일이나 폴더가 없다\(.*nope\.md\)\. 경로를 확인한다/);
+  // log/ 자리에 파일이 있다(ENOTDIR)
+  rmSync(path.join(w.run, 'log'), { recursive: true, force: true });
+  writeFileSync(path.join(w.run, 'log'), '폴더 자리에 파일');
+  const blocked = runSpec(w, ['approve', w.spec, '승인']);
+  assert.equal(blocked.status, 1);
+  const blockedLines = blocked.stderr.split('\n').filter(Boolean);
+  assert.equal(blockedLines.length, 1, blocked.stderr);
+  assert.match(blockedLines[0], /^ENOTDIR/);
+  assert.match(blockedLines[0], /손대지 말고 사용자에게 알린다/);
+  assert.equal(specStatus(w), 'draft');
+  assert.deepEqual(approvalEntries(w), []);
 });
 
 test('a file with only broken lines is no record: the gate refuses (new spec) or passes as an old spec', () => {

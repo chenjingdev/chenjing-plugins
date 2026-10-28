@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseSpec, lintSpec, lintNotes, riskUnits, RISK_WORDS, setStatus, slugify, newSpecPath, specRunDir } from '../scripts/spec.mjs';
+import { parseSpec, lintSpec, riskUnits, explainError, setStatus, slugify, newSpecPath, specRunDir } from '../scripts/spec.mjs';
 import { ensureRunDir } from '../scripts/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -253,16 +253,46 @@ test('tags that carry a source or a review number are accepted, with or without 
   assert.equal(parseSpec(withF1('- F1 보기 [위험: 공개] [AI 가정: 검수 2 맡김]')).items[0].tag, 'AI 가정');
 });
 
-test('a risk mark alone is not a tag, a misspelled mark is an unknown tag, and other brackets stay in the text', () => {
+test('a risk mark alone is not a tag, a word that only starts like the mark is an unknown tag, and other brackets stay in the text', () => {
   assert.ok(lintSpec(withF1('- F1 기록 비우기 [위험: 지우기]')).includes('F1: 태그가 없습니다 ([사용자] 또는 [AI 가정])'));
-  assert.deepEqual(lintSpec(withF1('- F1 기록 비우기 [위험 지우기] [사용자]')), [], '콜론이 없는 [위험 지우기]는 표시가 아니라 글이다: 태그는 맨 뒤의 [사용자]');
-  assert.ok(lintSpec(withF1('- F1 기록 비우기 [사용자] [위험성 높음]')).includes('F1: 알 수 없는 태그 [위험성 높음]'));
+  assert.ok(lintSpec(withF1('- F1 기록 비우기 [위험 지우기]')).includes('F1: 태그가 없습니다 ([사용자] 또는 [AI 가정])'), '콜론이 빠진 표시도 표시다: 태그가 아니다');
+  // 한글이 이어지면 표시가 아니라 다른 말이다: 맨 뒤에 오면 알 수 없는 태그
+  for (const word of ['위험성 높음', '위험한 작업', '위험요소']) {
+    assert.ok(lintSpec(withF1(`- F1 기록 비우기 [사용자] [${word}]`)).includes(`F1: 알 수 없는 태그 [${word}]`), word);
+  }
   const item = parseSpec(withF1('- F1 목록 [초안] 보기 [위험: 공개] [사용자]')).items[0];
   assert.equal(item.text, '목록 [초안] 보기');
   assert.equal(item.tag, '사용자');
 });
 
-// ---------- 위험 항목 찾기: F·R 줄과 그 케이스(접힌 칸 포함) ----------
+test('a mark with its colon left out is still a mark, so a typo cannot make a risk item look safe: [위험 지우기], [위험-지우기]', () => {
+  for (const [line, risk] of [
+    ['- F1 지난 수업 기록 비우기 [위험 지우기] [사용자]', '지우기'],
+    ['- F1 지난 수업 기록 비우기 [위험-지우기] [사용자]', '지우기'],
+    ['- F1 지난 수업 기록 비우기 [위험/공개] [사용자]', '공개'],
+    ['- F1 지난 수업 기록 비우기 [위험, 비용] [AI 가정]', '비용'],
+    ['- F1 지난 수업 기록 비우기 [사용자] [위험 지우기]', '지우기'],
+    ['- F1 지난 수업 기록 비우기 [위험!] [사용자]', '!'],
+    ['- F1 지난 수업 기록 비우기 [ 위험 : 지우기 ] [사용자]', '지우기'],
+  ]) {
+    const spec = withF1(line);
+    const [f1] = parseSpec(spec).items;
+    assert.equal(f1.risk, risk, line);
+    assert.equal(f1.text, '지난 수업 기록 비우기', line);
+    assert.ok(['사용자', 'AI 가정'].includes(f1.tag), `${line}: 표시가 태그로 읽히지 않는다`);
+    assert.deepEqual(lintSpec(spec), [], line);
+    assert.equal(riskUnits(spec)[0].marked, true, `${line}: 위험 항목으로 읽힌다`);
+  }
+  // 줄 가운데나 케이스 줄에 있어도 그 항목의 표시다
+  assert.equal(riskUnits(withF1('- F1 [위험 지우기] 지난 기록 비우기 [사용자]'))[0].marked, true);
+  assert.equal(riskUnits(withF1('- F1 지난 기록 정리 [사용자]\n  - 케이스: 오래된 것 → 비움 [위험-지우기]'))[0].marked, true);
+  // 표시가 아닌 말은 표시로 읽지 않는다
+  for (const word of ['위험성 높음', '위험한 작업', '위험요소']) {
+    assert.equal(riskUnits(withF1(`- F1 지난 기록 정리 [${word}] [사용자]`))[0].marked, false, word);
+  }
+});
+
+// ---------- 위험 항목 찾기: F·R 줄과 그 케이스(접힌 칸 포함). 낱말로는 찾지 않는다 ----------
 
 const RISKY = `---
 pact: 2
@@ -273,23 +303,25 @@ status: draft
 ## 목적
 기록을 삭제하지 않고 공개하지 않는다 (목적 줄은 보지 않는다)
 ## 범위
-배포 push 결제 (범위도 보지 않는다)
+배포 push 결제 [위험: 비용] (범위도 보지 않는다)
 ## 하지 않는 것
-- 유료 기능은 만들지 않는다
+- 유료 기능은 만들지 않는다 [위험: 비용]
 ## 기능
 - F1 오늘 수업 출석 현황 보기 [사용자]
   - 케이스: 삭제 요청이 오면 → 확인 팝업
 - F2 지난 학기 자료 비우기 [위험: 지우기] [사용자]
 - F3 학생에게 결과 메일 보내기 [사용자]
+  - 케이스: 주소가 틀림 → 보내지 않고 알림 [위험-공개]
 ## 공통 규칙
 - R1 같은 이름의 파일은 덮어쓰기 전에 묻는다 [AI 가정]
 - R2 출석 기록은 학기 동안 보관한다 [AI 가정]
 
 <details><summary>그 밖의 AI 가정 2개</summary>
 
-- R3 임시 파일은 제거한다 [AI 가정]
+- R3 임시 파일은 제거한다 [위험: 지우기] [AI 가정]
   - 케이스: 실패하면 → 다시 push 한다
 - R4 화면 문구는 한국어 [AI 가정]
+  - 케이스: 글자가 넘침 → 말줄임 [위험 비용]
 
 </details>
 
@@ -301,80 +333,90 @@ status: draft
 test('riskUnits reads F and R lines with their cases and the folded ones, and nothing from 목적·범위·하지 않는 것', () => {
   const units = riskUnits(RISKY);
   assert.deepEqual(units.map((u) => u.id), ['F1', 'F2', 'F3', 'R1', 'R2', 'R3', 'R4']);
-  const by = Object.fromEntries(units.map((u) => [u.id, u]));
-  assert.deepEqual([by.F1.marked, by.F1.words], [false, ['삭제']], '케이스 줄의 낱말도 그 항목의 것이다');
-  assert.deepEqual([by.F2.marked, by.F2.words], [true, []], '표시 안의 낱말은 세지 않는다');
-  assert.deepEqual([by.F3.marked, by.F3.words], [false, []]);
-  assert.deepEqual([by.R1.marked, by.R1.words], [false, ['덮어쓰']]);
-  assert.deepEqual([by.R2.marked, by.R2.words], [false, []]);
-  assert.deepEqual([by.R3.marked, by.R3.words], [false, ['제거', 'push']], '접힌 칸과 그 케이스도 본다');
-  assert.deepEqual([by.R4.marked, by.R4.words], [false, []]);
-  assert.equal(units.filter((u) => u.marked || u.words.length).length, 4);
+  assert.deepEqual(Object.fromEntries(units.map((u) => [u.id, u.marked])), {
+    F1: false, F2: true, F3: true, R1: false, R2: false, R3: true, R4: true,
+  }, '표시는 F·R 줄이나 그 케이스 줄(접힌 칸 포함)에 있어야 한다. 목적·범위·하지 않는 것의 표시는 보지 않는다');
+  assert.deepEqual(units.map((u) => Object.keys(u).sort().join()), units.map(() => 'id,lines,marked'), '낱말을 찾는 칸은 없다');
 });
 
-test('a mark on the case line counts for its item, and a risk word in a tag or a mark is not a risk word', () => {
-  const spec = withF1('- F1 지난 기록 정리 [사용자: 삭제 논의 회의]\n  - 케이스: 오래된 것 → 확인 [위험: 지우기]').replace('R1 삭제 전 확인 팝업', 'R1 확인 팝업');
-  const [f1] = riskUnits(spec);
-  assert.equal(f1.marked, true);
-  assert.deepEqual(f1.words, [], '태그의 출처 글과 표시 안의 글은 낱말로 세지 않는다');
-  assert.deepEqual(lintNotes(spec), []);
+test('a risk word is not a risk: without a mark the item is not a risk item, whatever it says (the spec-checker reads the meaning)', () => {
+  // 표시 없이 "기록을 삭제한다"가 든 명세는 위험 항목이 없다
+  const spec = withF1('- F1 지난 기록을 삭제한다 [사용자]\n  - 케이스: 외부에 공개하고 결제한다 → 비용 발생');
+  assert.deepEqual(riskUnits(spec).map((u) => u.marked), [false, false]);
+  assert.equal('words' in riskUnits(spec)[0], false);
+  assert.deepEqual(lintSpec(spec), []);
 });
 
-test('the risk words cover the Korean stems and their usual endings, and push in any case', () => {
-  assert.ok(RISK_WORDS.includes('push'));
-  for (const word of ['지우기', '지운다', '지워', '지웁니다', '삭제', '제거', '초기화', '덮어쓰기', '덮어쓴다', '덮어써', '공개', '게시', '배포', 'push', 'Push', '공유', '결제', '과금', '유료', '비용']) {
-    const [unit] = riskUnits(withF1(`- F1 데이터 ${word} 하기 [사용자]`));
-    assert.ok(unit.words.length > 0, word);
-  }
-  for (const calm of ['오늘 수업 출석 현황 보기', '학기 동안 보관한다', '표를 보여 준다', '빈 상태 문구']) {
-    assert.deepEqual(riskUnits(withF1(`- F1 ${calm} [사용자]`))[0].words, [], calm);
-  }
-});
-
-test('lintNotes names each F·R item that has a risk word and no mark, as a 참고: line; lintSpec still reports problems only', () => {
-  const notes = lintNotes(RISKY);
-  assert.equal(notes.length, 3);
-  assert.deepEqual(notes.map((n) => /^참고: (F1|R1|R3)/.exec(n)?.[1]), ['F1', 'R1', 'R3']);
-  for (const note of notes) assert.match(note, /^참고: /);
-  assert.match(notes[0], /삭제/);
-  assert.match(notes[0], /\[위험: …\] 표시가 없/);
-  assert.match(notes[0], /아니면 그대로 둔다/);
-  assert.doesNotMatch(notes.join('\n'), /F2/, '표시가 있는 줄은 알리지 않는다');
-  assert.deepEqual(lintSpec(RISKY), [], '참고는 문제가 아니다');
-  assert.deepEqual(lintNotes(GOOD.replace('R1 삭제 전 확인 팝업', 'R1 팝업')), []);
-  assert.deepEqual(lintNotes(''), []);
-});
-
-test('CLI lint prints 참고: lines for unmarked risk words but keeps its exit code; a mark silences the line', () => {
+test('CLI lint prints problems only: no 참고 line for risk words, with or without a mark, and the exit code follows the problems', () => {
   const d = tmp();
-  const risky = path.join(d, 'risky.md');
-  writeFileSync(risky, GOOD); // R1이 "삭제 전 확인 팝업"
-  let r = spawnSync('node', [CLI, 'lint', risky], { encoding: 'utf8' });
+  const file = path.join(d, 'risky.md');
+  // GOOD의 R1은 "삭제 전 확인 팝업"이다. 표시가 없어도 아무것도 출력하지 않는다
+  writeFileSync(file, GOOD);
+  let r = spawnSync('node', [CLI, 'lint', file], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^참고: R1/m);
-  assert.equal(r.stdout.split('\n').filter(Boolean).length, 1);
-  // 표시를 달면 참고가 없다
-  writeFileSync(risky, GOOD.replace('- R1 삭제 전 확인 팝업 [AI 가정]', '- R1 삭제 전 확인 팝업 [위험: 지우기] [AI 가정]'));
-  r = spawnSync('node', [CLI, 'lint', risky], { encoding: 'utf8' });
+  assert.equal(r.stdout, '');
+  writeFileSync(file, RISKY);
+  r = spawnSync('node', [CLI, 'lint', file], { encoding: 'utf8' });
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
-  // 문제가 있으면 문제와 참고가 함께 나오고 종료 코드는 1
-  writeFileSync(risky, GOOD.replace(' [사용자]', ''));
-  r = spawnSync('node', [CLI, 'lint', risky], { encoding: 'utf8' });
+  // 문제가 있으면 문제만 나오고 종료 코드는 1
+  writeFileSync(file, GOOD.replace(' [사용자]', ''));
+  r = spawnSync('node', [CLI, 'lint', file], { encoding: 'utf8' });
   assert.equal(r.status, 1);
-  assert.match(r.stdout, /F1: 태그가 없습니다/);
-  assert.match(r.stdout, /^참고: R1/m);
-  // [위험: 지우기] [사용자]가 태그 오류를 내지 않는다
-  writeFileSync(risky, GOOD.replace('- F1 오늘 수업 출석 현황 보기 [사용자]', '- F1 지난 기록 비우기 [위험: 지우기] [사용자]').replace('R1 삭제 전 확인 팝업', 'R1 확인 팝업'));
-  r = spawnSync('node', [CLI, 'lint', risky], { encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stdout);
-  assert.equal(r.stdout, '', '태그 오류도 참고도 없다');
+  assert.equal(r.stdout.trim(), 'F1: 태그가 없습니다 ([사용자] 또는 [AI 가정])');
+  assert.doesNotMatch(r.stdout, /참고/);
+  // [위험: 지우기] [사용자]와 콜론 없는 [위험 지우기] [사용자]가 태그 오류를 내지 않는다
+  for (const mark of ['[위험: 지우기]', '[위험 지우기]', '[위험-지우기]']) {
+    writeFileSync(file, GOOD.replace('- F1 오늘 수업 출석 현황 보기 [사용자]', `- F1 지난 기록 비우기 ${mark} [사용자]`));
+    r = spawnSync('node', [CLI, 'lint', file], { encoding: 'utf8' });
+    assert.equal(r.status, 0, `${mark}: ${r.stdout}`);
+    assert.equal(r.stdout, '', mark);
+  }
 });
 
-test('the template starts a new spec with pact: 2 and no risk note', () => {
+test('the template starts a new spec with pact: 2', () => {
   const d = tmp();
   const file = spawnSync('node', [CLI, 'new', d, '새 주제'], { encoding: 'utf8' }).stdout.trim();
-  const text = readFileSync(file, 'utf8');
-  assert.match(text, /^---\npact: 2\n/);
-  assert.deepEqual(lintNotes(text), []);
+  assert.match(readFileSync(file, 'utf8'), /^---\npact: 2\n/);
+});
+
+// ---------- 파일 오류에는 까닭과 대신 할 일이 한 줄로 붙는다 (R6) ----------
+
+function fsError(fn) {
+  try { fn(); } catch (error) { return error; }
+  throw new Error('오류가 나야 한다');
+}
+
+test('explainError puts a reason and what to do after the Node message of a file error, on one line, and leaves other errors alone', () => {
+  const d = tmp();
+  const missing = explainError(fsError(() => readFileSync(path.join(d, 'nope.md'), 'utf8')));
+  assert.match(missing, /^ENOENT: no such file or directory/);
+  assert.match(missing, /파일이나 폴더가 없다\(.*nope\.md\)/);
+  assert.match(missing, /경로를 확인한다/);
+  assert.match(missing, /spec\.mjs new <프로젝트> <주제>/);
+  const dir = explainError(fsError(() => readFileSync(d, 'utf8')));
+  assert.match(dir, /^EISDIR/);
+  assert.match(dir, /자리에 폴더가 있거나 폴더여야 할 자리에 파일이 있다/);
+  assert.match(dir, /손대지 말고 사용자에게 알린다/);
+  writeFileSync(path.join(d, 'file'), 'x');
+  const notDir = explainError(fsError(() => readFileSync(path.join(d, 'file', 'inner'), 'utf8')));
+  assert.match(notDir, /^ENOTDIR/);
+  assert.match(notDir, /손대지 말고 사용자에게 알린다/);
+  const denied = explainError(Object.assign(new Error('EACCES: permission denied, open \'/x\''), { code: 'EACCES', path: '/x' }));
+  assert.match(denied, /읽거나 쓸 권한이 없다\(\/x\)\. 사용자에게 알린다/);
+  for (const line of [missing, dir, notDir, denied]) assert.doesNotMatch(line, /\n/);
+  // 파일 오류가 아니면 글 그대로
+  assert.equal(explainError(new Error('명세 맨 위에 frontmatter(---)가 없습니다')), '명세 맨 위에 frontmatter(---)가 없습니다');
+  assert.equal(explainError('문자열'), '문자열');
+});
+
+test('CLI: a missing spec prints the Node message with a reason and what to do on one line, and exits 1', () => {
+  const spec = path.join(tmp(), 'docs', 'pact', 'nope.md');
+  for (const args of [['status', spec], ['lint', spec], ['set-status', spec, 'verifying']]) {
+    const r = spawnSync('node', [CLI, ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 1, args.join(' '));
+    const lines = r.stderr.split('\n').filter(Boolean);
+    assert.equal(lines.length, 1, `${args[0]}: ${r.stderr}`);
+    assert.match(lines[0], /ENOENT.*파일이나 폴더가 없다.*경로를 확인한다/, args[0]);
+  }
 });

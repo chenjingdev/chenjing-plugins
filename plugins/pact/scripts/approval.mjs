@@ -88,18 +88,19 @@ const readIfExists = (file) => {
   }
 };
 
-// 지금 명세의 위험 항목: 위험 표시가 있거나, 표시 없이도 위험 낱말이 있는 F·R 항목. 위임으로는 시작하지 못한다(R10).
-export const riskItems = (text) => riskUnits(text).filter((unit) => unit.marked || unit.words.length);
+// 지금 명세의 위험 항목: `[위험: …]` 표시가 있는 F·R 항목(케이스, 접힌 칸 포함). 위임으로는 시작하지 못한다(R10).
+// 표시가 빠졌는지는 낱말로 찾지 않는다. spec-checker가 뜻으로 보고 알린다(작업 4).
+export const riskItems = (text) => riskUnits(text).filter((unit) => unit.marked);
 
 function describeRisk(units) {
-  const parts = units.map((u) => `${u.id}(${u.marked ? '위험 표시' : `낱말 ${u.words.join('·')}`})`);
-  return parts.length > 4 ? `${parts.slice(0, 4).join(', ')} 외 ${parts.length - 4}개` : parts.join(', ');
+  const ids = units.map((u) => u.id);
+  return `${ids.length > 4 ? `${ids.slice(0, 4).join(', ')} 외 ${ids.length - 4}개` : ids.join(', ')}에 [위험: …] 표시가 있다`;
 }
 const ASK_APPROVAL = '명세를 보이고 사용자의 승인을 받아 spec.mjs approve <명세> "<사용자 말>"로 기록한다.';
 
 // ---------- 기록하기 ----------
 
-// approve·delegate. quote는 사용자가 한 말이다. 맞으면 기록을 덧붙이고 명세의 status를 approved로 바꾼다.
+// approve·delegate. quote는 사용자가 한 말이다. 맞으면 기록을 덧붙이고, status가 draft면 approved로 바꾼다(building·verifying이면 그대로 둔다).
 // 반환: { ok: true, entry, runDir, message } | { ok: false, reason, instead }. 읽지 못하면 던진다(부르는 쪽이 거절로 보인다).
 export function recordApproval(specFile, quote, kind, { env = process.env, now = new Date() } = {}) {
   const verb = kind === 'delegate' ? 'delegate' : 'approve';
@@ -121,7 +122,13 @@ export function recordApproval(specFile, quote, kind, { env = process.env, now =
   let checkerMs = null;
   if (kind === 'approve') {
     checker = latestSpecCheckerReply(runDir);
-    if (!checker) return refuse(`이 명세의 spec-checker 기록이 없다 (${logFile(runDir)}).`, 'pact:spec-checker로 명세를 검수한 뒤, 결과를 반영한 명세로 사용자의 승인을 받아 다시 실행한다.');
+    if (!checker) {
+      return refuse(
+        `이 명세의 spec-checker 기록이 없다 (${logFile(runDir)}).`,
+        'pact:spec-checker로 명세를 검수한 뒤, 결과를 반영한 명세로 사용자의 승인을 받아 다시 실행한다. '
+          + '이미 검수했는데도 기록이 없으면 훅이 돌지 않는 것이다. 플러그인 데이터 폴더의 hook-error.log를 보고 사용자에게 알린다(log/에 직접 쓰지 않는다).',
+      );
+    }
     checkerMs = Date.parse(checker.time);
     if (!Number.isFinite(checkerMs)) return refuse(`spec-checker 기록의 시각을 읽지 못했다 (${checker.time}).`, 'pact:spec-checker를 다시 불러 검수한 뒤 승인을 받는다.');
   }
@@ -184,13 +191,19 @@ export function recordApproval(specFile, quote, kind, { env = process.env, now =
     spec_checker_time: checker ? checker.time : null,
   };
   // 바꿀 명세 글을 먼저 만든다: frontmatter가 없는 명세처럼 status를 못 바꾸는 경우에 기록만 남기지 않으려고(던진다).
-  const approved = setStatus(readFileSync(spec, 'utf8'), 'approved');
+  const current = readFileSync(spec, 'utf8');
+  const approved = setStatus(current, 'approved');
+  // status는 draft(이미 approved면 그대로)일 때만 approved로 바꾼다. 만드는 중(building)·검수 중(verifying)에 다시 승인하거나 위임을 적어도
+  // 진행 중인 status를 되돌리지 않는다: 기록만 더한다(다시 승인한 뒤 이어 가는 길은 build.md가 말한다).
+  const status = parseSpec(current).frontmatter.status;
+  const moves = status === 'draft' || status === 'approved';
   ensureRunDir(project, runId);
   appendFileSync(approvalsFile(runDir), `${JSON.stringify(entry)}\n`);
   // 기록이 먼저다. status만 바뀌고 기록이 없는 일은 없다(기록은 남았는데 status 쓰기가 실패하면 set-status <명세> approved로 이어 간다).
-  writeFileSync(spec, approved);
+  if (moves) writeFileSync(spec, approved);
   const when = chosen.time ? ` (메시지 ${chosen.time})` : '';
-  return { ok: true, entry, runDir, message: `${label}을 기록했다: "${said}"${when} → status approved` };
+  const after = moves ? 'status approved' : `status는 ${status ?? '없음'} 그대로`;
+  return { ok: true, entry, runDir, message: `${label}을 기록했다: "${said}"${when} → ${after}` };
 }
 
 // ---------- 다시 맞춰 보기 ----------

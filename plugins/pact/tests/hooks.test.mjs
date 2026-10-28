@@ -402,12 +402,18 @@ test('(i) a delegation is looked at again when the worker is called: a risk item
   grantApproval(w, { kind: 'delegate' });
   passed(pre(w, workerCall(brief(w))));
   // 지금 명세에 위험 항목이 생겼다
-  writeFileSync(w.spec, specText({ status: 'building', rules: '- R2 오래된 기록을 삭제한다 [AI 가정]\n' }));
+  writeFileSync(w.spec, specText({ status: 'building', rules: '- R2 오래된 기록을 지운다 [위험: 지우기] [AI 가정]\n' }));
   const risky = denied(pre(w, workerCall(brief(w))));
-  assert.match(risky, /위임으로 시작하려는데 지금 명세에 위험 항목이 있다: R2\(낱말 삭제\)/);
+  assert.match(risky, /위임으로 시작하려는데 지금 명세에 위험 항목이 있다: R2에 \[위험: …\] 표시가 있다/);
   assert.match(risky, /사용자의 승인을 받아 spec\.mjs approve/);
   writeFileSync(w.spec, specText({ status: 'building', features: '- F2 자료 비우기 [위험: 지우기] [사용자]\n' }));
-  assert.match(denied(pre(w, workerCall(brief(w)))), /F2\(위험 표시\)/);
+  assert.match(denied(pre(w, workerCall(brief(w)))), /F2에 \[위험: …\] 표시가 있다/);
+  // 콜론을 빠뜨린 표시도 표시다
+  writeFileSync(w.spec, specText({ status: 'building', features: '- F2 자료 비우기 [위험 지우기] [사용자]\n' }));
+  assert.match(denied(pre(w, workerCall(brief(w)))), /F2에 \[위험: …\] 표시가 있다/);
+  // 표시가 없으면 낱말이 있어도 막지 않는다(표시가 빠졌는지는 spec-checker가 뜻으로 본다)
+  writeFileSync(w.spec, specText({ status: 'building', rules: '- R2 오래된 기록을 삭제한다 [AI 가정]\n' }));
+  passed(pre(w, workerCall(brief(w))));
   // 위험이 없어지면 다시 통과한다
   writeFileSync(w.spec, specText({ status: 'building' }));
   passed(pre(w, workerCall(brief(w))));
@@ -420,7 +426,8 @@ test('(i) a delegation is looked at again when the worker is called: a risk item
   writeFileSync(w.transcript, saved);
   passed(pre(w, workerCall(brief(w))));
   // 사용자가 위험을 보고 승인하면 이어 간다
-  writeFileSync(w.spec, specText({ status: 'building', rules: '- R2 오래된 기록을 삭제한다 [AI 가정]\n' }));
+  writeFileSync(w.spec, specText({ status: 'building', rules: '- R2 오래된 기록을 지운다 [위험: 지우기] [AI 가정]\n' }));
+  denied(pre(w, workerCall(brief(w))));
   grantApproval(w, { kind: 'approve', text: '위험한 것도 알고 승인합니다' });
   passed(pre(w, workerCall(brief(w))));
 });
@@ -537,6 +544,17 @@ test('(j) even the main session is denied when approve or delegate is run with t
     `HOME=/tmp/x node ${SPEC_CLI_PATH} lint ${w.spec}`,
   ];
   for (const command of fine) passed(pre(w, bash(command)), command);
+});
+
+test('(j) the documented way to pass the words, a quoted heredoc on standard input, is read like any other call: main passes, sub-agent and an overridden environment are denied', () => {
+  const w = approvalWorld();
+  const heredoc = (prefix = '', sub = 'approve') => `${prefix}node ${SPEC_CLI_PATH} ${sub} ${w.spec} - <<'EOF'\n\`rm -rf\` 말고 $HOME 은 그대로 이대로 승인\nEOF`;
+  for (const sub of ['approve', 'delegate']) {
+    passed(pre(w, bash(heredoc('', sub))), `main ${sub}`);
+    denied(pre(w, bash(heredoc('', sub)), SUB), `sub-agent ${sub}`);
+    assert.match(denied(pre(w, bash(heredoc('HOME=/tmp/x ', sub))), `env ${sub}`), /환경 변수 없이 spec\.mjs/);
+    assert.match(denied(pre(w, bash(`cd ${w.project} && CLAUDE_CODE_SESSION_ID=f ${heredoc('', sub)}`))), /CLAUDE_CODE_SESSION_ID/);
+  }
 });
 
 test('(j) a sub-agent that overrides the environment is denied for being a sub-agent first', () => {

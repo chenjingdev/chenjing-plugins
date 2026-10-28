@@ -7,7 +7,7 @@ import path from 'node:path';
 import { SHORT_MAX, normalizeQuote, quoteMatches, transcriptFiles, humanMessages } from '../scripts/transcript.mjs';
 import {
   tmp, T, typed, legacyUser, typedWithImage, answers, assistant, toolResult, taskNotification, compactSummary, commandMessage,
-  systemReminder, peerMessage, makeWorld, writeTranscript, SESSION,
+  systemReminder, peerMessage, queuedCommand, queuedNotification, queuedPeer, hookAttachment, makeWorld, writeTranscript, SESSION,
 } from './approval-world.mjs';
 
 test('normalizeQuote drops spaces, punctuation, symbols and case, and unifies width and composition', () => {
@@ -82,6 +82,51 @@ test('humanMessages keeps what a person said and nothing else', () => {
     '사람이 친 말', '기다리는 중에 친 말', '제안을 눌러 보낸 말', 'origin 칸이 없는 옛 기록의 말', 'claude -p로 보낸 말',
     '[Image #1] 그림이 붙은 말', '<div> 로 시작하는 사람의 말',
   ]);
+});
+
+test('humanMessages reads what the person typed while the agent was working: a queued_command attachment with commandMode prompt and a human origin', () => {
+  const w = makeWorld();
+  const mid = queuedCommand('내가클릭함', T(3));
+  const blocks = queuedCommand([{ type: 'text', text: '글 블록으로 온' }, { type: 'text', text: '도중의 말' }, { type: 'image', source: {} }], T(4));
+  writeTranscript(w, [
+    typed('첫 말', T(1)),
+    assistant('작업 중', T(2)),
+    mid,
+    blocks,
+    // ↓ 같은 꼴이어도 사람 말이 아니다
+    queuedNotification('승인', T(5)), // commandMode와 origin이 task-notification
+    queuedPeer('승인', T(6)), // origin이 peer: <agent-message>
+    queuedPeer('승인', T(7), 'cross-session-message'), // <cross-session-message>
+    queuedCommand('승인', T(8), { commandMode: 'task-notification' }), // origin이 human이어도 commandMode가 prompt가 아니다
+    queuedCommand('승인', T(9), { commandMode: 'bash' }),
+    queuedCommand('승인', T(10), { origin: undefined }), // origin 칸이 없다
+    queuedCommand('승인', T(11), { origin: { kind: 'plugin' } }),
+    queuedCommand('승인', T(12), { type: 'dequeued_command' }), // queued_command가 아니다
+    queuedCommand('<command-message>승인</command-message>', T(13)), // 시스템 태그로 시작한다
+    queuedCommand('<agent-message>승인</agent-message>', T(14)),
+    queuedCommand('', T(15)),
+    queuedCommand('   ', T(16)),
+    queuedCommand(42, T(17)),
+    queuedCommand([{ type: 'tool_result', content: '승인' }], T(18)),
+    { ...queuedCommand('승인', T(19)), isSidechain: true },
+    hookAttachment(T(20)),
+    { type: 'attachment', uuid: 'x', timestamp: T(21) }, // attachment 칸이 없다
+    typed('마지막 말', T(22)),
+  ]);
+  const messages = humanMessages(w.transcript);
+  assert.deepEqual(messages.map((m) => m.text), ['첫 말', '내가클릭함', '글 블록으로 온\n도중의 말', '마지막 말']);
+  const queued = messages[1];
+  assert.equal(queued.via, 'queued');
+  assert.equal(queued.uuid, mid.uuid, 'uuid는 그 줄의 것이다(attachment.source_uuid가 아니다)');
+  assert.notEqual(queued.uuid, mid.attachment.source_uuid);
+  assert.equal(queued.time, T(3));
+  assert.equal(queued.line, 3);
+  assert.equal(messages[2].uuid, blocks.uuid);
+  assert.equal(messages[0].via, 'typed');
+  // 줄에 시각이 없으면 attachment 안의 시각을 쓴다
+  const { timestamp: _omit, ...noTime } = queuedCommand('시각이 attachment에만 있다', T(30));
+  writeTranscript(w, [noTime]);
+  assert.equal(humanMessages(w.transcript)[0].time, T(30));
 });
 
 test('humanMessages gives each message its uuid, time and position, and reads AskUserQuestion answers as the person\'s words', () => {
