@@ -24,6 +24,8 @@ const TRAILING_GROUP = /\s*\[([^\]]*)\]$/;
 // 콜론을 빠뜨린 `[위험 지우기]`·`[위험-지우기]`도 표시로 읽는다. 표시를 잘못 적었다고 위험이 안 보이면 위임이 조용히 지나간다(낱말 검사는 하지 않는다).
 // `[위험성 높음]`·`[위험한 작업]`처럼 한글이 이어지면 표시가 아니라 다른 말이다.
 const RISK_GROUP = /^\s*위험(?![가-힣])/;
+// 태그로 보이는 묶음: `[사용자…]`·`[AI 가정…]`(전각 콜론 꼴도 포함)
+const TAG_GROUP = /^\s*(?:사용자|AI 가정)/u;
 // 줄 어디에 있든 위험 표시로 읽는 것
 const HAS_RISK_MARK = /\[\s*위험(?![가-힣])[^\]]*\]/;
 // 표시 안의 값: 앞의 `위험`과 구분 글자(콜론·공백·하이픈 …)를 뺀 것
@@ -36,15 +38,20 @@ function splitTrailing(rest) {
   let text = rest;
   let rawTag = null;
   const risks = [];
+  let doubleTag = false;
   for (;;) {
     const m = TRAILING_GROUP.exec(text);
     if (!m) break;
     if (RISK_GROUP.test(m[1])) risks.unshift(riskValue(m[1]));
     else if (rawTag === null) rawTag = m[1];
-    else break;
+    else {
+      // 태그 바로 앞에 또 태그 묶음이 있다: 한 줄에 태그는 하나라서 앞의 것은 읽지 않는다(lint가 알린다)
+      doubleTag = TAG_GROUP.test(m[1]);
+      break;
+    }
     text = text.slice(0, m.index);
   }
-  return { text: text.trim(), rawTag, risk: risks.length ? risks.join(', ') : null };
+  return { text: text.trim(), rawTag, risk: risks.length ? risks.join(', ') : null, doubleTag };
 }
 
 // 태그 글(`[..]` 안의 글)을 이름과 콜론 뒤의 글로 나눈다: `사용자: 검수 1` → { name: '사용자', rest: '검수 1' }. 태그가 없으면 name이 null이다.
@@ -58,8 +65,8 @@ function tagParts(rawTag) {
 
 // 줄 끝의 태그: { raw, name, rest }. 위험 표시는 건너뛴다. lint가 항목 줄에서 읽는 것과 같고, 케이스 줄에도 같은 규칙을 쓴다.
 const lineTag = (line) => {
-  const raw = splitTrailing(String(line).trim()).rawTag;
-  return { raw, ...tagParts(raw) };
+  const { rawTag: raw, doubleTag } = splitTrailing(String(line).trim());
+  return { raw, doubleTag, ...tagParts(raw) };
 };
 
 export function parseSpec(text) {
@@ -88,7 +95,7 @@ export function parseSpec(text) {
       if (/^-\s+\S/.test(line)) unnumbered.push(line.replace(/^-\s+/, '').trim());
       continue;
     }
-    const { text, rawTag, risk } = splitTrailing(it[2]);
+    const { text, rawTag, risk, doubleTag } = splitTrailing(it[2]);
     // [사용자: 10/8 회의]·[사용자: 검수 1]·[AI 가정: 검수 2 맡김]처럼 콜론 뒤에 출처나 번호를 붙여도 된다.
     const baseTag = tagParts(rawTag).name;
     items.push({
@@ -98,6 +105,7 @@ export function parseSpec(text) {
       rawTag,
       risk,
       section: current,
+      ...(doubleTag ? { doubleTag: true } : {}),
     });
   }
   return { frontmatter, sections, items, unnumbered };
@@ -118,6 +126,7 @@ export function lintSpec(text) {
     seen.add(item.id);
     if (item.rawTag === null) problems.push(`${item.id}: 태그가 없습니다 ([사용자] 또는 [AI 가정])`);
     else if (item.tag === null) problems.push(`${item.id}: 알 수 없는 태그 [${item.rawTag}]`);
+    if (item.doubleTag) problems.push(`${item.id}: 태그가 둘입니다. 한 줄에 태그는 하나라서 번호는 한 태그에 모읍니다 ([사용자: 검수 1, 3])`);
     if (PLACEHOLDER.test(item.text)) problems.push(`아직 틀 그대로입니다: ${item.id}`);
   }
   for (const line of spec.unnumbered) problems.push(`번호가 없는 항목: ${line} (F<n> 또는 R<n>을 붙이세요)`);
@@ -212,18 +221,26 @@ const REVIEW_LIST = String.raw`검수\s*(\d+(?:\s*[,，、·/]\s*\d+)*)`;
 const reviewNumbers = (text) => [...String(text).matchAll(new RegExp(REVIEW_LIST, 'gu'))].flatMap((m) => m[1].split(/\D+/).filter(Boolean).map(Number));
 const CONFIRM_LINE = new RegExp(String.raw`^\s*[-*]\s*${REVIEW_LIST}\s*[:：]\s*(\S.*?)\s*$`, 'u');
 const FULLWIDTH_TAG = /^\s*(?:사용자|AI 가정)\s*：(.*)$/u;
+// 줄 끝에 `[사용자: 검수 2].`처럼 태그 뒤에 문장부호만 붙은 꼴. afterText는 그 태그의 번호다.
+const TAG_THEN_PUNCT = /\[\s*(?:사용자|AI 가정)\s*:([^\]]*)\]\s*[.,;:!。…)*_]+\s*$/u;
 export function reviewMarks(text) {
   const { body } = splitFrontmatter(String(text ?? ''));
   const answered = new Set();
   const delegated = new Set();
   const notAsked = new Map();
   const fullwidth = new Set();
+  const afterText = new Set();
   for (const unit of itemUnits(text)) {
     for (const line of unit.lines) {
       const { raw, name, rest } = lineTag(line);
       if (name === '사용자') reviewNumbers(rest).forEach((n) => answered.add(n));
       else if (name === 'AI 가정' && rest.includes('맡김')) reviewNumbers(rest).forEach((n) => delegated.add(n));
       else if (raw !== null && FULLWIDTH_TAG.test(raw)) reviewNumbers(FULLWIDTH_TAG.exec(raw)[1]).forEach((n) => fullwidth.add(n));
+      // 줄 끝 태그 뒤에 마침표 같은 글자가 붙으면 줄 끝의 태그가 아니라서 읽히지 않는다
+      if (raw === null) {
+        const after = TAG_THEN_PUNCT.exec(line);
+        if (after) reviewNumbers(after[1]).forEach((n) => afterText.add(n));
+      }
     }
   }
   let section = null;
@@ -237,7 +254,7 @@ export function reviewMarks(text) {
     const m = CONFIRM_LINE.exec(raw);
     if (m) for (const n of reviewNumbers(`검수 ${m[1]}`)) if (!notAsked.has(n)) notAsked.set(n, m[2]);
   }
-  return { answered, delegated, notAsked, fullwidth };
+  return { answered, delegated, notAsked, fullwidth, afterText };
 }
 
 export function setStatus(text, status) {

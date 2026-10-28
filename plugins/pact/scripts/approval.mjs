@@ -114,7 +114,8 @@ const ASK_APPROVAL = `명세를 보이고 사용자의 승인을 받아 ${approv
 const REPLY_HEADING = /^\s*(?:#{1,6}\s*)?[*_]*\s*사용자만 답할 수 있음\s*[*_]*\s*[:：]?\s*(.*)$/u;
 const REPLY_END = /^\s*(?:#{1,6}\s+\S|[*_]*\s*(?:이미 답이 있음|사소함\s*[—–-]))/u;
 const REPLY_ITEM = /^\s*(?:[-*+•]\s*|\d+[.)]\s*)?[*_]*\s*(?:[\[(（【]\s*)?검수\s*(\d+)[*_]*/u;
-const REPLY_NONE = /^\s*(?:[-*+•]\s*)?[*_]*\s*(?:해당\s*)?없(?:음|다|습니다)/u;
+// '없음' 뒤는 줄 끝·문장부호·괄호일 때만 없음이다('없음에 가깝지만'은 아니다).
+const REPLY_NONE = /^\s*(?:[-*+•]\s*)?[*_]*\s*(?:해당\s*)?없(?:음|다|습니다)(?=\s*(?:$|[.,;:!?。…·~)\]）】*_]|[—–-]|[(（\[]))/u;
 
 // 한 칸을 읽는다: start 줄(칸 제목)과 그 줄에 이어 쓴 글(inline), 다음 칸 제목 앞까지의 줄들. { items, none }
 function readSection(lines, { start, inline }) {
@@ -134,7 +135,7 @@ function readSection(lines, { start, inline }) {
 
 // 칸 제목 후보는 '사용자만 답할 수 있음'으로 시작하는 줄 모두다. 답 맨 위의 머리말("사용자만 답할 수 있음 2개를 찾았습니다.")도 후보라서
 // 첫 후보만 칸으로 잡으면 뒤의 진짜 칸을 못 읽는다. `#` 제목 줄을 먼저 보고 맨 줄 꼴은 그다음에 보며, 그 가운데 번호나 '없음'을 읽은 첫 후보를 칸으로 고른다.
-// 어느 후보에서도 못 읽으면 첫 후보(칸은 있는데 못 읽은 것)를 돌려준다.
+// 어느 후보에서도 못 읽으면 첫 후보(칸은 있는데 못 읽은 것)를 돌려준다. 보는 후보는 제목 후보가 있으면 제목 후보뿐이다.
 export function parseReviewReply(message) {
   const lines = String(message ?? '').split(/\r?\n/);
   const candidates = [];
@@ -143,7 +144,9 @@ export function parseReviewReply(message) {
     if (m) candidates.push({ start, inline: m[1], heading: /^\s*#/.test(line) });
   });
   if (!candidates.length) return { found: false, none: false, items: [] };
-  const ordered = [...candidates.filter((c) => c.heading), ...candidates.filter((c) => !c.heading)];
+  // 제목 후보가 하나라도 있으면 제목 후보만 본다. 맨 줄 후보는 제목이 없을 때만 본다(제목 칸을 못 읽었는데 맨 줄의 '없음'으로 통과하지 않게).
+  const headings = candidates.filter((c) => c.heading);
+  const ordered = headings.length ? headings : candidates;
   for (const candidate of ordered) {
     const read = readSection(lines, candidate);
     if (read.items.length || read.none) return { found: true, ...read };
@@ -175,10 +178,12 @@ export function pairingProblem(specText, record, afterwards = '') {
   const list = gaps.map(({ n, text }) => (questionOf(text) ? `검수 ${n}("${clip(questionOf(text), 30)}")` : `검수 ${n}`)).join(', ');
   // 전각 콜론(：)으로 쓴 태그는 lint가 알 수 없는 태그로 알리는데 approve는 lint를 돌리지 않는다. 짝이 없다고만 하면 태그를 단 사람이 영문을 모르니 그렇다고 알린다.
   const wide = gaps.filter(({ n }) => marks.fullwidth.has(n)).map(({ n }) => `검수 ${n}`);
-  const hint = wide.length ? `${wide.join(', ')}의 태그는 콜론이 전각(：)이라 읽히지 않는다. 반각 콜론(:)으로 고친다. ` : '';
+  const trailing = gaps.filter(({ n }) => marks.afterText.has(n)).map(({ n }) => `검수 ${n}`);
+  const hint = (wide.length ? `${wide.join(', ')}의 태그는 콜론이 전각(：)이라 읽히지 않는다. 반각 콜론(:)으로 고친다. ` : '')
+    + (trailing.length ? `${trailing.join(', ')}의 태그 뒤에 글자(마침표 등)가 있어 읽히지 않는다. 태그 뒤에 글자를 두지 않는다. ` : '');
   return {
     reason: `spec-checker가 '사용자만 답할 수 있음'으로 짚은 ${list}에 명세의 짝이 없다.`,
-    instead: `${hint}물어서 답을 받은 줄에는 [사용자: 검수 n], 사용자가 맡긴 줄에는 [AI 가정: 검수 n 맡김]을 기능·규칙 줄이나 그 케이스 줄의 끝에 달고, 묻지 않은 것은 ## 확인 필요에 "- 검수 n: 안 물은 까닭"으로 적는다`
+    instead: `${hint}물어서 답을 받은 줄에는 [사용자: 검수 n], 사용자가 맡긴 줄에는 [AI 가정: 검수 n 맡김]을 기능·규칙 줄이나 그 케이스 줄의 끝에 달고(한 줄에 태그는 하나다. 번호가 여럿이면 \`[사용자: 검수 n, m]\`처럼 한 태그에 쓴다), 묻지 않은 것은 ## 확인 필요에 "- 검수 n: 안 물은 까닭"으로 적는다`
       + "(위임 중이면 까닭은 '위임이라 기본안으로 정함'). 아직 안 물었고 물어야 하는 것이면 먼저 묻는다.",
   };
 }

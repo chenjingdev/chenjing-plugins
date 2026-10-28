@@ -827,3 +827,54 @@ test('(d) F5 is checked when approving again too: a re-approval that drops the p
   assert.equal(runSpec(w, ['approve', w.spec, '닫는 시간을 바꿔 주세요 부탁해요']).status, 0);
   assert.equal(existsSync(path.join(w.run, 'approvals.jsonl')), true);
 });
+
+// ---------- 검토 반영 3차: 제목 칸을 못 읽으면 맨 줄의 '없음'으로 넘어가지 않는다, 한 줄에 태그는 하나다 ----------
+
+test('parseReviewReply: when a heading section exists but cannot be read, a bare line "없음" does not turn it into none', () => {
+  const message = '## 사용자만 답할 수 있음\n1. 질문 하나 (기본안: a)\n\n사용자만 답할 수 있음: 없음에 가깝지만 위 하나는 확인';
+  const reply = parseReviewReply(message);
+  assert.deepEqual({ ...reply, items: reply.items.length }, { found: true, none: false, items: 0 });
+  const problem = pairingProblem(specText(), { time: T(5), message });
+  assert.ok(problem, '읽지 못한 답은 거절한다');
+  assert.match(problem.reason, /칸에서 검수 번호\(검수 1, 검수 2 …\)도 '없음'도 읽지 못했다/);
+  // 제목이 읽히지 않아도 맨 줄이 "없음"으로 깔끔히 끝나면 여전히 제목 칸이 먼저다
+  const strictNone = '## 사용자만 답할 수 있음\n질문이 하나 있습니다.\n\n사용자만 답할 수 있음: 없음';
+  assert.equal(parseReviewReply(strictNone).none, false);
+  assert.ok(pairingProblem(specText(), { time: T(5), message: strictNone }));
+});
+
+test('parseReviewReply: "없음" is read only when it ends the line or is followed by punctuation or a parenthesis', () => {
+  for (const tail of ['없음', '없음.', '없음(이번엔)', '없음 (이번엔)', '없음, 이번엔', '없음 — 이번엔', '없음!']) {
+    const message = `## 사용자만 답할 수 있음\n${tail}`;
+    assert.equal(parseReviewReply(message).none, true, tail);
+    assert.equal(pairingProblem(specText(), { message }), null, tail);
+  }
+  for (const tail of ['없음에 가깝지만 위 하나는 확인', '없음이라고 하기는 어렵다']) {
+    const message = `## 사용자만 답할 수 있음\n${tail}`;
+    assert.equal(parseReviewReply(message).none, false, tail);
+    assert.ok(pairingProblem(specText(), { time: T(5), message }), tail);
+  }
+  assert.equal(parseReviewReply('사용자만 답할 수 있음: 없음에 가깝지만 위 하나는 확인').none, false);
+});
+
+test('two tags on one line: lint says so, and the approve refusal tells why a number has no pair', () => {
+  const problems = lintSpec(specText({ features: '- F1 보기 [사용자: 검수 1] [사용자: 검수 3]\n' }));
+  assert.ok(problems.some((p) => /^F1: 태그가 둘입니다.*한 태그에 모읍니다/.test(p)), problems.join('\n'));
+  assert.ok(lintSpec(specText({ features: '- F1 보기 [AI 가정] [사용자: 검수 1]\n' })).some((p) => /^F1: 태그가 둘/.test(p)));
+  assert.equal(lintSpec(specText({ features: '- F1 보기 [위험: 지우기] [사용자: 검수 1, 3]\n' })).some((p) => /태그가 둘/.test(p)), false);
+  assert.equal(lintSpec(specText({ features: '- F1 목록 [초안] 보기 [사용자]\n' })).some((p) => /태그가 둘/.test(p)), false);
+  const three = checkerReply(['질문 하나', '질문 둘', '질문 셋']);
+  const problem = pairingProblem(specText({ features: '- F1 보기 [사용자: 검수 1] [사용자: 검수 3]\n- F2 닫기 [사용자: 검수 2]\n' }), { time: T(5), message: three });
+  assert.match(problem.reason, /검수 1\(/);
+  assert.doesNotMatch(problem.reason, /검수 3/);
+  assert.match(problem.instead, /한 줄에 태그는 하나다\. 번호가 여럿이면 `\[사용자: 검수 n, m\]`처럼 한 태그에 쓴다/);
+  assert.equal(pairingProblem(specText({ features: '- F1 보기 [사용자: 검수 1, 3]\n- F2 닫기 [사용자: 검수 2]\n' }), { time: T(5), message: three }), null);
+});
+
+test('a period after the tag on a case line is not a tag; the refusal says to leave no text after the tag', () => {
+  const features = '- F1 보기 [AI 가정]\n  - 케이스: 빈 목록 → 안내 문구 [사용자: 검수 1].\n';
+  const problem = pairingProblem(specText({ features }), { time: T(5), message: TWO });
+  assert.match(problem.reason, /검수 1\(/);
+  assert.match(problem.instead, /검수 1의 태그 뒤에 글자\(마침표 등\)가 있어 읽히지 않는다\. 태그 뒤에 글자를 두지 않는다/);
+  assert.doesNotMatch(pairingProblem(specText({ features: '- F1 보기 [사용자: 검수 1]\n' }), { time: T(5), message: TWO }).instead, /태그 뒤에 글자\(/);
+});
