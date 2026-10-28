@@ -162,6 +162,10 @@ struct LeaseRow: Equatable, Identifiable, Sendable {
 
     /// Said instead of a button when this one cannot be released by itself.
     static let noWayHint = "풀 방법이 없어요 — 아래 안내를 따라 주세요"
+    /// What a leftover lease is while Codex refuses to let it go (`releaseBlocked`), before `· 18:48에 끝남`.
+    static let blockedStatus = "Codex가 막아서 풀 수 없음"
+    /// Said instead of 지우기 on such a lease that a live connection still holds.
+    static let heldByLiveHint = "살아 있는 연결이 쥐고 있어요"
 
     var id: String
     var kind: Kind
@@ -175,6 +179,8 @@ struct LeaseRow: Equatable, Identifiable, Sendable {
     var canReleaseSession: Bool
     /// Shown instead of the button when there is no way to release this one by itself.
     var hint: String?
+    /// 지우기 is shown instead of 탭 풀기: Codex refuses to let this one go (`releaseBlocked`).
+    var canDismiss = false
     /// 탭 풀기; nil when there is no session to aim at.
     var releaseButton: ButtonSpec? {
         guard canReleaseSession, let sessionID else { return nil }
@@ -183,6 +189,15 @@ struct LeaseRow: Equatable, Identifiable, Sendable {
             title: "탭 풀기", action: .releaseSession(sessionID, user: true),
             help: "이 대화가 남긴 점유만 풀어요 (세션 \(sessionID.prefix(8)))")
     }
+    /// 지우기: off the list only, while Codex refuses to let the lease go. Nothing is released.
+    var dismissButton: ButtonSpec? {
+        guard canDismiss, let sessionID else { return nil }
+        return ButtonSpec(
+            title: "지우기", action: .dismissSession(sessionID),
+            help: "목록에서만 지워요. Chrome 탭과 Codex는 그대로예요 (세션 \(sessionID.prefix(8)))")
+    }
+    /// The line's one button: 탭 풀기, or 지우기 while Codex refuses to let it go.
+    var button: ButtonSpec? { releaseButton ?? dismissButton }
 }
 
 /// One client of another tool, as its line in the list. For cmux-cua each is one connection (one
@@ -373,7 +388,7 @@ struct ConnectionsContent: Equatable, Sendable {
             tidy = TidyContent(
                 title: "손볼 것 \(rows.count)개", rows: rows,
                 // R14: with no readable list the app says what it knows and never invents a count.
-                notice: !leases.isEmpty && !status.leases.readable ? "점유 목록을 읽지 못해서, 끝난 연결 기록으로 보여요" : nil,
+                notice: Self.notice(leases: leases, status: status),
                 tidyAllButton: targets >= 2
                     ? ButtonSpec(title: "모두 정리", action: .tidyAll, help: "끝난 연결과 남은 점유를 한 번에 정리해요")
                     : nil)
@@ -396,7 +411,19 @@ struct ConnectionsContent: Equatable, Sendable {
                 $0.cwd == nil ? $0.agent.label : "\($0.agent.label) · \(Format.folder($0.cwd))"
             },
             liveConnectionsEmptyText: "없음",
-            needsAttention: leases.contains { $0.kind == .maybeLeft && !$0.canReleaseSession })
+            needsAttention: leases.contains { $0.kind == .maybeLeft && !$0.canReleaseSession && !$0.canDismiss })
+    }
+
+    static let unreadableNotice = "점유 목록을 읽지 못해서, 끝난 연결 기록으로 보여요"
+    /// The one line above the leases while Codex refuses to let them go (`releaseBlocked`). It stands for the unreadable
+    /// list's line too: the lines are the records either way, and one line is enough.
+    static let blockedNotice = "Codex가 브라우저를 막아서 남은 점유를 풀 수 없어요. 지워도 돼요. Chrome 탭이 막히면 그 탭을 닫거나 Codex 확장을 껐다 켜요."
+
+    /// R14: said once, when a lease line is shown and the lease list cannot be read; the blocked line instead while
+    /// Codex refuses to let the leftover leases go.
+    private static func notice(leases: [LeaseRow], status: EngineStatus) -> String? {
+        if status.leases.releaseBlocked && leases.contains(where: { $0.kind == .maybeLeft }) { return blockedNotice }
+        return !leases.isEmpty && !status.leases.readable ? unreadableNotice : nil
     }
 
     /// The lease lines: what the engine could read (`items`) unless a connection of the list holds it,
@@ -423,10 +450,21 @@ struct ConnectionsContent: Equatable, Sendable {
             if TidyPlan.lineToPress(for: item, in: status, tabsReleased: tabsReleased) != nil { continue }
             var parts: [String] = []
             if let ended = item.endedAt { parts.append("\(Format.when(ended, now: now, calendar: calendar))에 끝남") }
+            let id = "left-\(item.sessionID ?? item.connectionID ?? String(index))"
+            let detail = parts.isEmpty ? nil : parts.joined(separator: " · ")
+            if leases.releaseBlocked {
+                // Codex refuses to let it go: 지우기 instead of a 탭 풀기 that cannot work.
+                let dismissable = TidyPlan.canDismiss(item, in: status, tabsReleased: tabsReleased)
+                rows.append(LeaseRow(
+                    id: id, kind: .maybeLeft, agent: item.agent, folder: Format.folder(item.cwd),
+                    statusText: LeaseRow.blockedStatus, detail: detail, sessionID: item.sessionID, canReleaseSession: false,
+                    hint: dismissable ? nil : LeaseRow.heldByLiveHint, canDismiss: dismissable))
+                continue
+            }
             let releasable = item.sessionID != nil && item.releasable
             rows.append(LeaseRow(
-                id: "left-\(item.sessionID ?? item.connectionID ?? String(index))", kind: .maybeLeft, agent: item.agent,
-                folder: Format.folder(item.cwd), statusText: "점유가 남았을 수 있음", detail: parts.isEmpty ? nil : parts.joined(separator: " · "),
+                id: id, kind: .maybeLeft, agent: item.agent,
+                folder: Format.folder(item.cwd), statusText: "점유가 남았을 수 있음", detail: detail,
                 sessionID: item.sessionID, canReleaseSession: releasable, hint: releasable ? nil : LeaseRow.noWayHint))
         }
         return rows

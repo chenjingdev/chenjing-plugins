@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.7'
+VERSION = '0.8.8'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -42,6 +42,8 @@ NOTHING_TO_END = 'No CUA turn of this connection is open, so there was nothing t
 # this text (without the app to ask: "The browser access host is unavailable"). It is Codex's access control and no
 # setting of the user, so the AI is told that, and nothing is done about it.
 BROWSER_BLOCKED_MARKER = 'Local browser use is disabled in Work settings'
+# Every way Codex says it: the same texts a release by session id reads as browser_blocked.
+BROWSER_BLOCKED_MARKERS = ('Local browser use is disabled', 'browser access host is unavailable')
 BROWSER_BLOCKED_NOTE = ('CUA Bar note: since Codex 26.1023, Codex refuses browser use in conversations it did not start '
                         'itself, which includes Claude Code conversations that use CUA through CUA Bar. This is not a '
                         'setting the user turned off; changing Work settings or resetting the Chrome extension will '
@@ -91,6 +93,11 @@ def with_browser_note(name, answer):
             or not any(BROWSER_BLOCKED_MARKER in text for text in answer_texts({'content': content}))):
         return answer
     return {**answer, 'content': [*content, {'type': 'text', 'text': BROWSER_BLOCKED_NOTE}]}
+
+
+def browser_refused(name, answer):
+    """A js answer (a result, error or not) in which Codex refuses the browser to this conversation."""
+    return name == 'js' and any(marker in text for text in answer_texts(answer) for marker in BROWSER_BLOCKED_MARKERS)
 
 
 def failure(name, arguments, answer, ms):
@@ -361,6 +368,8 @@ class HostMcp:
         self.connected_at = self.last_call_at = None
         # Set by whoever keeps the records; both are best effort and never raise into a call.
         self.on_change = self.on_call = None
+        # Called with the Codex app version (or None) when a js answer says Codex refuses the browser; best effort.
+        self.on_browser_blocked = None
 
     @staticmethod
     def emit_stdout(message):
@@ -404,6 +413,20 @@ class HostMcp:
                 callback()
             except Exception:
                 pass
+
+    def codex_app_version(self):
+        """The version of the Codex app behind this connection, or None; the registered-host entry point knows it."""
+        return None
+
+    def browser_blocked(self):
+        """Tell whoever keeps the records that Codex refused the browser to this conversation (release_blocked)."""
+        callback = self.on_browser_blocked
+        if callback is None:
+            return
+        try:
+            callback(self.codex_app_version())
+        except Exception:
+            pass
 
     def host_info(self):
         """Which host this connection is attached to; the registered-host entry point knows more."""
@@ -673,6 +696,8 @@ class HostMcp:
                     self.reply(ident, error={'code': -32601, 'message': 'The tool is not advertised by the owned host CUA server.'})
                     return
                 answer = await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments))
+                if browser_refused(name, answer):
+                    self.browser_blocked()
                 self.reply(ident, with_browser_note(name, answer))
             else:
                 self.reply(ident, error={'code': -32601, 'message': 'Unsupported MCP method.'})

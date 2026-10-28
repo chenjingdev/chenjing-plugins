@@ -58,7 +58,7 @@ runtime; do not invent APIs from ordinary Node.js or Playwright examples.
 - Never replace a connection failure with a separately launched CUA engine,
   model proxy, changed permissions or automatic approval. Keep request
   payloads, screenshots and secrets out of diagnostic output.
-- Do not run `codex-cua release`, `release-session`, `stop`, `restart-codex` or
+- Do not run `codex-cua release`, `release-session`, `dismiss-session`, `stop`, `restart-codex` or
   `unlock-reset` yourself and never pass `--user`; point the user to the CUA Bar
   button or the command instead.
 

@@ -28,6 +28,42 @@ class RecordsTests(unittest.TestCase):
         self.assertEqual(records.state_dir({'CODEX_CUA_STATE_DIR': 'relative'}, home), default)
         self.assertEqual(records.state_dir({'CODEX_CUA_STATE_DIR': '/some/where'}, home), Path('/some/where'))
 
+    def test_a_refused_browser_is_written_down_as_the_codex_version_and_the_time_only(self):
+        state = self.root/'state'
+        self.assertTrue(records.remember_browser_blocked(state, '26.1023.50603', '2026-10-28T09:48:00Z'))
+        path = state/records.BROWSER_BLOCKED_FILE
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o700)
+        self.assertEqual(json.loads(path.read_text()),
+                         {'schema_version': 1, 'app_version': '26.1023.50603', 'at': '2026-10-28T09:48:00Z'})
+        self.assertEqual(records.read_browser_blocked(state), {'app_version': '26.1023.50603', 'at': '2026-10-28T09:48:00Z'})
+        # Without a version nothing could tell later whether the same Codex runs: nothing is written.
+        for version in (None, '', '../x', 'a b', 7):
+            self.assertFalse(records.remember_browser_blocked(state, version))
+        self.assertEqual(records.read_browser_blocked(state)['app_version'], '26.1023.50603')
+        # The time is now when none is given.
+        records.remember_browser_blocked(state, '26.1030.1')
+        self.assertRegex(records.read_browser_blocked(state)['at'], r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
+
+    def test_a_note_that_is_missing_foreign_or_damaged_says_nothing(self):
+        state = records.private_directory(self.root/'state')
+        path = state/records.BROWSER_BLOCKED_FILE
+        self.assertIsNone(records.read_browser_blocked(state))
+        for text in ('not json', '[]', '{"schema_version": 2, "app_version": "1"}', '{"schema_version": 1}',
+                     '{"schema_version": 1, "app_version": "a/b"}'):
+            path.write_text(text)
+            self.assertIsNone(records.read_browser_blocked(state), text)
+        path.write_text('{"schema_version": 1, "app_version": "1.2"}')
+        self.assertEqual(records.read_browser_blocked(state), {'app_version': '1.2', 'at': None})
+        path.chmod(0o666)
+        self.assertIsNone(records.read_browser_blocked(state), 'others may write it')
+        path.chmod(0o600)
+        self.assertIsNone(records.read_browser_blocked(state, uid=os.getuid()+1), 'another user\'s')
+        path.unlink()
+        path.symlink_to(self.root/'elsewhere.json')
+        (self.root/'elsewhere.json').write_text('{"schema_version": 1, "app_version": "1.2"}')
+        self.assertIsNone(records.read_browser_blocked(state), 'a link is not followed')
+
     def test_a_private_directory_is_made_with_0700_and_an_existing_one_must_already_be_private(self):
         path = records.private_directory(self.root/'a/b/state')
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)

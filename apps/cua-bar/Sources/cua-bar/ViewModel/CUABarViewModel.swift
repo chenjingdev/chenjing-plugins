@@ -623,10 +623,11 @@ final class CUABarViewModel: ObservableObject {
     /// The same for a lease line: its own 탭 풀기, 모두 정리 when it is one of the sessions that
     /// releases, a restart or a setup, or the automatic cleanup when it is a Claude session.
     func isWaiting(onSession id: String) -> Bool {
-        let tidiedByAll = TidyPlan.items(in: lastStatus, tabsReleased: tabsReleasedIDs).contains(.session(id))
+        let items = TidyPlan.items(in: lastStatus, tabsReleased: tabsReleasedIDs)
+        let tidiedByAll = items.contains(.session(id)) || items.contains(.dismiss(id))
         let running = inFlight.contains { action in
             switch action {
-            case .releaseSession(let session, _): session == id
+            case .releaseSession(let session, _), .dismissSession(let session): session == id
             case .tidyAll: tidiedByAll
             case .restartCodex, .runSetup: true
             default: false
@@ -704,6 +705,11 @@ final class CUABarViewModel: ObservableObject {
                 let outcome = ActionMessages.releaseSession(result)
                 recordSession(id, outcome: outcome, reason: result.reason, released: result.ok && result.released)
                 return ActionResult(outcome: outcome, reason: result.reason)
+            case .dismissSession(let id):
+                let result = try await engine.dismissSession(id: id)
+                let outcome = ActionMessages.dismissSession(result)
+                recordSession(id, outcome: outcome, reason: result.reason, released: result.ok && result.dismissed)
+                return ActionResult(outcome: outcome, reason: result.reason)
             case .tidy(let id):
                 return try await tidyConnection(id)
             case .tidyAll:
@@ -753,8 +759,11 @@ final class CUABarViewModel: ObservableObject {
             }
         } catch let error as EngineError {
             let outcome = ActionMessages.failure(of: Self.failureLead(for: action), error: error)
-            if case .releaseSession(let id, _) = action {
+            switch action {
+            case .releaseSession(let id, _), .dismissSession(let id):
                 recordSession(id, outcome: outcome, reason: error.reasonCode, released: false)
+            default:
+                break
             }
             return ActionResult(outcome: outcome, reason: error.reasonCode)
         } catch {
@@ -842,6 +851,12 @@ final class CUABarViewModel: ObservableObject {
                     if let reason = result.reason, !(result.ok && result.released), Self.reasonsPointingAtTheExtension.contains(reason) {
                         asksForTheExtension = true
                     }
+                case .dismiss(let id):
+                    // Codex refuses to let it go (release_blocked): it is taken off the list, nothing is released.
+                    let result = try await engine.dismissSession(id: id)
+                    steps.append(TidyStep(dismiss: result))
+                    recordSession(
+                        id, outcome: ActionMessages.dismissSession(result), reason: result.reason, released: result.ok && result.dismissed)
                 }
             } catch let error as EngineError {
                 switch error {
@@ -853,6 +868,10 @@ final class CUABarViewModel: ObservableObject {
                             id, outcome: ActionMessages.failure(of: Self.failureLead(for: .releaseSession(id, user: false)), error: error),
                             reason: error.reasonCode, released: false)
                         asksForTheExtension = asksForTheExtension || error.reasonCode.map(Self.reasonsPointingAtTheExtension.contains) == true
+                    } else if case .dismiss(let id) = item {
+                        recordSession(
+                            id, outcome: ActionMessages.failure(of: Self.failureLead(for: .dismissSession(id)), error: error),
+                            reason: nil, released: false)
                     }
                 }
             }
@@ -869,6 +888,7 @@ final class CUABarViewModel: ObservableObject {
             switch (action, item) {
             case (.tidy(let id), .connection(let target, _)): id == target
             case (.releaseSession(let id, _), .session(let target)): id == target
+            case (.dismissSession(let id), .dismiss(let target)): id == target
             default: false
             }
         }
@@ -903,6 +923,7 @@ final class CUABarViewModel: ObservableObject {
     private static func failureLead(for action: CUAAction) -> String {
         switch action {
         case .releaseConnection, .retryRelease, .releaseSession: "탭을 풀지 못했어요"
+        case .dismissSession: "지우지 못했어요"
         case .tidy, .tidyAll: "정리하지 못했어요"
         case .restartCodex: "Codex를 다시 켜지 못했어요"
         case .keepErrorText: "오류 문구 설정을 바꾸지 못했어요"
@@ -928,7 +949,7 @@ final class CUABarViewModel: ObservableObject {
         cleanupPlanner.markTried(keys)
         // Its time limit grows with what this status says it has to get through.
         var load = ReleaseEndedLoad(status: status)
-        if cleanupPlanner.browserBlocked {
+        if cleanupPlanner.browserBlocked || status.leases.releaseBlocked {
             // Only ended connections are left to try, and the engine is told not to go on to the sessions.
             load.claudeSessions = 0
             load.withSessions = false

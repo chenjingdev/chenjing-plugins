@@ -36,6 +36,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         case releaseConnection(String)
         case releaseEnded
         case releaseSession(String, user: Bool)
+        case dismissSession(String)
         case stopConnection(String, force: Bool)
         case stopGroup(StopGroup, force: Bool)
         case restartCodex
@@ -54,6 +55,8 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         var releaseConnectionQueue: [ReleaseResult] = []
         var releaseEnded = ReleaseEndedResult(ok: true, results: [])
         var releaseSession = SessionReleaseResult(ok: true, released: true, reason: nil, tabCount: 1)
+        /// nil: the session is dismissed, and the status no longer lists it from then on.
+        var dismissSession: DismissResult?
         var stopConnection = StopResult(ok: true, stopped: true, released: true, reason: nil)
         /// Per-connection answers for `stopConnection`, before falling back to `stopConnection`.
         var stopConnectionByID: [String: StopResult] = [:]
@@ -139,6 +142,17 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         let script = try await begin(.releaseSession(id, user: user), isAction: true)
         if let error = script.releaseSessionErrorByID[id] { throw error }
         return script.releaseSessionByID[id] ?? script.releaseSession
+    }
+
+    func dismissSession(id: String) async throws -> DismissResult {
+        if let answer = try await begin(.dismissSession(id), isAction: true).dismissSession { return answer }
+        lock.withLock {
+            if case .success(var status) = script.status {
+                status.leases.maybeLeft.removeAll { $0.sessionID == id }
+                script.status = .success(status)
+            }
+        }
+        return DismissResult(ok: true, dismissed: true, reason: nil)
     }
 
     func stopConnection(id: String, force: Bool) async throws -> StopResult {

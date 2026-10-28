@@ -29,7 +29,8 @@ struct CleanupPlanner: Equatable, Sendable {
     /// What is worth trying now: candidates in this status that were not tried yet.
     func untried(in status: EngineStatus) -> [String] {
         let connections = status.connections.filter { Self.isCandidate($0) }.map { Self.key(for: $0) }
-        let leases = browserBlocked ? [] : status.leases.maybeLeft.filter { Self.isCandidate($0) }.compactMap { Self.key(for: $0) }
+        let blocked = browserBlocked || status.leases.releaseBlocked
+        let leases = blocked ? [] : status.leases.maybeLeft.filter { Self.isCandidate($0) }.compactMap { Self.key(for: $0) }
         return (connections + leases).filter { !tried.contains($0) }
     }
 

@@ -48,7 +48,9 @@ struct NotificationPlanner: Sendable {
 
         var listed: Set<String> = []
         var held: Set<String> = []
-        for entry in status.leases.maybeLeft {
+        // While Codex refuses to let the leftover leases go (`releaseBlocked`) nobody can release them: no notification
+        // asks for it. One that comes back once Codex changes starts its minute over.
+        for entry in status.leases.releaseBlocked ? [] : status.leases.maybeLeft {
             guard let id = entry.sessionID ?? entry.connectionID else { continue }
             let key = "lease:" + id
             // A live connection holds the session: its owner is there, so nobody left it behind (a thread whose runtime

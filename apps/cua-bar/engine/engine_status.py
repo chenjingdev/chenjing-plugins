@@ -25,6 +25,7 @@ from engine_core import (ACTIVE_SECONDS, ACTIVITY_LIMIT, HOST_STOP_GRACE, IDLE_S
 from engine_inventory import (collect, is_app_server, is_cua_repl, mark_live, working_folders)
 from engine_records import (WRITER, bridge_name, control_socket, forget_released, load_records, prune, read_activity,
                             read_released, read_settings)
+from bridge_records import read_browser_blocked
 
 PRUNE_MIN_AGE = 60
 VERSION_NAME = re.compile(r'^[0-9A-Za-z._+-]{1,64}$')     # a Codex version, safe as a folder name
@@ -745,6 +746,14 @@ class View:
                  'error_text': line.get('error_text') if error_text else None}
                 for _, (line, target, agent) in ordered[:ACTIVITY_LIMIT]]
 
+    def release_blocked(self):
+        """True when the Codex app that is installed now is the version that refused the browser to a thread of the
+        engine (a release ended in browser_blocked, or a bridge saw the refusal): a release by session id cannot work
+        until Codex changes. Another version, or none known, is tried again as before."""
+        blocked = read_browser_blocked(self.ctx.state_dir, self.ctx.uid)
+        version = self.inv.app_version
+        return blocked is not None and version is not None and blocked['app_version'] == version
+
     def maybe_left_json(self):
         return [{key: item[key] for key in ('session_id', 'agent', 'connection_id', 'cwd', 'ended_at', 'releasable')}
                 for item in self.maybe_left]
@@ -764,7 +773,8 @@ class View:
                          'restart_adds_relay': self.restart_adds_relay()},
                 'setup': self._setup(),
                 'connections': [conn.to_json() for conn in self.connections],
-                'leases': {'readable': False, 'items': [], 'maybe_left': self.maybe_left_json()},
+                'leases': {'readable': False, 'items': [], 'maybe_left': self.maybe_left_json(),
+                           'release_blocked': self.release_blocked()},
                 'other_tools': self._other_tools(),
                 'screen': self._screen(),
                 'settings': settings,

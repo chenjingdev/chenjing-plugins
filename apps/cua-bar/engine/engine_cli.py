@@ -1,5 +1,5 @@
-"""The engine commands behind `codex-cua`: status, release, release-session, stop, restart-codex, unlock-reset, settings
-and diagnose.
+"""The engine commands behind `codex-cua`: status, release, release-session, dismiss-session, stop, restart-codex,
+unlock-reset, settings and diagnose.
 
 Every command prints exactly one JSON object and exits 0 even when the action itself failed ("ok": false);
 diagnose prints plain text. A non-zero exit means the command could not run at all. Output shapes and reasons
@@ -10,9 +10,11 @@ import sys
 
 from engine_core import Context
 
-COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'unlock-reset', 'settings', 'diagnose')
+COMMANDS = ('status', 'release', 'release-session', 'dismiss-session', 'stop', 'restart-codex', 'unlock-reset', 'settings',
+            'diagnose')
 # Which of the option flags each command accepts.
 OPTIONS = {'status': (), 'release': ('connection', 'ended', 'connections_only'), 'release-session': ('session', 'user'),
+           'dismiss-session': ('session',),
            'stop': ('connection', 'group', 'force'), 'restart-codex': (), 'unlock-reset': (),
            'settings': ('error_text',), 'diagnose': ()}
 
@@ -29,8 +31,8 @@ def validate(args, error):
         error('release needs exactly one of --connection ID or --ended')
     if getattr(args, 'connections_only', False) and not args.ended:
         error('--connections-only goes with release --ended')
-    if args.command == 'release-session' and not args.session:
-        error('release-session needs --session ID')
+    if args.command in ('release-session', 'dismiss-session') and not args.session:
+        error('%s needs --session ID' % args.command)
     if args.command == 'stop' and bool(args.connection) == bool(args.group):
         error('stop needs exactly one of --connection ID or --group all|claude|codex')
     if args.command == 'settings' and getattr(args, 'error_text', None) not in ('on', 'off'):
@@ -57,6 +59,9 @@ def execute(ctx, args):
     if args.command == 'release-session':
         from engine_release import release_session_command
         return release_session_command(ctx, args.session, user=args.user)
+    if args.command == 'dismiss-session':
+        from engine_release import dismiss_session_command
+        return dismiss_session_command(ctx, args.session)
     if args.command == 'release':
         from engine_actions import release_connection, release_ended
         if args.ended:

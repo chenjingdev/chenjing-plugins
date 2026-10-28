@@ -11,7 +11,8 @@ import uuid
 import engine_release
 import engine_status
 import host_mcp
-from engine_support import DECOY, NOW, OWN_THREAD, SESSION_A, SESSION_C, SESSION_D, EngineCase, FakeHost, State, at
+from engine_core import iso
+from engine_support import APP_VERSION, DECOY, NOW, OWN_THREAD, SESSION_A, SESSION_C, SESSION_D, EngineCase, FakeHost, State, at
 
 FAST = {'boot': 0.5, 'call': 0.5, 'end': 0.5, 'cleanup': 0.5}
 
@@ -319,6 +320,104 @@ class OldHostScopeTests(ReleaseCase):
         self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_C)])
         self.assertEqual(self.release([SESSION_C])[SESSION_C]['reason'], 'session_live')
         self.assertEqual(self.hosts, [])
+
+
+class BlockedNoteTests(ReleaseCase):
+    """A release Codex refuses (browser_blocked) is written down with the Codex app version; the status says
+    release_blocked while that very version is installed (0.8.8)."""
+
+    BLOCKED = {'isError': True, 'content': [{'type': 'text', 'text': 'Error: Local browser use is disabled in Work settings'}]}
+
+    def blocked(self):
+        return engine_status.status(self.context())['leases']['release_blocked']
+
+    def set_app_version(self, version):
+        import plistlib
+        plist = self.app/'Contents/Info.plist'
+        info = plistlib.loads(plist.read_bytes())
+        info['CFBundleShortVersionString'] = version
+        plist.write_bytes(plistlib.dumps(info))
+
+    def test_a_refused_release_notes_the_codex_version_and_the_status_says_so_until_codex_changes(self):
+        self.dead()
+        self.assertFalse(self.blocked())
+        self.tools['js'] = AsyncMock(return_value=self.BLOCKED)
+        self.assertEqual(self.release([SESSION_C])[SESSION_C]['reason'], 'browser_blocked')
+        note = json.loads((self.state.root/'browser-blocked.json').read_text())
+        self.assertEqual(note, {'schema_version': 1, 'app_version': APP_VERSION, 'at': iso(NOW)})
+        self.assertEqual(oct((self.state.root/'browser-blocked.json').stat().st_mode & 0o777), '0o600')
+        self.assertTrue(self.blocked())
+        # The session stays where it was: nothing was released.
+        self.assertEqual([item['session_id'] for item in engine_status.status(self.context())['leases']['maybe_left']], [SESSION_C])
+        # Another Codex: tried again as before.
+        self.set_app_version('26.1030.1')
+        self.chrome_plugin('26.1030.1')
+        self.assertFalse(self.blocked())
+        self.tools['js'] = counts_three
+        self.assertTrue(self.release([SESSION_C])[SESSION_C]['released'])
+
+    def test_other_outcomes_write_nothing(self):
+        self.dead()
+        self.dead('d2', 7002, session=SESSION_D)
+        self.tools['js'] = AsyncMock(return_value={'isError': True, 'content': [{'type': 'text', 'text': 'Extension is not connected'}]})
+        self.assertEqual(self.release([SESSION_C])[SESSION_C]['reason'], 'unsupported')
+        self.tools['js'] = counts_three
+        self.assertTrue(self.release([SESSION_D])[SESSION_D]['released'])
+        self.assertEqual(self.release([SESSION_A])[SESSION_A]['reason'], 'not_found')
+        self.assertFalse((self.state.root/'browser-blocked.json').exists())
+        self.assertFalse(self.blocked())
+
+    def test_a_note_of_the_bridge_counts_the_same_and_one_without_a_codex_says_nothing(self):
+        import bridge_records
+        bridge_records.remember_browser_blocked(self.state.root, APP_VERSION)
+        self.assertTrue(self.blocked())
+        (self.app/'Contents/Info.plist').unlink()
+        self.assertFalse(self.blocked(), 'no Codex version to compare with')
+
+
+class DismissTests(ReleaseCase):
+    """dismiss-session: off the list of what may have been left behind, by the person, with nothing released."""
+
+    def dismiss(self, session):
+        return engine_release.dismiss_session_command(self.context(), session)
+
+    def listed(self):
+        return [item['session_id'] for item in engine_status.status(self.context())['leases']['maybe_left']]
+
+    def test_a_dead_bridges_session_is_taken_off_the_list_and_nothing_else_happens(self):
+        directory = self.dead()
+        self.dead('d2', 7002, session=SESSION_D)
+        self.assertEqual(sorted(self.listed()), sorted([SESSION_C, SESSION_D]))
+        self.assertEqual(self.dismiss(SESSION_C), {'ok': True, 'dismissed': True, 'reason': None})
+        self.assertEqual(self.listed(), [SESSION_D])
+        self.assertFalse(directory.exists(), 'the record held nothing else')
+        self.assertEqual((self.hosts, self.machine.signals), ([], []), 'no host, no browser, no process')
+
+    def test_a_codex_threads_session_may_be_dismissed_too(self):
+        self.dead('d2', 7101, SESSION_D, kind='relay')
+        self.assertEqual(self.dismiss(SESSION_D)['dismissed'], True)
+        self.assertEqual(self.listed(), [])
+
+    def test_a_live_writers_record_is_left_alone_and_the_dismissal_is_remembered(self):
+        self.add_claude(500)
+        self.add_bridge(4242, 500, NOW-900)
+        directory = self.state.bridge('a1', 4242, NOW-900, owner_pid=500, cwd='/work/x', session_id=SESSION_D, cleanup='open',
+                                      scopes=[State.scope(SESSION_C, first=at(2000), last=at(1900)), State.scope(SESSION_D)])
+        before = (directory/'bridge.json').read_bytes()
+        self.assertEqual(self.dismiss(SESSION_C)['dismissed'], True)
+        self.assertEqual((directory/'bridge.json').read_bytes(), before)
+        self.assertNotIn(SESSION_C, self.listed())
+        self.assertEqual(self.dismiss(SESSION_D), {'ok': False, 'dismissed': False, 'reason': 'session_live'})
+
+    def test_what_a_release_refuses_is_refused_the_same_way(self):
+        self.dead()
+        self.add_runtime(2000, NOW-890)
+        self.state.relay('r1', 2001, NOW-890, root_pid=2000, runtime_pid=2002, scopes=[State.scope(SESSION_C)])
+        self.assertEqual(self.dismiss(SESSION_C), {'ok': False, 'dismissed': False, 'reason': 'session_live'})
+        self.assertEqual(self.dismiss(SESSION_A), {'ok': False, 'dismissed': False, 'reason': 'not_found'})
+        for bad in ('', '../x', 'a b'):
+            self.assertEqual(self.dismiss(bad)['reason'], 'not_found')
+        self.assertIn(SESSION_C, [item['session_id'] for item in engine_status.build_view(self.context()).maybe_left])
 
 
 class HostTests(ReleaseCase):

@@ -25,6 +25,20 @@ class RegistryTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.record))
         self.path.chmod(0o600)
 
+    def test_the_bridge_knows_the_codex_version_of_its_registered_host(self):
+        from test_runtime_paths import fake_app
+        app, native, _ = fake_app(self.state/'Applications')
+        import asyncio
+
+        async def made():           # the adapter's locks want a loop on Python 3.9
+            return mcp_stdio.build_adapter(self.state, emit=lambda message: None, log=lambda event: None)
+        adapter = asyncio.run(made())
+        self.assertIsNone(adapter.codex_app_version(), 'no host registered yet')
+        adapter.registry = dict(self.record, native_cli=str(native))
+        self.assertEqual(adapter.codex_app_version(), 'fixture')
+        adapter.registry = dict(self.record, native_cli='/elsewhere/codex')
+        self.assertIsNone(adapter.codex_app_version())
+
     def test_owned_live_registry_resolves_without_starting_a_process(self):
         with patch('subprocess.Popen', side_effect=AssertionError('No process may start')):
             self.assertEqual(mcp_stdio.endpoint_from_registry(self.state), Path('/private/test/host.sock'))

@@ -176,6 +176,10 @@ struct Leases: Equatable, Sendable {
     var readable = false
     var items: [LeaseItem] = []
     var maybeLeft: [LeftoverLease] = []
+    /// The Codex app installed now is the version that refused the browser to a conversation of the engine
+    /// (`browser_blocked`, since Codex 26.1023): no `maybeLeft` session can be released by id until Codex changes.
+    /// The app then offers to dismiss them (`dismiss-session`) instead of releasing them (0.8.8).
+    var releaseBlocked = false
 }
 
 /// A lease the engine could read. The contract does not spell out this shape yet, so every
@@ -370,12 +374,13 @@ extension Connection: Decodable {
 }
 
 extension Leases: Decodable {
-    private enum CodingKeys: String, CodingKey { case readable, items, maybeLeft = "maybe_left" }
+    private enum CodingKeys: String, CodingKey { case readable, items, maybeLeft = "maybe_left", releaseBlocked = "release_blocked" }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         readable = c.lenientBool(.readable) ?? false
         items = c.lenientArray(LeaseItem.self, forKey: .items)
         maybeLeft = c.lenientArray(LeftoverLease.self, forKey: .maybeLeft)
+        releaseBlocked = c.lenientBool(.releaseBlocked) ?? false
     }
 }
 

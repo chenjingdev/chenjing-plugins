@@ -11,7 +11,7 @@ enum StopGroup: String, CaseIterable, Hashable, Sendable {
 enum ResultPlace: Hashable, Sendable {
     /// The line of a connection: 탭 풀기 or 정리 on it.
     case connection(String)
-    /// The line of a leftover lease: 탭 풀기 on it.
+    /// The line of a leftover lease: 탭 풀기 or 지우기 on it.
     case session(String)
     /// Under the head of 손볼 것: 모두 정리.
     case tidyAll
@@ -35,6 +35,9 @@ enum CUAAction: Hashable, Sendable {
     /// 탭 풀기 on a leftover lease, by session id. `user` is true for a button press; a Codex
     /// thread's session is released only then.
     case releaseSession(String, user: Bool)
+    /// 지우기 on a leftover lease Codex refuses to let go of (`releaseBlocked`): `dismiss-session`. Off the list only;
+    /// Chrome, its tabs and Codex are left alone.
+    case dismissSession(String)
     /// 정리 of one ended connection, or of one cmux-cua connection nobody owns: release the tabs and
     /// stop what is left, by force when it does not stop in time. Asks nothing: no AI is cut off.
     case tidy(String)
@@ -66,7 +69,7 @@ enum CUAAction: Hashable, Sendable {
     var resultPlace: ResultPlace? {
         switch self {
         case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): .connection(id)
-        case .releaseSession(let id, _): .session(id)
+        case .releaseSession(let id, _), .dismissSession(let id): .session(id)
         case .tidyAll: .tidyAll
         case .copyDiagnosis: .diagnosis
         case .runProbe: .check(.host)

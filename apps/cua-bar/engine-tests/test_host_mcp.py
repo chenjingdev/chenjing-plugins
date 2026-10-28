@@ -11,7 +11,7 @@ import stat
 import sys
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]/'engine'
 spec = importlib.util.spec_from_file_location('host_mcp', PLUGIN_ROOT / 'host_mcp.py')
@@ -479,6 +479,29 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         await self.initialize(adapter)
         await adapter.handle(self.call())
         self.assertNotIn('result', output[-1])
+
+    async def test_the_refusal_is_reported_once_per_answer_to_whoever_keeps_the_records(self):
+        refusals = ({'content': [{'type': 'text', 'text': 'Error: Local browser use is disabled in Work settings'}], 'isError': True},
+                    {'content': [{'type': 'text', 'text': 'The browser access host is unavailable'}], 'isError': True})
+        for result in refusals:
+            adapter, _, _, _, _ = self.fixture(result=result)
+            seen = []
+            adapter.on_browser_blocked = seen.append
+            await self.initialize(adapter)
+            await adapter.handle(self.call())
+            self.assertEqual(seen, [None], 'the plain adapter knows no Codex version')
+        for options in ({'result': {'content': [{'type': 'text', 'text': 'ok'}]}}, {'mode': 'rpc_error'}):
+            adapter, _, _, _, _ = self.fixture(**options)
+            seen = []
+            adapter.on_browser_blocked = seen.append
+            await self.initialize(adapter)
+            await adapter.handle(self.call())
+            self.assertEqual(seen, [])
+        adapter, _, output, _, _ = self.fixture(result=refusals[0])
+        adapter.on_browser_blocked = Mock(side_effect=OSError('disk'))
+        await self.initialize(adapter)
+        await adapter.handle(self.call())
+        self.assertIn('result', output[-1], 'a note that cannot be written never fails the call')
 
     async def test_the_note_is_added_to_js_only(self):
         refusal = {'content': [{'type': 'text', 'text': 'Local browser use is disabled in Work settings'}], 'isError': True}

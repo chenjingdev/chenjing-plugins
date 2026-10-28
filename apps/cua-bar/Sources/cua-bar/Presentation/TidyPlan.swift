@@ -17,6 +17,8 @@ enum TidyPlan {
         case connection(String, Way)
         /// A leftover lease of a Claude conversation, released by session id without `--user`.
         case session(String)
+        /// A leftover lease Codex refuses to let go of (`releaseBlocked`): taken off the list (`dismiss-session`).
+        case dismiss(String)
     }
 
     /// How an ended connection is tidied; nil when the app can neither stop nor release it.
@@ -87,7 +89,10 @@ enum TidyPlan {
     /// keeps its line, with the advice to reset the extension, which is all that is left for it. A live holder is
     /// preferred to an ended one.
     static func lineToPress(for lease: LeftoverLease, in status: EngineStatus, tabsReleased: Set<String> = []) -> Connection? {
-        let pressable = (bridgeLeftItBehind(lease, in: status) + holders(of: lease, in: status))
+        // While Codex refuses the browser to the engine (`releaseBlocked`), a live bridge's 탭 풀기 cannot release by id
+        // what it left under an earlier host either: the lease keeps a line of its own, where it can be dismissed.
+        let behind = status.leases.releaseBlocked ? [] : bridgeLeftItBehind(lease, in: status)
+        let pressable = (behind + holders(of: lease, in: status))
             .filter { hasButton($0, tabsReleased: tabsReleased) }
         // A live line the list leaves out (it holds nothing, as the engine sees it) has no button to press.
         return pressable.first { $0.state != .ended && !$0.isQuiet } ?? pressable.filter { $0.state == .ended }.sorted(by: newestFirst).first
@@ -110,9 +115,28 @@ enum TidyPlan {
             .filter { seen.insert($0).inserted }
     }
 
+    /// The leftover leases that have a line of their own with 지우기, while Codex refuses to let them go
+    /// (`releaseBlocked`): no other line lets go of them, and no live connection holds them. Empty otherwise.
+    static func dismissableSessions(in status: EngineStatus, tabsReleased: Set<String> = []) -> [String] {
+        guard status.leases.releaseBlocked else { return [] }
+        var seen: Set<String> = []
+        return status.leases.maybeLeft
+            .filter { canDismiss($0, in: status, tabsReleased: tabsReleased) }
+            .compactMap(\.sessionID)
+            .filter { seen.insert($0).inserted }
+    }
+
+    /// Whether this leftover lease's own line offers 지우기: Codex refuses to let it go, it has a session to name, no
+    /// other line lets go of it and no live connection holds it (that one would be refused as live).
+    static func canDismiss(_ lease: LeftoverLease, in status: EngineStatus, tabsReleased: Set<String> = []) -> Bool {
+        status.leases.releaseBlocked && lease.sessionID != nil
+            && lineToPress(for: lease, in: status, tabsReleased: tabsReleased) == nil && !ownerIsAlive(for: lease, in: status)
+    }
+
     /// What 모두 정리 does, in the order the list shows it: the ended connections (newest first),
     /// the leftover Claude sessions, the cmux-cua connections nobody owns. Nothing else, and nothing
-    /// that is settled.
+    /// that is settled. While Codex refuses to let the leftover leases go (`releaseBlocked`), their lines are
+    /// dismissed instead of released.
     static func items(in status: EngineStatus?, tabsReleased: Set<String> = []) -> [Item] {
         guard let status else { return [] }
         let connections = endedConnections(in: status).compactMap { connection -> Item? in
@@ -122,6 +146,9 @@ enum TidyPlan {
         let orphans = status.otherTools.flatMap(\.clients).compactMap { client in
             way(for: client).flatMap { way in client.id.map { Item.connection($0, way) } }
         }
-        return connections + claudeSessions(in: status).map(Item.session) + orphans
+        let leases = status.leases.releaseBlocked
+            ? dismissableSessions(in: status, tabsReleased: tabsReleased).map(Item.dismiss)
+            : claudeSessions(in: status).map(Item.session)
+        return connections + leases + orphans
     }
 }

@@ -27,6 +27,8 @@ struct EngineTimeouts: Equatable, Sendable {
     var unlockReset: Duration = .seconds(90)
     /// `settings`: one small file written under the engine's lock, which waits 5 s at most.
     var settings: Duration = .seconds(15)
+    /// `dismiss-session`: the records read twice and one written under the engine's lock (5 s at most).
+    var dismissSession: Duration = .seconds(20)
     var diagnose: Duration = .seconds(30)
     /// `doctor --probe --timeout <n>`: the engine ends its own test after `n` seconds and then cleans up for up to
     /// about 6 s more, so the app waits that long and 10 s over.
@@ -77,6 +79,10 @@ struct CodexCUAEngineClient: EngineClient {
     func releaseSession(id: String, user: Bool) async throws -> SessionReleaseResult {
         let arguments = ["release-session", "--session", id] + (user ? ["--user"] : []) + ["--json"]
         return try await json(SessionReleaseResult.self, arguments, timeout: timeouts.releaseSession)
+    }
+
+    func dismissSession(id: String) async throws -> DismissResult {
+        try await json(DismissResult.self, ["dismiss-session", "--session", id, "--json"], timeout: timeouts.dismissSession)
     }
 
     func stopConnection(id: String, force: Bool) async throws -> StopResult {

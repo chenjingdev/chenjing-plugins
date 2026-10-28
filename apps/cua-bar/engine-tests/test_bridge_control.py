@@ -51,6 +51,20 @@ class ControlTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(control.finalize)
         return control
 
+    async def test_a_refused_browser_is_noted_in_the_state_folder_as_a_release_does(self):
+        control = await self.started()
+        self.assertEqual(control.adapter.on_browser_blocked, control.record_browser_blocked)
+        control.record_browser_blocked('26.1023.50603')
+        note = json.loads((control.state/'browser-blocked.json').read_text())
+        self.assertEqual((note['schema_version'], note['app_version']), (1, '26.1023.50603'))
+        (control.state/'browser-blocked.json').unlink()
+        control.record_browser_blocked(None)
+        self.assertFalse((control.state/'browser-blocked.json').exists(), 'no version, nothing to note')
+        await control.finalize()
+        self.assertIsNone(control.adapter.on_browser_blocked)
+        control.record_browser_blocked('26.1023.50603')
+        self.assertFalse((control.state/'browser-blocked.json').exists(), 'nothing after the end')
+
     async def test_a_call_with_no_relay_in_front_is_one_activity_line_that_names_the_bridges_folder(self):
         control = await self.started()
         control.record_call('js', True, 12, 'session', False)

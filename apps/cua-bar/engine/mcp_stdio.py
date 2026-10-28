@@ -109,6 +109,17 @@ def build_adapter(state, **options):
                 config[SERVER_KEY] = server
             return config
 
+        def codex_app_version(self):
+            # The version of the app the registered host's CLI belongs to (its Info.plist, as the status reads it).
+            try:
+                import plistlib
+                installation = installation_from_native_cli(getattr(self, 'registry', {})['native_cli'])
+                with (installation.app_path/'Contents/Info.plist').open('rb') as source:
+                    value = plistlib.load(source).get('CFBundleShortVersionString')
+                return value if isinstance(value, str) and value else None
+            except Exception:
+                return None
+
         def host_info(self):
             # The registry the host wrote, but only when it still names the endpoint this connection is on.
             try:

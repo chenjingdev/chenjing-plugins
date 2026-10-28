@@ -47,7 +47,7 @@ class ShapeTests(StatusCase):
                                           'engine_version': None, 'relay_reason': None, 'restart_adds_relay': False})
         self.assertEqual(list(status['setup']), ['command', 'dependencies', 'login_environment', 'wrapper', 'relay'])
         self.assertEqual(status['connections'], [])
-        self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})
+        self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': [], 'release_blocked': False})
         self.assertEqual(status['other_tools'], [])
         self.assertEqual(status['screen'], {'active_connection_id': None, 'last_call_at': None})
         self.assertEqual(status['settings'], {'error_text': False})
@@ -1279,7 +1279,7 @@ class LeaseTests(StatusCase):
         self.add_runtime(4000, NOW-5000, relay=False)
         self.state.root.chmod(0o755)
         status = self.status()
-        self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': []})
+        self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': [], 'release_blocked': False})
         self.assertEqual(len(status['connections']), 1)
         self.state.root.chmod(0o700)
 

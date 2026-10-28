@@ -309,7 +309,37 @@ def release_sessions(ctx, sessions, user=False, view=None, options=None):
         results[session] = result
         if result['released']:
             book_release(ctx, view.records, [session])
+    if any(result['reason'] == 'browser_blocked' for result in results.values()):
+        remember_blocked(ctx, view.inv.app_version)
     return results
+
+
+def remember_blocked(ctx, app_version):
+    """Write down that this Codex version refuses the browser to the engine's threads (status: release_blocked)."""
+    from bridge_records import remember_browser_blocked
+    try:
+        remember_browser_blocked(ctx.state_dir, app_version, iso(ctx.clock()))
+    except (OSError, RuntimeError):
+        pass       # the status then says nothing new; the release's own answer is what counts
+
+
+def dismiss_session_command(ctx, session):
+    """`dismiss-session`: take a session off the list of what may have been left behind, without releasing it.
+
+    For a session whose release Codex refuses (browser_blocked): the person decides it holds nothing worth keeping.
+    The same sessions are refused as for a release (session_live, not_found), and the same books are kept as after a
+    confirmed release: the dead records lose the session's scopes, a live writer's is remembered in the engine's file.
+    Chrome, its tabs, Codex and every process are left alone. A Codex thread's session may be dismissed too: only a
+    person runs this."""
+    view = build_view(ctx, with_folders=False, with_checks=False)
+    reason = refusal(view, session, user=True)
+    if reason:
+        return {'ok': False, 'dismissed': False, 'reason': reason}
+    book_release(ctx, view.records, [session])
+    after = build_view(ctx, with_folders=False, with_checks=False)
+    if any(item['session_id'] == session for item in after.maybe_left):
+        return {'ok': False, 'dismissed': False, 'reason': 'unwritable'}
+    return {'ok': True, 'dismissed': True, 'reason': None}
 
 
 def release_session_command(ctx, session, user=False, options=None):

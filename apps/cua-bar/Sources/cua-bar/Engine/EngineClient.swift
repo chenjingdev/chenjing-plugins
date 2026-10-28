@@ -40,6 +40,10 @@ protocol EngineClient: Sendable {
     /// a Codex thread's session is released only then (`needs_user` otherwise), so automatic
     /// cleanup passes false.
     func releaseSession(id: String, user: Bool) async throws -> SessionReleaseResult
+    /// `dismiss-session --session <id>`: off the list of what may have been left behind, without a release. Only for
+    /// the sessions Codex refuses to let go of (`releaseBlocked`), and only on a person's click. Chrome, Codex and every
+    /// process are left alone.
+    func dismissSession(id: String) async throws -> DismissResult
     /// `stop --connection <id> [--force]`
     func stopConnection(id: String, force: Bool) async throws -> StopResult
     /// `stop --group all|claude|codex [--force]`

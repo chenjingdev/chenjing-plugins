@@ -19,6 +19,13 @@ struct SessionReleaseResult: Equatable, Sendable {
     var tabCount: Int?
 }
 
+/// `dismiss-session`: the session is off the list of what may have been left behind; nothing was released.
+struct DismissResult: Equatable, Sendable {
+    var ok = false
+    var dismissed = false
+    var reason: String?
+}
+
 struct EndedRelease: Equatable, Sendable {
     var connectionID: String?
     var released = false
@@ -96,6 +103,16 @@ extension SessionReleaseResult: Decodable {
         released = c.lenientBool(.released) ?? false
         reason = c.lenientString(.reason)
         tabCount = c.lenientInt(.tabCount)
+    }
+}
+
+extension DismissResult: Decodable {
+    private enum CodingKeys: String, CodingKey { case ok, dismissed, reason }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ok = c.lenientBool(.ok) ?? false
+        dismissed = c.lenientBool(.dismissed) ?? false
+        reason = c.lenientString(.reason)
     }
 }
 

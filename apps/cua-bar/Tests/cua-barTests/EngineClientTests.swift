@@ -229,6 +229,16 @@ struct EngineClientTests {
     }
 
     /// A limit shorter than the engine's own worst case (P4) kills an engine that would still
+    @Test func dismissSessionRunsTheCommandWithTheSession() async throws {
+        let runner = ScriptedRunner(stdout: #"{"ok": true, "dismissed": true, "reason": null}"#)
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        let result = try await client.dismissSession(id: "019a-1")
+        #expect(result == DismissResult(ok: true, dismissed: true, reason: nil))
+        #expect(runner.calls.map(\.arguments) == [["dismiss-session", "--session", "019a-1", "--json"]])
+        #expect(runner.calls.map(\.timeout) == [.seconds(20)])
+    }
+
     /// After Codex refused the browser the cleanup asks for the ended connections alone: the engine does not go on to the
     /// sessions, and the limit has no time for them either.
     @Test func releaseEndedForTheConnectionsAlone() async throws {

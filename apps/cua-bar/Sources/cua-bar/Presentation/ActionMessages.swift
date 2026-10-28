@@ -63,6 +63,11 @@ struct TidyStep: Equatable, Sendable {
         }
     }
 
+    /// `dismiss-session`: a leftover lease Codex refuses to let go of, taken off the list.
+    init(dismiss result: DismissResult) {
+        self.init(kind: result.ok && result.dismissed ? .cleaned : .failed, reason: result.ok && result.dismissed ? nil : result.reason)
+    }
+
     /// `release-session` without `--user`: a leftover lease of a Claude conversation.
     init(session result: SessionReleaseResult) {
         if result.ok, result.released {
@@ -153,6 +158,14 @@ enum ActionMessages {
     }
 
     // MARK: 탭 풀기
+
+    /// `dismiss-session`: off the list, or why not. Nothing was released either way.
+    static func dismissSession(_ result: DismissResult) -> ActionOutcome {
+        if result.ok, result.dismissed { return ActionOutcome(kind: .success, message: dismissed) }
+        return ActionOutcome(kind: .failure, message: "지우지 못했어요 — \(reason(result.reason))")
+    }
+
+    static let dismissed = "목록에서 지웠어요"
 
     /// `no_trusted_scope` is "nothing to release", not a failure. `ok` tells the two answers apart
     /// (P4): a verified writer that holds nothing (`ok: true`), or nobody to ask at all (`ok: false`).

@@ -109,7 +109,7 @@ struct TidySectionView: View {
                         row: lease, failed: lease.sessionID.map(failedSessionIDs.contains) ?? false,
                         result: Self.result(of: lease, in: model),
                         waiting: lease.sessionID.map(model.isWaiting(onSession:)) ?? false,
-                        waitingHelp: lease.releaseButton.flatMap { model.cleanupHelp(for: $0.action) }) { model.send($0) }
+                        waitingHelp: lease.button.flatMap { model.cleanupHelp(for: $0.action) }) { model.send($0) }
                 case .orphan(let orphan):
                     RowCard(tint: .red) {
                         ToolClientRowView(
@@ -231,7 +231,7 @@ struct LeaseRowView: View {
                     }
                 }
                 Spacer(minLength: 4)
-                if let button = row.releaseButton {
+                if let button = row.button {
                     HStack(spacing: 4) {
                         if waiting { ProgressView().controlSize(.small) }
                         SpecButton(spec: button, waiting: waiting, waitingHelp: waitingHelp, send: send)

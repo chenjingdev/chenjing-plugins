@@ -10,6 +10,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import tempfile
@@ -27,6 +28,11 @@ SETTINGS_FILE = 'settings.json'
 SETTINGS_MAX_BYTES = 4096
 # How much of a failed call's error text its line keeps, in characters.
 ERROR_TEXT_LIMIT = 500
+# Codex refused the browser to a conversation it did not start (since Codex 26.1023): the Codex app version it was,
+# and when. A release by session id can never work while that version runs, so the app stops offering it (0.8.8).
+BROWSER_BLOCKED_FILE = 'browser-blocked.json'
+BROWSER_BLOCKED_MAX_BYTES = 4096
+APP_VERSION_TEXT = re.compile(r'^[0-9A-Za-z._+-]{1,64}$')
 
 
 def utc_now():
@@ -75,6 +81,44 @@ def write_json_atomic(path, value):
         except OSError:
             pass
         raise
+
+
+def remember_browser_blocked(state, app_version, at=None):
+    """Write down that Codex `app_version` refused the browser to a conversation of this engine, at `at` (now).
+
+    Only the version and the time go into the file. One without a known version writes nothing: nothing could tell
+    later whether the same Codex still runs. Returns whether it was written."""
+    if not isinstance(app_version, str) or not APP_VERSION_TEXT.match(app_version):
+        return False
+    private_directory(state)
+    write_json_atomic(state/BROWSER_BLOCKED_FILE,
+                      {'schema_version': 1, 'app_version': app_version, 'at': at if isinstance(at, str) else utc_now()})
+    return True
+
+
+def read_browser_blocked(state, uid=None):
+    """{'app_version', 'at'} from the file remember_browser_blocked writes, or None: a missing, foreign or unreadable
+    file says nothing."""
+    uid = os.getuid() if uid is None else uid
+    try:
+        descriptor = os.open(state/BROWSER_BLOCKED_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+                             | getattr(os, 'O_NONBLOCK', 0))
+    except OSError:
+        return None
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != uid or stat.S_IMODE(info.st_mode) & 0o022
+                or info.st_size > BROWSER_BLOCKED_MAX_BYTES):
+            return None
+        data = json.loads(os.read(descriptor, BROWSER_BLOCKED_MAX_BYTES+1).decode('utf-8'))
+    except (OSError, ValueError, UnicodeError):
+        return None
+    finally:
+        os.close(descriptor)
+    if (not isinstance(data, dict) or data.get('schema_version') != 1 or not isinstance(data.get('app_version'), str)
+            or not APP_VERSION_TEXT.match(data['app_version'])):
+        return None
+    return {'app_version': data['app_version'], 'at': data.get('at') if isinstance(data.get('at'), str) else None}
 
 
 def keeps_error_text(state):

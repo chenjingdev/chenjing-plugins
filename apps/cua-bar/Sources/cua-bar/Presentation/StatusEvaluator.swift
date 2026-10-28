@@ -249,7 +249,11 @@ enum StatusEvaluator {
                 warning: nil, fix: nil, fixLabel: nil)
         }
         // A lease the line of a connection lets go of is no problem of its own: that line is where to press (S16).
-        let leftover = status.leases.maybeLeft.filter { TidyPlan.lineToPress(for: $0, in: status, tabsReleased: tabsReleased) == nil }
+        // Nor is one Codex refuses to let go of (`releaseBlocked`): nothing can release it until Codex changes, so the
+        // card does not ask for what cannot be done, and its line offers 지우기.
+        let leftover = status.leases.releaseBlocked ? [] : status.leases.maybeLeft.filter {
+            TidyPlan.lineToPress(for: $0, in: status, tabsReleased: tabsReleased) == nil
+        }
         if !leftover.isEmpty {
             // No count: when the lease list cannot be read, the number would be a guess (R14).
             let aimable = leftover.filter { $0.releasable && $0.sessionID != nil }

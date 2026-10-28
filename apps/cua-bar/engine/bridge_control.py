@@ -65,6 +65,7 @@ class BridgeControl:
             raise
         self.adapter.on_change = self.refresh
         self.adapter.on_call = self.record_call
+        self.adapter.on_browser_blocked = self.record_browser_blocked
         self.adapter.owner = self.writer_id
 
     def record(self, **changes):
@@ -105,6 +106,16 @@ class BridgeControl:
                 entry['error_text'] = text
         try:
             records.append_activity(self.state, entry)
+        except Exception:
+            pass
+
+    def record_browser_blocked(self, app_version):
+        """Codex refused the browser to this bridge's conversation: the same note a release by id leaves when Codex
+        refuses it (records.remember_browser_blocked), so the app stops offering releases this Codex version refuses."""
+        if self.finished:
+            return
+        try:
+            records.remember_browser_blocked(self.state, app_version)
         except Exception:
             pass
 
@@ -205,7 +216,7 @@ class BridgeControl:
 
         The runtimes of this bridge's threads are ended first: nothing will use them again."""
         self.finished = True
-        self.adapter.on_change = self.adapter.on_call = None
+        self.adapter.on_change = self.adapter.on_call = self.adapter.on_browser_blocked = None
         if self.directory is None:
             return
         try:

@@ -188,6 +188,46 @@ struct PopoverSnapshotTests {
         try draw("state-restart-offered", rig.model)
     }
 
+    /// The user's screen of 0.8.7 under Codex 26.1023: seven Claude conversations that may have left a lease, the
+    /// lease list unreadable, and Codex refusing the browser to the engine (`release_blocked`). Drawn both ways
+    /// (A5-popover-release-blocked.png, A5-popover-release-not-blocked.png). Blocked: the card is no problem, every line
+    /// has 지우기, and one line above them says why. Not blocked: as before (a problem, 탭 풀기 on each line).
+    @Test func theLeftoverLeasesCodexRefusesToLetGoAreNoProblemAndOfferToBeDismissed() async throws {
+        func draw(_ name: String, _ model: CUABarViewModel) throws {
+            let bitmap = try #require(Snapshot.bitmap(of: SnapshotScene(model: model), dark: dark))
+            #expect(NSApplication.shared.windows.allSatisfy { !$0.isVisible })
+            #expect(Snapshot.inkRatio(bitmap) > 0.15, "\(name) looks blank")
+            if let directory = environment["CUABAR_SNAPSHOT_DIR"] { try Snapshot.write(bitmap, named: name, to: directory) }
+        }
+
+        let blocked = await Rig(try ReleaseBlockedFixture.status(blocked: true))
+        let summary = blocked.model.summary
+        #expect(summary.problem == nil, "nothing on the card asks for what cannot be done")
+        #expect(summary.icon != .problem)
+        #expect(!summary.nextStep.contains("탭 풀기") && !summary.headline.contains("점유"))
+        let tidy = try #require(blocked.model.content?.connections.tidy)
+        let leases = tidy.rows.compactMap(\.leaseRow)
+        #expect(leases.count == 7 && tidy.rows.count == 7)
+        #expect(leases.allSatisfy { $0.button?.title == "지우기" && $0.releaseButton == nil })
+        #expect(leases.allSatisfy { if case .dismissSession = $0.button?.action { true } else { false } })
+        #expect(leases.allSatisfy { $0.statusText == "Codex가 막아서 풀 수 없음" && $0.detail == "11:48에 끝남" })
+        #expect(tidy.notice == "Codex가 브라우저를 막아서 남은 점유를 풀 수 없어요. 지워도 돼요. Chrome 탭이 막히면 그 탭을 닫거나 Codex 확장을 껐다 켜요.")
+        #expect(tidy.notice?.contains("\n") == false, "one line, standing for the unreadable list's line too")
+        #expect(tidy.tidyAllButton?.title == "모두 정리")
+        #expect(blocked.model.content?.connections.guidance.needsAttention == false, "the extension guidance stays shut")
+        #expect(blocked.actionCalls.isEmpty, "no release and no cleanup was tried by itself")
+        try draw("A5-popover-release-blocked", blocked.model)
+
+        // Not blocked: exactly as before.
+        let open = await Rig(try ReleaseBlockedFixture.status(blocked: false))
+        #expect(open.model.summary.problem?.kind == .leasesMaybeLeft)
+        #expect(open.model.summary.nextStep == StatusEvaluator.releaseLeasesStep)
+        let openTidy = try #require(open.model.content?.connections.tidy)
+        #expect(openTidy.rows.compactMap(\.leaseRow).allSatisfy { $0.button?.title == "탭 풀기" && $0.statusText == "점유가 남았을 수 있음" })
+        #expect(openTidy.notice == "점유 목록을 읽지 못해서, 끝난 연결 기록으로 보여요")
+        try draw("A5-popover-release-not-blocked", open.model)
+    }
+
     /// The list drawn tall enough to show all of it: the answer to a line's button is one line on it.
     @Test func theAnswersAreDrawnOnTheirOwnLines() async throws {
         let rig = await Rig(try Fixtures.status("status-problem"))
