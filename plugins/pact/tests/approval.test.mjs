@@ -311,12 +311,11 @@ test('(f) delegate: words that hand over the approval too are recorded, at any t
   assert.equal(entry.quote, '끝까지 알아서 해');
   assert.equal(entry.message_time, T(0));
   assert.equal(entry.spec_checker_time, null);
-  // 검수가 끝난 뒤의 말이어도 된다. 같은 말로 다시 위임을 적는 것도 막지 않는다(이력이 쌓인다)
+  // 검수가 끝난 뒤의 말이어도 된다. 앞 기록이 있으면 더 새 말을 인용해야 한다(같은 말로 다시 위임을 적지 못한다 — 아래 (e)·F3 시험)
   addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('끝까지 알아서 해', T(0)), typed('승인 없이 만들어', T(9))]);
   assert.equal(runSpec(w, ['delegate', w.spec, '승인 없이 만들어']).status, 0);
-  assert.equal(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']).status, 0);
-  assert.deepEqual(approvalEntries(w).map((e) => e.kind), ['delegate', 'delegate', 'delegate']);
+  assert.deepEqual(approvalEntries(w).map((e) => e.kind), ['delegate', 'delegate']);
 });
 
 test('(f) delegate quotes are matched like approve quotes: a short quote must be the whole message, and only a person\'s words count', () => {
@@ -465,7 +464,8 @@ test('(g) set-status approved and building are refused without a record, on a ne
       const w = makeWorld({ status });
       const before = readFileSync(w.spec, 'utf8');
       const line = assertRefused(runSpec(w, ['set-status', w.spec, target]), /승인 기록이 없다/, `${status} → ${target}`);
-      assert.match(line, /spec\.mjs approve <명세> "<사용자 말>"/);
+      assert.match(line, /spec\.mjs approve <명세> - <<'EOF'/);
+      assert.doesNotMatch(line, /"<사용자 말>"/, '큰따옴표 인자 꼴은 알리지 않는다');
       assert.match(line, /delegate/);
       assert.equal(readFileSync(w.spec, 'utf8'), before, `${status} → ${target}: status가 바뀌지 않는다`);
     }

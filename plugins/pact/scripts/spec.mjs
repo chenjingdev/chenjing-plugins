@@ -124,14 +124,11 @@ export function decisionRulings(text) {
   return section.split('\n').map((line) => /^\s*[-*]\s+(Ruling:.*\S)\s*$/.exec(line)?.[1]).filter(Boolean);
 }
 
-// ---------- 위험 항목 (명세 R10) ----------
-// 기능·규칙 줄의 태그 앞에 `[위험: 지우기|공개|비용]`으로 표시한다. 표시가 있으면 위임으로는 만들기를 시작하지 않는다(approval.mjs).
-// 표시가 빠졌는지는 낱말로 찾지 않는다(진짜 명세 17개 모두에 걸려 위임이 늘 멈춘다). spec-checker가 뜻으로 보고 알린다(작업 4).
+// ---------- 항목 단위 읽기: 위험 표시(명세 R10), [사용자] 줄(R12), 검수 번호의 짝(R11) ----------
 // 보는 곳은 F·R 줄과 그 케이스(접힌 칸 포함)다. 목적·범위·하지 않는 것은 보지 않는다.
 
-// F·R 항목 하나(줄과 그 아래 들여쓴 케이스 줄들)마다: { id, lines, marked }
-//   marked  그 항목의 어느 줄에든 위험 표시가 있음
-export function riskUnits(text) {
+// F·R 항목 하나(줄과 그 아래 들여쓴 케이스 줄들)마다: { id, lines, tag } — tag는 `사용자`·`AI 가정` 또는 null
+function itemUnits(text) {
   const { body } = splitFrontmatter(String(text ?? ''));
   const units = [];
   let section = null;
@@ -144,15 +141,75 @@ export function riskUnits(text) {
       continue;
     }
     if (!ITEM_SECTIONS.includes(section)) continue;
-    const head = /^-\s+([FR]\d+)\b/.exec(line);
+    const head = /^-\s+([FR]\d+)\b\s*(.*?)\s*$/.exec(line);
     if (head) {
-      unit = { id: head[1], lines: [line], marked: false };
+      const base = splitTrailing(head[2]).rawTag?.replace(/:.*$/, '').trim() ?? null;
+      unit = { id: head[1], lines: [line], tag: TAGS.includes(base) ? base : null };
       units.push(unit);
     } else if (unit && /^\s+\S/.test(line)) unit.lines.push(line); // 들여쓴 줄은 앞 항목의 케이스
     else if (line.trim()) unit = null; // <details> 같은 항목이 아닌 줄에서 끊는다. 빈 줄에서는 끊지 않는다(접힌 칸 안)
   }
-  for (const u of units) u.marked = u.lines.some((line) => HAS_RISK_MARK.test(line));
   return units;
+}
+
+// 위험 항목 후보마다: { id, lines, marked }
+//   marked  그 항목의 어느 줄에든 위험 표시가 있음
+// 표시가 있으면 위임으로는 만들기를 시작하지 않는다(approval.mjs). 표시가 빠졌는지는 낱말로 찾지 않는다(진짜 명세 17개 모두에 걸려 위임이 늘 멈춘다).
+// spec-checker가 뜻으로 보고 알린다.
+export function riskUnits(text) {
+  return itemUnits(text).map(({ id, lines }) => ({ id, lines, marked: lines.some((line) => HAS_RISK_MARK.test(line)) }));
+}
+
+// 줄 비교용 꼴: 공백은 하나로, 앞뒤는 뺀다(들여쓰기·줄 끝 공백만 바뀐 것은 바뀐 것이 아니다)
+const squash = (line) => String(line).replace(/\s+/g, ' ').trim();
+
+// [사용자]나 [사용자: …] 태그가 붙은 F·R 항목의 줄들: { <번호>: [항목 줄, 케이스 줄, …] } (명세 F3, R12)
+// 승인을 기록할 때 이것을 남기고, 뒤에 지금 명세와 견준다. 같은 번호가 또 나오면(lint가 잡는 오류) `F1#2`처럼 이어 붙여 하나도 빠뜨리지 않는다.
+export function userLinesOf(text) {
+  const out = {};
+  const seen = new Map();
+  for (const unit of itemUnits(text)) {
+    if (unit.tag !== '사용자') continue;
+    const times = (seen.get(unit.id) ?? 0) + 1;
+    seen.set(unit.id, times);
+    out[times === 1 ? unit.id : `${unit.id}#${times}`] = unit.lines.map(squash);
+  }
+  return out;
+}
+
+// 검수 번호의 짝을 명세에서 읽는다 (명세 R11): spec-checker가 '사용자만 답할 수 있음'으로 짚은 `검수 n`마다 아래 셋 중 하나가 있어야 한다.
+//   answered   [사용자: 검수 n]  물어서 답을 받은 줄
+//   delegated  [AI 가정: 검수 n 맡김]  사용자가 맡긴 줄('맡김'이 없는 [AI 가정: 검수 n]은 AI가 알아서 정한 것이라 짝이 아니다)
+//   notAsked   `## 확인 필요`의 `- 검수 n: 안 물은 까닭` (까닭이 비면 짝이 아니다)  → Map(번호 → 까닭)
+// 태그는 `## 확인 필요`·`## 결정 기록` 밖의 어느 줄에서든 읽는다. 백틱으로 감싼 글은 예시라 읽지 않는다. 한 태그에 번호 여럿도 된다: [사용자: 검수 1, 3].
+const REVIEW_LIST = String.raw`검수\s*(\d+(?:\s*[,，、·/]\s*\d+)*)`;
+const reviewNumbers = (text) => [...String(text).matchAll(new RegExp(REVIEW_LIST, 'gu'))].flatMap((m) => m[1].split(/\D+/).filter(Boolean).map(Number));
+const CONFIRM_LINE = new RegExp(String.raw`^\s*[-*]\s*${REVIEW_LIST}\s*[:：]\s*(\S.*?)\s*$`, 'u');
+export function reviewMarks(text) {
+  const { body } = splitFrontmatter(String(text ?? ''));
+  const answered = new Set();
+  const delegated = new Set();
+  const notAsked = new Map();
+  let section = null;
+  for (const raw of body.split(/\r?\n/)) {
+    const h = /^##\s+(.+?)\s*$/.exec(raw);
+    if (h) {
+      section = h[1];
+      continue;
+    }
+    if (section === '확인 필요') {
+      const m = CONFIRM_LINE.exec(raw);
+      if (m) for (const n of reviewNumbers(`검수 ${m[1]}`)) if (!notAsked.has(n)) notAsked.set(n, m[2]);
+      continue;
+    }
+    if (section === '결정 기록') continue;
+    for (const m of raw.replace(/`[^`]*`/g, '').matchAll(/\[\s*(사용자|AI 가정)\s*[:：]([^\]]*)\]/g)) {
+      const numbers = reviewNumbers(m[2]);
+      if (m[1] === '사용자') numbers.forEach((n) => answered.add(n));
+      else if (m[2].includes('맡김')) numbers.forEach((n) => delegated.add(n));
+    }
+  }
+  return { answered, delegated, notAsked };
 }
 
 export function setStatus(text, status) {
@@ -205,10 +262,10 @@ function today() {
 const USAGE = `사용법:
   spec.mjs new <projectDir> <주제>      명세 파일을 만들고 경로를 출력
   spec.mjs status <명세>                status 값을 출력
-  spec.mjs approve <명세> "<사용자 말>"  사용자가 승인한 말을 이 대화 기록에서 찾아 맞춰 보고, 맞으면 승인 기록을 남기고 status를 draft에서 approved로 바꿈
-  spec.mjs delegate <명세> "<사용자 말>" 승인까지 맡긴다는 말을 같은 방식으로 기록. 위험 표시가 있으면 거절
-    사용자 말은 따옴표 대신 표준 입력으로 받을 수도 있다: spec.mjs approve <명세> - <<'EOF' (다음 줄에 말, 그다음 줄에 EOF).
-    따옴표 붙인 heredoc이면 말 속의 백틱·$·따옴표가 셸에서 풀리지 않는다.
+  spec.mjs approve <명세> -             사용자가 승인한 말을 표준 입력으로 받아 이 대화 기록에서 찾아 맞춰 보고, 맞으면 승인 기록을 남기고 status를 draft에서 approved로 바꿈
+  spec.mjs delegate <명세> -            승인까지 맡긴다는 말을 같은 방식으로 기록. 위험 표시가 있으면 거절
+    말은 따옴표 붙인 heredoc으로 넘긴다: spec.mjs approve <명세> - <<'EOF' (다음 줄에 말, 그다음 줄 맨 앞에 EOF).
+    말 속의 백틱·$·따옴표가 셸에서 풀리지 않는다. 말을 인자로 줄 수도 있지만 그러면 셸이 말 속의 백틱·$를 먼저 푼다.
   spec.mjs set-status <명세> <값>       status를 바꿈 (${STATUSES.join(', ')}). approved·building은 승인 기록이 있어야 함
   spec.mjs lint <명세>                  형식 문제를 줄마다 출력, 있으면 종료 코드 1
   spec.mjs run-dir <명세>               실행 산출물 폴더 .pact/<명세 파일명(확장자 제외)>/를 만들고 경로를 출력`;

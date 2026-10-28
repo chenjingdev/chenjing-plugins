@@ -3,7 +3,8 @@
 // 그래서 첫 일은 pact와 상관있는지 싸게 가르는 것이다(도구 이름, agent_type, 문자열에 `.pact/`·`docs/pact/`·pact 에이전트 이름이 있는지).
 // 상관없으면 파일을 읽지도 쓰지도 않고, 아무것도 출력하지 않고, 종료 코드 0으로 끝난다(명세 R1).
 //
-//   PreToolUse   — 승인 관문(F2, 명세 R8·R9·R10): 메인 세션이 pact:worker를 부를 때 그 판에 승인·위임 기록이 없으면 막고,
+//   PreToolUse   — 승인 관문(F2·F3, 명세 R8·R9·R10·R12): 메인 세션이 pact:worker를 부를 때 그 판에 승인·위임 기록이 없거나
+//                  승인 뒤 [사용자] 줄이 바뀌었으면 막고(바뀐 줄을 알리고 새 인용으로 다시 approve하게 한다),
 //                  하위 에이전트가 Bash로 spec.mjs approve·delegate·set-status를 부르거나 메인 세션이 approve·delegate 앞에 환경 변수를
 //                  덮어쓰면 막는다.
 //                  결과 잠금(F1, R14): 실행 폴더 바로 밑의 results*.json은 pact:verifier만, verification.json·approvals.jsonl·log/는
@@ -125,7 +126,8 @@ function gateSpecCommand(calls, command, subAgent) {
   return null;
 }
 
-// 메인 세션이 pact:worker를 부를 때: 작업 지시의 판(findRunDir)에 승인이나 위임 기록이 있어야 한다. 옛 판(pact: 1)은 기록 없이 통과한다.
+// 메인 세션이 pact:worker를 부를 때: 작업 지시의 판(findRunDir)에 승인이나 위임 기록이 있어야 하고, 가장 최근 기록 뒤로 [사용자] 줄이 바뀌지 않았어야 한다
+// (checkStart가 본다). 옛 판(pact: 1)은 기록 없이 통과한다.
 // 판은 지시문에 든 경로로만 찾는다. cwd로 짐작한 판의 기록을 보면 지시문이 가리키는 다른 판이 승인 없이 지나간다.
 async function gateWorker(input, toolInput) {
   const prompt = typeof toolInput.prompt === 'string' ? toolInput.prompt : '';

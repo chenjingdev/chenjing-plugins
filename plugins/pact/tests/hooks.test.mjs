@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PACT_AGENTS, touchesPact, denyOutput, allowOutput } from '../hooks/guard.mjs';
 import { LOGGED_AGENTS, readRecords, latestSpecCheckerReply, latestWorkerReply, latestVerifierFingerprint } from '../scripts/run-log.mjs';
-import { grantApproval, specText, typed, writeTranscript, SESSION } from './approval-world.mjs';
+import { grantApproval, specText, typed, writeTranscript, runSpec, assertRefused, T, SESSION } from './approval-world.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOOK = path.join(ROOT, 'hooks', 'guard.mjs');
@@ -349,7 +349,8 @@ test('(i) the main session calling pact:worker for a new spec with no approval r
   const before = tree(w.root);
   const reason = denied(pre(w, workerCall(brief(w))));
   assert.match(reason, /승인 기록이 없다/);
-  assert.match(reason, /spec\.mjs approve <명세> "<사용자 말>"/);
+  assert.match(reason, /spec\.mjs approve <명세> - <<'EOF'/);
+  assert.doesNotMatch(reason, /"<사용자 말>"/, '큰따옴표 인자 꼴은 알리지 않는다');
   assert.match(reason, /delegate/);
   assert.deepEqual(tree(w.root), before, '막으면서 아무것도 만들지 않는다');
   // 상대 경로로 가리켜도 같다
@@ -402,7 +403,7 @@ test('(i) a brief that names no run is denied with "put run-dir and the task num
 });
 
 test('(i) a delegation is looked at again when the worker is called: a risk item in the spec now, or a transcript that no longer holds the quote, denies', () => {
-  const w = approvalWorld();
+  const w = approvalWorld({ spec: specText({ status: 'building' }) }); // 위임을 기록한 때의 [사용자] 줄이 아래 명세들과 같아야 F3(승인 뒤 바뀐 줄)에 걸리지 않는다
   grantApproval(w, { kind: 'delegate' });
   passed(pre(w, workerCall(brief(w))));
   // 지금 명세에 위험 항목이 생겼다
@@ -443,6 +444,122 @@ test('(i) only the main session is held to this: a sub-agent calling pact:worker
     passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type, prompt: brief(w) } }), subagent_type);
   }
   passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'tiers:worker', prompt: brief(w) } }), '다른 플러그인의 worker');
+});
+
+// ---------- 승인 뒤 [사용자] 줄이 바뀌면 pact:worker를 부르지 못한다 (F3) ----------
+
+const USER_BASE = specText({
+  status: 'building',
+  features: '- F2 출석은 시작 10분 뒤에 닫는다 [사용자]\n  - 케이스: 10분이 지남 → 닫힘 표시\n- F3 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]\n',
+  rules: '- R2 결석 사유는 선생님만 본다 [사용자]\n',
+});
+// 승인한 뒤 명세를 이렇게 고쳤다: 글, 태그, 빼기, 더하기, 케이스 줄. 바뀐 줄의 번호도 같이 둔다.
+const USER_EDITS = {
+  글: [(t) => t.replace('시작 10분 뒤에', '시작 15분 뒤에'), 'F2 바뀜'],
+  태그: [(t) => t.replace('결석 사유는 선생님만 본다 [사용자]', '결석 사유는 선생님만 본다 [AI 가정]'), 'R2 태그가 바뀜'],
+  '번호 태그': [(t) => t.replace('선생님만 본다 [사용자]', '선생님만 본다 [사용자: 검수 1]'), 'R2 바뀜'],
+  빼기: [(t) => t.replace('- R2 결석 사유는 선생님만 본다 [사용자]\n', ''), 'R2 빠짐'],
+  더하기: [(t) => t.replace('## 공통 규칙\n', '## 공통 규칙\n- R9 새 규칙 [사용자]\n'), 'R9 더해짐'],
+  '케이스 줄': [(t) => t.replace('10분이 지남 → 닫힘 표시', '10분이 지남 → 닫히고 알림'), 'F2 바뀜'],
+};
+
+test('(d) a [사용자] line changed after the approval: the hook denies pact:worker and names the line, for an approval and for a delegation, and writes nothing', () => {
+  for (const kind of ['approve', 'delegate']) {
+    for (const [label, [edit, named]] of Object.entries(USER_EDITS)) {
+      const w = approvalWorld({ spec: USER_BASE });
+      grantApproval(w, { kind });
+      passed(pre(w, workerCall(brief(w))), `${kind}: 그대로면 통과`);
+      writeFileSync(w.spec, edit(USER_BASE));
+      const before = tree(w.root);
+      const reason = denied(pre(w, workerCall(brief(w))), `${kind} / ${label}`);
+      assert.match(reason, /승인 뒤 \[사용자\] 줄이 바뀌었다/, `${kind} / ${label}`);
+      assert.ok(reason.includes(named), `${kind} / ${label}: "${named}"를 알린다: ${reason}`);
+      assert.match(reason, /바꿔 달라고 한 사용자 말을 인용해 spec\.mjs approve <명세> - <<'EOF'로 다시 기록한다/);
+      assert.match(reason, /사용자가 파일을 직접 고쳤으면 한 번 묻고 그 답을 인용한다/);
+      assert.doesNotMatch(reason, /"<사용자 말>"/, '큰따옴표 인자 꼴은 알리지 않는다');
+      assert.deepEqual(tree(w.root), before, '막으면서 아무것도 만들지 않는다');
+      assert.deepEqual(errorLines(w), []);
+    }
+  }
+});
+
+test('(d) the call goes through again once the person is quoted in a newer message and the spec approved again; the same or an older message does not', () => {
+  const w = approvalWorld({ spec: USER_BASE });
+  grantApproval(w, { text: '승인', time: T(10) });
+  writeFileSync(w.spec, USER_EDITS.글[0](USER_BASE));
+  denied(pre(w, workerCall(brief(w))));
+  // 앞 기록에 쓴 말이나 더 옛 말로는 다시 기록되지 않는다
+  assertRefused(runSpec(w, ['approve', w.spec, '승인']), /앞 승인 기록에 쓴 메시지/);
+  assert.match(denied(pre(w, workerCall(brief(w)))), /F2 바뀜/, '거절했으니 그대로 막혀 있다');
+  // 바꿔 달라고 한 새 말을 인용하면 통과한다
+  const r = grantApproval(w, { text: '출석 닫는 시간을 15분으로 바꿔 주세요', time: T(20), checker: false });
+  assert.equal(r.length, 2, '이력이 쌓인다');
+  passed(pre(w, workerCall(brief(w))));
+  assert.deepEqual(errorLines(w), []);
+  // 또 바뀌면 또 새 말이 있어야 한다
+  writeFileSync(w.spec, USER_EDITS.글[0](USER_BASE).replace('15분', '20분'));
+  denied(pre(w, workerCall(brief(w))));
+  assertRefused(runSpec(w, ['approve', w.spec, '출석 닫는 시간을 15분으로 바꿔 주세요']), /앞 승인 기록에 쓴 메시지/);
+});
+
+test('(d) a delegation does not get around it: the old delegation words cannot be written again after a [사용자] line changed', () => {
+  const w = approvalWorld({ spec: USER_BASE });
+  grantApproval(w, { kind: 'delegate', text: '끝까지 알아서 해', time: T(1) });
+  writeFileSync(w.spec, USER_EDITS.글[0](USER_BASE));
+  denied(pre(w, workerCall(brief(w))));
+  assertRefused(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']), /앞 승인 기록에 쓴 메시지/);
+  denied(pre(w, workerCall(brief(w))));
+});
+
+test('(a)(d) end to end: the answer the hook logged for the spec-checker is what approve reads, and the worker gate follows the approval that record let through', () => {
+  const w = approvalWorld({ spec: USER_BASE });
+  const reply = [
+    '## 이미 답이 있음', '- 없음', '', '## 사소함 — AI가 정함', '- 없음', '', '## 사용자만 답할 수 있음',
+    '검수 1. 출석을 몇 분 뒤에 닫을까요? (기본안: 10분) — 화면이 달라진다', '검수 2. 결석 사유를 학생도 볼 수 있나요? (기본안: 선생님만) — 화면이 달라진다',
+    '', '질문 라운드는 이것 한 번뿐입니다.',
+  ].join('\n');
+  stop(w, stopInput(w, 'pact:spec-checker', `명세 경로: ${w.spec}`, reply)); // 훅이 spec-checker의 마지막 답을 log/에 남긴다
+  const soon = new Date(Date.now() + 3_600_000).toISOString(); // 훅이 남긴 시각(지금)보다 뒤의 사용자 말
+  writeTranscript(w, [typed('승인', soon)]);
+  // 번호 둘에 짝이 없다
+  const refused = assertRefused(runSpec(w, ['approve', w.spec, '승인']), /검수 1\("출석을 몇 분 뒤에 닫을까요\?"\), 검수 2\("결석 사유를 학생도 볼 수 있나요\?"\)에 명세의 짝이 없다/);
+  assert.doesNotMatch(refused, /\n/);
+  denied(pre(w, workerCall(brief(w))), '기록이 없으니 worker도 막힌다');
+  // 짝을 달면 승인이 기록되고 worker를 부를 수 있다
+  const paired = USER_BASE.replace('- F2 출석은 시작 10분 뒤에 닫는다 [사용자]', '- F2 출석은 시작 10분 뒤에 닫는다 [사용자: 검수 1]').replace('## 확인 필요\n', '## 확인 필요\n- 검수 2: 사용자가 바빠서 묻지 못했다\n');
+  assert.notEqual(paired, USER_BASE);
+  writeFileSync(w.spec, paired);
+  assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
+  passed(pre(w, workerCall(brief(w))));
+  // 승인 뒤 [사용자] 줄을 바꾸면 막힌다. [AI 가정] 줄과 확인 필요를 고치는 것은 막지 않는다
+  writeFileSync(w.spec, paired.replace('- 검수 2: 사용자가 바빠서 묻지 못했다', '- 검수 2: 묻지 못했다. 다음 판에 묻는다').replace('한국어 사용자라서', '한국어를 쓰는 사용자라서'));
+  passed(pre(w, workerCall(brief(w))));
+  writeFileSync(w.spec, paired.replace('시작 10분 뒤에 닫는다 [사용자: 검수 1]', '시작 15분 뒤에 닫는다 [사용자: 검수 1]'));
+  assert.match(denied(pre(w, workerCall(brief(w)))), /F2 바뀜\("출석은 시작 10분 뒤에 닫는다 \[사용자: 검수 1\]" → "출석은 시작 15분 뒤에 닫는다 \[사용자: 검수 1\]"\)/);
+  assert.deepEqual(errorLines(w), []);
+});
+
+test('(e) only [AI 가정] lines changed: the call goes through, and so do the other status and wording changes that are not [사용자] lines', () => {
+  const w = approvalWorld({ spec: USER_BASE });
+  grantApproval(w);
+  for (const edit of [
+    (t) => t.replace('화면 문구는 한국어 — 한국어 사용자라서', '화면 문구는 영어 — 해외 사용자라서'),
+    (t) => t.replace('## 공통 규칙\n', '## 공통 규칙\n- R8 AI가 더한 규칙 — 이유 [AI 가정]\n'),
+    (t) => t.replace('- F3 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]\n', ''),
+    (t) => t.replace('status: building', 'status: verifying').replace('## 결정 기록\n', '## 결정 기록\n- Ruling: 정했다 — 이유 — 잃는 것\n'),
+  ]) {
+    writeFileSync(w.spec, edit(USER_BASE));
+    passed(pre(w, workerCall(brief(w))));
+  }
+  assert.deepEqual(errorLines(w), []);
+});
+
+test('(f) an old spec (pact: 1, no record) is not asked for the [사용자] lines either, whatever they say', () => {
+  const old = approvalWorld({ spec: USER_BASE.replace('pact: 2', 'pact: 1') });
+  passed(pre(old, workerCall(brief(old))));
+  writeFileSync(old.spec, USER_EDITS.글[0](USER_BASE).replace('pact: 2', 'pact: 1'));
+  passed(pre(old, workerCall(brief(old))));
+  assert.deepEqual(errorLines(old), []);
 });
 
 test('(i) a hook that cannot read the record is not a hook that blocks: it passes the call and logs the error', () => {

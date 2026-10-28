@@ -28,8 +28,8 @@ export const tmp = (prefix = 'pact-approval-') => {
 // 2026-10-29 01:<분>:00Z. 분이 클수록 나중이다.
 export const T = (minute, second = 0) => new Date(Date.UTC(2026, 9, 29, 1, minute, second)).toISOString();
 
-// 위험 낱말이 없는 기본 명세
-export const specText = ({ pact = 2, status = 'draft', features = '', rules = '' } = {}) => `---
+// 기본 명세: 위험 표시가 없고, [사용자] 줄은 F1 하나(케이스 하나), [AI 가정] 줄은 R1 하나다. features·rules·confirm으로 줄을 더한다.
+export const specText = ({ pact = 2, status = 'draft', features = '', rules = '', confirm = '', log = '' } = {}) => `---
 pact: ${pact}
 topic: 출결
 status: ${status}
@@ -49,18 +49,18 @@ ${features}## 공통 규칙
 - R1 출석 기록은 학기 동안 보관한다 [AI 가정]
 ${rules}## 구조 판정
 ## 확인 필요
-## 결정 기록
-`;
+${confirm}## 결정 기록
+${log}`;
 
 // 판 하나: 프로젝트(명세와 실행 폴더), 가짜 HOME, 대화 기록 자리
-export function makeWorld({ pact = 2, status = 'draft', features, rules, id = ID, sessionId = SESSION, specBody } = {}) {
+export function makeWorld({ pact = 2, status = 'draft', features, rules, confirm, log, id = ID, sessionId = SESSION, specBody } = {}) {
   const root = tmp();
   const project = path.join(root, 'project');
   const home = path.join(root, 'home');
   mkdirSync(path.join(project, 'docs', 'pact'), { recursive: true });
   mkdirSync(home, { recursive: true });
   const spec = path.join(project, 'docs', 'pact', `${id}.md`);
-  writeFileSync(spec, specBody ?? specText({ pact, status, features, rules }));
+  writeFileSync(spec, specBody ?? specText({ pact, status, features, rules, confirm, log }));
   return {
     root, project, home, spec, id, sessionId,
     run: path.join(project, '.pact', id),
@@ -135,9 +135,19 @@ export function writeTranscript(world, records, file = world.transcript) {
   return file;
 }
 
-// spec-checker가 끝났다는 기록(훅이 남기는 log/subagents.jsonl 한 줄)
-export function addCheckerRecord(world, time) {
-  appendRecord(world.run, { time, agent_type: 'pact:spec-checker', agent_id: 'agent-c', task: null, message: '## 이미 답이 있음\n- 없음\n\n질문 라운드는 이것 한 번뿐입니다.' });
+// spec-checker가 돌려주는 답(agents/spec-checker.md의 형식). questions가 비면 '사용자만 답할 수 있음'은 "없음"이다.
+// 있으면 검수 1, 검수 2 … 번호가 붙어 온다.
+export const checkerReply = (questions = []) => [
+  '## 이미 답이 있음', '- 없음', '',
+  '## 사소함 — AI가 정함', '- 없음', '',
+  '## 사용자만 답할 수 있음',
+  ...(questions.length ? questions.map((question, i) => `검수 ${i + 1}. ${question} (기본안: 지금 그대로) — 답에 따라 화면이 달라진다`) : ['없음']),
+  '', '질문 라운드는 이것 한 번뿐입니다.',
+].join('\n');
+
+// spec-checker가 끝났다는 기록(훅이 남기는 log/subagents.jsonl 한 줄). message를 안 주면 사용자만 답할 수 있는 항목이 없다는 답이다.
+export function addCheckerRecord(world, time, { message = checkerReply() } = {}) {
+  appendRecord(world.run, { time, agent_type: 'pact:spec-checker', agent_id: 'agent-c', task: null, message });
 }
 
 // ---------- 스크립트 돌리기 ----------
@@ -172,10 +182,15 @@ export function assertRefused(r, pattern, label = '') {
 
 // 승인(또는 위임)을 스크립트로 받아 놓는다: 대화 기록에 그 말을 두고, spec-checker 기록을 남기고, 명령을 돌린다.
 // 훅 시험처럼 "승인 기록이 있는 판"이 필요할 때 쓴다. 이미 있는 대화 기록 줄은 지우지 않고 더한다.
-export function grantApproval(world, { kind = 'approve', text = kind === 'approve' ? '승인' : '끝까지 알아서 해', extra = [] } = {}) {
-  if (kind === 'approve') addCheckerRecord(world, T(5));
+// 위임은 spec-checker 기록이 없어도 되지만(approval.test), 완료 검사까지 가는 시험은 있어야 하니 checker: true로 남긴다.
+// 다시 기록할 때(F3)는 checker: false와 더 늦은 time으로 부른다: 앞 기록의 메시지보다 새 말이어야 한다.
+export function grantApproval(world, {
+  kind = 'approve', text = kind === 'approve' ? '승인' : '끝까지 알아서 해', extra = [], checker = kind === 'approve',
+  time = kind === 'approve' ? T(10) : T(1), checkerMessage,
+} = {}) {
+  if (checker) addCheckerRecord(world, T(5), checkerMessage === undefined ? {} : { message: checkerMessage });
   const prior = existsSync(world.transcript) ? readFileSync(world.transcript, 'utf8').split('\n').filter(Boolean) : [];
-  writeTranscript(world, [...prior, ...extra, typed(text, kind === 'approve' ? T(10) : T(1))]);
+  writeTranscript(world, [...prior, ...extra, typed(text, time)]);
   const r = runSpec(world, [kind, world.spec, text]);
   assert.equal(r.status, 0, `${kind} 성공해야 한다: ${r.stdout}${r.stderr}`);
   return approvalEntries(world);

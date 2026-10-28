@@ -6,6 +6,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { renderReport } from '../scripts/report.mjs';
+import { appendRecord } from '../scripts/run-log.mjs';
+import { userLinesOf } from '../scripts/spec.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(here, '..', 'scripts', 'report.mjs');
@@ -344,4 +346,206 @@ test('(g) CLI: the report built from results.json, summary.json and the spec sho
   assert.match(html, /결정 기록 2개/);
   assert.match(html, /<title>출결 관리 검수 보고서<\/title>/);
   assert.ok(root);
+});
+
+// ---------- 승인 기록과 참고 줄과 확인 필요의 검수 항목이 보고서에 보인다(명세 R5, R8, R11, R12) ----------
+
+const approvalSpec = ({ pact = 2, status = 'verifying', features = '', confirm = '' } = {}) => `---
+pact: ${pact}
+topic: 출결 관리
+status: ${status}
+---
+# 출결 관리
+## 기능
+- F1 목록 [사용자]
+${features}## 공통 규칙
+- R1 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]
+## 확인 필요
+${confirm}## 결정 기록
+`;
+// 승인 기록 한 줄: 승인할 때의 명세 글에서 [사용자] 줄을 읽어 담는다
+const entryFor = (text, over = {}) => ({
+  version: 1, kind: 'approve', quote: '승인', message: '승인', message_uuid: 'u1', message_time: '2026-10-29T01:10:00.000Z', answer_question: null,
+  transcript: '/t', session_id: 's', recorded_at: '2026-10-29T01:10:05.000Z', spec: SPEC_PATH, spec_checker_time: '2026-10-29T01:05:00.000Z', user_lines: userLinesOf(text), ...over,
+});
+// 명세(지금 글)와 승인 기록(앞에서부터)을 가진 판. checker가 있으면 spec-checker 기록도 남긴다.
+function approvedProject({ spec, entries, checker }) {
+  const root = mkdtempSync(path.join(tmpdir(), 'pact-report-approved-'));
+  mkdirSync(path.join(root, 'docs', 'pact'), { recursive: true });
+  writeFileSync(path.join(root, SPEC_PATH), spec);
+  const run = path.join(root, '.pact', 'x');
+  mkdirSync(run, { recursive: true });
+  if (entries) writeFileSync(path.join(run, 'approvals.jsonl'), entries.map((entry) => `${JSON.stringify(entry)}\n`).join(''));
+  if (checker) appendRecord(run, { time: '2026-10-29T01:05:00.000Z', agent_type: 'pact:spec-checker', agent_id: 'a', task: null, message: checker });
+  return { root, run };
+}
+const reportOf = (project, extra = {}) => renderReport({ ...RESULTS, spec: SPEC_PATH, rulings: undefined, ...extra }, { runDir: project.run }).html;
+
+test('(g) the report shows each record: approval or delegation, the quoted words, the whole message and the times', () => {
+  const spec = approvalSpec();
+  const long = '이대로 만들어 주세요\n그리고 <b>굵게</b> 보이게는 하지 말고 "그대로" 두세요';
+  const { run } = approvedProject({ spec, entries: [entryFor(spec, { quote: '이대로 만들어 주세요', message: long })] });
+  const html = renderReport({ ...RESULTS, spec: SPEC_PATH, rulings: undefined }, { runDir: run }).html;
+  assert.match(html, /<h2>승인 기록<\/h2>/);
+  assert.match(html, /<strong>승인<\/strong> <span class="meta">기록 2026-10-29T01:10:05\.000Z · 메시지 2026-10-29T01:10:00\.000Z<\/span>/);
+  assert.match(html, /<p class="quote">이대로 만들어 주세요<\/p>/);
+  assert.match(html, /<details class="more"><summary>메시지 전문<\/summary><pre>이대로 만들어 주세요\n그리고 &lt;b&gt;굵게&lt;\/b&gt; 보이게는 하지 말고 &quot;그대로&quot; 두세요<\/pre><\/details>/);
+  assert.doesNotMatch(html, /<b>굵게<\/b>/, '글은 걸러서 낸다');
+  assert.doesNotMatch(html, /<strong>다시/, '기록이 하나면 다시 승인이 아니다');
+  assert.doesNotMatch(html, /아직 다시 승인되지 않았습니다/);
+  // 위임이면 위임이라고 한다. 질문 도구의 답이면 그 질문도 보인다
+  const delegated = approvedProject({ spec, entries: [entryFor(spec, { kind: 'delegate', quote: '끝까지 알아서 해', message: '끝까지 알아서 해', answer_question: '승인까지 맡기시겠어요?', spec_checker_time: null })] });
+  const dHtml = reportOf(delegated);
+  assert.match(dHtml, /<strong>위임<\/strong>/);
+  assert.match(dHtml, /<p class="quote">끝까지 알아서 해<\/p>/);
+  assert.match(dHtml, /<p class="meta">질문 도구의 답: 승인까지 맡기시겠어요\?<\/p>/);
+  assert.doesNotMatch(dHtml, /<strong>승인<\/strong>/);
+  // 승인 기록 칸은 명세와 다른 것 뒤, 통과 앞에 있다
+  assert.ok(html.indexOf('<h2>승인 기록</h2>') > html.indexOf('<h2>명세와 다른 것</h2>') && html.indexOf('<h2>승인 기록</h2>') < html.indexOf('<h2>통과</h2>'));
+});
+
+test('(g) a [사용자] line changed after an approval is shown with the words that approved it again: before and after, next to the quote', () => {
+  const v1 = approvalSpec({ features: '- F2 출석은 시작 10분 뒤에 닫는다 [사용자]\n  - 케이스: 10분이 지남 → 닫힘 표시\n' });
+  const v2 = v1.replace('시작 10분 뒤에', '시작 15분 뒤에');
+  const v3 = v2.replace('- F1 목록 [사용자]\n', '');
+  const entries = [
+    entryFor(v1),
+    entryFor(v2, { kind: 'delegate', quote: '출석은 15분 뒤에 닫는 걸로 바꿔 줘', message: '출석은 15분 뒤에 닫는 걸로 바꿔 줘', message_uuid: 'u2', message_time: '2026-10-29T02:00:00.000Z', recorded_at: '2026-10-29T02:00:03.000Z' }),
+    entryFor(v3, { quote: '목록은 필요 없으니 빼 주세요', message: '목록은 필요 없으니 빼 주세요 <지금 바로>', message_uuid: 'u3', message_time: '2026-10-29T03:00:00.000Z', recorded_at: '2026-10-29T03:00:03.000Z' }),
+  ];
+  const { run } = approvedProject({ spec: v3, entries });
+  const html = renderReport({ ...RESULTS, spec: SPEC_PATH, rulings: undefined }, { runDir: run }).html;
+  const second = html.indexOf('<strong>다시 위임</strong>');
+  const third = html.indexOf('<strong>다시 승인</strong>');
+  assert.ok(second > 0 && third > second, '이력이 순서대로 나온다');
+  const middle = html.slice(second, third);
+  assert.match(middle, /앞 기록 뒤로 바뀐 \[사용자\] 줄 1개/);
+  assert.match(middle, /<span class="tag">바뀜<\/span>F2 <del>출석은 시작 10분 뒤에 닫는다 \[사용자\] \/ 케이스: 10분이 지남 → 닫힘 표시<\/del> <ins>출석은 시작 15분 뒤에 닫는다 \[사용자\] \/ 케이스: 10분이 지남 → 닫힘 표시<\/ins>/);
+  assert.match(middle, /<p class="quote">출석은 15분 뒤에 닫는 걸로 바꿔 줘<\/p>/, '다시 승인한 인용이 바뀐 줄 옆에 있다');
+  const last = html.slice(third, html.indexOf('<h2>통과</h2>'));
+  assert.match(last, /<span class="tag">빠짐<\/span>F1 <del>목록 \[사용자\]<\/del>/);
+  assert.match(last, /<p class="quote">목록은 필요 없으니 빼 주세요<\/p>/);
+  assert.match(last, /<pre>목록은 필요 없으니 빼 주세요 &lt;지금 바로&gt;<\/pre>/);
+  assert.doesNotMatch(html, /아직 다시 승인되지 않았습니다/, '지금 명세는 가장 최근 기록과 같다');
+  // 더해진 줄과 태그만 바뀐 줄
+  const v4 = `${v1}`.replace('- F1 목록 [사용자]\n', '- F1 목록 [사용자]\n- F9 새 기능 [사용자]\n');
+  const added = approvedProject({ spec: v4, entries: [entryFor(v1), entryFor(v4, { message_time: '2026-10-29T02:00:00.000Z', message_uuid: 'u2' })] });
+  assert.match(reportOf(added), /<span class="tag">더해짐<\/span>F9 <ins>새 기능 \[사용자\]<\/ins>/);
+  // 앞 기록에 줄이 없으면 견줄 수 없다고 적는다
+  const bare = approvedProject({ spec: v1, entries: [{ ...entryFor(v1), user_lines: undefined }, entryFor(v1, { message_time: '2026-10-29T02:00:00.000Z', message_uuid: 'u2' })] });
+  assert.match(reportOf(bare), /앞 기록에 \[사용자\] 줄이 없어 무엇이 바뀌었는지 견주지 못했습니다/);
+});
+
+test('(g) everything the person wrote that the page shows is escaped: the quote, the message, the lines before and after a change, the question and the reason', () => {
+  const v1 = approvalSpec({ features: '- F2 <script>alert(1)</script> 보기 [사용자]\n', confirm: '- 검수 2: <i>묻지 않았다</i> & 그대로 둔다\n' });
+  const v2 = v1.replace('<script>alert(1)</script>', '<img src=x onerror=alert(2)>');
+  const entries = [
+    entryFor(v1, { quote: '<b>승인</b>', message: '<b>승인</b> & "그대로" 만들어 주세요', answer_question: '<u>승인할까요?</u>' }),
+    entryFor(v2, { message_time: '2026-10-29T02:00:00.000Z', message_uuid: 'u2', quote: '<s>바꿔 주세요</s>', message: '<s>바꿔 주세요</s>' }),
+  ];
+  const { run } = approvedProject({ spec: v2, entries, checker: '## 사용자만 답할 수 있음\n검수 2. <em>질문</em>인가요? (기본안: 예)\n\n질문 라운드는 이것 한 번뿐입니다.' });
+  const html = reportOf({ run });
+  for (const raw of ['<b>승인</b>', '<s>바꿔 주세요</s>', '<u>승인할까요?</u>', '<script>alert(1)</script>', '<img src=x onerror=alert(2)>', '<i>묻지 않았다</i>', '<em>질문</em>']) {
+    assert.ok(!html.includes(raw), `${raw}가 걸러지지 않았다`);
+  }
+  assert.match(html, /<p class="quote">&lt;b&gt;승인&lt;\/b&gt;<\/p>/);
+  assert.match(html, /<pre>&lt;b&gt;승인&lt;\/b&gt; &amp; &quot;그대로&quot; 만들어 주세요<\/pre>/);
+  assert.match(html, /질문 도구의 답: &lt;u&gt;승인할까요\?&lt;\/u&gt;/);
+  assert.match(html, /<del>&lt;script&gt;alert\(1\)&lt;\/script&gt; 보기 \[사용자\]<\/del> <ins>&lt;img src=x onerror=alert\(2\)&gt; 보기 \[사용자\]<\/ins>/);
+  assert.match(html, /<li>검수 2: &lt;i&gt;묻지 않았다&lt;\/i&gt; &amp; 그대로 둔다 \(질문: &lt;em&gt;질문&lt;\/em&gt;인가요\?\)<\/li>/);
+});
+
+test('(g) a [사용자] line that changed and has not been approved again is warned about at the top and listed in the records; an [AI 가정] change is not', () => {
+  const v1 = approvalSpec();
+  const entries = [entryFor(v1)];
+  const changed = approvedProject({ spec: v1.replace('- F1 목록 [사용자]', '- F1 목록과 검색 [사용자]'), entries });
+  const html = reportOf(changed);
+  const top = html.slice(html.indexOf('<section class="top">'), html.indexOf('</section>'));
+  assert.match(top, /<p class="missing">승인 뒤 바뀐 \[사용자\] 줄이 아직 다시 승인되지 않았습니다\. 아래 승인 기록에 있습니다\.<\/p>/);
+  const records = html.slice(html.indexOf('<h2>승인 기록</h2>'));
+  assert.match(records, /<p class="missing">승인 뒤 바뀐 \[사용자\] 줄이 아직 다시 승인되지 않았습니다\.<\/p><ul class="changes"><li><span class="tag">바뀜<\/span>F1 <del>목록 \[사용자\]<\/del> <ins>목록과 검색 \[사용자\]<\/ins>/);
+  // [AI 가정]만 바뀐 것은 알리지 않는다
+  const ai = approvedProject({ spec: v1.replace('화면 문구는 한국어', '화면 문구는 영어'), entries });
+  assert.doesNotMatch(reportOf(ai), /아직 다시 승인되지 않았습니다/);
+  // 줄이 없는 옛 기록은 견줄 수 없다고 알린다
+  const unknown = approvedProject({ spec: v1, entries: [{ ...entryFor(v1), user_lines: undefined }] });
+  const uHtml = reportOf(unknown);
+  assert.match(uHtml, /가장 최근 기록에 \[사용자\] 줄이 없어 승인 뒤 바뀐 줄이 있는지 확인하지 못했습니다/);
+  assert.match(uHtml.slice(uHtml.indexOf('<section class="top">'), uHtml.indexOf('</section>')), /아직 다시 승인되지 않았습니다/);
+});
+
+test('(g) an old spec says "옛 판이라 승인 기록 없음"; a new spec with no record, an unreadable record and no spec at all each say what they can', () => {
+  const old = approvedProject({ spec: approvalSpec({ pact: 1, status: 'verifying' }) });
+  assert.match(reportOf(old), /<h2>승인 기록<\/h2>\n<p class="missing">옛 판이라 승인 기록 없음<\/p>/);
+  // 옛 명세라도 draft였던 것은 옛 판이 아니다
+  assert.match(reportOf(approvedProject({ spec: approvalSpec({ pact: 1, status: 'draft' }) })), /<p class="missing">승인 기록이 없습니다\.<\/p>/);
+  assert.match(reportOf(approvedProject({ spec: approvalSpec() })), /<p class="missing">승인 기록이 없습니다\.<\/p>/);
+  // 기록 자리가 폴더라 못 읽는다: 보고서는 그래도 만들어진다
+  const broken = approvedProject({ spec: approvalSpec() });
+  mkdirSync(path.join(broken.run, 'approvals.jsonl'));
+  assert.match(reportOf(broken), /<p class="missing">승인 기록을 읽지 못했습니다\(EISDIR\)\.<\/p>/);
+  // 명세도 기록도 없으면 말할 것이 없다: 칸도 없다
+  const { html } = renderReport(RESULTS, { runDir: tmp() });
+  assert.doesNotMatch(html, /승인 기록/);
+  // 명세를 못 읽어도 기록이 있으면 기록은 보인다(바뀐 줄은 모른다)
+  const lost = approvedProject({ spec: approvalSpec(), entries: [entryFor(approvalSpec())] });
+  const lostHtml = renderReport({ ...RESULTS, spec: 'docs/pact/없음.md', rulings: undefined }, { runDir: lost.run }).html;
+  assert.match(lostHtml, /<strong>승인<\/strong>/);
+  assert.doesNotMatch(lostHtml, /아직 다시 승인되지 않았습니다/);
+});
+
+test('(g) the 참고 lines of the completion check (notes) are in the report, escaped', () => {
+  const { run } = approvedProject({ spec: approvalSpec(), entries: [entryFor(approvalSpec())] });
+  const notes = ['참고: 옛 판이고 verifier 기록이 없어 results.json이 verifier가 쓴 그대로인지는 확인하지 않았다', '참고: <b>둘째</b> 줄'];
+  const { html } = renderReport({ ...RESULTS, spec: SPEC_PATH, rulings: undefined }, { runDir: run, notes });
+  const top = html.slice(html.indexOf('<section class="top">'), html.indexOf('</section>'));
+  assert.match(top, /<p class="meta">참고: 옛 판이고 verifier 기록이 없어 results\.json이 verifier가 쓴 그대로인지는 확인하지 않았다<\/p>/);
+  assert.match(top, /<p class="meta">참고: &lt;b&gt;둘째&lt;\/b&gt; 줄<\/p>/);
+  assert.doesNotMatch(html, /<b>둘째<\/b>/);
+  assert.ok(top.indexOf('시나리오 3개') < top.indexOf('참고: 옛 판'), '개수 줄 아래에 있다');
+  assert.doesNotMatch(renderReport(RESULTS, { runDir: tmp() }).html, /class="meta">참고/, '참고 줄이 없으면 칸도 없다');
+});
+
+test('(g) the 검수 items in ## 확인 필요 go to the 할 일 list by themselves, with the checker\'s question, and are not repeated when the summary already names them', () => {
+  const spec = approvalSpec({ confirm: '- 검수 2: 위임이라 기본안으로 정함\n- 검수 3: 사용자가 바빠서 묻지 못함\n- 검수 4: 질문 글이 없는 번호\n' });
+  const checker = ['## 사용자만 답할 수 있음', '검수 2. 결석 사유를 학생도 볼 수 있나요? (기본안: 선생님만) — 화면이 달라진다', '검수 3. ' + '길'.repeat(80) + ' (기본안: 하나)', '', '질문 라운드는 이것 한 번뿐입니다.'].join('\n');
+  const { run } = approvedProject({ spec, entries: [entryFor(spec)], checker });
+  // summary.json이 없어도 할 일 칸이 생긴다
+  const html = reportOf({ run });
+  assert.match(html, /<h2>할 일<\/h2><ul><li>검수 2: 위임이라 기본안으로 정함 \(질문: 결석 사유를 학생도 볼 수 있나요\?\)<\/li><li>검수 3: 사용자가 바빠서 묻지 못함 \(질문: 길{60}…\)<\/li><li>검수 4: 질문 글이 없는 번호<\/li><\/ul>/);
+  // 메인이 쓴 할 일 뒤에 붙는다. 이미 번호를 적은 것은 되풀이하지 않는다
+  writeSummary(run, { todo: ['빈 수업 화면 문구를 정해 주세요', '검수 3은 다음에 꼭 묻는다'] });
+  const merged = reportOf({ run });
+  assert.match(merged, /<ul><li>빈 수업 화면 문구를 정해 주세요<\/li><li>검수 3은 다음에 꼭 묻는다<\/li><li>검수 2: 위임이라/);
+  assert.equal(merged.split('검수 3').length - 1, 1, '검수 3은 한 번만 나온다');
+  assert.match(merged, /<li>검수 4: 질문 글이 없는 번호<\/li>/);
+  // 메인의 todo가 빈 배열이어도 검수 항목은 올라온다
+  writeSummary(run, { todo: [] });
+  assert.match(reportOf({ run }), /<h2>할 일<\/h2><ul><li>검수 2:/);
+  // 번호가 10 이상이어도 번호가 겹치지 않게 본다: 검수 12를 적었다고 검수 1이 적힌 것이 아니다
+  const ten = approvedProject({ spec: approvalSpec({ confirm: '- 검수 1: 묻지 못함\n' }), entries: [] });
+  writeSummary(ten.run, { todo: ['검수 12는 나중에'] });
+  assert.match(reportOf(ten), /<li>검수 1: 묻지 못함<\/li>/);
+  // 항목이 없으면 달라지는 것이 없다: todo가 []이면 "없음", 칸이 없으면 칸도 없다
+  const plain = approvedProject({ spec: approvalSpec(), entries: [entryFor(approvalSpec())] });
+  assert.doesNotMatch(reportOf(plain), /<h2>할 일<\/h2>/);
+  writeSummary(plain.run, { todo: [] });
+  assert.match(reportOf(plain), /<h2>할 일<\/h2><p>없음<\/p>/);
+});
+
+test('(g) CLI: the report written next to results.json shows the approval records, and the 참고 lines the completion check prints are in the page too', () => {
+  const spec = approvalSpec({ confirm: '- 검수 2: 위임이라 기본안으로 정함\n' });
+  const { run } = approvedProject({ spec, entries: [entryFor(spec, { kind: 'delegate', quote: '끝까지 알아서 해', message: '끝까지 알아서 해', spec_checker_time: null })] });
+  writeFileSync(path.join(run, 'results.json'), JSON.stringify({ ...RESULTS, spec: SPEC_PATH, rulings: undefined }));
+  const r = spawnSync('node', [CLI, run], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  // 검수 기록(verification.json)이 없으면 완료 검사 줄도 없다: 출력은 전과 같다(요약 줄과 보고서 경로)
+  const out = r.stdout.trim().split('\n');
+  assert.equal(out.length, 2, r.stdout);
+  assert.match(out[0], /^통과 \d+ · 실패 1 · 의심 0/);
+  assert.equal(out[1], path.join(run, 'report.html'));
+  const html = readFileSync(path.join(run, 'report.html'), 'utf8');
+  assert.match(html, /<strong>위임<\/strong>/);
+  assert.match(html, /<p class="quote">끝까지 알아서 해<\/p>/);
+  assert.match(html, /<li>검수 2: 위임이라 기본안으로 정함<\/li>/);
 });

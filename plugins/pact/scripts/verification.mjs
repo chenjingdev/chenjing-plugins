@@ -9,7 +9,7 @@ import path from 'node:path';
 import { lintSpec, parseSpec, setStatus, specRunDir } from './spec.mjs';
 import { evidenceIssues, effectiveResult } from './evidence.mjs';
 import { isMainModule } from './paths.mjs';
-import { checkStart, refusalLine } from './approval.mjs';
+import { checkStart, completionChecks, refusalLine } from './approval.mjs';
 import { latestVerifierFingerprint, logFile, resultsSha256 } from './run-log.mjs';
 import { decisionOf, readSummary } from './summary.mjs';
 
@@ -165,6 +165,7 @@ export function fingerprintVerdict(specFile, runDir) {
 }
 
 // 지금 검수할 명세·코드의 내용을 기록한다. 내용이 같으면 있는 기록을 그대로 쓴다.
+// 검수를 시작하기 전에 승인 기록도 본다(checkStart): 기록이 있어야 하고, 승인 뒤 [사용자] 줄이 바뀌었으면 다시 승인을 받아야 한다(F2, F3).
 // 내용이 바뀌었으면 새 ID를 만들고 앞 기록을 previous/history로 잇는다. 그래야 고친 뒤 다시 검수할 때
 // 앞 판에서 통과한 시나리오를 그대로 인정할 수 있고, 무엇이 바뀌었는지(changed_files)도 알 수 있다.
 export function snapshotVerification(specFile, targetDir, surface) {
@@ -300,6 +301,9 @@ export function checkVerification(specFile, targetDir) {
   const verdict = fingerprintVerdict(current.specPath, runDir);
   if (verdict.issue) issues.push(verdict.issue);
   if (verdict.note) notes.push(verdict.note);
+  // 승인 기록(F2·F3·F5): spec-checker가 '사용자만 답할 수 있음'으로 짚은 검수 번호마다 명세에 짝이 있는지, 승인 뒤 [사용자] 줄이 바뀌지 않았는지.
+  // 옛 판(승인 기록 없는 pact: 1 명세)은 건너뛴다(R5).
+  issues.push(...completionChecks(current.specPath, current.text));
   return {
     ok: issues.length === 0, runDir, verification_id: currentId, issues: [...new Set(issues)], warnings: [...new Set(warnings)], notes, carried, outcomes,
     snapshot: snapshot ?? null, current: { spec_hash: current.specHash, target_fingerprint: current.source.fingerprint, head: current.source.head },

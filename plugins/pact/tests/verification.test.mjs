@@ -7,10 +7,10 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { snapshotVerification, checkVerification, finishVerification, sourceFingerprint, declaredCases, archiveResults, fingerprintVerdict } from '../scripts/verification.mjs';
-import { parseSpec, setStatus } from '../scripts/spec.mjs';
+import { parseSpec, setStatus, userLinesOf } from '../scripts/spec.mjs';
 import { LEGACY_NOTE } from '../scripts/approval.mjs';
 import { appendRecord, resultsSha256 } from '../scripts/run-log.mjs';
-import { makeWorld, grantApproval, runSpec } from './approval-world.mjs';
+import { makeWorld, grantApproval, runSpec, checkerReply } from './approval-world.mjs';
 
 const CLI = fileURLToPath(new URL('../scripts/verification.mjs', import.meta.url));
 const SPEC = `---
@@ -31,15 +31,26 @@ function git(dir, ...args) {
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 }
-function fixture({ specText = SPEC, surface = 'command', repo = true, approved = false } = {}) {
+// 새 명세(pact: 2)는 승인 기록이 있어야 snapshot이 되고, 완료 검사는 spec-checker가 끝난 기록과 [사용자] 줄의 지문도 본다.
+// 훅과 스크립트가 쓰는 꼴로 한 줄씩 미리 둔다. approvedText는 승인할 때의 명세(안 주면 지금 명세), checkerMessage는 spec-checker의 답이다.
+function seedApproval(project, runId, spec, text, { kind = 'approve', checker = true, checkerMessage = checkerReply(), time = '2026-10-25T00:10:00.000Z' } = {}) {
+  const run = path.join(project, '.pact', runId);
+  mkdirSync(run, { recursive: true });
+  if (checker) appendRecord(run, { time: '2026-10-25T00:00:00.000Z', agent_type: 'pact:spec-checker', agent_id: 'agent-c', task: null, message: checkerMessage });
+  const entry = {
+    version: 1, kind, quote: '승인', message: '승인', message_uuid: `uuid-${time}`, message_time: time, answer_question: null,
+    transcript: '/none', session_id: 's', recorded_at: time, spec, spec_checker_time: kind === 'approve' ? '2026-10-25T00:00:00.000Z' : null, user_lines: userLinesOf(text),
+  };
+  writeFileSync(path.join(run, 'approvals.jsonl'), `${JSON.stringify(entry)}\n`, { flag: 'a' });
+  return run;
+}
+
+function fixture({ specText = SPEC, surface = 'command', repo = true, approved = false, approvedText = specText, checker = true, checkerMessage } = {}) {
   const project = mkdtempSync(path.join(tmpdir(), 'pact-verification-'));
   const spec = path.join(project, 'docs/pact/2026-10-25-list.md');
   mkdirSync(path.dirname(spec), { recursive: true });
   writeFileSync(spec, specText);
-  if (approved) { // 새 명세(pact: 2)는 승인 기록이 있어야 snapshot이 된다: 기록 한 줄만 미리 둔다
-    mkdirSync(path.join(project, '.pact', '2026-10-25-list'), { recursive: true });
-    writeFileSync(path.join(project, '.pact', '2026-10-25-list', 'approvals.jsonl'), `${JSON.stringify({ version: 1, kind: 'approve', quote: '승인' })}\n`);
-  }
+  if (approved) seedApproval(project, '2026-10-25-list', spec, approvedText, { checker, checkerMessage });
   writeFileSync(path.join(project, 'app.js'), 'export const answer = 1;\n');
   if (repo) {
     git(project, 'init', '-q');
@@ -371,7 +382,8 @@ test('snapshot is refused without an approval record on a new spec (pact: 2), an
   const w = repoWorld({ status: 'verifying' });
   assert.throws(() => snapshotVerification(w.spec, w.project, 'command'), (error) => {
     assert.match(error.message, /승인 기록이 없다/);
-    assert.match(error.message, /spec\.mjs approve <명세> "<사용자 말>"/);
+    assert.match(error.message, /spec\.mjs approve <명세> - <<'EOF'/);
+    assert.doesNotMatch(error.message, /"<사용자 말>"/, '큰따옴표 인자 꼴은 알리지 않는다');
     assert.doesNotMatch(error.message, /\n/);
     return true;
   });
@@ -535,7 +547,7 @@ test('(f) a missing results.json is reported by the existing "could not read" is
   assert.match(issuesOf(checked), /results\.json을 읽지 못했습니다/);
   assert.doesNotMatch(issuesOf(checked), /바뀌었다/);
   // 읽을 수 없는 기록은 거절로 끝난다(느슨해지지 않는다)
-  const g = fixture({ specText: NEW_SPEC, approved: true });
+  const g = fixture({ specText: NEW_SPEC, approved: true, checker: false }); // log/subagents.jsonl 자리를 폴더로 만들 것이라 기록 파일을 미리 두지 않는다
   mkdirSync(path.join(g.capture.runDir, 'log', 'subagents.jsonl'), { recursive: true });
   assert.throws(() => checkVerification(g.spec, g.project), /EISDIR/);
   const r = spawnSync(process.execPath, [CLI, 'finish', g.spec, g.project], { encoding: 'utf8' });
@@ -752,4 +764,215 @@ test('(f) report.mjs prints the completion check line with the fingerprint refus
   assert.match(changed, /^완료 검사: 막힘 1개 — results\.json이 가장 최근 verifier가 끝난 뒤\(.*\) 바뀌었다\. 코드를 고쳐야 하면 build로 되돌려 고치고 verifier로 다시 검수한다\. 코드는 맞고 results\.json만 바뀐 것이면 verifier만 다시 돌린다\./m);
   const bare = fixture({ specText: NEW_SPEC, approved: true });
   assert.match(report(bare).stdout, /^완료 검사: 막힘 1개 — 이 판에 verifier가 끝난 기록이 없어/m);
+});
+
+// ---------- 승인 기록: 검수 번호의 짝(F5)과 승인 뒤 바뀐 [사용자] 줄(F3)을 완료 검사가 본다 ----------
+
+const TWO_QUESTIONS = checkerReply(['출석을 몇 분 뒤에 닫을까요?', '결석 사유를 학생도 볼 수 있나요?']); // 검수 1·2
+const PAIRED = (extra = '') => `${NEW_SPEC.replace('- F1 목록을 연다 [사용자]', '- F1 목록을 연다 [사용자: 검수 1]')}${extra}`;
+const withRule = (text, rule) => text.replace('## 공통 규칙\n', `## 공통 규칙\n${rule}\n`);
+const blocked = (checked, pattern) => {
+  assert.equal(checked.ok, false, issuesOf(checked));
+  const mine = checked.issues.find((issue) => pattern.test(issue));
+  assert.ok(mine, issuesOf(checked));
+  assert.doesNotMatch(mine, /\n/, '까닭과 대신 할 일은 한 줄이다');
+  return mine;
+};
+
+test('(a) the completion check and finish name the review number whose pair is missing, and the spec is not marked done', () => {
+  const f = fixture({ specText: PAIRED(), approved: true, checkerMessage: TWO_QUESTIONS });
+  verifierStopped(f);
+  for (const checked of [checkVerification(f.spec, f.project), finishVerification(f.spec, f.project)]) {
+    const mine = blocked(checked, /명세의 짝이 없다/);
+    assert.match(mine, /검수 2\("결석 사유를 학생도 볼 수 있나요\?"\)에 명세의 짝이 없다/);
+    assert.doesNotMatch(mine, /검수 1/, '짝이 있는 번호는 알리지 않는다');
+    assert.match(mine, /\[사용자: 검수 n\].*\[AI 가정: 검수 n 맡김\].*## 확인 필요에 "- 검수 n: 안 물은 까닭"/);
+  }
+  assert.equal(parseSpec(readFileSync(f.spec, 'utf8')).frontmatter.status, 'verifying');
+  // 번호가 둘 다 빠지면 둘 다 알린다
+  const none = fixture({ specText: NEW_SPEC, approved: true, checkerMessage: TWO_QUESTIONS });
+  verifierStopped(none);
+  assert.match(blocked(checkVerification(none.spec, none.project), /명세의 짝이 없다/), /검수 1\(.*\), 검수 2\(/);
+});
+
+test('(a) each of the three pairs for 검수 2 lets the completion check and finish through', () => {
+  for (const [label, text] of [
+    ['## 확인 필요의 - 검수 2', PAIRED('## 확인 필요\n- 검수 2: 사용자가 바쁘다고 해서 묻지 않았다\n')],
+    ['위임이라 기본안으로 정함', PAIRED('## 확인 필요\n- 검수 2: 위임이라 기본안으로 정함\n')],
+    ['[AI 가정: 검수 2 맡김]', withRule(PAIRED(), '- R2 결석 사유 공개 여부 — 사용자가 맡겼다 [AI 가정: 검수 2 맡김]')],
+    ['[사용자: 검수 2]', withRule(PAIRED(), '- R2 결석 사유는 학생도 본다 [사용자: 검수 2]')],
+  ]) {
+    const f = fixture({ specText: text, approved: true, checkerMessage: TWO_QUESTIONS });
+    verifierStopped(f);
+    const checked = checkVerification(f.spec, f.project);
+    assert.equal(checked.ok, true, `${label}: ${issuesOf(checked)}`);
+    const finished = finishVerification(f.spec, f.project);
+    assert.equal(finished.ok, true, `${label}: ${issuesOf(finished)}`);
+    assert.equal(parseSpec(readFileSync(f.spec, 'utf8')).frontmatter.status, 'done');
+  }
+});
+
+test('(b) a spec-checker record that says "사용자만 답할 수 있음: 없음" passes, and a record whose numbers cannot be read is refused', () => {
+  for (const message of [checkerReply(), '## 사용자만 답할 수 있음\n- 없음', '사용자만 답할 수 있음: 없음']) {
+    const f = fixture({ specText: NEW_SPEC, approved: true, checkerMessage: message });
+    verifierStopped(f);
+    assert.equal(checkVerification(f.spec, f.project).ok, true, message);
+  }
+  for (const message of ['', '## 이미 답이 있음\n- 없음', '## 사용자만 답할 수 있음\n1. 질문 (기본안: …)']) {
+    const f = fixture({ specText: NEW_SPEC, approved: true, checkerMessage: message });
+    verifierStopped(f);
+    assert.match(blocked(checkVerification(f.spec, f.project), /읽지 못했다/), /pact:spec-checker를 다시 불러/, message);
+  }
+});
+
+test('(c) a new spec with no spec-checker record is refused, with where the hook error log is; an old spec (pact: 1) is not asked for one', () => {
+  const f = fixture({ specText: NEW_SPEC, approved: true, checker: false });
+  verifierStopped(f);
+  for (const checked of [checkVerification(f.spec, f.project), finishVerification(f.spec, f.project)]) {
+    const mine = blocked(checked, /spec-checker가 끝난 기록이 없다/);
+    assert.match(mine, /^이 판에 spec-checker가 끝난 기록이 없다 \(.*log[/\\]subagents\.jsonl\)\. pact:spec-checker로 명세를 검수하고 결과를 명세에 반영한다\./);
+    assert.match(mine, /훅이 돌지 않는 것이니 플러그인 데이터 폴더의 hook-error\.log를 보고 사용자에게 알린다\(log\/에 직접 쓰지 않는다\)/);
+  }
+  assert.equal(parseSpec(readFileSync(f.spec, 'utf8')).frontmatter.status, 'verifying');
+  // 다른 에이전트의 기록은 spec-checker 기록이 아니다
+  appendRecord(f.capture.runDir, { time: new Date().toISOString(), agent_type: 'pact:reviewer', agent_id: 'r', task: 1, message: '## 사용자만 답할 수 있음\n없음' });
+  assert.match(issuesOf(checkVerification(f.spec, f.project)), /spec-checker가 끝난 기록이 없다/);
+  // 옛 판은 기록이 없어도, 검수 번호 짝도 [사용자] 줄도 보지 않는다
+  const old = fixture();
+  verifierStopped(old);
+  const checked = checkVerification(old.spec, old.project);
+  assert.equal(checked.ok, true, issuesOf(checked));
+  assert.deepEqual(checked.notes, []);
+});
+
+test('(c) a new spec with no approval record at all is refused by the completion check, since there is nothing to compare the [사용자] lines with', () => {
+  const f = fixture({ specText: NEW_SPEC, approved: true });
+  verifierStopped(f);
+  rmSync(path.join(f.capture.runDir, 'approvals.jsonl'));
+  const mine = blocked(checkVerification(f.spec, f.project), /승인 기록이 없다/);
+  assert.match(mine, /spec\.mjs approve <명세> - <<'EOF'/);
+  assert.equal(finishVerification(f.spec, f.project).ok, false);
+});
+
+test('(d) a [사용자] line that changed after the approval is named by the completion check and refused by snapshot, until it is approved again', () => {
+  const f = fixture({ specText: NEW_SPEC, approved: true });
+  verifierStopped(f);
+  const changed = NEW_SPEC.replace('목록을 연다', '목록을 내보낸다');
+  writeFileSync(f.spec, changed);
+  for (const checked of [checkVerification(f.spec, f.project), finishVerification(f.spec, f.project)]) {
+    const mine = blocked(checked, /승인 뒤 \[사용자\] 줄이 바뀌었다/);
+    assert.match(mine, /F1 바뀜\("목록을 연다 \[사용자\]" → "목록을 내보낸다 \[사용자\]"\)/);
+    assert.match(mine, /바꿔 달라고 한 사용자 말을 인용해 spec\.mjs approve <명세> - <<'EOF'로 다시 기록한다/);
+    assert.match(mine, /사용자가 파일을 직접 고쳤으면 한 번 묻고 그 답을 인용한다/);
+    assert.doesNotMatch(mine, /"<사용자 말>"/);
+  }
+  assert.equal(parseSpec(readFileSync(f.spec, 'utf8')).frontmatter.status, 'verifying');
+  assert.throws(() => snapshotVerification(f.spec, f.project, 'command'), (error) => /승인 뒤 \[사용자\] 줄이 바뀌었다.*F1 바뀜/.test(error.message) && !/\n/.test(error.message));
+  const cli = spawnSync(process.execPath, [CLI, 'snapshot', f.spec, f.project, 'command'], { encoding: 'utf8' });
+  assert.equal(cli.status, 1);
+  assert.match(JSON.parse(cli.stdout).issues[0], /승인 뒤 \[사용자\] 줄이 바뀌었다/);
+  // 다시 승인하면(더 새 기록) snapshot이 되고, 완료 검사에서 이 이유로는 막히지 않는다
+  seedApproval(f.project, '2026-10-25-list', f.spec, changed, { checker: false, time: '2026-10-25T00:20:00.000Z' });
+  const again = snapshotVerification(f.spec, f.project, 'command');
+  assert.equal(again.reused, false);
+  assert.doesNotMatch(issuesOf(checkVerification(f.spec, f.project)), /승인 뒤 \[사용자\] 줄이 바뀌었다/);
+});
+
+test('(d) every kind of change to a [사용자] line is caught by the completion check: text, tag, case line, a line left out, a line added', () => {
+  const edits = {
+    글: [(t) => t.replace('목록을 연다', '목록을 내보낸다'), /F1 바뀜/],
+    태그: [(t) => t.replace('다른 사람의 자료를 보이지 않는다 [사용자]', '다른 사람의 자료를 보이지 않는다 [AI 가정]'), /R1 태그가 바뀜\(\[AI 가정\]\)/],
+    '케이스 줄': [(t) => t.replace('자료가 없음 → 빈 상태 표시', '자료가 없음 → 안내 문구 표시'), /F1 바뀜\("케이스: 자료가 없음 → 빈 상태 표시" → "케이스: 자료가 없음 → 안내 문구 표시"\)/],
+    빼기: [(t) => t.replace('- R1 다른 사람의 자료를 보이지 않는다 [사용자]\n', ''), /R1 빠짐/],
+    더하기: [(t) => `${t}- R2 새 규칙 [사용자]\n`, /R2 더해짐\("새 규칙 \[사용자\]"\)/],
+  };
+  for (const [label, [edit, pattern]] of Object.entries(edits)) {
+    const f = fixture({ specText: NEW_SPEC, approved: true });
+    verifierStopped(f);
+    writeFileSync(f.spec, edit(NEW_SPEC));
+    assert.match(blocked(checkVerification(f.spec, f.project), /승인 뒤 \[사용자\] 줄이 바뀌었다/), pattern, label);
+  }
+});
+
+test('(e) only an [AI 가정] line changed since the approval: snapshot and the completion check pass', () => {
+  const v1 = withRule(NEW_SPEC, '- R2 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]');
+  const v2 = v1.replace('화면 문구는 한국어 — 한국어 사용자라서', '화면 문구는 영어 — 해외 사용자라서');
+  const f = fixture({ specText: v2, approvedText: v1, approved: true }); // 승인은 v1, 지금 명세와 snapshot은 v2
+  verifierStopped(f);
+  const checked = checkVerification(f.spec, f.project);
+  assert.equal(checked.ok, true, issuesOf(checked));
+  assert.equal(finishVerification(f.spec, f.project).ok, true);
+});
+
+test('(f) an old spec (pact: 1) is not asked about review numbers or [사용자] lines; once an approval record exists for it, it is', () => {
+  const old = fixture({ specText: SPEC.replace('목록을 연다', '목록을 내보낸다') });
+  verifierStopped(old);
+  assert.equal(checkVerification(old.spec, old.project).ok, true, '옛 판: 기록이 없으니 견줄 줄도 없다');
+  // 옛 명세라도 그 뒤에 기록이 생겼는데 spec-checker 기록과 [사용자] 줄이 없다
+  const h = fixture();
+  verifierStopped(h);
+  writeFileSync(path.join(h.capture.runDir, 'approvals.jsonl'), `${JSON.stringify({ version: 1, kind: 'delegate', quote: '끝까지 알아서 해' })}\n`);
+  const issues = issuesOf(checkVerification(h.spec, h.project));
+  assert.match(issues, /spec-checker가 끝난 기록이 없다/);
+  assert.match(issues, /가장 최근 위임 기록에 \[사용자\] 줄이 없어 승인 뒤 바뀐 줄이 있는지 확인하지 못한다/);
+  // 기록이 있는 옛 판은 새 규칙으로 통과한다
+  const g = fixture({ specText: SPEC, approved: true });
+  verifierStopped(g);
+  assert.equal(checkVerification(g.spec, g.project).ok, true);
+});
+
+test('(f) a record with no [사용자] lines (one written by hand) is refused until the spec is approved again, and approving again repairs it', () => {
+  const f = fixture({ specText: NEW_SPEC, approved: true });
+  verifierStopped(f);
+  const file = path.join(f.capture.runDir, 'approvals.jsonl');
+  const entry = JSON.parse(readFileSync(file, 'utf8'));
+  delete entry.user_lines;
+  writeFileSync(file, `${JSON.stringify(entry)}\n`);
+  assert.match(blocked(checkVerification(f.spec, f.project), /가장 최근 승인 기록에 \[사용자\] 줄이 없어/), /다시 기록한다/);
+  assert.throws(() => snapshotVerification(f.spec, f.project, 'command'), /가장 최근 승인 기록에 \[사용자\] 줄이 없어/);
+  seedApproval(f.project, '2026-10-25-list', f.spec, NEW_SPEC, { checker: false, time: '2026-10-25T00:30:00.000Z' });
+  assert.equal(checkVerification(f.spec, f.project).ok, true);
+});
+
+test('(f) the review-number and [사용자]-line refusals reach the CLI: check prints them as issues and exits 1, and report.mjs puts them in the 완료 검사 line', () => {
+  const REPORT = fileURLToPath(new URL('../scripts/report.mjs', import.meta.url));
+  const f = fixture({ specText: PAIRED(), approved: true, checkerMessage: TWO_QUESTIONS });
+  verifierStopped(f);
+  const check = spawnSync(process.execPath, [CLI, 'check', f.spec, f.project], { encoding: 'utf8' });
+  assert.equal(check.status, 1);
+  assert.match(JSON.parse(check.stdout).issues.join('\n'), /검수 2\(.*\)에 명세의 짝이 없다/);
+  const report = spawnSync(process.execPath, [REPORT, f.capture.runDir], { encoding: 'utf8' });
+  assert.equal(report.status, 0, report.stderr);
+  assert.match(report.stdout, /^완료 검사: 막힘 1개 — spec-checker가 '사용자만 답할 수 있음'으로 짚은 검수 2\(/m);
+});
+
+test('(g) report.mjs after a real completion check: its 참고 lines are in report.html, an old spec says so, the approval and the 검수 items are on the page, and a changed [사용자] line is warned about', () => {
+  const REPORT = fileURLToPath(new URL('../scripts/report.mjs', import.meta.url));
+  const run = (f) => {
+    const r = spawnSync(process.execPath, [REPORT, f.capture.runDir], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return { lines: r.stdout.trim().split('\n'), html: readFileSync(path.join(f.capture.runDir, 'report.html'), 'utf8') };
+  };
+  // 옛 판: 참고 줄이 화면에 있고 옛 판이라고 적힌다
+  const old = run(fixture());
+  assert.equal(old.lines[3], '참고: 옛 판이고 verifier 기록이 없어 results.json이 verifier가 쓴 그대로인지는 확인하지 않았다');
+  assert.match(old.html, /<p class="meta">참고: 옛 판이고 verifier 기록이 없어 results\.json이 verifier가 쓴 그대로인지는 확인하지 않았다<\/p>/);
+  assert.match(old.html, /<h2>승인 기록<\/h2>\n<p class="missing">옛 판이라 승인 기록 없음<\/p>/);
+  // 새 명세: 승인 기록과 확인 필요의 검수 항목
+  const spec = PAIRED('## 확인 필요\n- 검수 2: 위임이라 기본안으로 정함\n');
+  const f = fixture({ specText: spec, approved: true, checkerMessage: TWO_QUESTIONS });
+  verifierStopped(f);
+  const ok = run(f);
+  assert.equal(ok.lines[2], '완료 검사: 통과');
+  assert.match(ok.html, /<strong>승인<\/strong> <span class="meta">기록 2026-10-25T00:10:00\.000Z · 메시지 2026-10-25T00:10:00\.000Z<\/span>/);
+  assert.match(ok.html, /<p class="quote">승인<\/p>/);
+  assert.match(ok.html, /<h2>할 일<\/h2><ul><li>검수 2: 위임이라 기본안으로 정함 \(질문: 결석 사유를 학생도 볼 수 있나요\?\)<\/li><\/ul>/);
+  assert.doesNotMatch(ok.html, /class="meta">참고/);
+  assert.doesNotMatch(ok.html, /아직 다시 승인되지 않았습니다/);
+  // 승인한 뒤 [사용자] 줄이 바뀌었다: 완료 검사 줄과 보고서가 모두 알린다
+  writeFileSync(f.spec, spec.replace('목록을 연다', '목록을 내보낸다'));
+  const changed = run(f);
+  assert.match(changed.lines.join('\n'), /^완료 검사: 막힘 \d개 — .*승인 뒤 \[사용자\] 줄이 바뀌었다/m);
+  assert.match(changed.html, /<p class="missing">승인 뒤 바뀐 \[사용자\] 줄이 아직 다시 승인되지 않았습니다\. 아래 승인 기록에 있습니다\.<\/p>/);
+  assert.match(changed.html, /<span class="tag">바뀜<\/span>F1 <del>목록을 연다 \[사용자: 검수 1\] \/ 케이스: 자료가 없음 → 빈 상태 표시<\/del> <ins>목록을 내보낸다 \[사용자: 검수 1\] \/ 케이스: 자료가 없음 → 빈 상태 표시<\/ins>/);
 });

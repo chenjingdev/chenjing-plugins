@@ -164,11 +164,13 @@ test('results.json is the verifier\'s alone, and verify.md, verifier.md and the 
   assert.match(verify, /이때 스크립트가 앞 결과를 `results-round<n>\.json`으로 남긴다\(출력의 `saved_results`, 있는 round 파일은 덮어쓰지 않는다\)\. 직접 복사하지 않는다/);
   assert.doesNotMatch(verify, /먼저 `results\.json`을 `results-round<n>\.json`으로 복사해 둔다/, '메인이 복사하던 지시는 없어졌다');
   assert.match(verify, /고치려 하면 훅이 막고, 다른 길로 바뀐 것은 finish가 verifier 기록의 지문과 비교해 막는다/);
-  // 완료 검사가 막는 것에 지문 비교가 들어 있다
-  assert.match(verify, /완료 검사가 막는 것은 일곱 가지다/);
-  const blocks = /완료 검사가 막는 것은 일곱 가지다\.\n((?:- .*\n)+)/.exec(verify);
+  // 완료 검사가 막는 것에 지문 비교와 승인 기록 확인(검수 번호의 짝, 승인 뒤 바뀐 [사용자] 줄)이 들어 있다
+  assert.match(verify, /완료 검사가 막는 것은 아홉 가지다/);
+  const blocks = /완료 검사가 막는 것은 아홉 가지다\.\n((?:- .*\n)+)/.exec(verify);
   assert.ok(blocks, '막는 것의 목록');
-  assert.equal(blocks[1].trim().split('\n').length, 7, '목록은 센 숫자와 같은 일곱 줄이다');
+  assert.equal(blocks[1].trim().split('\n').length, 9, '목록은 센 숫자와 같은 아홉 줄이다');
+  assert.match(blocks[1], /^- spec-checker가 짚은 `검수 n`에 짝이 없는 것, 또는 spec-checker가 끝난 기록이 없는 것: 명세에 `\[사용자: 검수 n\]`, `\[AI 가정: 검수 n 맡김\]`, `## 확인 필요`의 `- 검수 n: 안 물은 까닭` 중 하나가 있어야 한다\.$/m);
+  assert.match(blocks[1], /^- 승인 뒤 바뀐 `\[사용자\]` 줄: 가장 최근 승인 기록의 `\[사용자\]` 줄과 지금 명세가 다르다\. 바꿔 달라고 한 사용자 말을 인용해 `spec\.mjs approve`로 다시 기록한다\(`build\.md`\)\.$/m);
   assert.match(blocks[1], /^- 읽지 못하거나 칸의 모양이 틀린 `summary\.json`: `headline`은 글, `todo`·`changes`는 배열, `decision`은 시나리오 id를 키로 하는 객체여야 한다\.$/m);
   assert.match(verify, /verifier가 끝난 뒤 바뀐 `results\.json`: 지금 파일의 지문이 가장 최근 verifier 기록과 다르거나, 그 기록이 없거나, 기록에 지문이 없다/);
   // 지문이 어긋난 두 경우를 나눠 적는다: 코드를 고쳐야 하면 build로, 코드는 맞고 결과만 바뀌었으면 verifier만 다시
@@ -436,4 +438,124 @@ test('first end-to-end run: friction fixes stay in the guidance', () => {
   const verifier = read('agents/verifier.md');
   assert.match(verifier, /## 다시 검수/);
   assert.match(verifier, /화면 도구 없음/);
+});
+
+// ---------- 사용자만 답할 수 있음 항목의 짝(F5)과 승인 뒤 바뀐 [사용자] 줄(F3)을 문서가 가르친다 ----------
+
+test('spec-checker numbers the questions only the person can answer, "없음" when there are none, and reports a missing risk mark under the small things the AI decides', () => {
+  const checker = read('agents/spec-checker.md');
+  // 번호: 항목마다 검수 1, 검수 2 … 를 줄 맨 앞에. 코드가 짝을 본다
+  assert.match(checker, /"사용자만 답할 수 있음" 항목마다 `검수 1`, `검수 2` … 번호를 줄 맨 앞에 붙인다/);
+  assert.match(checker, /메인 세션이 이 번호로 명세에 짝을 달고, 코드가 승인을 기록할 때와 완료 검사에서 번호마다 짝이 있는지 본다/);
+  assert.match(checker, /^검수 1\. <질문> \(기본안: …\) — <답에 따라 결과가 어떻게 달라지는지>$/m);
+  assert.match(checker, /^검수 2\. …$/m);
+  assert.doesNotMatch(checker, /^1\. <질문>/m, '옛 번호 목록은 없다');
+  assert.match(checker, /해당하는 것이 없는 무더기에는 "없음"이라고 적는다/);
+  // 빠진 위험 표시: 뜻으로 보고, 사소함 — AI가 정함에 적는다
+  assert.match(checker, /\*\*위험 표시 보기\.\*\*/);
+  assert.match(checker, /`\[위험: 지우기\|공개\|비용\]` 표시가 없으면 알린다/);
+  assert.match(checker, /낱말이 아니라 뜻으로 본다/);
+  assert.match(checker, /"사소함 — AI가 정함"에 적는다/);
+  assert.match(checker, /^- <F 또는 R 번호> \[위험: 지우기\|공개\|비용\] 표시 빠짐 — /m);
+  // 그대로인 것: 고정 마지막 줄
+  assert.equal(checker.trimEnd().split('\n').at(-1), '질문 라운드는 이것 한 번뿐입니다.');
+});
+
+test('probe 6 teaches the three pairs for a review number, the delegated default, the missing risk mark, and probe 5 makes 검수 items the exception to "only what changes the result"', () => {
+  const probe = read('skills/pact/probe.md');
+  // 5: 확인 필요에는 결과를 바꾸는 것만 — 검수 항목은 예외
+  assert.match(probe, /- `## 확인 필요`에는 결과를 바꾸는 것만 적는다\. 예외는 검수 항목이다\./);
+  assert.match(probe, /묻지 않고 넘어갔으면 결과를 바꾸지 않아도 `- 검수 n: 안 물은 까닭` 한 줄로 적는다/);
+  // 6: 번호 짝 다는 법
+  assert.match(probe, /항목마다 `검수 n` 번호가 붙어 온다/);
+  assert.match(probe, /번호마다 명세에 짝을 단다\. 번호마다 아래 셋 중 하나가 있어야 한다\./);
+  assert.match(probe, /그 답을 반영한 줄에 `\[사용자: 검수 n\]`을 단다/);
+  assert.match(probe, /사용자가 그 질문을 맡겼으면\("네가 정해"\) 반영한 줄에 `\[AI 가정: 검수 n 맡김\]`을 단다/);
+  assert.match(probe, /묻지 않았으면 `## 확인 필요`에 `- 검수 n: 안 물은 까닭`으로 적는다/);
+  assert.match(probe, /번호 하나라도 짝이 없으면 `approve`·`delegate`와 완료 검사가 그 번호를 알리고 거절한다/);
+  // 위임 중이면 기본안
+  assert.match(probe, /승인까지 맡긴 위임 중이면 묻지 않고 기본안으로 정한다/);
+  assert.match(probe, /위임 중이면 까닭은 '위임이라 기본안으로 정함'이다/);
+  assert.match(probe, /검수 보고서의 할 일에 저절로 올라가니/);
+  // 빠진 위험 표시 달기
+  assert.match(probe, /위험 표시가 빠졌다는 알림\(`<번호> \[위험: …\] 표시 빠짐`\)이 오면 그 줄의 태그 앞에 표시를 단다/);
+  // 승인 기록에 [사용자] 줄이 든다
+  assert.match(probe, /기록에는 그때 `\[사용자\]` 줄들도 담긴다\(바뀌면 build\.md의 "\[사용자\] 항목을 바꿀 때"\)/);
+  assert.doesNotMatch(probe, /참고:/);
+});
+
+test('every heredoc example the guidance shows closes with EOF at the start of the line, and probe 6 says so', () => {
+  const files = [...PROSE, path.join(ROOT, 'README.md')];
+  let examples = 0;
+  for (const file of files) {
+    const text = readFileSync(file, 'utf8');
+    for (const m of text.matchAll(/^([ \t]*)```[^\n]*\n([\s\S]*?)^\1```[ \t]*$/gm)) {
+      if (!m[2].includes("<<'EOF'")) continue;
+      examples++;
+      assert.equal(m[1], '', `${rel(file)}: 코드 블록을 들여쓰지 않는다(들여쓴 EOF는 heredoc을 끝내지 못한다)`);
+      const body = m[2].split('\n');
+      assert.ok(body.includes('EOF'), `${rel(file)}: EOF가 줄 맨 앞에 있다`);
+      assert.ok(!body.some((line) => /^\s+EOF\s*$/.test(line)), `${rel(file)}: 들여쓴 EOF가 없다`);
+    }
+  }
+  assert.ok(examples >= 2, `heredoc 예시를 찾았다(${examples})`);
+  assert.match(read('skills/pact/probe.md'), /아래 예시는 들여쓰지 않고 그대로 쓴다\. 닫는 `EOF`는 줄 맨 앞에 와야 heredoc이 끝난다\./);
+});
+
+test('build.md says what to do when a [사용자] item changes after the approval: fix the spec, quote the person, approve again, go on with the status as it is; ask once if the person edited the file', () => {
+  const build = read('skills/pact/build.md');
+  assert.match(build, /^## `\[사용자\]` 항목을 바꿀 때$/m);
+  assert.match(build, /승인한 뒤에 `\[사용자\]` 항목\(`\[사용자\]`나 `\[사용자: …\]` 태그가 붙은 기능·규칙 줄과 그 케이스\)이 바뀌면 `pact:worker` 부르기, `snapshot`, 완료 검사가 바뀐 줄을 알리고 거절한다/);
+  assert.match(build, /줄의 글, 태그, 빼기, 더하기가 모두 바뀐 것이다\. `\[AI 가정\]` 줄만 바뀐 것은 막지 않는다/);
+  assert.match(build, /막혔다고 실패로 끝내지 않고 다시 승인을 받아 이어 간다/);
+  assert.match(build, /사용자가 바꿔 달라고 했으면 명세를 고치고, 바꿔 달라고 한 그 말을 그대로 인용해 `spec\.mjs approve <명세> - <<'EOF'`로 다시 기록한 뒤 하던 작업을 이어 간다/);
+  assert.match(build, /부탁받은 변경이라 다시 묻지 않는다\. status는 `building` 그대로다/);
+  assert.match(build, /인용하는 말은 앞 기록\(승인이든 위임이든\)에 쓴 어떤 메시지보다 새것이어야 하니, 앞서 쓴 말로 다시 기록하지 못한다/);
+  assert.match(build, /사용자가 명세 파일을 직접 고쳤으면 부탁한 말이 없다\. 거절이 알려 준 바뀐 줄을 보이고 이대로 두는지 한 번 묻는다\. 그 답을 인용해 다시 기록한다/);
+  assert.match(build, /`\[사용자\]` 항목은 사용자가 바꾸라고 하기 전에 바꾸지 않는다/);
+  // 작업 지시 칸과 BLOCKED에서 이 절로 이어진다
+  assert.match(build, /승인 뒤 `\[사용자\]` 줄이 바뀌었으면 `pact:worker` 호출이 막히고/);
+  assert.match(build, /바꾸라는 답을 받으면 아래 "`\[사용자\]` 항목을 바꿀 때"를 따른다/);
+  // approval.mjs의 주석이 가리키는 길이 실제로 문서에 있다
+  assert.match(read('scripts/approval.mjs'), /다시 승인한 뒤 이어 가는 길은 build\.md의 "\[사용자\] 항목을 바꿀 때"가 말한다/);
+  assert.ok(build.includes('## `[사용자]` 항목을 바꿀 때'));
+});
+
+test('SKILL.md, verify.md and the README say the same about the review pairs, the [사용자] lines kept in the record, and what the report shows', () => {
+  const skill = read('skills/pact/SKILL.md');
+  assert.match(skill, /하나는 spec-checker가 '사용자만 답할 수 있음'으로 짚은 `검수 n`마다 명세에 짝이 있는지다\(`\[사용자: 검수 n\]`, `\[AI 가정: 검수 n 맡김\]`, `## 확인 필요`의 `- 검수 n: 안 물은 까닭`\./);
+  assert.match(skill, /승인 뒤 `\[사용자\]` 줄이 바뀌면 `pact:worker` 부르기, `snapshot`, 완료 검사가 바뀐 줄을 알리고 거절한다/);
+  assert.match(skill, /바꿔 달라고 한 사용자 말을 인용해 `approve`로 다시 기록하면 이어 간다\(`build\.md`\)\. 옛 판은 이 둘을 건너뛴다/);
+  assert.match(skill, /바꾸라는 답을 받으면 명세를 고치고 그 말을 인용해 다시 승인을 기록한다/);
+  const verify = read('skills/pact/verify.md');
+  assert.match(verify, /명세 `## 확인 필요`의 검수 항목\(사용자에게 묻지 않고 정한 것\)은 할 일 칸에 저절로 올라간다/);
+  assert.match(verify, /승인 기록\(승인인지 위임인지, 인용한 말, 승인 뒤 바뀐 `\[사용자\]` 줄과 다시 승인한 말, 옛 판 표시\)과 완료 검사의 참고 줄도 실리고/);
+  assert.match(verify, /옛 판\(`pact: 1`이고 승인 기록이 없는 명세\)은 검수 번호 짝과 `\[사용자\]` 줄 확인도 건너뛴다/);
+  assert.match(verify, /바꾸라는 답을 받으면 `build\.md`의 "`\[사용자\]` 항목을 바꿀 때"대로 명세를 고치고 그 말을 인용해 다시 승인을 기록한 뒤 build로 돌아간다/);
+  const readme = read('README.md');
+  assert.match(readme, /그때의 `\[사용자\]` 줄\(`user_lines`\)을 `approvals\.jsonl`에 한 줄 덧붙인다/);
+  assert.match(readme, /- 검수 번호의 짝\(F5\): spec-checker는 '사용자만 답할 수 있음' 항목마다 `검수 1`, `검수 2` … 번호를 붙인다/);
+  assert.match(readme, /짝이 빠진 번호는 그 번호를 알리고 거절한다\. 칸이 "없음"이면 통과하고, 번호도 "없음"도 읽지 못하면 거절한다/);
+  assert.match(readme, /완료 검사는 새 명세에 spec-checker 기록이 없으면 거절한다/);
+  assert.match(readme, /- 승인 뒤 바뀐 `\[사용자\]` 줄\(F3\): /);
+  assert.match(readme, /글·태그가 바뀌었거나 줄을 빼거나 더했으면 바뀐 줄을 알리고 거절한다/);
+  assert.match(readme, /사용자가 파일을 직접 고쳤으면 한 번 묻고 그 답을 인용한다\. `\[AI 가정\]` 줄만 바뀐 것은 막지 않는다/);
+  assert.match(readme, /이미 기록이 있으면 승인이든 위임이든 인용하는 말이 앞 기록들에 쓴 어떤 메시지보다 새것이어야 한다/);
+  assert.doesNotMatch(readme, /다시 승인하면 앞 기록의 메시지보다 새 말이어야 한다\. 위임은 처음 부탁에 있는 말이어도 된다/, '옛 문구: 위임은 같은 말로 다시 기록할 수 있다는 말은 없다');
+  assert.match(readme, /옛 판은 '옛 판이라 승인 기록 없음'이라고 적는다/);
+  assert.match(readme, /메시지 전문, 기록한 시각을 보이고, 앞 기록 뒤로 바뀐 `\[사용자\]` 줄은 그것을 다시 승인한 인용 옆에 둔다/);
+  assert.match(readme, /명세 `## 확인 필요`의 `검수 n` 항목\(사용자에게 묻지 않고 정한 것\)은 할 일 칸에 저절로 올린다/);
+  assert.match(readme, /승인 뒤 `\[사용자\]` 줄이 바뀌었으면 막는다\(옛 판은 통과\)/);
+});
+
+test('the refusals the scripts and the hook print tell only the standard-input way to pass the person\'s words, never the quoted argument form a backtick could run through', () => {
+  // 큰따옴표로 감싼 인자는 긴 말 속 백틱이 셸에서 실행될 수 있다. 사용법(spec.mjs의 USAGE)도 같다.
+  for (const file of ['scripts/approval.mjs', 'scripts/spec.mjs', 'scripts/verification.mjs', 'scripts/locks.mjs', 'scripts/report.mjs', 'hooks/guard.mjs']) {
+    const text = read(file);
+    assert.doesNotMatch(text, /(?:approve|delegate)\s+<명세>\s+"/, `${file}에 큰따옴표 인자 꼴이 없다`);
+    assert.ok(!text.includes('"<사용자 말>"'), `${file}에 "<사용자 말>" 꼴이 없다`);
+  }
+  const approval = read('scripts/approval.mjs');
+  assert.match(approval, /const approveCmd = \(verb = 'approve'\) => `spec\.mjs \$\{verb\} <명세> - <<'EOF'`;/);
+  assert.match(approval, /const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';/);
 });
