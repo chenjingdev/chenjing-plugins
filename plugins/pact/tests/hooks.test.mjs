@@ -2,7 +2,7 @@
 // 모든 시험은 CLAUDE_PLUGIN_DATA와 HOME을 임시 폴더로 돌려서, 진짜 ~/.claude 밑에는 아무것도 쓰지 않는다.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, symlinkSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, symlinkSync, utimesSync, rmSync, cpSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -282,17 +282,18 @@ test('(a) a SubagentStop from an agent that is not a pact agent prints nothing, 
   assert.equal(existsSync(w.data), false);
 });
 
-test('PreToolUse calls that touch pact but are none of the gated ones still pass, whoever makes them (the locks on results and log come later)', () => {
+test('PreToolUse calls that touch pact but are none of the gated ones still pass, whoever makes them', () => {
   const w = busyWorld();
   const calls = [
-    { tool_name: 'Write', tool_input: { file_path: path.join(w.run, 'results.json'), content: '{}' } },
+    { tool_name: 'Write', tool_input: { file_path: path.join(w.run, 'summary.json'), content: '{}' } },
     { tool_name: 'Edit', tool_input: { file_path: w.spec, old_string: 'a', new_string: 'b' } },
-    { tool_name: 'MultiEdit', tool_input: { file_path: path.join(w.run, 'log', 'subagents.jsonl'), edits: [] } },
+    { tool_name: 'MultiEdit', tool_input: { file_path: path.join(w.run, 'plan.md'), edits: [] } },
     { tool_name: 'NotebookEdit', tool_input: { notebook_path: path.join(w.run, 'x.ipynb') } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:reviewer', prompt: `${w.run}/tasks/1-report.md` } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:verifier', prompt: `run-dir: ${w.run}` } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:spec-checker', prompt: `명세 경로: ${w.spec}` } },
-    { tool_name: 'Bash', tool_input: { command: `echo x > ${w.run}/log/subagents.jsonl` } },
+    { tool_name: 'Bash', tool_input: { command: `echo x > ${w.run}/report.html` } },
+    { tool_name: 'Bash', tool_input: { command: `cat ${w.run}/results.json ${w.run}/log/subagents.jsonl | jq .` } },
     { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/spec.mjs status ${w.spec}` } },
     { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/spec.mjs lint ${w.spec}` } },
     { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/spec.mjs run-dir ${w.spec}` } },
@@ -577,6 +578,213 @@ test('(j) a Bash command that only mentions spec.mjs without pact calls passes: 
     passed(pre(w, bash(command)), command);
   }
   assert.deepEqual(tree(w.root), before);
+});
+
+// ---------- 결과·기록 파일 잠금 (F1, R5, R6, R14) ----------
+
+const VERIFIER_CALLER = { agent_id: 'agent-v1', agent_type: 'pact:verifier' };
+const WORKER_CALLER = { agent_id: 'agent-w1', agent_type: 'pact:worker' };
+const fileCall = (tool_name, file) => ({
+  tool_name,
+  tool_input: tool_name === 'NotebookEdit' ? { notebook_path: file } : { file_path: file, content: 'x', old_string: 'a', new_string: 'b', edits: [] },
+});
+const FILE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+test('lock (a) the main session is denied on results.json and results-round1.json through Write, Edit, MultiEdit and NotebookEdit, with why and what to do on one line', () => {
+  const w = busyWorld();
+  const before = tree(w.root);
+  for (const name of ['results.json', 'results-round1.json']) {
+    for (const tool of FILE_TOOLS) {
+      const reason = denied(pre(w, fileCall(tool, path.join(w.run, name))), `${tool} ${name}`);
+      assert.match(reason, new RegExp(`검수 결과\\(${escapeRe(name)}\\)는 verifier만 쓴다`), `${tool} ${name}`);
+      assert.match(reason, name === 'results.json' ? /build로 되돌려 고치고 verifier로 다시 검수한다\. 보고 칸.*summary\.json에 쓴다/ : /snapshot.*results-round<n>\.json/, `${tool} ${name}`);
+    }
+  }
+  assert.deepEqual(tree(w.root), before, '막으면서 아무것도 만들거나 바꾸지 않는다');
+  assert.equal(existsSync(w.data), false, '막는 것은 오류가 아니다: 오류 기록도 없다');
+});
+
+test('lock (b) the verifier may write results.json and results-round files and nothing else locked; a worker, a reviewer, a spec-checker and another plugin\'s agent may write none', () => {
+  const w = busyWorld();
+  for (const name of ['results.json', 'results-round1.json']) {
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) passed(pre(w, fileCall(tool, path.join(w.run, name)), VERIFIER_CALLER), `verifier ${tool} ${name}`);
+  }
+  // agent_type만 있고 agent_id가 없는 입력은 `claude --agent pact:verifier`로 연 대화다: 그것이 verifier다
+  passed(pre(w, fileCall('Write', path.join(w.run, 'results.json')), { agent_type: 'pact:verifier' }), 'agent_type만');
+  for (const name of ['verification.json', 'approvals.jsonl', 'log/subagents.jsonl']) {
+    for (const tool of FILE_TOOLS) denied(pre(w, fileCall(tool, path.join(w.run, name)), VERIFIER_CALLER), `verifier ${tool} ${name}`);
+  }
+  assert.match(denied(pre(w, fileCall('Write', path.join(w.run, 'verification.json')), VERIFIER_CALLER)), /검수 기록\(verification\.json\)은 verification\.mjs snapshot만 쓴다.*snapshot을 다시 실행한다/);
+  for (const agent_type of ['pact:worker', 'pact:reviewer', 'pact:spec-checker', 'tiers:worker', 'Explore', 'pact:verifiers', 'pact:verifier-2', 'notpact:verifier', 'verifier']) {
+    const caller = { agent_id: 'agent-x', agent_type };
+    for (const tool of ['Write', 'Edit']) assert.match(denied(pre(w, fileCall(tool, path.join(w.run, 'results.json')), caller), `${agent_type} ${tool}`), /verifier만 쓴다/);
+    denied(pre(w, fileCall('Write', path.join(w.run, 'results-round2.json')), caller), `${agent_type} round`);
+  }
+  // 에이전트 종류가 없는 하위 에이전트도 verifier가 아니다
+  denied(pre(w, fileCall('Write', path.join(w.run, 'results.json')), { agent_id: 'agent-x' }));
+  // verifier라도 잠기지 않은 것은 누구나 쓴다
+  for (const name of ['summary.json', 'report.html', 'plan.md', 'shots/S1-1.jpg', 'tasks/1-report.md']) {
+    for (const caller of [{}, VERIFIER_CALLER, WORKER_CALLER]) passed(pre(w, fileCall('Write', path.join(w.run, name)), caller), `${name} ${JSON.stringify(caller)}`);
+  }
+});
+
+test('lock (c) Bash: write forms that target results.json are denied for the main session; reading and pact script calls pass; a write form next to a pact script call is still caught', () => {
+  const w = busyWorld();
+  const R = w.run;
+  const before = tree(w.root);
+  const writes = [
+    `python3 -c "import json; json.dump({}, open('${R}/results.json','w'))"`,
+    `python3 - <<'EOF'\nimport json\np='${R}/results.json'\nd=json.load(open(p))\nd['headline']='x'\njson.dump(d, open(p,'w'), ensure_ascii=False)\nEOF`,
+    `node -e "const fs=require('fs'); fs.writeFileSync('${R}/results.json', '{}')"`,
+    `sed -i '' 's/a/b/' ${R}/results.json`, `perl -pi -e 's/a/b/' ${R}/results.json`,
+    `echo x > ${R}/results.json`, `echo x >> ${R}/results-round1.json`, `cat > ${R}/results.json <<'EOF'\n{}\nEOF`,
+    `cp /tmp/a ${R}/results.json`, `cp ${R}/results.json ${R}/results-round1.json`, `mv /tmp/a ${R}/results.json`, `rm ${R}/results.json`, `truncate -s 0 ${R}/results.json`, `touch ${R}/results-round3.json`,
+    `jq '.headline="x"' ${R}/results.json > ${R}/results.json`, `jq '.headline="x"' ${R}/results.json > /tmp/r.json && mv /tmp/r.json ${R}/results.json`, `jq . /tmp/a.json | tee ${R}/results.json`,
+    `cd ${R} && echo x > results.json`, `RUN=${R}; echo x > $RUN/results.json`, `bash -c "echo x > ${R}/results.json"`,
+    `node ${ROOT}/scripts/verification.mjs snapshot ${w.spec} ${R}/wt ui && echo x > ${R}/results.json`,
+    `node ${ROOT}/scripts/report.mjs ${R} && cp /tmp/a ${R}/results.json`,
+  ];
+  for (const command of writes) {
+    const reason = denied(pre(w, bash(command)), command);
+    assert.match(reason, /verifier만 쓴다/, command);
+  }
+  const reads = [
+    `cat ${R}/results.json`, `jq . ${R}/results.json`, `jq '.scenarios | length' ${R}/results.json`, `grep headline ${R}/results.json`, `cat ${R}/results.json > /tmp/copy.json`, `cp ${R}/results.json /tmp/backup.json`,
+    `ls -la ${R}`, `python3 -c "import json; print(json.load(open('${R}/results.json'))['scenarios'])"`, `node -e "console.log(require('${R}/results.json').scenarios.length)"`,
+    `echo x > ${R}/summary.json`, `python3 -c "import json; json.dump({}, open('${R}/summary.json','w'))"`,
+    `node ${ROOT}/scripts/verification.mjs snapshot ${w.spec} ${R}/wt ui`, `node ${ROOT}/scripts/verification.mjs check ${w.spec} ${R}/wt`, `node ${ROOT}/scripts/verification.mjs finish ${w.spec} ${w.project}`,
+    `node ${ROOT}/scripts/report.mjs ${R}`, `node /somewhere/else/scripts/report.mjs ${R} 2>&1 | tail -3`,
+    `git commit -m "echo x > ${R}/results.json 를 막는다"`,
+  ];
+  for (const command of reads) passed(pre(w, bash(command)), command);
+  assert.deepEqual(tree(w.root), before);
+  // 같은 호출을 verifier가 하면 results.json 쓰기는 통과하고, 잠긴 다른 파일은 그대로 막힌다
+  for (const command of writes.slice(0, 8)) passed(pre(w, bash(command), VERIFIER_CALLER), `verifier ${command}`);
+  denied(pre(w, bash(`echo x > ${R}/verification.json`), VERIFIER_CALLER));
+  denied(pre(w, bash(`python3 -c "open('${R}/log/subagents.jsonl','a')"`), VERIFIER_CALLER));
+  // 하위 에이전트(worker)도 메인과 같다
+  denied(pre(w, bash(`echo x > ${R}/results.json`), WORKER_CALLER));
+  passed(pre(w, bash(`cat ${R}/results.json`), WORKER_CALLER));
+});
+
+test('lock (c) Bash: a command that runs inside the run dir is a pact call even when it does not say .pact/', () => {
+  const w = busyWorld();
+  const inRun = (command, cwd = w.run) => runHook(w, { hook_event_name: 'PreToolUse', session_id: 's', cwd, ...bash(command) });
+  assert.match(denied(inRun('echo x > results.json')), /verifier만 쓴다/);
+  denied(inRun('sed -i "" s/a/b/ results.json'));
+  denied(inRun('cp /tmp/a results-round1.json'));
+  denied(inRun('python3 -c "open(\'results.json\',\'w\')"'));
+  passed(inRun('cat results.json | jq .'));
+  passed(inRun('echo x > summary.json'));
+  passed(inRun('echo x > results.json', path.join(w.run, 'wt')), 'worktree 안');
+  passed(inRun('echo x > results.json', w.project), '프로젝트 맨 위: pact 호출이 아니다');
+  passed(inRun('echo x > results.json', w.root), '프로젝트가 아닌 곳');
+  assert.equal(existsSync(w.data), false);
+});
+
+test('lock (d) approvals.jsonl and log/ are written by nobody but the hook and the scripts: not the main session, a worker or the verifier, through any tool', () => {
+  const w = busyWorld();
+  const R = w.run;
+  const callers = [{}, WORKER_CALLER, VERIFIER_CALLER, { agent_id: 'agent-r', agent_type: 'pact:reviewer' }];
+  for (const caller of callers) {
+    for (const name of ['approvals.jsonl', 'log/subagents.jsonl', 'log/other.log']) {
+      for (const tool of FILE_TOOLS) denied(pre(w, fileCall(tool, path.join(R, name)), caller), `${tool} ${name} ${JSON.stringify(caller)}`);
+    }
+    for (const command of [
+      `echo x >> ${R}/approvals.jsonl`, `echo x > ${R}/log/subagents.jsonl`, `echo '{"kind":"approve"}' | tee -a ${R}/approvals.jsonl`, `sed -i '' '$d' ${R}/log/subagents.jsonl`,
+      `rm ${R}/approvals.jsonl`, `rm -rf ${R}/log`, `cp /tmp/a ${R}/approvals.jsonl`, `mv /tmp/a ${R}/log/subagents.jsonl`, `truncate -s 0 ${R}/log/subagents.jsonl`, `touch ${R}/log/x`,
+      `python3 -c "open('${R}/approvals.jsonl','a').write('x')"`, `node -e "require('fs').appendFileSync('${R}/log/subagents.jsonl','x')"`,
+      `cd ${R} && echo x >> approvals.jsonl`, `cd ${R}/log && echo x > subagents.jsonl`,
+    ]) denied(pre(w, bash(command), caller), `${command} ${JSON.stringify(caller)}`);
+    passed(pre(w, bash(`cat ${R}/approvals.jsonl ${R}/log/subagents.jsonl | jq .`), caller), '읽기');
+    passed(pre(w, bash(`grep -c . ${R}/log/subagents.jsonl`), caller), '읽기');
+  }
+  const approvals = denied(pre(w, fileCall('Write', path.join(R, 'approvals.jsonl'))));
+  assert.match(approvals, /승인 기록\(approvals\.jsonl\)은 spec\.mjs approve·delegate만 쓴다.*spec\.mjs approve/);
+  const log = denied(pre(w, fileCall('Edit', path.join(R, 'log', 'subagents.jsonl'))));
+  assert.match(log, /log\/ 밑의 기록\(log\/subagents\.jsonl\)은 훅이.*훅과 pact 스크립트만 쓴다.*hook-error\.log를 보고 사용자에게 알린다/);
+  // 잠그는 것이 스크립트를 멈추지는 않는다: 같은 파일을 스크립트가 쓰는 길은 그대로다
+  assert.equal(existsSync(path.join(R, 'log', 'subagents.jsonl')), true);
+});
+
+test('lock (e) the worktree, other projects, a .pact/ with no spec, and files that are not locked are never touched, even by the main session', () => {
+  const w = busyWorld();
+  mkdirSync(path.join(w.run, 'wt', 'sub', 'log'), { recursive: true });
+  const other = path.join(w.root, 'other');
+  mkdirSync(path.join(other, '.pact', ID, 'log'), { recursive: true }); // 다른 프로젝트: 명세가 없다
+  const bare = path.join(w.root, 'bare');
+  mkdirSync(path.join(bare, '.pact', 'tmp-run'), { recursive: true }); // 시험이나 개발 중 임시 .pact/
+  for (const caller of [{}, WORKER_CALLER]) {
+    for (const file of [
+      path.join(w.run, 'wt', 'results.json'), path.join(w.run, 'wt', 'sub', 'log', 'x.log'), path.join(w.run, 'wt', 'plugins', 'pact', 'approvals.jsonl'), path.join(w.run, 'wt', 'verification.json'),
+      path.join(w.run, 'wt', '.pact', ID, 'results.json'), path.join(w.run, 'tasks', 'x', '.pact', 'r2', 'results.json'),
+      path.join(other, '.pact', ID, 'results.json'), path.join(other, '.pact', ID, 'log', 'subagents.jsonl'), path.join(bare, '.pact', 'tmp-run', 'results.json'), path.join(bare, '.pact', 'tmp-run', 'approvals.jsonl'),
+      path.join(w.run, 'results.json.bak'), path.join(w.run, 'items.json'), path.join(w.run, 'logs', 'x'),
+    ]) {
+      for (const tool of ['Write', 'Edit']) passed(pre(w, fileCall(tool, file), caller), `${tool} ${file}`);
+    }
+    for (const command of [
+      `echo x > ${w.run}/wt/results.json`, `cd ${w.run}/wt && echo x > results.json`, `rm -rf ${w.run}/wt/sub/log`, `cp /tmp/a ${w.run}/wt/approvals.jsonl`,
+      `echo x > ${other}/.pact/${ID}/results.json`, `rm ${other}/.pact/${ID}/log/subagents.jsonl`, `echo x > ${bare}/.pact/tmp-run/results.json`, `python3 -c "open('${bare}/.pact/tmp-run/results.json','w')"`,
+      `cd ${w.run}/wt/sub && python3 -c "import os; open(os.path.join('/tmp/q','log'),'w'); open('results.json','w')"`,
+    ]) passed(pre(w, bash(command), caller), command);
+  }
+  // 명세를 지우면 그 판의 잠금도 풀린다(명세가 있는 판에만 건다)
+  rmSync(w.spec);
+  passed(pre(w, fileCall('Write', path.join(w.run, 'results.json'))), '명세가 없는 판');
+  writeSpec(w.project, ID);
+  denied(pre(w, fileCall('Write', path.join(w.run, 'results.json'))), '명세가 다시 생기면 걸린다');
+});
+
+test('lock (R5) an old spec (pact: 1) is locked the same way, and so is an old run folder without the date', () => {
+  const old = busyWorld();
+  writeFileSync(old.spec, specText({ pact: 1, status: 'building' }));
+  denied(pre(old, fileCall('Write', path.join(old.run, 'results.json'))), 'pact: 1 명세');
+  denied(pre(old, bash(`echo x > ${old.run}/log/subagents.jsonl`)), 'pact: 1 Bash');
+  passed(pre(old, fileCall('Write', path.join(old.run, 'results.json')), VERIFIER_CALLER), 'pact: 1 verifier');
+  const undated = path.join(old.project, '.pact', '출결-관리');
+  mkdirSync(undated, { recursive: true });
+  denied(pre(old, fileCall('Write', path.join(undated, 'results.json'))), '날짜 없는 옛 실행 폴더');
+  denied(pre(old, bash(`cp /tmp/a ${undated}/results-round1.json`)), '날짜 없는 옛 실행 폴더 Bash');
+  passed(pre(old, fileCall('Write', path.join(undated, 'summary.json'))));
+});
+
+test('lock: a call with odd input is passed, never blocked, and a relative path with no usable cwd is read from the hook\'s own cwd', () => {
+  const w = busyWorld();
+  for (const input of [
+    { hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: 42 } },
+    { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: ['echo'] }, cwd: w.run },
+    { hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: null },
+    { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo x > results.json' }, cwd: 42 },
+    { hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: 'results.json' } },
+  ]) {
+    const r = runHook(w, input);
+    assert.equal(r.stdout, '', JSON.stringify(input));
+  }
+  assert.equal(existsSync(w.data), false, '이상한 입력은 오류도 아니다');
+});
+
+test('lock (R7): when the lock module itself is broken, the hook passes the call, exits 0, and logs one error line', () => {
+  const w = busyWorld();
+  const plugin = path.join(w.root, 'plugin-copy'); // 훅과 scripts를 베껴 locks.mjs만 깬다
+  cpSync(path.join(ROOT, 'hooks'), path.join(plugin, 'hooks'), { recursive: true });
+  cpSync(path.join(ROOT, 'scripts'), path.join(plugin, 'scripts'), { recursive: true });
+  writeFileSync(path.join(plugin, 'scripts', 'locks.mjs'), 'export const broken = ;\n');
+  const hook = (input) => spawnSync(process.execPath, [path.join(plugin, 'hooks', 'guard.mjs')], { input: JSON.stringify(input), encoding: 'utf8', cwd: w.root, env: baseEnv(w) });
+  const locked = { hook_event_name: 'PreToolUse', session_id: 's', cwd: w.project, tool_name: 'Write', tool_input: { file_path: path.join(w.run, 'results.json'), content: '{}' } };
+  const r = hook(locked);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, '', '고장난 훅은 막지 않는다');
+  const lines = errorLines(w);
+  assert.equal(lines.length, 1, lines.join('\n'));
+  assert.match(lines[0], /\[PreToolUse\]/);
+  assert.match(lines[0], /SyntaxError/);
+  // 같은 복사본에서 잠금과 상관없는 호출은 모듈을 부르지도 않는다
+  assert.equal(hook({ ...locked, tool_input: { file_path: path.join(w.root, 'other.txt') } }).stdout, '');
+  assert.equal(errorLines(w).length, 1);
+  // 고장나지 않은 훅은 같은 호출을 막는다
+  denied(pre(w, locked));
 });
 
 // ---------- (b) worker ----------

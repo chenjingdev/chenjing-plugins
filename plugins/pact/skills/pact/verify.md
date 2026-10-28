@@ -7,31 +7,39 @@
 1. `node <pact>/scripts/spec.mjs set-status <명세> verifying`
 2. 화면이 있는 결과물은 verifier가 Codex CUA로 브라우저에서 직접 써 보고 스크린샷을 남긴다. 따로 설치할 것은 없다. verifier를 부르기 전에 메인 세션이 SKILL.md의 방법으로 CUA 도구를 찾아 `await cua.getState()`를 한 번 부른다. 응답의 `browsers`에 쓸 브라우저가 있고 `errors`가 없으면 된다. 도구가 없거나 오류가 있으면 사용자에게 한 줄 알리고(세션을 새로 열면 될 수 있다는 것도 덧붙인다. 세션이 열린 뒤 CUA 플러그인이 바뀌면 이 세션의 연결만 낡는다), verifier에게 "화면 도구 없음"과 오류를 넘긴다. 그러면 verifier는 명령과 HTTP 요청으로 볼 수 있는 것만 확인하고, 화면으로만 볼 수 있는 단계는 미검증으로 남긴다. 그 이유는 접힌 작업 기록에 들어가므로, 보고서 맨 위 `headline`에도 화면 없이 확인했다고 쓴다.
 3. 대상을 실행한다. 개발 서버라면 worktree에서 백그라운드로 띄우고 URL을 확인한다. 파일 하나로 여는 페이지도 `python3 -m http.server --bind 127.0.0.1 <포트>`로 띄워 http URL을 넘긴다. Codex CUA는 `file://` 주소를 열지 못한다. 화면이 없으면 실행 명령을 정한다.
-4. worktree에 커밋하지 않은 변경이 있으면 커밋한다. 그다음 `node <pact>/scripts/verification.mjs snapshot <명세> <run-dir>/wt <ui|command>`로 지금 검수하는 명세와 코드의 내용을 `<run-dir>/verification.json`에 기록한다. 커밋된 파일만 기록에 든다. 웹 화면은 CUA가 없어도 `ui`다. 출력의 `verification.verification_id`와 `verification.surface`를 verifier에게 넘긴다. git이나 HEAD를 읽지 못해 snapshot이 실패하면 검수를 시작하지 않고 알린다.
+4. worktree에 커밋하지 않은 변경이 있으면 커밋한다. 그다음 `node <pact>/scripts/verification.mjs snapshot <명세> <run-dir>/wt <ui|command>`로 지금 검수하는 명세와 코드의 내용을 `<run-dir>/verification.json`에 기록한다. 이 파일은 snapshot만 쓰고, 손으로 고치면 훅이 막는다. 커밋된 파일만 기록에 든다. 웹 화면은 CUA가 없어도 `ui`다. 출력의 `verification.verification_id`와 `verification.surface`를 verifier에게 넘긴다. git이나 HEAD를 읽지 못해 snapshot이 실패하면 검수를 시작하지 않고 알린다.
 
 ## 2. 검수
 
 1. `pact:verifier`에 명세 경로, run-dir, 실행 방법(URL 또는 명령), `<run-dir>/verification.json`과 그 안의 `verification_id`·`surface`를 넘긴다. build에서 당신이 직접 고친 커밋도 검수 범위에 든다고 알린다.
-2. verifier가 `<run-dir>/results.json`을 쓰면 명세 `## 결정 기록`의 Ruling 줄들을 `rulings` 배열에 넣는다.
-3. `node <pact>/scripts/report.mjs <run-dir>`로 보고서를 만든다. 첫 줄이 요약(`통과 n · 실패 n · 의심 n`, 미검증이 있으면 `· 미검증 n`), 둘째 줄이 `report.html` 경로, 셋째 줄이 완료 검사 결과(`완료 검사: 통과` 또는 `완료 검사: 막힘 n개 — <이유>`)다. 증거가 없는 `pass`는 통과로 세지 않고 미검증으로 센다. 여기서는 열지 않는다.
+2. verifier가 `<run-dir>/results.json`을 쓴다. 이 파일은 verifier만 쓴다. 당신은 고치지 않는다. 훅이 다른 쪽의 쓰기를 막고, verifier가 끝날 때 파일의 지문이 기록된다. 보고서의 결정 기록(rulings)은 `report.mjs`가 명세 `## 결정 기록`의 Ruling 줄에서 읽으니 따로 옮기지 않는다.
+3. `node <pact>/scripts/report.mjs <run-dir>`로 보고서를 만든다. results.json, 아래 `summary.json`, 명세의 결정 기록을 합친 것이다. 첫 줄이 요약(`통과 n · 실패 n · 의심 n`, 미검증이 있으면 `· 미검증 n`), 둘째 줄이 `report.html` 경로, 셋째 줄이 완료 검사 결과(`완료 검사: 통과` 또는 `완료 검사: 막힘 n개 — <이유>`)다. 증거가 없는 `pass`는 통과로 세지 않고 미검증으로 센다. 여기서는 열지 않는다.
 4. 띄운 개발 서버를 멈춘다.
 
-완료 검사가 막는 것은 다섯 가지다.
+완료 검사가 막는 것은 여섯 가지다.
 - 빠진 시나리오: 기능마다 정상 흐름, 케이스마다 하나, 처음 쓰는 사람 2~4개
 - 빠진 증거: 화면 단계의 스크린샷, 명령 단계의 출력과 종료 코드
 - 실패나 미검증으로 남은 결과
 - 이유(`decision`) 없이 남긴 의심
 - 명세에 있는데 결과물에 없는 것, 명세와 다르게 동작하는 것(`specCheck`의 `missing`, `misunderstood`)
+- verifier가 끝난 뒤 바뀐 `results.json`: 지금 파일의 지문이 가장 최근 verifier 기록과 다르거나, 그 기록이 없거나, 기록에 지문이 없다. 훅이 막지 못한 길로 바뀐 것을 잡는다. 그때는 build로 되돌려 고치고 verifier로 다시 검수한다.
 
-확인하지 않은 공통 규칙과 명세에 없는데 더한 것(`extra`)은 막지 않고 셋째 줄 아래 `참고:`로 알린다. 검사는 기록이 빠졌는지만 본다. 실제로 써 봤는지는 verifier의 일이니, 검사가 통과했다고 화면 확인을 줄이지 않는다.
+확인하지 않은 공통 규칙과 명세에 없는데 더한 것(`extra`)은 막지 않고 셋째 줄 아래 `참고:`로 알린다. 0.6.0 전에 만든 명세(옛 판)에 verifier 기록이 하나도 없으면 지문 비교를 건너뛰고 그렇다고 `참고:`로 알린다. 검사는 기록이 빠졌는지만 본다. 실제로 써 봤는지는 verifier의 일이니, 검사가 통과했다고 화면 확인을 줄이지 않는다.
 
 ## 보고서 맨 위
 
-사용자에게 보고서를 보일 때마다(3에서 멈추고 물을 때, 5에서 알릴 때) 먼저 `results.json`에 아래 칸을 채우고 `report.mjs`로 다시 만든 뒤 `open`으로 연다. 사용자가 이 칸만 읽고 끝낼 수 있어야 한다.
+사용자에게 보고서를 보일 때마다(3에서 멈추고 물을 때, 5에서 알릴 때) 먼저 `<run-dir>/summary.json`에 아래 칸을 채우고 `report.mjs`로 다시 만든 뒤 `open`으로 연다. 사용자가 이 칸만 읽고 끝낼 수 있어야 한다. results.json은 verifier만 쓰니 이 칸들은 summary.json에 쓴다. 형식은 이렇다:
+
+```json
+{ "headline": "…", "todo": ["…"], "changes": ["…"], "decision": { "<시나리오 id>": "…" } }
+```
+
 - `headline`: 첫 문장이 결론이다. 다 됐는지, 덜 됐으면 무엇이 남았는지. 한두 문장, 100자 안팎으로 쓰고 남은 것의 사정은 아래 칸에 맡긴다.
 - `todo`: 사용자가 할 일이나 정할 것. 나중에 부탁할 일도 언제인지와 함께 넣는다. 한 항목에 한 문장이고, 정할 것이면 추천을 붙인다. 까닭은 관련 시나리오의 `decision`에 둔다. 없으면 `[]`이고 보고서에 "없음"으로 보인다.
 - `changes`: 만들면서 승인한 명세와 달라진 것 중 사용자가 알아차릴 것(화면, 동작, 비용, 데이터). 결정 기록에서 골라 한 항목에 한 문장, 세 개까지 쓴다. 없으면 `[]`.
-- 실패·의심 시나리오마다 `decision`: 고쳤는지 그대로 두는지와 까닭, 다음에 할 일을 한두 문장으로.
+- `decision`: 실패·의심 시나리오마다 id를 키로, 고쳤는지 그대로 두는지와 까닭, 다음에 할 일을 한두 문장으로. 없으면 `{}`.
+
+칸마다 summary.json에 있으면 그것을, 없으면 results.json의 같은 칸을 읽는다(0.5.0에서 results.json에 쓴 판이 그대로 보이게). summary.json을 읽지 못하거나 칸의 모양이 틀리면 완료 검사가 막는다.
 
 이 칸들도 verifier의 `summary`와 같은 기준으로 쓴다. 명세를 승인한 사람이 30초 안에 알아듣게 사용자가 쓴 말과 화면에 보이는 말로 쓰고, 코드·명령·설정 이름, 경로, 번호(F3, 작업 8), 시각, 지어낸 이름은 쓰지 않는다. 기술 세부는 결정 기록과 작업 기록에 있으니, 여기서는 사용자에게 무엇이 달라지는지만 쓴다. 쉬운 말로 풀 수 없는 기술 세부는 맨 위에 올리지 않는다.
 
@@ -39,12 +47,12 @@
 
 verify에서는 고치지 않는다. build로 되돌린다.
 
-미검증이 남았으면 까닭을 본다. verifier가 돌리지 않았거나 증거를 빠뜨린 것이면 verifier에게 그 시나리오를 다시 확인하게 한다. 화면 도구가 없어 볼 수 없는 것이면 build로 돌리지도, 명령 출력으로 대신 통과시키지도 않는다. status를 `verifying`으로 두고 무엇이 막혔는지 보고서와 함께 사용자에게 알린다. `results.json`의 결과나 ID를 손으로 고쳐 완료 검사를 통과시키지 않는다.
+미검증이 남았으면 까닭을 본다. verifier가 돌리지 않았거나 증거를 빠뜨린 것이면 verifier에게 그 시나리오를 다시 확인하게 한다. 화면 도구가 없어 볼 수 없는 것이면 build로 돌리지도, 명령 출력으로 대신 통과시키지도 않는다. status를 `verifying`으로 두고 무엇이 막혔는지 보고서와 함께 사용자에게 알린다. `results.json`의 결과나 ID를 손으로 고쳐 완료 검사를 통과시키지 않는다. 고치려 하면 훅이 막고, 다른 길로 바뀐 것은 finish가 verifier 기록의 지문과 비교해 막는다.
 
-의심 중 명세 위반이 아닌 쓰기 불편은 고칠지 당신이 정한다. 고치지 않을 의심은 보고서에 그대로 두고, 남긴 이유를 그 시나리오의 `decision`에 적는다.
+의심 중 명세 위반이 아닌 쓰기 불편은 고칠지 당신이 정한다. 고치지 않을 의심은 보고서에 그대로 두고, 남긴 이유를 그 시나리오의 `decision`에 적는다(`summary.json`).
 - 무엇을 고칠지는 수정 기준 표를 따른다. `[AI 가정]` 범위면 고치고 Ruling을 남긴다. `[사용자]` 항목을 바꿔야 하면 보고서를 보여 주고 묻는다.
 - `set-status <명세> building`으로 돌리고 `build.md`로 간다. worktree가 이미 있으니 build는 0의 이어 하기로 들어가 3(작업마다)부터 고친다.
-- 고친 뒤 verify를 처음부터 다시 돌리지 않는다. 먼저 `results.json`을 `results-round<n>.json`으로 복사해 둔다. worktree를 커밋하고 1의 `snapshot`을 다시 만든다. 코드가 바뀌었으니 새 `verification_id`가 나오고, 출력의 `changed_files`가 고친 파일 목록이다. verifier에 "다시 검수"로 새 `verification_id`와 다시 볼 시나리오 id를 넘긴다: 실패·의심·미검증이었던 것, 고친 파일이 닿는 기능의 시나리오, 고친 것을 확인할 새 시나리오. 나머지 시나리오는 앞 판의 결과와 ID를 그대로 둔다. 완료 검사는 이 검수의 앞 판 ID도 인정한다.
+- 고친 뒤 verify를 처음부터 다시 돌리지 않는다. worktree를 커밋하고 1의 `snapshot`을 다시 만든다. 코드가 바뀌었으니 새 `verification_id`가 나오고, 출력의 `changed_files`가 고친 파일 목록이다. 이때 스크립트가 앞 결과를 `results-round<n>.json`으로 남긴다(출력의 `saved_results`, 있는 round 파일은 덮어쓰지 않는다). 직접 복사하지 않는다. verifier에 "다시 검수"로 새 `verification_id`와 다시 볼 시나리오 id를 넘긴다: 실패·의심·미검증이었던 것, 고친 파일이 닿는 기능의 시나리오, 고친 것을 확인할 새 시나리오. 나머지 시나리오는 앞 판의 결과와 ID를 그대로 둔다. 완료 검사는 이 검수의 앞 판 ID도 인정한다.
 - 같은 시나리오가 두 번 실패하면 멈추고, 보고서 경로와 함께 무엇이 막혔는지 사용자에게 알린다.
 
 ## 4. 실패가 없으면
@@ -56,12 +64,12 @@ verify에서는 고치지 않는다. build로 되돌린다.
 3. `node <pact>/scripts/git-state.mjs <프로젝트>`로 확인한다. 그래도 `changed`가 남아 있으면 사용자의 작업이니 목록을 알리고 멈춘다. `untracked`는 상관없다.
 4. `plan.md`에 적어 둔 시작 HEAD 뒤로 메인에 다른 소스 변경이 들어왔는지 본다: `git diff <시작 HEAD> HEAD --name-only -- . ':(exclude)docs/pact/**' ':(exclude).pact/**'`. 있으면 합치지 않고 알린다. 합친 결과를 다시 검수해야 한다.
 5. 메인 작업 트리에서 `git merge --no-ff --no-edit -m "merge(pact): <주제>" pact/<run-id>`로 합친다. 충돌이 나면 `git merge --abort`로 되돌리고 멈춰서 알린다.
-6. `node <pact>/scripts/verification.mjs finish <명세> <프로젝트>`를 돌린다. 검수한 코드가 그대로 합쳐졌는지와 완료 검사를 다시 보고, 통과하면 status를 `done`으로 바꾼다. 막히면 완료라고 말하지 않고 이유를 알린다. `done`은 이 명령만 바꾼다. 통과하면 명세 파일을 커밋한다(`docs(pact): <주제> 완료`).
+6. `node <pact>/scripts/verification.mjs finish <명세> <프로젝트>`를 돌린다. 검수한 코드가 그대로 합쳐졌는지와 완료 검사(results.json이 verifier가 끝난 그대로인지 포함)를 다시 보고, 통과하면 status를 `done`으로 바꾼다. 막히면 완료라고 말하지 않고 이유를 알린다. `done`은 이 명령만 바꾼다. 통과하면 명세 파일을 커밋한다(`docs(pact): <주제> 완료`).
 7. `git worktree remove <run-dir>/wt`, 그리고 `git branch -d pact/<run-id>`. worktree에 커밋하지 않은 파일이 있어 지우기가 거부되어도 `--force`는 쓰지 않는다. `git -C <run-dir>/wt status --porcelain`으로 남은 파일을 보고, 빌드 산출물이나 임시 파일이면 `<run-dir>/leftover/`로 옮긴 뒤 다시 지운다. 소스로 보이는 파일이면 목록을 알리고 멈춘다.
 
 ## 5. 알리기
 
-완료라고 말하기 전에 보고서 맨 위를 채워 보고서를 다시 만들고, 요약 줄을 실제로 다시 읽고 그 숫자를 그대로 인용한다. 기억이나 짐작으로 숫자를 적지 않는다.
+완료라고 말하기 전에 `summary.json`의 보고서 맨 위 칸을 채워 보고서를 다시 만들고, 요약 줄을 실제로 다시 읽고 그 숫자를 그대로 인용한다. 기억이나 짐작으로 숫자를 적지 않는다.
 
 채팅은 보고서 맨 위와 같은 말로 보낸다:
 - `headline`과 요약 한 줄(`통과 n · 실패 n · 의심 n`), 무엇이 합쳐졌는지

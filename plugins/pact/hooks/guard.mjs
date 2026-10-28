@@ -5,7 +5,10 @@
 //
 //   PreToolUse   — 승인 관문(F2, 명세 R8·R9·R10): 메인 세션이 pact:worker를 부를 때 그 판에 승인·위임 기록이 없으면 막고,
 //                  하위 에이전트가 Bash로 spec.mjs approve·delegate·set-status를 부르거나 메인 세션이 approve·delegate 앞에 환경 변수를
-//                  덮어쓰면 막는다. 결과 잠금·걱정 붙이기는 handlePreToolUse에 더한다.
+//                  덮어쓰면 막는다.
+//                  결과 잠금(F1, R14): 실행 폴더 바로 밑의 results*.json은 pact:verifier만, verification.json·approvals.jsonl·log/는
+//                  아무도(훅과 pact 스크립트만) 쓰지 못하게 Edit·Write·MultiEdit·NotebookEdit와 Bash의 쓰기 꼴을 막는다. scripts/locks.mjs가 한다.
+//                  worker 걱정 붙이기(F6)는 뒤 작업이 handlePreToolUse에 더한다.
 //   SubagentStop — pact:spec-checker·reviewer·worker·verifier가 멈추면 마지막 답을 그 판의 <run-dir>/log/에 덧붙여 남기고,
 //                  verifier는 그때의 results.json 지문(sha256)도 남긴다(F4, R14, R15). scripts/run-log.mjs가 한다.
 //
@@ -22,6 +25,9 @@ import { fileURLToPath } from 'node:url';
 export const PACT_AGENTS = new Set(['pact:spec-checker', 'pact:reviewer', 'pact:worker', 'pact:verifier']);
 const PACT_TEXT = /\.pact\/|docs\/pact\/|\bpact:(?:spec-checker|reviewer|worker|verifier)\b|\bscripts\/(?:spec|verification|report|checklist|gallery|git-state)\.mjs\b/;
 const ERROR_LOG = 'hook-error.log';
+const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+// Bash의 cwd가 실행 폴더(<프로젝트>/.pact/<run-id>) 안이면 명령에 `.pact/`가 없어도 pact 호출이다: `echo x > results.json`
+const RUN_CWD = /\/\.pact\/[^/]/;
 
 // Claude Code가 플러그인에 주는 데이터 폴더. 훅 환경에 안 오면 설치된 플러그인이 받는 이름(<플러그인>-<마켓플레이스>)과 같은 곳으로 떨어진다.
 export function dataDir() {
@@ -133,16 +139,26 @@ async function gateWorker(input, toolInput) {
   return verdict.ok ? null : denyOutput(verdict.reason, verdict.instead);
 }
 
+// 실행 폴더 바로 밑의 결과·기록 파일을 정해진 쪽만 쓰게 한다. verifier는 results*.json을 쓸 수 있다(그 밖의 잠긴 파일은 verifier도 못 쓴다).
+// 이 파일은 node 내장 모듈만 불러오므로 규칙(scripts/locks.mjs)은 필요할 때 불러온다.
+async function gateLocks(input) {
+  const { checkLocks, VERIFIER } = await import('../scripts/locks.mjs');
+  const verdict = checkLocks(input, { verifier: input.agent_type === VERIFIER });
+  return verdict ? denyOutput(verdict.reason, verdict.instead) : null;
+}
+
 // ---------- PreToolUse ----------
 // 돌려주는 값: 막거나 입력을 바꾸는 출력(denyOutput, allowOutput) 또는 null(그냥 통과).
-// 승인 관문 외의 규칙(결과 잠금, 걱정 붙이기)은 3~5번 작업이 pact가 걸린 호출에 한해 여기에 더한다.
+// worker 걱정 붙이기(F6)는 뒤 작업이 pact가 걸린 호출에 한해 여기에 더한다.
 export async function handlePreToolUse(input) {
   const command = bashCommand(input);
   const calls = specCalls(command);
-  if (!touchesPact(input) && !calls.length) return null; // R1: 상관없는 호출은 파일을 읽지 않고 바로 통과
+  const inRun = input && input.tool_name === 'Bash' && typeof input.cwd === 'string' && RUN_CWD.test(input.cwd);
+  if (!touchesPact(input) && !calls.length && !inRun) return null; // R1: 상관없는 호출은 파일을 읽지 않고 바로 통과
   const subAgent = typeof input.agent_id === 'string' && input.agent_id !== ''; // agent_id가 없으면 메인 세션
   const toolInput = input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
-  if (input.tool_name === 'Bash') return gateSpecCommand(calls, command, subAgent);
+  if (input.tool_name === 'Bash') return gateSpecCommand(calls, command, subAgent) ?? gateLocks(input);
+  if (FILE_TOOLS.has(input.tool_name)) return gateLocks(input);
   if (input.tool_name === 'Agent' && toolInput.subagent_type === 'pact:worker' && !subAgent) return gateWorker(input, toolInput);
   return null;
 }

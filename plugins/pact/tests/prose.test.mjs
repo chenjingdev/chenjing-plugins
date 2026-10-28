@@ -143,6 +143,65 @@ test('the report is written for the person who approved the spec: plain fields o
   assert.match(verify, /여기서는 열지 않는다/);
   assert.match(verify, /남긴 이유를 그 시나리오의 `decision`에 적는다/);
   assert.match(verify, /채팅은 보고서 맨 위와 같은 말로 보낸다/);
+  // 이 칸들은 results.json이 아니라 summary.json에 쓴다
+  assert.match(verify, /먼저 `<run-dir>\/summary\.json`에 아래 칸을 채우고/);
+  assert.match(verify, /results\.json은 verifier만 쓰니 이 칸들은 summary\.json에 쓴다/);
+  assert.match(verify, /`decision`: 실패·의심 시나리오마다 id를 키로/);
+  assert.match(verify, /칸마다 summary\.json에 있으면 그것을, 없으면 results\.json의 같은 칸을 읽는다/);
+});
+
+const SUMMARY_SHAPE = '{ "headline": "…", "todo": ["…"], "changes": ["…"], "decision": { "<시나리오 id>": "…" } }';
+
+test('results.json is the verifier\'s alone, and verify.md, verifier.md and the README say the same about it, summary.json and the round files', () => {
+  const verify = read('skills/pact/verify.md');
+  const verifier = read('agents/verifier.md');
+  const readme = read('README.md');
+  // verify.md: results.json은 고치지 않는다, 보고 칸은 summary.json, 앞 결과는 스크립트가 남긴다, rulings는 보고서가 읽는다
+  assert.match(verify, /verifier가 `<run-dir>\/results\.json`을 쓴다\. 이 파일은 verifier만 쓴다\. 당신은 고치지 않는다\. 훅이 다른 쪽의 쓰기를 막고/);
+  assert.match(verify, /`report\.mjs`가 명세 `## 결정 기록`의 Ruling 줄에서 읽으니 따로 옮기지 않는다/);
+  assert.doesNotMatch(verify, /`rulings` 배열에 넣는다/);
+  assert.match(verify, /이 파일은 snapshot만 쓰고, 손으로 고치면 훅이 막는다/);
+  assert.match(verify, /이때 스크립트가 앞 결과를 `results-round<n>\.json`으로 남긴다\(출력의 `saved_results`, 있는 round 파일은 덮어쓰지 않는다\)\. 직접 복사하지 않는다/);
+  assert.doesNotMatch(verify, /먼저 `results\.json`을 `results-round<n>\.json`으로 복사해 둔다/, '메인이 복사하던 지시는 없어졌다');
+  assert.match(verify, /고치려 하면 훅이 막고, 다른 길로 바뀐 것은 finish가 verifier 기록의 지문과 비교해 막는다/);
+  // 완료 검사가 막는 것에 지문 비교가 들어 있다
+  assert.match(verify, /완료 검사가 막는 것은 여섯 가지다/);
+  assert.match(verify, /verifier가 끝난 뒤 바뀐 `results\.json`: 지금 파일의 지문이 가장 최근 verifier 기록과 다르거나, 그 기록이 없거나, 기록에 지문이 없다/);
+  assert.match(verify, /옛 판\)에 verifier 기록이 하나도 없으면 지문 비교를 건너뛰고 그렇다고 `참고:`로 알린다/);
+  // verifier.md: results.json만 쓴다, 보고 칸은 쓰지 않는다
+  assert.match(verifier, /run-dir 맨 위의 파일 가운데 `results\.json`만 당신이 쓴다\. 다른 쪽이 쓰려 하면 훅이 막는다/);
+  assert.match(verifier, /당신이 끝날 때 이 파일의 지문이 기록되고, 완료 검사가 그 지문과 비교한다/);
+  assert.match(verifier, /`results-round<n>\.json`은 snapshot이 쓴다\. 이 다섯은 당신이 쓰지 않는다/);
+  assert.match(verifier, /앞 결과는 snapshot이 `results-round<n>\.json`으로 남겨 두었으니 따로 복사하지 않는다/);
+  assert.match(verifier, /`rulings`·`headline`·`todo`·`changes`·`decision`은 쓰지 않는다\. 보고서의 결정 기록은 `report\.mjs`가 명세에서 읽고, 나머지 칸은 메인 세션이 `summary\.json`에 쓴다/);
+  assert.doesNotMatch(verifier, /"rulings"/, '결과 형식에 rulings 칸이 없다');
+  // README: 파일 표, 보고 칸 절, 잠금 규칙, 지문 비교
+  assert.match(readme, /\| `\.pact\/<날짜>-<주제>\/results\.json` \| 검수 결과\. verifier만 쓴다/);
+  assert.match(readme, /\| `\.pact\/<날짜>-<주제>\/summary\.json` \| 보고서 맨 위 칸/);
+  assert.match(readme, /### 결과 파일과 보고 칸/);
+  assert.match(readme, /`report\.mjs`는 `results\.json`, `summary\.json`, 명세 `## 결정 기록`의 `Ruling:` 줄\(rulings\)을 합쳐 지금과 같은 보고서를 만든다/);
+  assert.match(readme, /칸마다 `summary\.json`에 있으면 그것을, 없으면 `results\.json`의 같은 칸을 읽는다/);
+  assert.match(readme, /PreToolUse\(결과 잠금\): 실행 폴더 바로 밑의 파일은 정해진 쪽만 쓴다/);
+  assert.match(readme, /`results\.json`·`results-round\*\.json`은 `pact:verifier`만, `verification\.json`은 `verification\.mjs snapshot`만, `approvals\.jsonl`과 `log\/` 밑은 훅과 pact 스크립트만 쓴다/);
+  assert.match(readme, /`<run-dir>\/wt\/` 밑.*명세\(`docs\/pact\/<run-id>\.md`\)가 없는 폴더는 대상이 아니다\. 옛 판도 똑같이 건다/);
+  assert.match(readme, /완료 검사는 `results\.json`의 지금 sha256을 가장 최근 verifier가 끝날 때 훅이 남긴 지문과 비교한다/);
+  assert.match(readme, /0\.6\.0에서 verifier가 다시 돌아 기록이 생긴 옛 판은 비교한다/);
+  assert.match(readme, /출력의 `saved_results`/);
+  // 세 곳이 summary.json의 모양을 같게 적는다
+  for (const [name, text] of [['verify.md', verify], ['README.md', readme]]) assert.ok(text.includes(SUMMARY_SHAPE), `${name}의 summary.json 모양`);
+  assert.ok(verify.includes('`headline`') && verify.includes('`todo`') && verify.includes('`changes`') && verify.includes('`decision`'));
+});
+
+test('the files the lock covers are named the same in the guidance and in the code', async () => {
+  const { classifyRest } = await import('../scripts/locks.mjs');
+  const readme = read('README.md');
+  for (const [rest, kind] of [[['results.json'], 'results'], [['results-round1.json'], 'results'], [['verification.json'], 'verification'], [['approvals.jsonl'], 'approvals'], [['log', 'subagents.jsonl'], 'log']]) {
+    assert.equal(classifyRest(rest).kind, kind, rest.join('/'));
+  }
+  for (const free of ['summary.json', 'report.html', 'plan.md', 'tasks', 'shots']) {
+    assert.equal(classifyRest([free]), null, free);
+    assert.ok(readme.includes(free.endsWith('.md') || free.endsWith('.json') || free.endsWith('.html') ? `\`${free}\`` : `\`${free}/\``), `README가 ${free}를 잠그지 않는다고 적는다`);
+  }
 });
 
 test('verify.md runs the verifier, builds the report, merges locally and asks only before push', () => {

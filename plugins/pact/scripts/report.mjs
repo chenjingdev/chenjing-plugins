@@ -4,10 +4,11 @@
 // 모든 시나리오는 단계마다 스크린샷(또는 명령 출력)을 남기므로, 빠진 스크린샷은 숨기지 않고 센다.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { parseSpec } from './spec.mjs';
+import { decisionRulings, parseSpec } from './spec.mjs';
 import { effectiveResult } from './evidence.mjs';
 import { checkVerification } from './verification.mjs';
 import { isMainModule } from './paths.mjs';
+import { decisionOf, readSummary, reportFields } from './summary.mjs';
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -76,18 +77,22 @@ ${scenarioBody(s, runDir)}
 </details>`;
 }
 
-// 제목에 쓸 주제. run-dir은 <프로젝트>/.pact/<slug>이고 results.spec은 프로젝트 기준 경로다.
-function topicOf(spec, runDir) {
+// 명세 글. run-dir은 <프로젝트>/.pact/<slug>이고 results.spec은 프로젝트 기준 경로다. 못 읽으면 null.
+function specText(spec, runDir) {
   if (!spec) return null;
   try {
-    return parseSpec(readFileSync(path.resolve(runDir, '..', '..', spec), 'utf8')).frontmatter.topic || null;
+    return readFileSync(path.resolve(runDir, '..', '..', spec), 'utf8');
   } catch {
     return null;
   }
 }
 
+// 보고서는 results.json(verifier), summary.json(메인이 쓰는 보고 칸), 명세의 `## 결정 기록`(rulings)을 합쳐 만든다(명세 R13).
+// summary.json이 없고 results.json에 그 칸이 있는 옛 판은 results.json의 칸을 그대로 읽는다.
 export function renderReport(results, { runDir }) {
   const raw = Array.isArray(results?.scenarios) ? results.scenarios : [];
+  const { summary: written } = readSummary(runDir);
+  const fields = reportFields(results, written);
   let surface = results?.surface;
   const captureFile = path.join(runDir, 'verification.json');
   let captureId = null;
@@ -103,7 +108,7 @@ export function renderReport(results, { runDir }) {
   const scenarios = raw.map(s => {
     const stale = needsReceipt && (!captureId || results?.verification_id !== captureId || !accepted.has(s?.verification_id));
     const carried = !stale && Boolean(captureId) && s?.verification_id !== captureId;
-    return { ...s, stale, carried, result: stale ? 'unverified' : effectiveResult(s, { runDir, surface }) };
+    return { ...s, decision: decisionOf(s, written), stale, carried, result: stale ? 'unverified' : effectiveResult(s, { runDir, surface }) };
   });
   const stale = scenarios.filter(s => s.stale).length;
   const count = { pass: 0, fail: 0, doubt: 0, unverified: 0 };
@@ -114,15 +119,17 @@ export function renderReport(results, { runDir }) {
   const passed = scenarios.filter((s) => s.result === 'pass');
   const check = results?.specCheck ?? {};
   const diffs = [
-    ...(results?.changes ?? []).map((x) => ['바꿈', x]),
+    ...(Array.isArray(fields.changes) ? fields.changes : []).map((x) => ['바꿈', x]),
     ...(check.missing ?? []).map((x) => ['빠짐', x]),
     ...(check.extra ?? []).map((x) => ['더함', x]),
     ...(check.misunderstood ?? []).map((x) => ['다르게 동작', x]),
   ];
-  const rulings = results?.rulings ?? [];
-  const topic = topicOf(results?.spec, runDir);
+  const spec = specText(results?.spec, runDir);
+  const fromSpec = spec === null ? [] : decisionRulings(spec);
+  const rulings = fromSpec.length ? fromSpec : Array.isArray(results?.rulings) ? results.rulings : [];
+  const topic = spec === null ? null : parseSpec(spec).frontmatter.topic || null;
   const title = topic ? `${topic} 검수 보고서` : '검수 보고서';
-  const todo = results?.todo;
+  const todo = fields.todo;
   const html = `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
@@ -158,7 +165,7 @@ export function renderReport(results, { runDir }) {
 ${scenarios.length === 0 ? '<p class="missing">검수한 시나리오가 없습니다. 완료로 판정할 수 없습니다.</p>' : ''}
 ${stale ? `<p class="missing">이번 검수 기록과 이어지지 않는 결과 ${stale}개는 미검증으로 두었습니다.</p>` : ''}
 ${scenarios.length > 0 && !needsReceipt ? '<p class="missing">완료 검사를 두기 전의 옛 보고서입니다. 지금도 그대로인지는 다시 확인해야 합니다.</p>' : ''}
-${results?.headline ? `<p class="headline">${esc(results.headline)}</p>` : ''}
+${fields.headline ? `<p class="headline">${esc(fields.headline)}</p>` : ''}
 ${Array.isArray(todo) ? `<h2>할 일</h2>${list(todo)}` : ''}
 <p class="counts">시나리오 ${scenarios.length}개 · ${summary}</p>
 </section>
@@ -185,6 +192,7 @@ function printCompletionCheck(runDir, results) {
     const checked = checkVerification(spec, target);
     console.log(checked.ok ? '완료 검사: 통과' : `완료 검사: 막힘 ${checked.issues.length}개 — ${checked.issues.join(' / ')}`);
     if (checked.warnings.length) console.log(`참고: ${checked.warnings.join(' / ')}`);
+    for (const note of checked.notes ?? []) console.log(note);
   } catch (err) {
     console.log(`완료 검사: 못 함 — ${err.message}`);
   }

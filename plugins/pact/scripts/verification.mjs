@@ -4,12 +4,14 @@
 // 대신 보증하지는 않는다. 그것은 verifier의 일이다.
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { constants, copyFileSync, existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { lintSpec, parseSpec, setStatus, specRunDir } from './spec.mjs';
 import { evidenceIssues, effectiveResult } from './evidence.mjs';
 import { isMainModule } from './paths.mjs';
 import { checkStart, refusalLine } from './approval.mjs';
+import { latestVerifierFingerprint, logFile, resultsSha256 } from './run-log.mjs';
+import { decisionOf, readSummary } from './summary.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const nonempty = (value) => typeof value === 'string' && value.trim().length > 0;
@@ -107,6 +109,61 @@ function writeJson(file, data) {
   renameSync(temporary, file);
 }
 
+// 앞 결과를 results-round<n>.json으로 남긴다(명세 R13). 새 검수 기록을 만들 때 부른다: 그때 results.json은 앞 검수의 결과이고,
+// verifier가 다시 검수하면서 덮어쓰기 전이다. 메인이 손으로 복사하던 것을 스크립트가 한다(결과 파일은 verifier만 쓰도록 훅이 잠근다).
+// n은 이미 있는 round 번호 가운데 가장 큰 것 다음 번호이고, 있는 파일은 덮어쓰지 않는다. results.json이 없거나, 가장 높은 번호의
+// round 파일과 내용이 같으면(verifier가 아직 다시 돌지 않았다) 남기지 않는다. 남겼으면 그 경로를, 아니면 null을 돌려준다.
+export function archiveResults(runDir) {
+  const file = path.join(runDir, 'results.json');
+  let bytes;
+  try {
+    bytes = readFileSync(file);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const rounds = readdirSync(runDir).map((name) => /^results-round(\d+)\.json$/.exec(name)).filter(Boolean).map((m) => Number(m[1]));
+  const top = Math.max(0, ...rounds);
+  if (top && readFileSync(path.join(runDir, `results-round${top}.json`)).equals(bytes)) return null;
+  for (let n = top + 1; ; n++) {
+    const target = path.join(runDir, `results-round${n}.json`);
+    try {
+      copyFileSync(file, target, constants.COPYFILE_EXCL);
+      return target;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+  }
+}
+
+const FINGERPRINT_NOTE = '참고: 옛 판이고 verifier 기록이 없어 results.json이 verifier가 쓴 그대로인지는 확인하지 않았다';
+
+// results.json이 가장 최근에 verifier가 끝날 때의 그대로인가(명세 R14). 훅이 그때의 sha256을 log/subagents.jsonl에 남긴다.
+// 다르거나, verifier 기록이 없거나, 기록의 지문이 null이면 막는다: { issue }(까닭과 대신 할 일을 한 줄로).
+// 옛 판(R5)이고 verifier 기록이 하나도 없으면 비교를 건너뛰고 { note }만 남긴다. 0.6.0에서 verifier가 다시 돌아 기록이 생긴 옛 판은 비교한다.
+// results.json이 없는 것은 여기서 따로 말하지 않는다(checkVerification이 읽지 못했다고 막는다). 기록을 읽지 못하면 던진다.
+export function fingerprintVerdict(specFile, runDir) {
+  const latest = latestVerifierFingerprint(runDir);
+  const again = '결과가 틀렸으면 build로 되돌려 고치고 verifier로 다시 검수한다. 보고 칸은 summary.json에 쓴다.';
+  if (!latest) {
+    const gate = checkStart({ specFile, purpose: 'finish' });
+    if (gate.ok && gate.mode === 'legacy') return { note: FINGERPRINT_NOTE };
+    return {
+      issue: `이 판에 verifier가 끝난 기록이 없어 results.json을 verifier가 쓴 것인지 알 수 없다 (${logFile(runDir)}). `
+        + 'pact:verifier로 검수를 돌린다. 이미 돌렸는데도 기록이 없으면 훅이 돌지 않는 것이니 플러그인 데이터 폴더의 hook-error.log를 보고 사용자에게 알린다.',
+    };
+  }
+  const recorded = latest.results_sha256;
+  if (typeof recorded !== 'string' || !recorded) {
+    return { issue: `가장 최근 verifier 기록(${latest.time})에 results.json 지문이 없다(그때 results.json이 없었다). pact:verifier로 다시 검수해 results.json을 쓰게 한다.` };
+  }
+  const now = resultsSha256(runDir);
+  if (now !== null && now !== recorded) {
+    return { issue: `results.json이 가장 최근 verifier가 끝난 뒤(${latest.time}) 바뀌었다. ${again}` };
+  }
+  return {};
+}
+
 // 지금 검수할 명세·코드의 내용을 기록한다. 내용이 같으면 있는 기록을 그대로 쓴다.
 // 내용이 바뀌었으면 새 ID를 만들고 앞 기록을 previous/history로 잇는다. 그래야 고친 뒤 다시 검수할 때
 // 앞 판에서 통과한 시나리오를 그대로 인정할 수 있고, 무엇이 바뀌었는지(changed_files)도 알 수 있다.
@@ -143,8 +200,9 @@ export function snapshotVerification(specFile, targetDir, surface) {
     history: sameRun ? [...(Array.isArray(old.history) ? old.history : []), old.verification_id] : [],
     files: current.source.files,
   };
+  const saved_results = archiveResults(runDir); // 기록을 쓰기 전에 남긴다: 못 남기면 새 기록도 만들지 않는다
   writeJson(file, verification);
-  return { runDir, verification, reused: false, changed_files, spec_changed: sameRun ? old.spec_hash !== current.specHash : null, untracked: current.source.untracked, ...notes };
+  return { runDir, verification, reused: false, changed_files, spec_changed: sameRun ? old.spec_hash !== current.specHash : null, untracked: current.source.untracked, saved_results, ...notes };
 }
 
 // 완료할 수 있는지 본다. issues가 하나라도 있으면 완료할 수 없고, warnings는 알리기만 한다.
@@ -160,6 +218,9 @@ export function checkVerification(specFile, targetDir) {
     try { assign(JSON.parse(readFileSync(path.join(runDir, name), 'utf8'))); }
     catch { issues.push(`${name}을 읽지 못했습니다`); }
   }
+  // 메인이 쓰는 보고 칸(R13). 형식이 틀리면 막고, 의심 시나리오의 결정 이유(decision)는 여기서 읽는다(없으면 results.json의 옛 칸).
+  const { summary, problems } = readSummary(runDir);
+  issues.push(...problems);
   if (snapshot?.version !== 1 || !nonempty(snapshot?.verification_id)) issues.push('유효한 검수 snapshot이 없습니다');
   if (snapshot?.spec !== current.specPath) issues.push('snapshot이 현재 명세를 가리키지 않습니다');
   if (!isSha(snapshot?.head)) issues.push('snapshot에 검수한 실제 HEAD가 없습니다');
@@ -221,7 +282,7 @@ export function checkVerification(specFile, targetDir) {
     const result = effectiveResult(scenario ?? {}, { runDir, surface: snapshot?.surface });
     outcomes.push({ id: label, result });
     if (result === 'fail' || result === 'unverified') issues.push(`${label}: ${result} 결과는 완료할 수 없습니다`);
-    if (result === 'doubt' && !nonempty(scenario?.decision)) issues.push(`${label}: 의심을 남기는 결정 이유가 없습니다`);
+    if (result === 'doubt' && !nonempty(decisionOf(scenario, summary))) issues.push(`${label}: 의심을 남기는 결정 이유가 없습니다`);
   }
   for (const feature of current.features) if (!featureCoverage.has(feature.id)) issues.push(`${feature.id}: 정상 흐름 검수가 없습니다`);
   // 공통 규칙은 시나리오로 확인할 수 없는 것(화면 한 장 규칙, 글 규칙)이 있어 막지 않고 알린다.
@@ -234,8 +295,13 @@ export function checkVerification(specFile, targetDir) {
   if (Array.isArray(check.missing) && check.missing.length) issues.push(`명세에 있는데 결과물에 없는 것이 남아 있습니다: ${check.missing.join(', ')}`);
   if (Array.isArray(check.misunderstood) && check.misunderstood.length) issues.push(`명세와 다르게 동작하는 것이 남아 있습니다: ${check.misunderstood.join(', ')}`);
   if (Array.isArray(check.extra) && check.extra.length) warnings.push(`명세에 없는데 결과물에 있는 것: ${check.extra.join(', ')}`);
+  // results.json은 verifier만 쓴다(훅이 잠근다). 훅이 못 막는 길로 바뀌었는지 verifier가 끝날 때의 지문과 비교해 본다(R14).
+  const notes = [];
+  const verdict = fingerprintVerdict(current.specPath, runDir);
+  if (verdict.issue) issues.push(verdict.issue);
+  if (verdict.note) notes.push(verdict.note);
   return {
-    ok: issues.length === 0, runDir, verification_id: currentId, issues: [...new Set(issues)], warnings: [...new Set(warnings)], carried, outcomes,
+    ok: issues.length === 0, runDir, verification_id: currentId, issues: [...new Set(issues)], warnings: [...new Set(warnings)], notes, carried, outcomes,
     snapshot: snapshot ?? null, current: { spec_hash: current.specHash, target_fingerprint: current.source.fingerprint, head: current.source.head },
   };
 }

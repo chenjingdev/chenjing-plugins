@@ -48,6 +48,8 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
 | `.pact/<날짜>-<주제>/` | 실행 폴더. 명세 파일명(날짜 포함)으로 구분한다. 체크리스트, 스케치, 작업 보고, 검수 기록(`verification.json`)이 들어가고 스스로 git에서 빠진다 |
 | `.pact/<날짜>-<주제>/log/subagents.jsonl` | 하위 에이전트가 끝날 때마다 훅이 마지막 답을 한 줄씩 덧붙인 기록 |
 | `.pact/<날짜>-<주제>/approvals.jsonl` | 승인·위임 기록. `spec.mjs approve`·`delegate`가 사용자 말을 대화 기록에서 찾아 맞춰 보고 한 줄씩 덧붙인다 |
+| `.pact/<날짜>-<주제>/results.json` | 검수 결과. verifier만 쓴다. 앞 검수의 결과는 `snapshot`이 `results-round<n>.json`으로 남긴다 |
+| `.pact/<날짜>-<주제>/summary.json` | 보고서 맨 위 칸(`headline`·`todo`·`changes`·시나리오별 `decision`). 메인 세션이 쓴다 |
 
 화면 검수에는 Codex CUA를 쓴다. 브라우저에서 결과물을 직접 써 보고 단계마다 스크린샷(JPEG)을 남긴다. 도구 이름은 호스트마다 달라 pact가 찾아 쓴다. 메인 세션이 검수 전에 한 번 확인해서, 쓸 수 없으면 오류를 바로 알리고 명령과 HTTP 요청으로 볼 수 있는 것만 확인한다. 화면으로만 볼 수 있는 단계는 `미검증`으로 남고, 미검증이 있으면 완료가 되지 않는다.
 
@@ -85,7 +87,19 @@ node <pact>/scripts/verification.mjs finish <명세> <프로젝트>             
 
 `finish`가 통과할 때만 명세가 `done`이 된다. `spec.mjs set-status done`은 막혀 있다. 이 검사는 기록이 빠졌는지만 본다. 실제로 써 봤는지는 verifier의 일이다.
 
-고친 뒤에는 `snapshot`을 다시 만든다. 새 ID가 나오고 출력의 `changed_files`에 고친 파일이 든다. 실패·의심·미검증이었던 시나리오와 고친 파일이 닿는 시나리오만 다시 돌리고, 나머지는 앞 판의 결과를 그대로 둔다. 완료 검사는 같은 검수의 앞 판 ID를 인정한다.
+고친 뒤에는 `snapshot`을 다시 만든다. 새 ID가 나오고 출력의 `changed_files`에 고친 파일이 든다. 이때 앞 결과(`results.json`)를 스크립트가 `results-round<n>.json`으로 남긴다(출력의 `saved_results`). `n`은 있는 round 번호 다음 번호이고, 있는 파일은 덮어쓰지 않으며, verifier가 아직 다시 돌지 않아 가장 높은 번호의 파일과 같으면 남기지 않는다. 실패·의심·미검증이었던 시나리오와 고친 파일이 닿는 시나리오만 다시 돌리고, 나머지는 앞 판의 결과를 그대로 둔다. 완료 검사는 같은 검수의 앞 판 ID를 인정한다.
+
+### 결과 파일과 보고 칸
+
+`results.json`은 verifier만 쓴다. 메인 세션이 보고서 맨 위 칸을 채우려고 고치던 것을 막으려고, 그 칸들(`headline`·`todo`·`changes`와 시나리오마다 `decision`)은 `.pact/<run-id>/summary.json`에 쓴다.
+
+```json
+{ "headline": "…", "todo": ["…"], "changes": ["…"], "decision": { "<시나리오 id>": "…" } }
+```
+
+`report.mjs`는 `results.json`, `summary.json`, 명세 `## 결정 기록`의 `Ruling:` 줄(rulings)을 합쳐 지금과 같은 보고서를 만든다. 칸마다 `summary.json`에 있으면 그것을, 없으면 `results.json`의 같은 칸을 읽는다. 0.5.0에서 `results.json`에 칸을 쓴 진행 중인 판이 그대로 보인다. 완료 검사는 의심의 `decision`도 같은 순서로 찾고, `summary.json`을 읽지 못하거나 칸의 모양이 틀리면 막는다.
+
+완료 검사는 `results.json`의 지금 sha256을 가장 최근 verifier가 끝날 때 훅이 남긴 지문과 비교한다. 다르거나, verifier 기록이 없거나, 기록에 지문이 없으면 막고 verifier로 다시 검수하라고 알린다. 훅이 막지 못하는 길(변수로 만든 경로, 파일에 적어 둔 스크립트)로 바뀐 것을 잡는 마지막 그물이다. 0.6.0 전에 만든 명세(옛 판)에 verifier 기록이 하나도 없으면 비교를 건너뛰고 `참고:`로 알린다. 0.6.0에서 verifier가 다시 돌아 기록이 생긴 옛 판은 비교한다.
 
 예전 방식의 `.pact/<주제>/` 폴더는 건드리지 않는다. 그 안에 `wt`가 남아 있으면 `run-dir`이 멈추고 사람이 정리한다.
 
@@ -94,7 +108,8 @@ node <pact>/scripts/verification.mjs finish <명세> <프로젝트>             
 `hooks/hooks.json`이 PreToolUse와 SubagentStop에 훅 하나(`hooks/guard.mjs`)를 건다. 플러그인 훅은 pact를 쓰지 않는 대화에서도 도는 터라, `.pact/`·`docs/pact/`를 만지지도 않고 pact 에이전트나 스크립트도 아닌 호출은 아무것도 읽지 않고 바로 통과시킨다.
 
 - PreToolUse: 메인 세션이 `pact:worker`를 부를 때 작업 지시의 판(`맥락` 칸의 run-dir)에 승인·위임 기록이 없으면 막는다(옛 판은 통과). 지시문에서 판을 못 찾으면 "맥락 칸에 run-dir과 작업 번호를 넣는다"로 막는다. 위임 기록이면 지금 명세의 위험 항목과 인용을 다시 본다. 하위 에이전트가 Bash로 `spec.mjs approve`·`delegate`·`set-status`를 부르면 막고, 메인 세션도 approve·delegate 앞에 환경 변수(`HOME=`, `CLAUDE_CODE_SESSION_ID=`, `CLAUDE_CONFIG_DIR=` 등)를 덮어쓰면 막는다. 막을 때는 까닭과 대신 할 일을 한 줄로 알린다.
-- SubagentStop: `pact:spec-checker`·`pact:reviewer`·`pact:worker`·`pact:verifier`가 끝나면 마지막 답을 그 판의 `<run-dir>/log/subagents.jsonl`에 한 줄 덧붙인다. 실행 폴더는 하위 에이전트의 첫 지시에 든 경로로 찾고, 없으면 그 프로젝트에서 가장 최근에 바뀐 진행 중 명세로 찾는다. `pact:verifier`가 끝날 때는 그 순간의 `results.json` sha256도 같은 줄에 적는다.
+- PreToolUse(결과 잠금): 실행 폴더 바로 밑의 파일은 정해진 쪽만 쓴다. `results.json`·`results-round*.json`은 `pact:verifier`만, `verification.json`은 `verification.mjs snapshot`만, `approvals.jsonl`과 `log/` 밑은 훅과 pact 스크립트만 쓴다. 메인 세션과 다른 하위 에이전트가 Edit·Write·MultiEdit·NotebookEdit로 쓰거나 Bash로 쓰면(`>`·`>>`·`tee`·`sed -i`·`perl -i`, `cp`·`mv`·`rm`·`truncate`·`touch`의 대상, `python -c`·`node -e`·heredoc 한 줄 스크립트의 `open(…, 'w')`·`writeFileSync` 같은 쓰기) 막고, 까닭과 대신 할 일을 한 줄로 알린다. 읽기(`cat`·`jq`·`grep`)와 pact 스크립트 호출은 막지 않는다. `<run-dir>/wt/` 밑, `summary.json`·`report.html`·`shots/`·`plan.md`·`tasks/`, 그리고 명세(`docs/pact/<run-id>.md`)가 없는 폴더는 대상이 아니다. 옛 판도 똑같이 건다. 변수로 만든 경로와 파일에 적어 둔 스크립트는 훅이 못 본다. 그 길은 완료 검사의 지문 비교가 막는다.
+- SubagentStop: `pact:spec-checker`·`pact:reviewer`·`pact:worker`·`pact:verifier`가 끝나면 마지막 답을 그 판의 `<run-dir>/log/subagents.jsonl`에 한 줄 덧붙인다. 실행 폴더는 하위 에이전트의 첫 지시에 든 경로로 찾고, 없으면 그 프로젝트에서 가장 최근에 바뀐 진행 중 명세로 찾는다. `pact:verifier`가 끝날 때는 그 순간의 `results.json` sha256도 같은 줄에 적는다. 완료 검사가 이 지문과 지금 파일을 비교한다.
 - 훅이 고장나도 대화를 막지 않는다. 오류는 플러그인 데이터 폴더(`${CLAUDE_PLUGIN_DATA}`, 없으면 `~/.claude/plugins/data/pact-chenjing-plugins`)의 `hook-error.log`에 한 줄 남는다.
 
 ## 시험

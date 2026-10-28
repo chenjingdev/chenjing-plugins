@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseSpec, lintSpec, riskUnits, explainError, setStatus, slugify, newSpecPath, specRunDir } from '../scripts/spec.mjs';
+import { parseSpec, lintSpec, riskUnits, explainError, setStatus, slugify, newSpecPath, specRunDir, decisionRulings } from '../scripts/spec.mjs';
 import { ensureRunDir } from '../scripts/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -419,4 +419,30 @@ test('CLI: a missing spec prints the Node message with a reason and what to do o
     assert.equal(lines.length, 1, `${args[0]}: ${r.stderr}`);
     assert.match(lines[0], /ENOENT.*파일이나 폴더가 없다.*경로를 확인한다/, args[0]);
   }
+});
+
+test('decisionRulings returns the Ruling lines of ## 결정 기록 without their bullet, and nothing from other sections', () => {
+  const text = `${GOOD.replace('## 결정 기록\n', '')}## 결정 기록
+- Ruling: 첫째 — 이유 — 잃는 것
+- 사용자가 말한 것(Ruling 줄이 아니다)
+* Ruling: 별표 줄도 읽는다 — 이유 — 잃는 것
+  - Ruling: 들여쓴 줄도 읽는다 — 이유 — 잃는 것
+Ruling: 글머리 없는 줄은 Ruling 줄이 아니다
+- Ruling:
+- 앞뒤 공백이 있는 줄  Ruling: 줄 가운데 있는 것은 아니다
+- Ruling: 마지막 줄 — 이유 — 잃는 것   
+`;
+  assert.deepEqual(decisionRulings(text), [
+    'Ruling: 첫째 — 이유 — 잃는 것',
+    'Ruling: 별표 줄도 읽는다 — 이유 — 잃는 것',
+    'Ruling: 들여쓴 줄도 읽는다 — 이유 — 잃는 것',
+    'Ruling: 마지막 줄 — 이유 — 잃는 것',
+  ]);
+  // 다른 섹션의 Ruling 줄은 보지 않는다
+  assert.deepEqual(decisionRulings(GOOD.replace('## 목적\n교수자가 출석을 빨리 확인한다.', '## 목적\n- Ruling: 목적 안에 있다 — a — b')), []);
+  assert.deepEqual(decisionRulings(GOOD), [], '결정 기록이 비었다');
+  assert.deepEqual(decisionRulings(GOOD.replace('## 결정 기록\n', '')), [], '결정 기록 섹션이 없다');
+  assert.deepEqual(decisionRulings(''), []);
+  assert.deepEqual(decisionRulings(undefined), []);
+  assert.deepEqual(decisionRulings(`## 결정 기록\r\n- Ruling: 윈도우 줄바꿈 — a — b\r\n`), ['Ruling: 윈도우 줄바꿈 — a — b']);
 });

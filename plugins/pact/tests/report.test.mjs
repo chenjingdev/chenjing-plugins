@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -206,4 +206,142 @@ test('results from an earlier round of the same verification still count and are
   assert.match(html, /앞 판에서 확인/);
   data.scenarios[0].verification_id = 'round0';
   assert.match(renderReport(data, { runDir: dir }).summary, /미검증 1/);
+});
+
+// ---------- 보고 칸은 summary.json에서, rulings는 명세 결정 기록에서 온다(명세 R13) ----------
+
+const SPEC_PATH = 'docs/pact/2026-10-10-x.md';
+const bullets = (lines) => lines.map((line) => `- ${line}\n`).join('');
+const specWith = (log) => `---\npact: 2\ntopic: 출결 관리\nstatus: verifying\n---\n# 출결 관리\n## 기능\n- F1 목록 [사용자]\n## 공통 규칙\n## 결정 기록\n${log}`;
+// 프로젝트 하나와 그 안의 실행 폴더(명세가 있는). 결정 기록은 줄 목록(rulings)이나 글 그대로(log)로 준다.
+function project({ rulings = [], log = bullets(rulings) } = {}) {
+  const root = mkdtempSync(path.join(tmpdir(), 'pact-report-project-'));
+  mkdirSync(path.join(root, 'docs', 'pact'), { recursive: true });
+  writeFileSync(path.join(root, SPEC_PATH), specWith(log));
+  const run = path.join(root, '.pact', 'x');
+  mkdirSync(path.join(run, 'shots'), { recursive: true });
+  writeFileSync(path.join(run, 'shots', 'S1-1.png'), png);
+  return { root, run };
+}
+const writeSummary = (run, summary) => writeFileSync(path.join(run, 'summary.json'), JSON.stringify(summary));
+
+const RULING_LINES = ['Ruling: 빈 상태 문구는 "수업 없음" — 짧아서 — 문구만 바뀜', 'Ruling: 결석 사유는 선생님만 본다 <기본> — 명세에 없음 — 화면이 달라짐'];
+
+test('(g) summary.json and the spec\'s decision log fill the report exactly where results.json\'s own fields used to: the page is the same', () => {
+  // 0.5.0 꼴: 메인이 results.json에 headline·todo·changes·decision·rulings를 썼다
+  const old = project();
+  const oldResults = { ...FILLED, spec: SPEC_PATH, rulings: RULING_LINES };
+  oldResults.scenarios = oldResults.scenarios.map((sc) => ({ ...sc, steps: sc.steps.map((st) => ({ ...st })) }));
+  const oldHtml = renderReport(oldResults, { runDir: old.run }).html;
+  // 0.6.0 꼴: results.json에는 verifier 칸만, 보고 칸은 summary.json, rulings는 명세
+  const fresh = project({ rulings: RULING_LINES });
+  const { headline, todo, changes, rulings: _ignored, ...rest } = oldResults;
+  const decision = Object.fromEntries(oldResults.scenarios.filter((sc) => sc.decision).map((sc) => [sc.id, sc.decision]));
+  const newResults = { ...rest, scenarios: rest.scenarios.map(({ decision: _d, ...sc }) => sc) };
+  writeSummary(fresh.run, { headline, todo, changes, decision });
+  const newHtml = renderReport(newResults, { runDir: fresh.run }).html;
+  assert.equal(newHtml, oldHtml);
+  // 그리고 칸이 실제로 나와 있다
+  assert.match(newHtml, /<p class="headline">출결 앱을 다 만들었고 명세대로 됩니다\.<\/p>/);
+  assert.match(newHtml, /<h2>할 일<\/h2><ul><li>빈 수업 화면 문구를 정해 주세요<\/li><\/ul>/);
+  assert.match(newHtml, /<span class="tag">바꿈<\/span>결석 사유는 선생님만 봅니다/);
+  assert.match(newHtml, /<p class="decision">그대로 둡니다\. 저장 버튼이 있어서요\.<\/p>/);
+  assert.match(newHtml, /<details><summary>결정 기록 2개<\/summary>/);
+  assert.match(newHtml, /<li>Ruling: 결석 사유는 선생님만 본다 &lt;기본&gt; — 명세에 없음 — 화면이 달라짐<\/li>/);
+});
+
+test('(g) the decision of a scenario comes by its id from summary.json, and results.json\'s own decision still shows when summary.json has none for it', () => {
+  const { run } = project();
+  const results = { ...RESULTS, spec: SPEC_PATH, rulings: undefined, scenarios: [
+    scenario('A', 'fail', [{ action: '실행', shot: null, output: 'x', exitCode: 1 }]),
+    { ...scenario('B', 'doubt', [{ action: '실행', shot: null, output: 'x', exitCode: 0 }]), decision: 'B의 옛 이유' },
+    scenario('C', 'doubt', [{ action: '실행', shot: null, output: 'x', exitCode: 0 }]),
+  ] };
+  writeSummary(run, { decision: { A: 'A는 고친다', C: 'C는 그대로 둔다' } });
+  const { html } = renderReport(results, { runDir: run });
+  assert.match(html, /<p class="decision">A는 고친다<\/p>/);
+  assert.match(html, /<p class="decision">B의 옛 이유<\/p>/);
+  assert.match(html, /<p class="decision">C는 그대로 둔다<\/p>/);
+  // summary.json이 같은 id를 가지고 있으면 그것이 이긴다
+  writeSummary(run, { decision: { B: 'B의 새 이유' } });
+  const again = renderReport(results, { runDir: run }).html;
+  assert.match(again, /<p class="decision">B의 새 이유<\/p>/);
+  assert.doesNotMatch(again, /B의 옛 이유/);
+});
+
+test('(g) field by field, summary.json first and results.json second: an old run with fields in results.json still shows them', () => {
+  const { run } = project();
+  const results = { ...FILLED, spec: SPEC_PATH };
+  // summary.json이 없다: results.json의 칸이 그대로 나온다
+  const noSummary = renderReport(results, { runDir: run }).html;
+  assert.match(noSummary, /출결 앱을 다 만들었고/);
+  assert.match(noSummary, /빈 수업 화면 문구를 정해 주세요/);
+  assert.match(noSummary, /결석 사유는 선생님만 봅니다/);
+  // headline만 summary.json에 있으면 headline만 바뀌고 todo·changes는 results.json 것이다
+  writeSummary(run, { headline: '새 결론이다.' });
+  const mixed = renderReport(results, { runDir: run }).html;
+  assert.match(mixed, /<p class="headline">새 결론이다\.<\/p>/);
+  assert.doesNotMatch(mixed, /출결 앱을 다 만들었고/);
+  assert.match(mixed, /빈 수업 화면 문구를 정해 주세요/);
+  assert.match(mixed, /결석 사유는 선생님만 봅니다/);
+  // 빈 배열도 값이다: todo가 []이면 "없음"이고 results.json의 옛 todo는 쓰지 않는다
+  writeSummary(run, { todo: [], changes: [] });
+  const emptied = renderReport(results, { runDir: run }).html;
+  assert.match(emptied, /<h2>할 일<\/h2><p>없음<\/p>/);
+  assert.doesNotMatch(emptied, /빈 수업 화면 문구를 정해 주세요/);
+  assert.doesNotMatch(emptied, /결석 사유는 선생님만 봅니다/);
+  // 칸이 없는 결과에는 빈 상자도 없다
+  rmSync(path.join(run, 'summary.json'));
+  assert.doesNotMatch(renderReport({ ...RESULTS, spec: SPEC_PATH }, { runDir: run }).html, /<h2>할 일<\/h2>/);
+});
+
+test('(g) rulings are the Ruling lines of the spec\'s decision log; a spec with none falls back to results.json\'s rulings, and a spec that cannot be read does too', () => {
+  const fromSpec = project({ log: '- Ruling: 명세에서 온 것 — 이유 — 잃는 것\n- 사용자가 말했다 (Ruling 줄이 아니다)\n  - Ruling: 들여쓴 것도 읽는다 — 이유 — 잃는 것\n\n정리하는 글\n' });
+  const results = { ...RESULTS, spec: SPEC_PATH, rulings: ['Ruling: results.json의 옛 것 — 이유 — 잃는 것'] };
+  const html = renderReport(results, { runDir: fromSpec.run }).html;
+  assert.match(html, /<summary>결정 기록 2개<\/summary>/);
+  assert.match(html, /<li>Ruling: 명세에서 온 것 — 이유 — 잃는 것<\/li>/);
+  assert.match(html, /<li>Ruling: 들여쓴 것도 읽는다 — 이유 — 잃는 것<\/li>/);
+  assert.doesNotMatch(html, /results\.json의 옛 것/);
+  assert.doesNotMatch(html, /Ruling 줄이 아니다/);
+  // 명세에 Ruling 줄이 없다
+  const none = project();
+  assert.match(renderReport(results, { runDir: none.run }).html, /<summary>결정 기록 1개<\/summary>[\s\S]*results\.json의 옛 것/);
+  // 명세 경로가 틀렸거나 results.json에 spec이 없다
+  const gone = renderReport({ ...results, spec: 'docs/pact/없음.md' }, { runDir: fromSpec.run }).html;
+  assert.match(gone, /results\.json의 옛 것/);
+  const noSpec = renderReport({ ...RESULTS, spec: undefined, rulings: undefined }, { runDir: fromSpec.run }).html;
+  assert.match(noSpec, /<title>검수 보고서<\/title>/, 'results.json에 spec이 없으면 명세를 찾지 않는다');
+  assert.doesNotMatch(noSpec, /결정 기록/);
+  assert.doesNotMatch(renderReport({ ...RESULTS, spec: SPEC_PATH, rulings: undefined }, { runDir: none.run }).html, /결정 기록/);
+});
+
+test('(g) a summary.json that cannot be read or has the wrong shape does not break the page: the fields it could not give fall back to results.json', () => {
+  const { run } = project();
+  const results = { ...FILLED, spec: SPEC_PATH };
+  for (const text of ['{ 깨짐', '[1]', 'null', JSON.stringify({ headline: 3, todo: '하나', changes: { a: 1 }, decision: ['S1'] })]) {
+    writeFileSync(path.join(run, 'summary.json'), text);
+    const { html } = renderReport(results, { runDir: run });
+    assert.match(html, /출결 앱을 다 만들었고/, text);
+    assert.match(html, /빈 수업 화면 문구를 정해 주세요/, text);
+    assert.match(html, /그대로 둡니다\. 저장 버튼이 있어서요\./, text);
+  }
+  rmSync(path.join(run, 'summary.json'));
+  mkdirSync(path.join(run, 'summary.json')); // 파일 자리에 폴더
+  assert.match(renderReport(results, { runDir: run }).html, /출결 앱을 다 만들었고/);
+});
+
+test('(g) CLI: the report built from results.json, summary.json and the spec shows all three; the output lines are the same as before', () => {
+  const { root, run } = project({ rulings: RULING_LINES });
+  writeFileSync(path.join(run, 'results.json'), JSON.stringify({ ...RESULTS, spec: SPEC_PATH, rulings: undefined }));
+  writeSummary(run, { headline: '요약 칸은 summary.json에서 왔다.', todo: ['할 일 하나'], changes: [], decision: {} });
+  const r = spawnSync('node', [CLI, run], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.trim().split('\n'), ['통과 2 · 실패 1 · 의심 0', path.join(run, 'report.html')]);
+  const html = readFileSync(path.join(run, 'report.html'), 'utf8');
+  assert.match(html, /요약 칸은 summary\.json에서 왔다\./);
+  assert.match(html, /할 일 하나/);
+  assert.match(html, /결정 기록 2개/);
+  assert.match(html, /<title>출결 관리 검수 보고서<\/title>/);
+  assert.ok(root);
 });

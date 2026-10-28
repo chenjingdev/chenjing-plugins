@@ -118,6 +118,12 @@ export function isTemplate(text) {
   return features.length > 0 && features.every((i) => PLACEHOLDER.test(i.text));
 }
 
+// `## 결정 기록`의 Ruling 줄들. 줄 앞의 `- `를 뗀 `Ruling: …` 글이다. 보고서(report.mjs)가 읽는다(명세 R13).
+export function decisionRulings(text) {
+  const section = parseSpec(text).sections['결정 기록'] ?? '';
+  return section.split('\n').map((line) => /^\s*[-*]\s+(Ruling:.*\S)\s*$/.exec(line)?.[1]).filter(Boolean);
+}
+
 // ---------- 위험 항목 (명세 R10) ----------
 // 기능·규칙 줄의 태그 앞에 `[위험: 지우기|공개|비용]`으로 표시한다. 표시가 있으면 위임으로는 만들기를 시작하지 않는다(approval.mjs).
 // 표시가 빠졌는지는 낱말로 찾지 않는다(진짜 명세 17개 모두에 걸려 위임이 늘 멈춘다). spec-checker가 뜻으로 보고 알린다(작업 4).
