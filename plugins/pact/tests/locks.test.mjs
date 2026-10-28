@@ -401,6 +401,28 @@ test('the verifier may write results.json by script, but not a lock it may not t
   free(bash(py(`import json; v=json.load(open('${R}/verification.json')); json.dump({'verification_id': v['verification_id']}, open('${R}/results.json','w'))`), { verifier: true }), '읽는 verification.json은 막지 않는다');
 });
 
+test('a path that ends in subagents.jsonl is a log/ file: the verifier may not write it even when the path is derived from results.json', () => {
+  const py = (code) => `python3 -c ${JSON.stringify(code)}`;
+  const RES = `res = Path('${R}/results.json')`;
+  for (const code of [
+    py(`from pathlib import Path; ${RES}; (res.parent / 'log' / 'subagents.jsonl').write_text('x')`),
+    py(`from pathlib import Path; ${RES}; res.with_name('subagents.jsonl').write_text('x')`),
+    py(`import os; res = '${R}/results.json'; open(os.path.join(os.path.dirname(res), 'log', 'subagents.jsonl'), 'a')`),
+  ]) {
+    for (const verifier of [false, true]) blocked(bash(code, { verifier }), `${verifier ? 'verifier' : 'main'}: ${code}`);
+    assert.match(bash(code, { verifier: true }).reason, /log\/ 밑의 기록\(log\/subagents\.jsonl\)/, '종류는 log다');
+  }
+  // 가운데에 폴더가 낀 경로는 풀어 주되, 위로 올라가거나 log/ 밑이거나 모르는 칸이 끼면 그대로 막는다
+  for (const code of [
+    py(`import os; RUN = '${R}'; open(os.path.join(RUN, 'wt', '..', 'results.json'), 'w')`),
+    py(`import os; RUN = '${R}'; open(os.path.join(RUN, 'log', 'results.json'), 'w')`),
+    py(`import os, sys; RUN = '${R}'; open(os.path.join(RUN, sys.argv[1], 'results.json'), 'w')`),
+    py(`import os; RUN = '${R}'; open(os.path.join(RUN, '.', 'results.json'), 'w')`),
+    py(`import os; RUN = '${R}'; open(os.path.join(RUN, 'wt', '${R}/results.json'), 'w')`),
+    py(`from pathlib import Path; RUN = Path('${R}'); (RUN / '..' / '${path.basename(R)}' / 'results.json').write_text('x')`),
+  ]) blocked(bash(code), code);
+});
+
 test('a glob is read against the names that exist and the locked names, and a broken pattern is only text', () => {
   blocked(bash(`rm -f ${R}/results*.json`), 'results*.json');
   blocked(bash(`rm ${R}/results-round*.json`), 'results-round*.json');
@@ -463,6 +485,22 @@ test('a file derived from a locked path (parent, dirname, with_name, replace, a 
     py(`import sys; from pathlib import Path; ${RES}; name = sys.argv[1]; (res.parents[0] / name).write_text('x')`),
     py(`import sys; from pathlib import Path; ${RES}; name = sys.argv[1]; res.with_name(name).write_text('x')`),
     py(`import shutil; from pathlib import Path; ${RES}; shutil.copy('/tmp/x', res.parent)`),
+    // 검토 반영: JS 문자열 메서드 normalize('NFC')는 경로 호출이 아니라 마지막 칸을 정하지 않는다(summary.json은 통과)
+    node(`const fs=require('fs'); const p='${R}/summary.json'; fs.writeFileSync(p.normalize('NFC'), '{}')`),
+    node(`const fs=require('fs'); const p='${R}/results.json'.replace('results','summary'); fs.writeFileSync(p.normalize('NFC'), '{}')`),
+    // 읽기 모드 'rs'와 pathlib가 아닌 문자열 replace(인자 둘)는 쓰기가 아니다
+    node(`const fs=require('fs'); fs.openSync('${R}/results.json', 'rs')`),
+    py(`res = '${R}/results.json'; name = res.replace('results', 'summary'); open('/tmp/out.txt', 'w').write(name)`),
+    py(`from pathlib import Path; ${RES}; tmp = res.with_name('summary.tmp'); tmp.write_text('x'); tmp.replace(res.with_name('summary.json'))`),
+    // strip은 경로를 바꾸지 않으니 따라간다: 마지막 칸이 잠긴 이름이 아니면 통과
+    py(`res = '${R}/results.json'; open(res.strip() + '.bak', 'w')`),
+    // 가운데 칸이 폴더면 실행 폴더 바로 밑이 아니다(wt/ 밑 worker의 작업 공간)
+    py(`import os; RUN = '${R}'; open(os.path.join(RUN, 'wt', 'results.json'), 'w')`),
+    py(`from pathlib import Path; RUN = Path('${R}'); (RUN / 'wt' / 'results.json').write_text('x')`),
+    py(`from pathlib import Path; RUN = Path('${R}'); RUN.joinpath('wt', 'approvals.jsonl').write_text('x')`),
+    py(`from pathlib import Path; RUN = Path('${R}'); Path(RUN, 'wt', 'sub', 'verification.json').write_text('x')`),
+    node(`const fs=require('fs'), path=require('path'); const RUN='${R}'; fs.writeFileSync(path.join(RUN, 'wt', 'results.json'), '{}')`),
+    node(`const fs=require('fs'), path=require('path'); const RUN='${R}'; fs.writeFileSync(path.resolve(RUN, 'tasks', 'log'), '{}')`),
   ];
   for (const code of main) free(bash(code), code);
   // verifier의 shots 쓰기: verification.json 경로에서 이끌어 낸 것
@@ -476,6 +514,7 @@ test('a file derived from a locked path (parent, dirname, with_name, replace, a 
 
 test('the shapes that are the locked file itself stay blocked: joined names, f-strings, Path(name), a variable, a derived path whose last name is locked, and anything under log/', () => {
   const py = (code) => `python3 -c ${JSON.stringify(code)}`;
+  const nodeCode = (code) => `node -e ${JSON.stringify(code)}`;
   const RES = `res = Path('${R}/results.json')`;
   for (const [code, options] of [
     [py(`import os; RUN='${R}'; open(os.path.join(RUN,'results.json'),'w')`), {}],
@@ -496,6 +535,40 @@ test('the shapes that are the locked file itself stay blocked: joined names, f-s
     [py(`import os; LOG='${R}/log'; open(os.path.join(LOG, 'notes.txt'), 'w')`), {}],
     [py(`p='${R}/log/notes.txt'; open(p, 'w')`), {}],
     [py(`open('${R}/log/subagents.jsonl' + '.copy', 'w')`), {}],
+    // 검토 반영 ① f-string·템플릿의 {x.속성}·{x()}·${x.trim()}: 마지막 칸이 잠긴 이름이면 그 변수를 따라간다
+    [py(`from pathlib import Path; ${RES}; open(f'{res.parent}/results.json','w')`), {}],
+    [py(`from pathlib import Path; RUN = Path('${R}'); open(f'{RUN.resolve()}/results.json','w')`), {}],
+    [py(`from pathlib import Path; ${RES}; open(f'{res.parent}/approvals.jsonl','a')`), {}],
+    [py(`from pathlib import Path; ${RES}; open(f'{res.parent}/verification.json','w')`), {}],
+    [py(`from pathlib import Path; ${RES}; open(f'{res.parent}/log/subagents.jsonl','a')`), {}],
+    [py(`from pathlib import Path; ${RES}; open(f'{res.parent}/approvals.jsonl','a')`), { verifier: true }],
+    [py(`import os; res='${R}/results.json'; open(f'{os.path.dirname(res)}/results.json','w')`), {}],
+    [`node -e 'const fs=require("fs"); const run="${R}"; fs.writeFileSync(\`\${run.trim()}/results.json\`, "{}")'`, {}],
+    [`node -e 'const fs=require("fs"), path=require("path"); const res="${R}/results.json"; fs.writeFileSync(\`\${path.dirname(res)}/results.json\`, "{}")'`, {}],
+    [`node - <<'EOF'\nconst fs=require('fs'); const run='${R}';\nfs.writeFileSync(\`\${run.trim()}/results.json\`, '{}');\nEOF`, {}],
+    // ② 목록·사전에서 고른 경로(고르기 x[0]·x['k']는 따라가고, 슬라이스만 이끌어 낸 값이다)
+    [py(`RUN='${R}'; paths=[f'{RUN}/results.json']; open(paths[0],'w')`), {}],
+    [py(`cfg={'out': '${R}/results.json'}; open(cfg['out'],'w')`), {}],
+    [py(`RUN='${R}'; cfg={'out': f'{RUN}/results.json'}; open(cfg['out'],'w')`), {}],
+    [py(`RUN='${R}'; fs=[f'{RUN}/approvals.jsonl']; open(fs[0],'a')`), {}],
+    [nodeCode(`const fs=require('fs'); const paths=['${R}/results.json']; fs.writeFileSync(paths[0], '{}')`), {}],
+    // ③ JS 문자열 메서드 p.normalize('NFC')는 경로 호출이 아니다. 인자 없는 p.normalize()도 막힌다
+    [nodeCode(`const fs=require('fs'); const p='${R}/results.json'; fs.writeFileSync(p.normalize('NFC'), '{}')`), {}],
+    [nodeCode(`const fs=require('fs'); const p='${R}/results.json'; fs.writeFileSync(p.normalize('NFKD'), '{}')`), {}],
+    [nodeCode(`const fs=require('fs'); const p='${R}/results.json'; fs.writeFileSync(p.normalize(), '{}')`), {}],
+    // ④ Node 플래그 'as'·'rs+'
+    [nodeCode(`const fs=require('fs'); const p='${R}/results.json'; fs.openSync(p, 'as')`), {}],
+    [nodeCode(`const fs=require('fs'); fs.openSync('${R}/results.json', 'rs+')`), {}],
+    [nodeCode(`const fs=require('fs'); fs.openSync('${R}/approvals.jsonl', 'as+')`), {}],
+    // ⑤ pathlib의 원자 쓰기: tmp.replace(res)·tmp.rename(res)
+    [py(`from pathlib import Path; ${RES}; tmp = res.with_suffix('.tmp'); tmp.write_text('x'); tmp.replace(res)`), {}],
+    [py(`from pathlib import Path; ${RES}; tmp = res.with_suffix('.tmp'); tmp.write_text('x'); tmp.rename(res)`), {}],
+    [py(`from pathlib import Path; ${RES}; Path('/tmp/x').replace(res)`), {}],
+    [py(`from pathlib import Path; p = Path('${R}/approvals.jsonl'); Path('/tmp/x').with_suffix('.tmp').replace(p)`), {}],
+    // ⑦ strip은 경로를 바꾸지 않는다
+    [py(`p='${R}/results.json'; open(p.strip(),'w')`), {}],
+    [py(`p='${R}/verification.json'; open(p.rstrip(),'w')`), {}],
+    [nodeCode(`const fs=require('fs'); const p='${R}/results.json'; fs.writeFileSync(p.trim(), '{}')`), {}],
   ]) blocked(bash(code, options), code);
   assert.match(bash(py(`from pathlib import Path; ${RES}; (res.parent / 'approvals.jsonl').write_text('x')`)).reason, /승인 기록\(approvals\.jsonl\)/, '이름으로 종류를 정한다');
   assert.match(bash(py(`from pathlib import Path; ${RES}; res.with_name('results-round3.json').write_text('x')`)).reason, /검수 결과\(results-round3\.json\)/);

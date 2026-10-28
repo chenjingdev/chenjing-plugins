@@ -309,6 +309,7 @@ const FS_CALLS = table({
 const BARE_FS = new Set(['writeFile', 'writeFileSync', 'appendFile', 'appendFileSync', 'createWriteStream', 'unlinkSync', 'rmSync', 'rmdirSync', 'truncateSync', 'copyFile', 'copyFileSync', 'cpSync', 'renameSync']);
 const OPEN_CALLS = new Set(['open', 'io.open', 'codecs.open', 'builtins.open', 'fs.openSync', 'fs.open', 'fsp.open', 'openSync']);
 const RECEIVER_METHODS = new Set(['write_text', 'write_bytes', 'unlink', 'touch']);
+const MOVE_ONTO = new Set(['replace', 'rename']); // 인자 하나짜리 pathlib `.replace(대상)`·`.rename(대상)`
 
 const STRING_RE = /"((?:\\.|[^"\\\n])*)"|'((?:\\.|[^'\\\n])*)'|`((?:\\.|[^`\\])*)`/g;
 const literalsIn = (text) => [...text.matchAll(STRING_RE)].map((m) => m[1] ?? m[2] ?? m[3]);
@@ -388,10 +389,15 @@ function assignmentsIn(code) {
   return map;
 }
 
-// 글 안의 이름(변수)과 f-string·템플릿 글 안의 `{이름}`. `{이름.속성}`·`{이름(…)}`처럼 이끌어 낸 값은 뺀다.
-function identsIn(text) {
+// 글 안의 이름(변수)과 f-string·템플릿 글 안의 `{이름}`. cut이면 `{이름.속성}`·`{이름(…)}`처럼 이끌어 낸 값은 뺀다.
+// cut이 아니면(마지막 칸이 잠긴 이름이라 이끌어 낸 값도 따라간다) `{…}`·`${…}` 안의 이름을 모두 낸다: `{res.parent}`·`${run.trim()}`·`{os.path.dirname(res)}`.
+function identsIn(text, cut = true) {
   const names = new Set(withoutStrings(text).match(IDENT) ?? []);
-  for (const m of text.matchAll(/\$?\{\s*([A-Za-z_$][\w$]*)\s*(?:[:!][^{}]*)?\}/g)) names.add(m[1]);
+  if (cut) {
+    for (const m of text.matchAll(/\$?\{\s*([A-Za-z_$][\w$]*)\s*(?:[:!][^{}]*)?\}/g)) names.add(m[1]);
+  } else {
+    for (const m of text.matchAll(/\$?\{([^{}]*)\}/g)) for (const id of withoutStrings(m[1]).match(IDENT) ?? []) names.add(id);
+  }
   return names;
 }
 
@@ -402,7 +408,7 @@ function writeTargets(code) {
   const writes = (mode) => {
     const m = /^\s*(?:(?:mode|flags)\s*=\s*)?[urbtUR]*(?:"([^"]*)"|'([^']*)')/.exec(mode ?? '');
     const text = m ? (m[1] ?? m[2]) : '';
-    return /^[rwxabtU+]+$/.test(text) && /[wax+]/.test(text);
+    return /^[rwxabtsU+]+$/.test(text) && /[wax+]/.test(text); // s는 Node 플래그('as', 'rs+')
   };
   const modeOf = (args) => args.find((a) => /^\s*mode\s*=/.test(a)) ?? args[0]; // pathlib의 open은 첫 인자가 모드다
   for (const m of maskStrings(code).matchAll(/([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(/g)) {
@@ -415,7 +421,10 @@ function writeTargets(code) {
       const before = code.slice(0, at - 1);
       const receiver = before.slice(Math.max(before.lastIndexOf('\n'), before.lastIndexOf(';')) + 1);
       if (RECEIVER_METHODS.has(full)) out.push({ text: receiver, at });
-      else if (full === 'open') {
+      else if (MOVE_ONTO.has(full)) {
+        const args = splitArgs(code, open).filter((a) => a.trim());
+        if (args.length === 1) out.push({ text: args[0], at });
+      } else if (full === 'open') {
         if (writes(modeOf(splitArgs(code, open)))) out.push({ text: receiver, at });
       } else if (FS_CALLS[full] && (BARE_FS.has(full) || /require\(\s*['"](?:node:)?fs(?:\/promises)?['"]\s*\)\s*$/.test(before))) {
         const args = splitArgs(code, open);
@@ -436,6 +445,9 @@ function writeTargets(code) {
       for (const i of spots) if (args[i] !== undefined) out.push({ text: args[i], at });
     } else if (dot !== -1 && RECEIVER_METHODS.has(last)) { // `p.write_text(…)`: 점 앞 이름이 받는 쪽이다
       out.push({ text: full.slice(0, dot), at });
+    } else if (dot !== -1 && MOVE_ONTO.has(last)) { // `tmp.replace(res)`·`tmp.rename(res)`: 인자 하나면 pathlib의 옮기기라 그 인자가 쓰는 곳이다(문자열 replace는 인자가 둘이다)
+      const args = splitArgs(code, open).filter((a) => a.trim());
+      if (args.length === 1) out.push({ text: args[0], at });
     } else if (dot !== -1 && last === 'open' && writes(modeOf(splitArgs(code, open)))) { // `p.open('w')`
       out.push({ text: full.slice(0, dot), at });
     }
@@ -487,8 +499,10 @@ function receiverStart(masked, end) {
 // 다른 글에서 이끌어 낸 값의 꼴: `dirname(x)`·`x.parent`·`x.with_name('y')`·`x.replace(…)`·`x[:-5]`·`re.sub(…)`.
 // 이런 값은 받는 쪽 글과 다른 경로다. 그래서 받는 쪽(변수)과 인자까지 통째로 가려서, 그 안에 있던 잠긴 경로를 까닭으로 막지 않게 한다.
 const DERIVE_CALL = /(?<![\w$.])(?:(?:os\.path|posixpath|path)\.)?(?:dirname|basename|splitext|extname|relpath|relative|commonpath)\(|(?<![\w$.])(?:os\.path|posixpath|path)\.(?:split|parse)\(|(?<![\w$.])re\.subn?\(/;
-const DERIVE_MEMBER = /\.(?:parents?|name|stem|suffixes?|with_name|with_suffix|with_stem|relative_to|replace|rsplit|split|partition|rpartition|rstrip|lstrip|strip|removesuffix|removeprefix|slice|substring|substr)(?![\w$])/;
-const SUBSCRIPT = /(?<=[\w$)\]])\[/;
+const DERIVE_MEMBER = /\.(?:parents?|name|stem|suffixes?|with_name|with_suffix|with_stem|relative_to|replace|rsplit|split|partition|rpartition|removesuffix|removeprefix|slice|substring|substr)(?![\w$])/;
+// 이름·`)`·`]` 뒤의 `[`. 그 괄호 안 맨 위 수준에 `:`가 있는 것(슬라이스 `x[:-5]`)만 이끌어 낸 값이다.
+// 고르기(`x[0]`, `x['k']`)는 목록·사전에서 고른 값이라 그 변수를 따라간다. `.strip()`·`.trim()`도 경로를 바꾸지 않으니 같다.
+const SUBSCRIPT = /(?<=[\w$)\]])\[/g;
 
 // 가장 왼쪽의 이끌어 낸 값이 차지한 자리 [시작, 끝] 또는 null
 function findDerivation(masked) {
@@ -507,10 +521,12 @@ function findDerivation(masked) {
     }
     spans.push([receiverStart(masked, member.index), end]);
   }
-  const subscript = SUBSCRIPT.exec(masked);
-  if (subscript) {
+  for (const subscript of masked.matchAll(SUBSCRIPT)) {
     const close = matchForward(masked, subscript.index);
+    const inner = masked.slice(subscript.index + 1, close === -1 ? masked.length : close);
+    if (lastTopLevel(inner, ':') === -1) continue; // 고르기
     spans.push([receiverStart(masked, subscript.index), close === -1 ? masked.length : close + 1]);
+    break;
   }
   return spans.sort((a, b) => a[0] - b[0])[0] ?? null;
 }
@@ -536,7 +552,8 @@ function nearestAssignment(id, at, assigns) {
 // 경로를 만들 뿐인 호출(`Path('x')`, `path.resolve('x')`, `os.path.abspath('x')` …)과 cwd에 붙이는 꼴(`Path.cwd() / 'x'`, `path.join(process.cwd(), 'x')`)도 같다.
 const LITERAL = String.raw`[rRuUbB]{0,2}(?:"([^"]*)"|'([^']*)'|\x60([^\x60]*)\x60)`;
 const WHOLE_LITERAL = new RegExp(`^${LITERAL}$`);
-const PATH_WRAPPER = /^(?:[A-Za-z_$][\w$]*\.)*(?:Path|PurePath|PurePosixPath|resolve|normalize|abspath|normpath|realpath|expanduser|fspath|str|String)\(([\s\S]*)\)(?:\.(?:resolve|absolute|expanduser|as_posix)\(\s*\))*$/;
+// normalize는 `path.normalize(p)`처럼 모듈 이름이 붙을 때만 경로 호출이다. `p.normalize('NFC')`는 JS 문자열 메서드(유니코드 정규화)다.
+const PATH_WRAPPER = /^(?:(?:[A-Za-z_$][\w$]*\.)*(?:Path|PurePath|PurePosixPath|resolve|abspath|normpath|realpath|expanduser|fspath|str|String)|(?:(?:[A-Za-z_$][\w$]*\.)*(?:path|posixpath|ntpath)\.)?normalize)\(([\s\S]*)\)(?:\.(?:resolve|absolute|expanduser|as_posix)\(\s*\))*$/;
 const CWD = String.raw`(?:process\.cwd\(\)|os\.getcwd\(\)|(?:pathlib\.)?Path\.cwd\(\)|"\."|'\.')`;
 const CWD_JOIN = new RegExp(String.raw`^(?:[A-Za-z_$][\w$]*\.)*(?:join|resolve)\(\s*${CWD}\s*,\s*(${LITERAL})\s*\)$`);
 const CWD_SLASH = new RegExp(String.raw`^${CWD}\s*/\s*(${LITERAL})$`);
@@ -567,7 +584,7 @@ const literalBody = (s) => {
   const m = LITERAL_ANY.exec(s.trim());
   return m ? (m[1] ?? m[2] ?? m[3]) : null;
 };
-const PATH_CALL = /^((?:[A-Za-z_$][\w$]*\.)*(?:join|resolve|normalize|abspath|normpath|realpath|expanduser|fspath|Path|PurePath|PurePosixPath|str|String))\(/;
+const PATH_CALL = /^((?:[A-Za-z_$][\w$]*\.)*(?:join|resolve|abspath|normpath|realpath|expanduser|fspath|Path|PurePath|PurePosixPath|str|String)|(?:(?:[A-Za-z_$][\w$]*\.)*(?:path|posixpath|ntpath)\.)?normalize)\(/;
 const PATH_TAIL = /^(?:\.(?:resolve|absolute|expanduser|as_posix)\(\s*\)\s*)*$/;
 
 function lastSegment(text, at, assigns, depth = 0) {
@@ -576,6 +593,8 @@ function lastSegment(text, at, assigns, depth = 0) {
   const masked = maskStrings(t);
   const next = (part, bound = at) => lastSegment(part, bound, assigns, depth + 1);
   if (t[0] === '(' && matchForward(masked, 0) === t.length - 1) return next(t.slice(1, -1));
+  const strip = /\.(?:strip|lstrip|rstrip|trim|trimStart|trimEnd)\(\s*\)$/.exec(masked); // 끝의 공백만 깎는다: 경로는 그대로다
+  if (strip && lastTopLevel(masked, '+') === -1 && lastTopLevel(masked, '/') === -1) return next(t.slice(0, strip.index));
   const plus = lastTopLevel(masked, '+');
   if (plus !== -1) { // 이어 붙인 글: 맨 오른쪽 글자에 폴더 가르개가 있으면 그 뒤가 마지막 칸이고, 없으면 왼쪽의 마지막 칸 뒤에 붙는다
     const body = literalBody(t.slice(plus + 1));
@@ -611,6 +630,53 @@ function lastSegment(text, at, assigns, depth = 0) {
     return assignment ? next(assignment.rhs, assignment.at) : null;
   }
   return null;
+}
+
+// 경로를 칸마다 따로 적은 글(`os.path.join(RUN, 'wt', 'results.json')`, `RUN / 'wt' / 'results.json'`, `Path(RUN, 'wt', 'results.json')`)에서
+// 마지막 칸 앞에 폴더 이름 글자가 끼어 있으면 그 파일은 실행 폴더 바로 밑이 아니다(wt/ 밑 같은 곳). 칸이 모두 글자일 때만 그렇게 읽는다:
+// 모르는 칸(변수)이 끼었거나 `..`·`.pact`·절대 경로가 있거나 첫 폴더가 log이면 아니다(log/ 밑은 잠겼다).
+const plainLiteral = (s) => {
+  const body = literalBody(s);
+  return body !== null && !/[{}$%]/.test(body) ? body : null;
+};
+function inSubfolder(text, depth = 0) {
+  const t = text.trim();
+  if (!t || depth > 8) return false;
+  const masked = maskStrings(t);
+  if (t[0] === '(' && matchForward(masked, 0) === t.length - 1) return inSubfolder(t.slice(1, -1), depth + 1);
+  let parts = null; // 칸마다 적은 식들: 첫 칸(바탕), 가운데 칸들, 마지막 칸
+  if (lastTopLevel(masked, '/') !== -1) {
+    parts = [];
+    let level = 0;
+    let start = 0;
+    for (let i = 0; i < masked.length; i++) {
+      const c = masked[i];
+      if ('([{'.includes(c)) level++;
+      else if (')]}'.includes(c)) level--;
+      else if (level === 0 && c === '/') { parts.push(t.slice(start, i)); start = i + 1; }
+    }
+    parts.push(t.slice(start));
+  } else {
+    const joinpath = masked.lastIndexOf('.joinpath(');
+    const call = PATH_CALL.exec(masked);
+    if (joinpath !== -1 && matchForward(masked, joinpath + '.joinpath'.length) === masked.length - 1) {
+      parts = ['', ...splitArgs(`${t.slice(joinpath + '.joinpath('.length, -1)})`, 0)];
+    } else if (call) {
+      const open = call[0].length - 1;
+      const close = matchForward(masked, open);
+      if (close === -1 || !PATH_TAIL.test(masked.slice(close + 1))) return false;
+      const args = splitArgs(`${t.slice(open + 1, close)})`, 0);
+      if (args.length === 1) return inSubfolder(args[0], depth + 1);
+      parts = args;
+    }
+  }
+  if (!parts || parts.length < 3) return false;
+  const final = plainLiteral(parts[parts.length - 1]);
+  if (final === null || final.includes('/')) return false;
+  const middle = parts.slice(1, -1).map(plainLiteral);
+  if (middle.some((b) => b === null || b.startsWith('/') || b.includes('..') || /\.pact/i.test(b))) return false;
+  const first = middle.find((b) => b !== '' && b !== '.');
+  return first !== undefined && first.split('/')[0].toLowerCase() !== 'log';
 }
 
 // 맨 위 수준(괄호 밖)에서 마지막으로 나온 ch의 자리. 없으면 -1
@@ -680,7 +746,7 @@ function followAssignments(target, at, assigns, cut) {
   const pool = [target];
   const seen = new Set();
   for (let k = 0; k < pool.length && k < 24; k++) {
-    for (const id of identsIn(pool[k])) {
+    for (const id of identsIn(pool[k], cut)) {
       const list = assigns.get(id);
       if (seen.has(id) || !list) continue;
       seen.add(id);
@@ -700,11 +766,14 @@ function followAssignments(target, at, assigns, cut) {
 function lockInTarget(text, at, assigns, state, findSpec) {
   const last = lastSegment(text, at, assigns);
   const lockedLast = last !== null && isLockedName(last);
+  if (lockedLast && inSubfolder(text)) return null; // `os.path.join(RUN, 'wt', 'results.json')`은 실행 폴더 바로 밑이 아니다
   const target = lockedLast ? text : stripDerived(text);
   const whole = wholeString(target, at, assigns);
   const accept = last !== null && !lockedLast ? (lock) => lock.kind === 'log' : () => true;
   const hit = scan([target], whole, state, findSpec, accept) ?? scan(followAssignments(target, at, assigns, !lockedLast), whole, state, findSpec, accept);
-  const named = hit && lockedLast && hit.kind !== 'log' ? classifyRest([last]) : null;
+  // 마지막 칸이 subagents.jsonl이면 log/ 밑 파일이다(classifyRest(['subagents.jsonl'])은 null이라 따로 정한다)
+  const inLog = lockedLast && last.toLowerCase() === 'subagents.jsonl';
+  const named = hit && lockedLast && hit.kind !== 'log' ? (inLog ? { kind: 'log', name: 'log/subagents.jsonl' } : classifyRest([last])) : null;
   return named ? { ...hit, ...named } : hit;
 }
 
