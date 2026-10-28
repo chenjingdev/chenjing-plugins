@@ -165,8 +165,14 @@ test('results.json is the verifier\'s alone, and verify.md, verifier.md and the 
   assert.doesNotMatch(verify, /먼저 `results\.json`을 `results-round<n>\.json`으로 복사해 둔다/, '메인이 복사하던 지시는 없어졌다');
   assert.match(verify, /고치려 하면 훅이 막고, 다른 길로 바뀐 것은 finish가 verifier 기록의 지문과 비교해 막는다/);
   // 완료 검사가 막는 것에 지문 비교가 들어 있다
-  assert.match(verify, /완료 검사가 막는 것은 여섯 가지다/);
+  assert.match(verify, /완료 검사가 막는 것은 일곱 가지다/);
+  const blocks = /완료 검사가 막는 것은 일곱 가지다\.\n((?:- .*\n)+)/.exec(verify);
+  assert.ok(blocks, '막는 것의 목록');
+  assert.equal(blocks[1].trim().split('\n').length, 7, '목록은 센 숫자와 같은 일곱 줄이다');
+  assert.match(blocks[1], /^- 읽지 못하거나 칸의 모양이 틀린 `summary\.json`: `headline`은 글, `todo`·`changes`는 배열, `decision`은 시나리오 id를 키로 하는 객체여야 한다\.$/m);
   assert.match(verify, /verifier가 끝난 뒤 바뀐 `results\.json`: 지금 파일의 지문이 가장 최근 verifier 기록과 다르거나, 그 기록이 없거나, 기록에 지문이 없다/);
+  // 지문이 어긋난 두 경우를 나눠 적는다: 코드를 고쳐야 하면 build로, 코드는 맞고 결과만 바뀌었으면 verifier만 다시
+  assert.match(verify, /결과가 틀려서 코드를 고쳐야 하면 build로 되돌려 고치고 verifier로 다시 검수한다\. 코드는 맞고 `results\.json`만 바뀐 것이면 verifier만 다시 돌린다/);
   assert.match(verify, /옛 판\)에 verifier 기록이 하나도 없으면 지문 비교를 건너뛰고 그렇다고 `참고:`로 알린다/);
   // verifier.md: results.json만 쓴다, 보고 칸은 쓰지 않는다
   assert.match(verifier, /run-dir 맨 위의 파일 가운데 `results\.json`만 당신이 쓴다\. 다른 쪽이 쓰려 하면 훅이 막는다/);
@@ -185,6 +191,10 @@ test('results.json is the verifier\'s alone, and verify.md, verifier.md and the 
   assert.match(readme, /`results\.json`·`results-round\*\.json`은 `pact:verifier`만, `verification\.json`은 `verification\.mjs snapshot`만, `approvals\.jsonl`과 `log\/` 밑은 훅과 pact 스크립트만 쓴다/);
   assert.match(readme, /`<run-dir>\/wt\/` 밑.*명세\(`docs\/pact\/<run-id>\.md`\)가 없는 폴더는 대상이 아니다\. 옛 판도 똑같이 건다/);
   assert.match(readme, /완료 검사는 `results\.json`의 지금 sha256을 가장 최근 verifier가 끝날 때 훅이 남긴 지문과 비교한다/);
+  assert.match(readme, /코드를 고쳐야 하면 build로 되돌려 고친 뒤 verifier로 다시 검수하라고, 코드는 맞고 `results\.json`만 바뀐 것이면 verifier만 다시 돌리라고 알린다/);
+  // 훅이 못 보는 길: 변수로 만든 경로, 파일에 적은 스크립트, MCP 도구(hooks.json은 그대로)
+  assert.match(readme, /훅이 못 보는 길도 있다: 변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구\(메인 세션도 CUA의 `js`로 `fs\.writeFileSync`를 불러 실행 폴더에 쓸 수 있고, MCP 도구는 `hooks\.json`의 matcher에 없다\)/);
+  assert.match(readme, /이름은 대소문자를 가리지 않고 본다/);
   assert.match(readme, /0\.6\.0에서 verifier가 다시 돌아 기록이 생긴 옛 판은 비교한다/);
   assert.match(readme, /출력의 `saved_results`/);
   // 세 곳이 summary.json의 모양을 같게 적는다

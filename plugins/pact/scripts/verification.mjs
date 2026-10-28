@@ -144,7 +144,7 @@ const FINGERPRINT_NOTE = '참고: 옛 판이고 verifier 기록이 없어 result
 // results.json이 없는 것은 여기서 따로 말하지 않는다(checkVerification이 읽지 못했다고 막는다). 기록을 읽지 못하면 던진다.
 export function fingerprintVerdict(specFile, runDir) {
   const latest = latestVerifierFingerprint(runDir);
-  const again = '결과가 틀렸으면 build로 되돌려 고치고 verifier로 다시 검수한다. 보고 칸은 summary.json에 쓴다.';
+  const again = '코드를 고쳐야 하면 build로 되돌려 고치고 verifier로 다시 검수한다. 코드는 맞고 results.json만 바뀐 것이면 verifier만 다시 돌린다. 보고 칸은 summary.json에 쓴다.';
   if (!latest) {
     const gate = checkStart({ specFile, purpose: 'finish' });
     if (gate.ok && gate.mode === 'legacy') return { note: FINGERPRINT_NOTE };

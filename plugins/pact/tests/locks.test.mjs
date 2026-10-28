@@ -425,7 +425,193 @@ test('a locked file in the same command is found whichever part of a long comman
   blocked(bash(`echo 1\n\necho 2\n# 주석\ncp a ${R}/results.json\n`), '줄바꿈 뒤');
   blocked(bash(`echo start && python3 - <<'EOF'\nprint(1)\nEOF\nrm ${R}/log/subagents.jsonl`), 'heredoc 뒤');
   free(bash(`${'echo x; '.repeat(2000)}`), '아주 긴 명령도 지나간다');
-  free(bash(`echo ${'x'.repeat(300000)} > ${R}/results.json`), '너무 긴 글은 보지 않는다(지문이 막는다)');
+  blocked(bash(`echo ${'x'.repeat(300000)} > ${R}/results.json`), '30만 자도 본다');
+});
+
+// ---------- 검토 반영: 잠긴 파일의 경로에서 이끌어 낸 다른 파일은 막지 않는다 ----------
+
+test('a file derived from a locked path (parent, dirname, with_name, replace, a slice, a suffix) is judged by its own last name: summary.json, shots/… and plan.md pass', () => {
+  const py = (code) => `python3 -c ${JSON.stringify(code)}`;
+  const node = (code) => `node -e ${JSON.stringify(code)}`;
+  const RES = `res = Path('${R}/results.json')`;
+  const main = [
+    // 메인의 새 흐름: results.json을 읽고 그 옆에 summary.json을 쓴다
+    py(`from pathlib import Path; ${RES}; (res.parent / 'summary.json').write_text('x')`),
+    py(`from pathlib import Path; ${RES}; res.parent.joinpath('summary.json').write_text('x')`),
+    py(`from pathlib import Path; ${RES}; (res.parent / 'shots' / 'S1-1.txt').write_text('x')`),
+    py(`from pathlib import Path; ${RES}; res.with_name('summary.json').write_text('x')`),
+    py(`from pathlib import Path; ${RES}; res.with_suffix('.bak').write_text('x')`),
+    py(`from pathlib import Path; ${RES}; Path(str(res).replace('results', 'summary')).write_text('x')`),
+    py(`import os; res = '${R}/results.json'; open(os.path.join(os.path.dirname(res), 'summary.json'), 'w')`),
+    py(`import os; res = '${R}/results.json'; open(os.path.join(os.path.dirname(res), 'plan.md'), 'a')`),
+    py(`src = '${R}/results.json'; open(src.replace('results.json', 'summary.json'), 'w')`),
+    py(`res = '${R}/results.json'; open(res[:-12] + 'summary.json', 'w')`),
+    node(`const fs=require('fs'), path=require('path'); const res='${R}/results.json'; fs.writeFileSync(path.join(path.dirname(res),'summary.json'),'x')`),
+    node(`const fs=require('fs'); const res='${R}/results.json'; fs.writeFileSync(res.replace('results.json','summary.json'), '{}')`),
+    node(`const fs=require('fs'); const res='${R}/results.json'; fs.writeFileSync(res.slice(0,-12) + 'summary.json', '{}')`),
+    `node -e 'const fs=require("fs"), path=require("path"); const res="${R}/results.json"; fs.writeFileSync(\`\${path.dirname(res)}/summary.json\`, "{}")'`,
+    // 이름 뒤에 글자를 붙인 것(백업, 임시)은 잠긴 이름이 아니다
+    py(`import shutil; res = '${R}/results.json'; shutil.copy(res, res + '.bak')`),
+    py(`res = '${R}/results.json'; open(res + '.tmp', 'w')`),
+    py(`res = '${R}/results.json'; open(f'{res}.bak', 'w')`),
+    // 마지막 칸을 모르면 이끌어 낸 값 안은 따라가지 않는다
+    py(`import os, sys; res = '${R}/results.json'; name = sys.argv[1]; open(os.path.join(os.path.dirname(res), name), 'w')`),
+    py(`import sys; from pathlib import Path; ${RES}; name = sys.argv[1]; open(f'{res.parent}/{name}', 'w')`),
+    py(`import os; res = '${R}/results.json'; open(os.path.join(os.path.dirname(res), 'shots', f'S1-{1 + 1}.txt'), 'w')`),
+    // .parent·.parents·with_name에 이름을 모르는 것을 이은 것, 폴더를 받는 쪽(shutil.copy의 도착지)도 같다
+    py(`import sys; from pathlib import Path; ${RES}; name = sys.argv[1]; (res.parent / name).write_text('x')`),
+    py(`import sys; from pathlib import Path; ${RES}; name = sys.argv[1]; (res.parents[0] / name).write_text('x')`),
+    py(`import sys; from pathlib import Path; ${RES}; name = sys.argv[1]; res.with_name(name).write_text('x')`),
+    py(`import shutil; from pathlib import Path; ${RES}; shutil.copy('/tmp/x', res.parent)`),
+  ];
+  for (const code of main) free(bash(code), code);
+  // verifier의 shots 쓰기: verification.json 경로에서 이끌어 낸 것
+  for (const code of [
+    py(`import os; v = '${R}/verification.json'; open(os.path.join(os.path.dirname(v), 'shots', 'S1-1.txt'), 'w')`),
+    py(`from pathlib import Path; v = Path('${R}/verification.json'); (v.parent / 'shots' / 'S1-1.txt').write_text('x')`),
+    node(`const fs=require('fs'), path=require('path'); const v='${R}/verification.json'; fs.writeFileSync(path.join(path.dirname(v),'shots','S1-1.png'),'x')`),
+    py(`import os; v = '${R}/approvals.jsonl'; open(os.path.join(os.path.dirname(v), 'plan.md'), 'a')`),
+  ]) free(bash(code, { verifier: true }), `verifier: ${code}`);
+});
+
+test('the shapes that are the locked file itself stay blocked: joined names, f-strings, Path(name), a variable, a derived path whose last name is locked, and anything under log/', () => {
+  const py = (code) => `python3 -c ${JSON.stringify(code)}`;
+  const RES = `res = Path('${R}/results.json')`;
+  for (const [code, options] of [
+    [py(`import os; RUN='${R}'; open(os.path.join(RUN,'results.json'),'w')`), {}],
+    [py(`RD='${R}'; open(f'{RD}/results.json','w')`), {}],
+    [py(`from pathlib import Path; p=Path('results.json'); p.write_text('x')`), { cwd: R }],
+    [py(`res='${R}/results.json'; open(res,'w')`), {}],
+    [py(`res='${R}/results.json'; open(f'{res}', 'w')`), {}],
+    [py(`import os; res='${R}/results.json'; os.replace(res + '.tmp', res)`), {}],
+    [py(`import shutil; res='${R}/results.json'; shutil.copy('/tmp/x', res)`), {}],
+    // 마지막 칸이 잠긴 이름이면 이끌어 낸 값도 따라가 그 폴더를 찾는다. 잠긴 종류는 그 이름으로 정한다
+    [py(`from pathlib import Path; ${RES}; (res.parent / 'results.json').write_text('x')`), {}],
+    [py(`from pathlib import Path; ${RES}; res.with_name('results-round3.json').write_text('x')`), {}],
+    [py(`import os; res='${R}/results.json'; open(os.path.join(os.path.dirname(res), 'verification.json'), 'w')`), {}],
+    [py(`from pathlib import Path; ${RES}; (res.parent / 'approvals.jsonl').write_text('x')`), {}],
+    [py(`from pathlib import Path; ${RES}; (res.parent / 'approvals.jsonl').write_text('x')`), { verifier: true }],
+    // log/ 밑은 이름이 무엇이든 잠겼다
+    [py(`import os; RUN='${R}'; open(os.path.join(RUN, 'log', 'notes.txt'), 'w')`), {}],
+    [py(`import os; LOG='${R}/log'; open(os.path.join(LOG, 'notes.txt'), 'w')`), {}],
+    [py(`p='${R}/log/notes.txt'; open(p, 'w')`), {}],
+    [py(`open('${R}/log/subagents.jsonl' + '.copy', 'w')`), {}],
+  ]) blocked(bash(code, options), code);
+  assert.match(bash(py(`from pathlib import Path; ${RES}; (res.parent / 'approvals.jsonl').write_text('x')`)).reason, /승인 기록\(approvals\.jsonl\)/, '이름으로 종류를 정한다');
+  assert.match(bash(py(`from pathlib import Path; ${RES}; res.with_name('results-round3.json').write_text('x')`)).reason, /검수 결과\(results-round3\.json\)/);
+  assert.match(bash(py(`import os; RUN='${R}'; open(os.path.join(RUN, 'log', 'notes.txt'), 'w')`)).reason, /log\/ 밑의 기록\(log\/\)/, '폴더 이름뿐이면 log/');
+});
+
+test('Path.open and p.open take the mode as their first argument: a write mode is a write, a read or a file name is not', () => {
+  const py = (code) => `python3 -c ${JSON.stringify(code)}`;
+  for (const [code, options] of [
+    [py(`from pathlib import Path; Path('${R}/results.json').open('w').write('x')`), {}],
+    [py(`from pathlib import Path; p = Path('${R}/results.json'); p.open('w')`), {}],
+    [py(`from pathlib import Path; p = Path('${R}/results.json'); p.open(mode='a')`), {}],
+    [py(`from pathlib import Path; p = Path('${R}/results.json'); p.open('wb')`), {}],
+    [py(`from pathlib import Path; p = Path('${R}/results.json'); p.open('r+', encoding='utf8')`), {}],
+    [py(`from pathlib import Path; p = Path('${R}/verification.json'); f = p.open('x')`), {}],
+    [py(`from pathlib import Path; Path('${R}/approvals.jsonl').open('a')`), {}],
+    [py(`from pathlib import Path; Path('results.json').open('w')`), { cwd: R }],
+    [py(`from pathlib import Path; p = Path('${R}/results.json'); p.open('w')`), { verifier: true }],
+  ]) {
+    const verdict = bash(code, options);
+    if (options.verifier) free(verdict, `verifier: ${code}`); else blocked(verdict, code);
+  }
+  for (const code of [
+    py(`from pathlib import Path; p = Path('${R}/results.json'); p.open()`), py(`from pathlib import Path; Path('${R}/results.json').open('r').read()`),
+    py(`from pathlib import Path; p = Path('${R}/results.json'); p.open('rb')`), py(`from pathlib import Path; p = Path('${R}/results.json'); p.open(mode='r')`),
+    py(`from pathlib import Path; Path('${R}/summary.json').open('w').write('x')`), py(`from pathlib import Path; Path('${R}/wt/results.json').open('w')`),
+    py(`import zipfile; z = zipfile.ZipFile('${R}/results.json'); z.open('results.json')`), py(`import webbrowser; webbrowser.open('${R}/results.json')`),
+    py(`import gzip; gzip.open('${R}/results.json', 'rt')`),
+    // 모드 자리가 모드 글자만 든 글자가 아니면 모드가 아니다: zip 안의 이름 `word/document.xml`에는 w·a·x가 들어 있다
+    py(`import zipfile; z = zipfile.ZipFile('${R}/results.json'); z.open('word/document.xml')`),
+  ]) free(bash(code), code);
+  free(bash(py(`from pathlib import Path; Path('results.json').open('w')`), { cwd: w.project }), '프로젝트 맨 위');
+  // 이름이 모드 글자 같아도 open(경로, 모드)의 경로 자리는 모드로 읽지 않는다
+  free(bash(py(`open('${R}/summary.json', 'w'); open('${R}/results.json')`)), '읽기 open과 다른 파일 쓰기');
+  free(bash(py(`open('a.json', 'r')`), { cwd: R }), '모드 글자가 든 파일 이름');
+});
+
+test('$PWD and ${PWD} are the cwd when it is known, so a write through $PWD is the same write as the relative one', () => {
+  for (const command of [`echo x > $PWD/results.json`, `echo x > \${PWD}/results-round1.json`, `echo x >> "$PWD/log/subagents.jsonl"`, `cp /tmp/a "$PWD"/approvals.jsonl`, `tee $PWD/verification.json`]) {
+    blocked(bash(command, { cwd: R }), `실행 폴더 안: ${command}`);
+    free(bash(command, { cwd: path.join(R, 'wt') }), `worktree 안: ${command}`);
+    free(bash(command, { cwd: w.project }), `프로젝트 맨 위: ${command}`);
+  }
+  blocked(bash(`cd ${R} && echo x > $PWD/results.json`, { cwd: w.project }), 'cd 뒤의 $PWD');
+  free(bash(`cd ${R}/wt && echo x > $PWD/results.json`, { cwd: R }), 'worktree로 cd한 뒤의 $PWD');
+  blocked(bash(`PWD=${R}; echo x > $PWD/results.json`, { cwd: w.project }), '이 명령 안에서 정한 PWD가 먼저다');
+  free(bash(`cd $UNKNOWN && echo x > $PWD/results.json`, { cwd: R }), 'cd를 풀 수 없으면 $PWD도 모른다');
+  free(bash(`echo x > $OLDPWD/results.json`, { cwd: R }), '$OLDPWD는 풀지 않는다');
+});
+
+test('locked names are compared without regard to case, because this Mac does not tell them apart: RESULTS.JSON is the real results.json', () => {
+  for (const name of ['RESULTS.JSON', 'Results.json', 'results.JSON', 'RESULTS-ROUND1.JSON', 'Results-Round12.json', 'VERIFICATION.JSON', 'Verification.json', 'APPROVALS.JSONL', 'Approvals.jsonl', 'LOG/subagents.jsonl', 'Log/SUBAGENTS.JSONL', 'LOG/new.txt']) {
+    for (const toolName of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) blocked(tool(toolName, path.join(R, name)), `${toolName} ${name}`);
+    blocked(bash(`echo x > ${R}/${name}`), `echo > ${name}`);
+    blocked(bash(`rm ${R}/${name}`), `rm ${name}`);
+  }
+  blocked(bash(`python3 -c "open('${R}/RESULTS.JSON','w')"`), 'python RESULTS.JSON');
+  blocked(bash(`python3 -c "import os; open(os.path.join('${R}', 'Results.json'), 'w')"`), 'join Results.json');
+  blocked(bash(`node -e "require('fs').writeFileSync('${R}/APPROVALS.JSONL','x')"`), 'node APPROVALS.JSONL');
+  blocked(bash(`cd ${R} && echo x > RESULTS.JSON`), 'cd 뒤 RESULTS.JSON');
+  blocked(tool('Write', path.join(w.project, '.PACT', ID, 'results.json')), '.PACT');
+  blocked(tool('Write', path.join(w.project, '.Pact', ID, 'LOG', 'x')), '.Pact/LOG');
+  // 이름이 비슷할 뿐인 것과 worktree·다른 폴더 밑은 그대로 통과한다
+  for (const name of ['SUMMARY.JSON', 'Plan.md', 'RESULTS.JSON.bak', 'RESULTS.JSONL', 'WT/RESULTS.JSON', 'Wt/LOG/x', 'TASKS/results.json', 'LOGS/x', 'LOGBOOK.txt']) {
+    free(tool('Write', path.join(R, name)), `Write ${name}`);
+    free(bash(`echo x > ${R}/${name}`), `echo > ${name}`);
+  }
+  // 글 속 이름 조각도 같다
+  assert.equal(classifyRest(['RESULTS.json']).kind, 'results');
+  assert.equal(classifyRest(['Verification.JSON']).kind, 'verification');
+  assert.equal(classifyRest(['LOG']).name, 'LOG/');
+  assert.equal(classifyRest(['Log', 'a', 'b']).name, 'Log/a/b');
+  assert.equal(lockForPath(path.join(R, 'RESULTS.JSON')).kind, 'results');
+  assert.equal(lockForPath(path.join(w.project, '.PACT', ID, 'approvals.jsonl')).kind, 'approvals');
+  assert.equal(lockForPath(path.join(w.project, '.PACT', ID, 'WT', 'results.json')), null);
+});
+
+test('a command of a few megabytes is still read: a heredoc that rewrites the whole results.json is caught, and only a command longer than the limit is left alone', () => {
+  const json = JSON.stringify({ scenarios: Array.from({ length: 3000 }, (_, i) => ({ id: `S${i}`, title: `시나리오 ${i} "인용" (괄호) [대괄호]`, steps: [{ action: 'a'.repeat(40), output: 'o'.repeat(60) }] })) });
+  assert.ok(json.length > 500_000, `통째로 다시 쓰는 글은 지난 상한(20만 자)을 넘는다: ${json.length}`);
+  const rewrite = `cat > ${R}/results.json <<'EOF'\n${json}\nEOF`;
+  blocked(bash(rewrite), 'cat 으로 통째로 다시 쓰기');
+  free(bash(rewrite, { verifier: true }), 'verifier는 같은 것을 쓴다');
+  blocked(bash(`python3 - <<'EOF'\nimport json\nd = ${JSON.stringify(json)}\nopen('${R}/results.json','w').write(d)\nEOF`), 'python heredoc으로 통째로 다시 쓰기');
+  blocked(bash(`echo ${'x'.repeat(300_000)} > ${R}/results.json`), '30만 자');
+  blocked(bash(`${'echo x >> /tmp/out.txt\n'.repeat(60_000)}echo x > ${R}/results.json`), '명령 6만 개 뒤의 쓰기');
+  const started = Date.now();
+  blocked(bash(`echo ${'x'.repeat(3_900_000)} > ${R}/results.json`), '상한 바로 아래');
+  assert.ok(Date.now() - started < 10_000, `수 MB도 몇 초 안에 읽는다: ${Date.now() - started}ms`);
+  // 상한을 넘는 글은 보지 않는다(지문이 그물이다)
+  free(bash(`echo ${'x'.repeat(4_100_000)} > ${R}/results.json`), '상한을 넘는 글');
+});
+
+test('the line that says what to do instead fits who called: a sub-agent is told to hand the matter to the main session, the main session is told what to do itself', () => {
+  const hit = (kind, name) => ({ kind, name });
+  const main = (kind, name) => lockMessage(hit(kind, name));
+  const sub = (kind, name) => lockMessage(hit(kind, name), { sub: true });
+  // 메인
+  assert.match(main('approvals', 'approvals.jsonl').instead, /사용자가 승인한 말을 그대로 넣어 spec\.mjs approve로 기록한다/);
+  assert.match(main('verification', 'verification.json').instead, /worktree를 커밋하고 snapshot을 다시 실행한다/);
+  assert.match(main('results', 'results.json').instead, /build로 되돌려 고치고 verifier로 다시 검수한다/);
+  assert.match(main('log', 'log/subagents.jsonl').instead, /hook-error\.log를 보고 사용자에게 알린다\. 다른 기록은 log\/ 밖에 둔다/);
+  // 하위 에이전트: 하위 에이전트의 approve·snapshot·build 되돌리기는 막혀 있거나 메인 세션의 일이다
+  assert.match(sub('approvals', 'approvals.jsonl').instead, /메인 세션이 사용자 말을 받아 spec\.mjs approve로 기록한다.*답장에 적어 메인 세션에 넘긴다/);
+  assert.doesNotMatch(sub('approvals', 'approvals.jsonl').instead, /사용자가 승인한 말을 그대로 넣어/);
+  assert.match(sub('verification', 'verification.json').instead, /snapshot은 메인 세션이 돌린다.*답장에 적어 메인 세션에 넘긴다/);
+  assert.match(sub('results', 'results.json').instead, /답장에 적어 메인 세션에 넘긴다.*메인 세션이 summary\.json에 쓴다/);
+  assert.doesNotMatch(sub('results', 'results.json').instead, /build로 되돌려/);
+  assert.match(sub('results', 'results-round1.json').instead, /snapshot을 다시 실행할 때 스크립트가 results-round<n>\.json으로 남긴다/);
+  assert.match(sub('log', 'log/x').instead, /답장에 적어 메인 세션에 알린다\. 다른 기록은 log\/ 밖에 둔다/);
+  for (const kind of ['results', 'verification', 'approvals', 'log']) for (const text of [...Object.values(main(kind, 'x')), ...Object.values(sub(kind, 'x'))]) assert.doesNotMatch(text, /\n/);
+  // checkLocks는 agent_id로 부른 쪽을 안다
+  const call = (extra) => checkLocks({ tool_name: 'Write', tool_input: { file_path: path.join(R, 'approvals.jsonl') }, cwd: w.project, ...extra });
+  assert.match(call({}).instead, /사용자가 승인한 말을 그대로 넣어/);
+  assert.match(call({ agent_id: 'agent-9', agent_type: 'pact:worker' }).instead, /메인 세션이 사용자 말을 받아/);
+  assert.match(call({ agent_id: '' }).instead, /사용자가 승인한 말을 그대로 넣어/, 'agent_id가 비면 메인 세션이다');
 });
 
 test('VERIFIER names the pact verifier agent', () => {

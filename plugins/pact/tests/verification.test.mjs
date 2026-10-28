@@ -438,7 +438,8 @@ test('(f) a results.json that changed after the verifier stopped is refused, wit
     const mine = checked.issues.find((issue) => /verifier가 끝난 뒤/.test(issue));
     assert.ok(mine, issuesOf(checked));
     assert.match(mine, /results\.json이 가장 최근 verifier가 끝난 뒤\(\d{4}-\d\d-\d\dT[\d:.]+Z\) 바뀌었다/);
-    assert.match(mine, /build로 되돌려 고치고 verifier로 다시 검수한다/);
+    // 두 경우를 나눠 알린다: 코드를 고쳐야 하면 build로, 코드는 맞고 results.json만 바뀌었으면 verifier만 다시
+    assert.match(mine, /코드를 고쳐야 하면 build로 되돌려 고치고 verifier로 다시 검수한다\. 코드는 맞고 results\.json만 바뀐 것이면 verifier만 다시 돌린다\./);
     assert.match(mine, /보고 칸은 summary\.json에 쓴다/);
     assert.doesNotMatch(mine, /\n/, '까닭과 대신 할 일은 한 줄이다');
   }
@@ -748,7 +749,7 @@ test('(f) report.mjs prints the completion check line with the fingerprint refus
   f.results.headline = '손으로 고침';
   f.save();
   const changed = report(f).stdout;
-  assert.match(changed, /^완료 검사: 막힘 1개 — results\.json이 가장 최근 verifier가 끝난 뒤\(.*\) 바뀌었다\. 결과가 틀렸으면 build로 되돌려 고치고 verifier로 다시 검수한다\./m);
+  assert.match(changed, /^완료 검사: 막힘 1개 — results\.json이 가장 최근 verifier가 끝난 뒤\(.*\) 바뀌었다\. 코드를 고쳐야 하면 build로 되돌려 고치고 verifier로 다시 검수한다\. 코드는 맞고 results\.json만 바뀐 것이면 verifier만 다시 돌린다\./m);
   const bare = fixture({ specText: NEW_SPEC, approved: true });
   assert.match(report(bare).stdout, /^완료 검사: 막힘 1개 — 이 판에 verifier가 끝난 기록이 없어/m);
 });

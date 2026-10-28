@@ -200,6 +200,9 @@ test('touchesPact: pact agents, .pact/ and docs/pact/ paths and pact scripts are
     { tool_name: 'Bash', tool_input: { command: 'node ~/.claude/plugins/cache/chenjing-plugins/pact/0.6.0/scripts/verification.mjs finish a.md .' } },
     { tool_name: 'Bash', tool_input: { command: 'cd /x && node plugins/pact/scripts/report.mjs /p/run' } },
     { tool_name: 'SendMessage', tool_input: { to: 'a', message: { text: 'pact:worker 야 고쳐라' } } },
+    // 이 컴퓨터의 파일 시스템은 대소문자를 가리지 않는다: `.PACT/`도 실제 `.pact/`다
+    { tool_name: 'Write', tool_input: { file_path: '/p/.PACT/r/RESULTS.JSON', content: 'x' } },
+    { tool_name: 'Bash', tool_input: { command: 'echo x > .Pact/r/LOG/x' } },
   ];
   const no = [
     { tool_name: 'Agent', tool_input: { subagent_type: 'tiers:worker', prompt: 'run-dir: /p/.pact/r' } },
@@ -615,7 +618,8 @@ test('lock (b) the verifier may write results.json and results-round files and n
   for (const name of ['verification.json', 'approvals.jsonl', 'log/subagents.jsonl']) {
     for (const tool of FILE_TOOLS) denied(pre(w, fileCall(tool, path.join(w.run, name)), VERIFIER_CALLER), `verifier ${tool} ${name}`);
   }
-  assert.match(denied(pre(w, fileCall('Write', path.join(w.run, 'verification.json')), VERIFIER_CALLER)), /검수 기록\(verification\.json\)은 verification\.mjs snapshot만 쓴다.*snapshot을 다시 실행한다/);
+  assert.match(denied(pre(w, fileCall('Write', path.join(w.run, 'verification.json')), VERIFIER_CALLER)), /검수 기록\(verification\.json\)은 verification\.mjs snapshot만 쓴다.*snapshot은 메인 세션이 돌린다/);
+  assert.match(denied(pre(w, fileCall('Write', path.join(w.run, 'verification.json')))), /검수 기록\(verification\.json\)은 verification\.mjs snapshot만 쓴다.*snapshot을 다시 실행한다/);
   for (const agent_type of ['pact:worker', 'pact:reviewer', 'pact:spec-checker', 'tiers:worker', 'Explore', 'pact:verifiers', 'pact:verifier-2', 'notpact:verifier', 'verifier']) {
     const caller = { agent_id: 'agent-x', agent_type };
     for (const tool of ['Write', 'Edit']) assert.match(denied(pre(w, fileCall(tool, path.join(w.run, 'results.json')), caller), `${agent_type} ${tool}`), /verifier만 쓴다/);
@@ -703,7 +707,7 @@ test('lock (d) approvals.jsonl and log/ are written by nobody but the hook and t
   const approvals = denied(pre(w, fileCall('Write', path.join(R, 'approvals.jsonl'))));
   assert.match(approvals, /승인 기록\(approvals\.jsonl\)은 spec\.mjs approve·delegate만 쓴다.*spec\.mjs approve/);
   const log = denied(pre(w, fileCall('Edit', path.join(R, 'log', 'subagents.jsonl'))));
-  assert.match(log, /log\/ 밑의 기록\(log\/subagents\.jsonl\)은 훅이.*훅과 pact 스크립트만 쓴다.*hook-error\.log를 보고 사용자에게 알린다/);
+  assert.match(log, /log\/ 밑의 기록\(log\/subagents\.jsonl\)은 훅이.*훅과 pact 스크립트만 쓴다.*hook-error\.log를 보고 사용자에게 알린다\. 다른 기록은 log\/ 밖에 둔다/);
   // 잠그는 것이 스크립트를 멈추지는 않는다: 같은 파일을 스크립트가 쓰는 길은 그대로다
   assert.equal(existsSync(path.join(R, 'log', 'subagents.jsonl')), true);
 });
@@ -763,6 +767,71 @@ test('lock: a call with odd input is passed, never blocked, and a relative path 
     assert.equal(r.stdout, '', JSON.stringify(input));
   }
   assert.equal(existsSync(w.data), false, '이상한 입력은 오류도 아니다');
+});
+
+// ---------- 검토 반영 ----------
+
+test('lock (derived paths): the main session reads results.json and writes summary.json or plan.md next to it, the verifier writes shots next to verification.json: all pass; the locked file itself is still denied', () => {
+  const w = busyWorld();
+  const R = w.run;
+  const heredoc = (code) => `python3 - <<'EOF'\n${code}\nEOF`;
+  for (const command of [
+    heredoc(`import json\nfrom pathlib import Path\nres = Path('${R}/results.json')\nd = json.loads(res.read_text())\n(res.parent / 'summary.json').write_text(json.dumps({'headline': '다 됐다', 'todo': [], 'changes': [], 'decision': {}}))`),
+    heredoc(`import json, os\nres = '${R}/results.json'\nd = json.load(open(res))\njson.dump({'todo': []}, open(os.path.join(os.path.dirname(res), 'summary.json'), 'w'))`),
+    heredoc(`import os\nres = '${R}/results.json'\nopen(os.path.join(os.path.dirname(res), 'plan.md'), 'a').write('\\n## verify\\n')`),
+    heredoc(`src = '${R}/results.json'\nopen(src.replace('results.json', 'summary.json'), 'w').write('{}')`),
+    `node -e "const fs=require('fs'), path=require('path'); const res='${R}/results.json'; fs.writeFileSync(path.join(path.dirname(res),'summary.json'), '{}')"`,
+  ]) passed(pre(w, bash(command)), command);
+  passed(pre(w, bash(heredoc(`import os\nv = '${R}/verification.json'\nopen(os.path.join(os.path.dirname(v), 'shots', 'S1-1.txt'), 'w').write('x')`)), VERIFIER_CALLER), 'verifier의 shots 쓰기');
+  // 잠긴 파일 자체나 그 이름을 이은 것은 그대로 막힌다
+  for (const command of [
+    heredoc(`from pathlib import Path\nres = Path('${R}/results.json')\n(res.parent / 'results.json').write_text('{}')`),
+    heredoc(`import os\nRUN = '${R}'\nopen(os.path.join(RUN, 'results.json'), 'w').write('{}')`),
+    heredoc(`RD = '${R}'\nopen(f'{RD}/results.json', 'w').write('{}')`),
+    heredoc(`from pathlib import Path\np = Path('${R}/results.json')\np.open('w').write('{}')`),
+  ]) assert.match(denied(pre(w, bash(command)), command), /검수 결과\(results\.json\)는 verifier만 쓴다/);
+});
+
+test('lock (review): the name is compared without regard to case, $PWD is the cwd, and a command that rewrites the whole results.json is read', () => {
+  const w = busyWorld();
+  const R = w.run;
+  for (const name of ['RESULTS.JSON', 'Results-Round1.json', 'VERIFICATION.JSON', 'Approvals.jsonl', 'LOG/subagents.jsonl']) {
+    denied(pre(w, fileCall('Write', path.join(R, name))), `Write ${name}`);
+    denied(pre(w, bash(`echo x > ${R}/${name}`)), `echo > ${name}`);
+  }
+  denied(pre(w, fileCall('Write', path.join(w.project, '.PACT', ID, 'results.json'))), '.PACT');
+  passed(pre(w, fileCall('Write', path.join(R, 'SUMMARY.JSON'))), 'SUMMARY.JSON');
+  const inRun = (command, cwd) => runHook(w, { hook_event_name: 'PreToolUse', session_id: 's', cwd, ...bash(command) });
+  denied(inRun('echo x > $PWD/results.json', R));
+  denied(inRun('echo x > "${PWD}/log/subagents.jsonl"', R));
+  passed(inRun('echo x > $PWD/results.json', path.join(R, 'wt')), 'worktree 안의 $PWD');
+  passed(inRun('echo x > $PWD/results.json', w.project), '프로젝트 맨 위의 $PWD');
+  // 통째로 다시 쓰는 글(수백 KB)도 읽는다. 지난 상한은 20만 자였다
+  const json = JSON.stringify({ scenarios: Array.from({ length: 3000 }, (_, i) => ({ id: `S${i}`, title: `시나리오 ${i} "인용" (괄호)`, steps: [{ action: 'a'.repeat(40), output: 'o'.repeat(60) }] })) });
+  assert.ok(json.length > 200_000);
+  denied(pre(w, bash(`cat > ${R}/results.json <<'EOF'\n${json}\nEOF`)), 'cat 으로 통째로 다시 쓰기');
+  passed(pre(w, bash(`cat > ${R}/results.json <<'EOF'\n${json}\nEOF`), VERIFIER_CALLER), 'verifier는 같은 것을 쓴다');
+});
+
+test('lock (review): what to do instead fits the caller: a sub-agent is told to hand the matter to the main session, and log/ says to keep other records outside log/', () => {
+  const w = busyWorld();
+  const R = w.run;
+  const say = (call, caller) => denied(pre(w, call, caller));
+  const approvals = fileCall('Write', path.join(R, 'approvals.jsonl'));
+  assert.match(say(approvals, {}), /사용자가 승인한 말을 그대로 넣어 spec\.mjs approve로 기록한다/);
+  assert.match(say(approvals, WORKER_CALLER), /메인 세션이 사용자 말을 받아 spec\.mjs approve로 기록한다.*답장에 적어 메인 세션에 넘긴다/);
+  assert.doesNotMatch(say(approvals, WORKER_CALLER), /사용자가 승인한 말을 그대로 넣어/);
+  assert.match(say(bash(`echo x >> ${R}/approvals.jsonl`), WORKER_CALLER), /메인 세션이 사용자 말을 받아/);
+  const verification = fileCall('Write', path.join(R, 'verification.json'));
+  assert.match(say(verification, {}), /worktree를 커밋하고 snapshot을 다시 실행한다/);
+  assert.match(say(verification, VERIFIER_CALLER), /snapshot은 메인 세션이 돌린다.*답장에 적어 메인 세션에 넘긴다/);
+  const results = fileCall('Write', path.join(R, 'results.json'));
+  assert.match(say(results, {}), /build로 되돌려 고치고 verifier로 다시 검수한다/);
+  assert.match(say(results, WORKER_CALLER), /답장에 적어 메인 세션에 넘긴다/);
+  assert.doesNotMatch(say(results, WORKER_CALLER), /build로 되돌려/);
+  const log = fileCall('Write', path.join(R, 'log', 'subagents.jsonl'));
+  assert.match(say(log, {}), /hook-error\.log를 보고 사용자에게 알린다\. 다른 기록은 log\/ 밖에 둔다/);
+  assert.match(say(log, WORKER_CALLER), /hook-error\.log를 보고 답장에 적어 메인 세션에 알린다\. 다른 기록은 log\/ 밖에 둔다/);
 });
 
 test('lock (R7): when the lock module itself is broken, the hook passes the call, exits 0, and logs one error line', () => {

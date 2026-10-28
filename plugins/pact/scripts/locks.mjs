@@ -25,22 +25,24 @@ import { parseShell } from './shell.mjs';
 
 export const VERIFIER = 'pact:verifier';
 
-const RESULTS_NAME = /^results(?:-round[^/]*)?\.json$/;
+const RESULTS_NAME = /^results(?:-round[^/]*)?\.json$/i;
 const GLOB_SAMPLES = ['results.json', 'results-round1.json', 'verification.json', 'approvals.jsonl', 'log'];
-const MAX_TEXT = 200_000;
+const MAX_TEXT = 4_000_000; // 명령 글이 이보다 길면 보지 않는다(이 컴퓨터의 results.json은 가장 큰 것이 251KB라 통째로 다시 쓰는 heredoc도 들어온다)
 
 // ---------- 경로 → 잠금 ----------
 
 // `<실행 폴더>/` 밑의 이름들(rest)이 잠긴 것인가: { kind, name } | null.
 // 잠긴 것은 바로 밑의 정해진 이름과 log/ 밑뿐이다. 그래서 wt/(worker의 작업 공간)와 tasks/·shots/ 같은 폴더 밑은 저절로 대상이 아니다.
+// 이름은 대소문자를 가리지 않고 비교한다: 이 컴퓨터(APFS)는 대소문자를 가리지 않아 `RESULTS.JSON`도 실제 results.json이다.
 export function classifyRest(rest) {
   const [first, ...more] = rest;
   if (!first) return null;
-  if (first === 'log') return { kind: 'log', name: more.length ? `log/${more.join('/')}` : 'log/' };
+  const lower = first.toLowerCase();
+  if (lower === 'log') return { kind: 'log', name: more.length ? `${first}/${more.join('/')}` : `${first}/` };
   if (more.length) return null;
   if (RESULTS_NAME.test(first)) return { kind: 'results', name: first };
-  if (first === 'verification.json') return { kind: 'verification', name: first };
-  if (first === 'approvals.jsonl') return { kind: 'approvals', name: first };
+  if (lower === 'verification.json') return { kind: 'verification', name: first };
+  if (lower === 'approvals.jsonl') return { kind: 'approvals', name: first };
   return null;
 }
 
@@ -49,7 +51,7 @@ export function classifyRest(rest) {
 // 명세 파일이 실제로 있는 판에만 건다. findSpec(project, runId)가 명세 경로나 null을 돌려준다.
 export function lockForPath(abs, findSpec = findSpecForRun) {
   const parts = String(abs).split('/');
-  const at = parts.indexOf('.pact');
+  const at = parts.findIndex((part) => part.toLowerCase() === '.pact');
   const runId = at > 0 ? parts[at + 1] : undefined;
   if (!runId) return null;
   const hit = classifyRest(parts.slice(at + 2).filter(Boolean));
@@ -61,29 +63,38 @@ export function lockForPath(abs, findSpec = findSpecForRun) {
 
 // ---------- 막을 때 내는 말(R6: 까닭과 대신 할 일) ----------
 
-export function lockMessage(hit) {
+// sub는 하위 에이전트가 부른 경우다. 하위 에이전트는 승인도 snapshot도 못 하니 메인 세션에 넘기라고 알린다.
+export function lockMessage(hit, { sub = false } = {}) {
   switch (hit.kind) {
     case 'results':
       return {
         reason: `검수 결과(${hit.name})는 verifier만 쓴다.`,
-        instead: hit.name === 'results.json'
-          ? '결과가 틀렸으면 build로 되돌려 고치고 verifier로 다시 검수한다. 보고 칸(headline·todo·changes·decision)은 summary.json에 쓴다.'
-          : '이전 결과는 snapshot을 다시 실행할 때 스크립트가 results-round<n>.json으로 남긴다. 직접 복사하거나 고치지 않는다.',
+        instead: !/^results\.json$/i.test(hit.name)
+          ? '이전 결과는 snapshot을 다시 실행할 때 스크립트가 results-round<n>.json으로 남긴다. 직접 복사하거나 고치지 않는다.'
+          : sub
+            ? '결과가 틀렸다고 보면 답장에 적어 메인 세션에 넘긴다. 보고 칸(headline·todo·changes·decision)은 메인 세션이 summary.json에 쓴다.'
+            : '결과가 틀렸으면 build로 되돌려 고치고 verifier로 다시 검수한다. 보고 칸(headline·todo·changes·decision)은 summary.json에 쓴다.',
       };
     case 'verification':
       return {
         reason: `검수 기록(${hit.name})은 verification.mjs snapshot만 쓴다.`,
-        instead: '검수할 코드가 바뀌었으면 worktree를 커밋하고 snapshot을 다시 실행한다.',
+        instead: sub
+          ? 'snapshot은 메인 세션이 돌린다. 검수 기록에 문제가 있으면 답장에 적어 메인 세션에 넘긴다.'
+          : '검수할 코드가 바뀌었으면 worktree를 커밋하고 snapshot을 다시 실행한다.',
       };
     case 'approvals':
       return {
         reason: `승인 기록(${hit.name})은 spec.mjs approve·delegate만 쓴다.`,
-        instead: '사용자가 승인한 말을 그대로 넣어 spec.mjs approve로 기록한다.',
+        instead: sub
+          ? '승인과 위임은 메인 세션이 사용자 말을 받아 spec.mjs approve로 기록한다. 필요하면 답장에 적어 메인 세션에 넘긴다.'
+          : '사용자가 승인한 말을 그대로 넣어 spec.mjs approve로 기록한다.',
       };
     default:
       return {
         reason: `log/ 밑의 기록(${hit.name})은 훅이 하위 에이전트의 마지막 답을 남기는 것이라 훅과 pact 스크립트만 쓴다.`,
-        instead: '기록이 빠졌으면 플러그인 데이터 폴더의 hook-error.log를 보고 사용자에게 알린다.',
+        instead: sub
+          ? '기록이 빠졌으면 플러그인 데이터 폴더의 hook-error.log를 보고 답장에 적어 메인 세션에 알린다. 다른 기록은 log/ 밖에 둔다.'
+          : '기록이 빠졌으면 플러그인 데이터 폴더의 hook-error.log를 보고 사용자에게 알린다. 다른 기록은 log/ 밖에 둔다.',
       };
   }
 }
@@ -102,7 +113,8 @@ function expand(word, state) {
   return expandTilde(word, state.home).replace(/\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)/g, (match, a, b) => {
     const name = a ?? b;
     if (state.vars.has(name)) return state.vars.get(name);
-    return name === 'HOME' ? state.home : match; // 풀 수 없으면 `$`가 남아 경로로 읽지 않는다
+    if (name === 'HOME') return state.home;
+    return name === 'PWD' && state.cwd ? state.cwd : match; // 풀 수 없으면 `$`가 남아 경로로 읽지 않는다
   });
 }
 
@@ -376,20 +388,23 @@ function assignmentsIn(code) {
   return map;
 }
 
-// 글 안의 이름(변수)과 f-string·템플릿 글 안의 `{이름}`
+// 글 안의 이름(변수)과 f-string·템플릿 글 안의 `{이름}`. `{이름.속성}`·`{이름(…)}`처럼 이끌어 낸 값은 뺀다.
 function identsIn(text) {
   const names = new Set(withoutStrings(text).match(IDENT) ?? []);
-  for (const m of text.matchAll(/\$?\{\s*([A-Za-z_$][\w$]*)/g)) names.add(m[1]);
+  for (const m of text.matchAll(/\$?\{\s*([A-Za-z_$][\w$]*)\s*(?:[:!][^{}]*)?\}/g)) names.add(m[1]);
   return names;
 }
 
 // 한 줄 스크립트에서 쓰는 호출의 대상 글들: [{ text, at }]
 function writeTargets(code) {
   const out = [];
+  // 모드 글자만 든 글자(`'w'`, `'a+'`, `'rb'`)로 쓰기 모드를 읽는다. `open(p, 'a.json')`의 파일 이름을 모드로 읽지 않는다.
   const writes = (mode) => {
     const m = /^\s*(?:(?:mode|flags)\s*=\s*)?[urbtUR]*(?:"([^"]*)"|'([^']*)')/.exec(mode ?? '');
-    return Boolean(m) && /[wax+]/.test(m[1] ?? m[2]);
+    const text = m ? (m[1] ?? m[2]) : '';
+    return /^[rwxabtU+]+$/.test(text) && /[wax+]/.test(text);
   };
+  const modeOf = (args) => args.find((a) => /^\s*mode\s*=/.test(a)) ?? args[0]; // pathlib의 open은 첫 인자가 모드다
   for (const m of maskStrings(code).matchAll(/([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(/g)) {
     const full = m[1];
     const dot = full.lastIndexOf('.');
@@ -398,8 +413,10 @@ function writeTargets(code) {
     const open = at + m[0].length;
     if (code[at - 1] === '.') { // 앞 표현식의 메서드: `Path(…).write_text(`는 그 줄의 앞 글이 받는 쪽이고, `require('fs').writeFileSync(`는 fs 호출이다
       const before = code.slice(0, at - 1);
-      if (RECEIVER_METHODS.has(full)) {
-        out.push({ text: before.slice(Math.max(before.lastIndexOf('\n'), before.lastIndexOf(';')) + 1), at });
+      const receiver = before.slice(Math.max(before.lastIndexOf('\n'), before.lastIndexOf(';')) + 1);
+      if (RECEIVER_METHODS.has(full)) out.push({ text: receiver, at });
+      else if (full === 'open') {
+        if (writes(modeOf(splitArgs(code, open)))) out.push({ text: receiver, at });
       } else if (FS_CALLS[full] && (BARE_FS.has(full) || /require\(\s*['"](?:node:)?fs(?:\/promises)?['"]\s*\)\s*$/.test(before))) {
         const args = splitArgs(code, open);
         for (const i of FS_CALLS[full]) if (args[i] !== undefined) out.push({ text: args[i], at });
@@ -419,9 +436,100 @@ function writeTargets(code) {
       for (const i of spots) if (args[i] !== undefined) out.push({ text: args[i], at });
     } else if (dot !== -1 && RECEIVER_METHODS.has(last)) { // `p.write_text(…)`: 점 앞 이름이 받는 쪽이다
       out.push({ text: full.slice(0, dot), at });
+    } else if (dot !== -1 && last === 'open' && writes(modeOf(splitArgs(code, open)))) { // `p.open('w')`
+      out.push({ text: full.slice(0, dot), at });
     }
   }
   return out;
+}
+
+// ---------- 쓰는 곳 글에서 경로 읽기 ----------
+
+// 가린 글(maskStrings)에서 `from`의 여는 괄호와 짝이 맞는 닫는 괄호의 자리. 없으면 -1.
+function matchForward(masked, from) {
+  let depth = 0;
+  for (let i = from; i < masked.length; i++) {
+    if ('([{'.includes(masked[i])) depth++;
+    else if (')]}'.includes(masked[i]) && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// `from`의 닫는 괄호와 짝이 맞는 여는 괄호의 자리. 없으면 -1.
+function matchBackward(masked, from) {
+  let depth = 0;
+  for (let i = from; i >= 0; i--) {
+    if (')]}'.includes(masked[i])) depth++;
+    else if ('([{'.includes(masked[i]) && --depth === 0) return i;
+  }
+  return -1;
+}
+
+// `end` 바로 앞에 붙은 표현 하나(이름, 점으로 이은 이름, 호출, 괄호 묶음, 문자열)의 시작 자리
+function receiverStart(masked, end) {
+  let j = end;
+  while (j > 0) {
+    const c = masked[j - 1];
+    if (c === ')' || c === ']') {
+      const open = matchBackward(masked, j - 1);
+      if (open === -1) break;
+      j = open;
+    } else if (c === '"' || c === "'" || c === '`') {
+      const open = masked.lastIndexOf(c, j - 2);
+      if (open === -1) break;
+      j = open;
+    } else if (/[\w$.]/.test(c)) j--;
+    else break;
+  }
+  return j;
+}
+
+// 다른 글에서 이끌어 낸 값의 꼴: `dirname(x)`·`x.parent`·`x.with_name('y')`·`x.replace(…)`·`x[:-5]`·`re.sub(…)`.
+// 이런 값은 받는 쪽 글과 다른 경로다. 그래서 받는 쪽(변수)과 인자까지 통째로 가려서, 그 안에 있던 잠긴 경로를 까닭으로 막지 않게 한다.
+const DERIVE_CALL = /(?<![\w$.])(?:(?:os\.path|posixpath|path)\.)?(?:dirname|basename|splitext|extname|relpath|relative|commonpath)\(|(?<![\w$.])(?:os\.path|posixpath|path)\.(?:split|parse)\(|(?<![\w$.])re\.subn?\(/;
+const DERIVE_MEMBER = /\.(?:parents?|name|stem|suffixes?|with_name|with_suffix|with_stem|relative_to|replace|rsplit|split|partition|rpartition|rstrip|lstrip|strip|removesuffix|removeprefix|slice|substring|substr)(?![\w$])/;
+const SUBSCRIPT = /(?<=[\w$)\]])\[/;
+
+// 가장 왼쪽의 이끌어 낸 값이 차지한 자리 [시작, 끝] 또는 null
+function findDerivation(masked) {
+  const spans = [];
+  const call = DERIVE_CALL.exec(masked);
+  if (call) {
+    const close = matchForward(masked, call.index + call[0].length - 1);
+    spans.push([call.index, close === -1 ? masked.length : close + 1]);
+  }
+  const member = DERIVE_MEMBER.exec(masked);
+  if (member) {
+    let end = member.index + member[0].length;
+    if (masked[end] === '(') {
+      const close = matchForward(masked, end);
+      end = close === -1 ? masked.length : close + 1;
+    }
+    spans.push([receiverStart(masked, member.index), end]);
+  }
+  const subscript = SUBSCRIPT.exec(masked);
+  if (subscript) {
+    const close = matchForward(masked, subscript.index);
+    spans.push([receiverStart(masked, subscript.index), close === -1 ? masked.length : close + 1]);
+  }
+  return spans.sort((a, b) => a[0] - b[0])[0] ?? null;
+}
+
+const stripDerived = (text) => {
+  let t = text;
+  for (let n = 0; n < 30; n++) {
+    const found = findDerivation(maskStrings(t));
+    if (!found) break;
+    t = `${t.slice(0, found[0])}0${t.slice(found[1])}`;
+  }
+  return t;
+};
+
+// 대입 하나 앞의 가장 가까운 대입(`=`). 이어 붙인 변수(`+=`)이거나 없으면 null
+function nearestAssignment(id, at, assigns) {
+  const earlier = (assigns.get(id) ?? []).filter((a) => a.at < at);
+  const last = earlier[earlier.length - 1];
+  return last?.plain ? last : null;
 }
 
 // 쓰는 곳 글 전체가 문자열 하나이면 그 문자열: 경로 전체다. 아니면 null. 그 문자열을 대입한 변수 하나(`p = 'results.json'`),
@@ -444,18 +552,132 @@ function wholeString(text, at, assigns) {
     const wrapped = PATH_WRAPPER.exec(t);
     if (wrapped) { t = wrapped[1].trim(); continue; }
     if (!/^[A-Za-z_$][\w$]*$/.test(t)) return null;
-    const earlier = (assigns.get(t) ?? []).filter((a) => a.at < at);
-    if (!earlier.length) return null;
-    t = earlier[earlier.length - 1].rhs.trim();
+    const assignment = nearestAssignment(t, at, assigns);
+    if (!assignment) return null;
+    t = stripDerived(assignment.rhs).trim();
   }
   return null;
 }
 
-// 쓰는 곳 글 하나가 잠긴 파일을 가리키는가. 변수는 그 앞에서 가장 가까운 대입으로 풀고, 경로 조각(`os.path.join(RUN, 'results.json')`)은
-// 같은 글 안의 실행 폴더 조각과 이어 본다. 상대 경로 글은 그 글이 경로 전체일 때만 cwd에 붙인다: `os.path.join(DIR, 'results.json')`의
-// 조각을 cwd 밑 파일로 짐작하면 임시 폴더에 쓰는 것까지 막힌다.
-function lockInTarget(text, at, assigns, state, findSpec) {
-  const pool = [text];
+// 쓰는 곳 글이 가리키는 파일의 마지막 칸(이름)이 글자로 정해지면 그 이름, 아니면 null.
+// `os.path.join(dir, 'summary.json')`·`dir / 'summary.json'`·`RUN + '/plan.md'`·`f'{RD}/results.json'`·`f'{p}.bak'`(p가 글자로 정해질 때)·
+// 변수(가장 가까운 대입)와 경로만 만드는 호출은 따라간다. 이끌어 낸 값이나 모르는 호출은 null이다.
+const LITERAL_ANY = /^[rRuUbBfF]{0,3}(?:"([^"]*)"|'([^']*)'|`([^`]*)`)$/;
+const literalBody = (s) => {
+  const m = LITERAL_ANY.exec(s.trim());
+  return m ? (m[1] ?? m[2] ?? m[3]) : null;
+};
+const PATH_CALL = /^((?:[A-Za-z_$][\w$]*\.)*(?:join|resolve|normalize|abspath|normpath|realpath|expanduser|fspath|Path|PurePath|PurePosixPath|str|String))\(/;
+const PATH_TAIL = /^(?:\.(?:resolve|absolute|expanduser|as_posix)\(\s*\)\s*)*$/;
+
+function lastSegment(text, at, assigns, depth = 0) {
+  const t = text.trim();
+  if (!t || depth > 8) return null;
+  const masked = maskStrings(t);
+  const next = (part, bound = at) => lastSegment(part, bound, assigns, depth + 1);
+  if (t[0] === '(' && matchForward(masked, 0) === t.length - 1) return next(t.slice(1, -1));
+  const plus = lastTopLevel(masked, '+');
+  if (plus !== -1) { // 이어 붙인 글: 맨 오른쪽 글자에 폴더 가르개가 있으면 그 뒤가 마지막 칸이고, 없으면 왼쪽의 마지막 칸 뒤에 붙는다
+    const body = literalBody(t.slice(plus + 1));
+    if (body === null) return null;
+    if (body.includes('/')) return segmentOf(body, at, assigns, depth);
+    const left = next(t.slice(0, plus));
+    return left === null ? null : left + body;
+  }
+  const slash = lastTopLevel(masked, '/');
+  if (slash !== -1) return next(t.slice(slash + 1)); // Path 연산자 `a / 'b'`
+  const body = literalBody(t);
+  if (body !== null) return segmentOf(body, at, assigns, depth);
+  const joinpath = masked.lastIndexOf('.joinpath(');
+  if (joinpath !== -1 && matchForward(masked, joinpath + '.joinpath'.length) === masked.length - 1) {
+    const args = splitArgs(`${t.slice(joinpath + '.joinpath('.length, -1)})`, 0);
+    return args.length ? next(args[args.length - 1]) : null;
+  }
+  const withName = masked.lastIndexOf('.with_name(');
+  if (withName !== -1 && matchForward(masked, withName + '.with_name'.length) === masked.length - 1) { // `x.with_name('y')`의 마지막 칸은 y
+    const args = splitArgs(`${t.slice(withName + '.with_name('.length, -1)})`, 0);
+    return args.length ? next(args[0]) : null;
+  }
+  const call = PATH_CALL.exec(masked);
+  if (call) { // 마지막 인자가 마지막 칸이다. 호출 뒤에는 `.resolve()` 같은 꼬리만 올 수 있다
+    const open = call[0].length - 1;
+    const close = matchForward(masked, open);
+    if (close === -1 || !PATH_TAIL.test(masked.slice(close + 1))) return null;
+    const args = splitArgs(`${t.slice(open + 1, close)})`, 0);
+    return args.length ? next(args[args.length - 1]) : null;
+  }
+  if (/^[A-Za-z_$][\w$]*$/.test(t)) {
+    const assignment = nearestAssignment(t, at, assigns);
+    return assignment ? next(assignment.rhs, assignment.at) : null;
+  }
+  return null;
+}
+
+// 맨 위 수준(괄호 밖)에서 마지막으로 나온 ch의 자리. 없으면 -1
+function lastTopLevel(masked, ch) {
+  let depth = 0;
+  let found = -1;
+  for (let i = 0; i < masked.length; i++) {
+    const c = masked[i];
+    if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (depth === 0 && c === ch) found = i;
+  }
+  return found;
+}
+
+// 글자(f-string·템플릿 포함) 안의 마지막 칸. `{이름}`으로 끝나거나 `{이름}.bak`처럼 이름 뒤에 글자가 붙으면 그 이름의 마지막 칸을 이어 붙인다.
+function segmentOf(body, at, assigns, depth) {
+  const trimmed = body.replace(/\/+$/, '');
+  const segment = trimmed.slice(trimmed.lastIndexOf('/') + 1);
+  if (!/[{}$%]/.test(segment)) return segment || null;
+  const m = /^\$?\{\s*([A-Za-z_$][\w$]*)\s*\}([^{}$%]*)$/.exec(segment);
+  if (!m) return null;
+  const head = lastSegment(m[1], at, assigns, depth + 1);
+  return head === null ? null : head + m[2];
+}
+
+const isLockedName = (name) => {
+  const n = name.toLowerCase();
+  return RESULTS_NAME.test(n) || n === 'verification.json' || n === 'approvals.jsonl' || n === 'subagents.jsonl' || n === 'log';
+};
+
+// 글 속 이름 조각: `'results.json'`, `'/results.json'`, `'{run}/results.json'`처럼 앞에 폴더가 없는 것
+const NAMED = /^(results(?:-round[^/]*)?\.json|verification\.json|approvals\.jsonl|subagents\.jsonl|log)(?:\/.*)?$/i;
+const inRun = (dir, name) => path.join(dir, name === 'subagents.jsonl' ? 'log/subagents.jsonl' : name === 'log' ? 'log/x' : name);
+
+// 글들 속의 글자에서 잠긴 파일을 찾는다. accept가 거르는 것은 건너뛴다.
+//  - 절대 경로 글자 하나가 잠긴 파일이면 그것. 상대 경로 글자는 쓰는 곳 글 전체일 때만(whole) cwd에 붙인다:
+//    `os.path.join(DIR, 'results.json')`의 조각을 cwd 밑 파일로 짐작하면 임시 폴더에 쓰는 것까지 막힌다.
+//  - `.pact/<run-id>`에서 끝나는 글자(실행 폴더 조각)와 앞에 폴더가 없는 이름 조각은 이어 본다.
+function scan(texts, whole, state, findSpec, accept) {
+  const runDirs = new Set();
+  const names = new Set();
+  for (const raw of texts.flatMap(literalsIn)) {
+    const s = expandTilde(raw, state.home);
+    const named = NAMED.exec(s.replace(/^(?:\$?\{[^}]*\})?\/?/, ''));
+    if (named) names.add(named[1].toLowerCase());
+    if (!s || isUnresolved(s)) continue;
+    const abs = path.isAbsolute(s) ? path.resolve(s) : state.cwd ? path.resolve(state.cwd, s) : null;
+    if (!abs) continue;
+    if (path.isAbsolute(s) || raw === whole) {
+      const direct = lockForPath(abs, findSpec);
+      if (direct && accept(direct)) return direct;
+    }
+    if (/(?:^|\/)\.pact\/[^/]+\/?$/i.test(s)) runDirs.add(abs);
+  }
+  for (const name of names) {
+    for (const dir of runDirs) {
+      const hit = lockForPath(inRun(dir, name), findSpec);
+      if (hit && accept(hit)) return name === 'log' ? { ...hit, name: 'log/' } : hit; // 폴더 이름뿐이면 어느 파일인지는 모른다
+    }
+  }
+  return null;
+}
+
+// 쓰는 곳 글이 참조하는 변수의 대입 글을 모은다. cut이면 이끌어 낸 값 안은 따라가지 않는다.
+function followAssignments(target, at, assigns, cut) {
+  const pool = [target];
   const seen = new Set();
   for (let k = 0; k < pool.length && k < 24; k++) {
     for (const id of identsIn(pool[k])) {
@@ -464,35 +686,26 @@ function lockInTarget(text, at, assigns, state, findSpec) {
       seen.add(id);
       const before = list.filter((a) => a.at < at);
       const from = before.map((a) => a.plain).lastIndexOf(true); // 마지막 `=` 대입부터 그 뒤의 `+=`까지
-      for (const a of from === -1 ? before : before.slice(from)) pool.push(a.rhs);
+      for (const a of from === -1 ? before : before.slice(from)) pool.push(cut ? stripDerived(a.rhs) : a.rhs);
     }
   }
-  const whole = wholeString(text, at, assigns);
-  const runDirs = new Set();
-  const names = new Set();
-  for (const raw of pool.flatMap(literalsIn)) {
-    const s = expandTilde(raw, state.home);
-    // 이름 조각: `'results.json'`, `'/results.json'`, `'{run}/results.json'`처럼 앞에 폴더가 없는 것
-    const named = /^(results(?:-round[^/]*)?\.json|verification\.json|approvals\.jsonl|subagents\.jsonl|log)(?:\/.*)?$/.exec(s.replace(/^(?:\$?\{[^}]*\})?\/?/, ''));
-    if (named) names.add(named[1]);
-    if (!s || isUnresolved(s)) continue;
-    const abs = path.isAbsolute(s) ? path.resolve(s) : state.cwd ? path.resolve(state.cwd, s) : null;
-    if (!abs) continue;
-    if (path.isAbsolute(s) || raw === whole) {
-      const direct = lockForPath(abs, findSpec);
-      if (direct) return direct;
-    }
-    // 실행 폴더 조각: 글이 `.pact/<run-id>`에서 끝나는 것(뒤에 `/`가 붙어도 된다). 그 밑 파일 경로는 조각이 아니다.
-    if (/(?:^|\/)\.pact\/[^/]+\/?$/.test(s)) runDirs.add(abs);
-  }
-  const inRun = (dir, name) => path.join(dir, name === 'subagents.jsonl' ? 'log/subagents.jsonl' : name === 'log' ? 'log/x' : name);
-  for (const name of names) {
-    for (const dir of runDirs) {
-      const hit = lockForPath(inRun(dir, name), findSpec);
-      if (hit) return hit;
-    }
-  }
-  return null;
+  return pool;
+}
+
+// 쓰는 곳 글 하나가 잠긴 파일을 가리키는가.
+//  - 마지막 칸이 글자로 정해지고 잠긴 이름이 아니면(summary.json, shots/…, plan.md) 그 글을 거슬러 모은 글 속의 잠긴 경로는 까닭이 아니다:
+//    잠긴 파일의 경로에서 이끌어 낸 다른 파일을 쓰는 것이다. 단 log/ 밑 파일은 이름이 무엇이든 잠겼으니 그것만 남긴다.
+//  - 마지막 칸을 모르면 이끌어 낸 값(dirname·parent·replace …) 안은 따라가지 않는다.
+//  - 마지막 칸이 잠긴 이름이면 이끌어 낸 값도 따라가 그 폴더를 찾는다(`res.parent / 'approvals.jsonl'`). 그때는 잠긴 종류를 그 이름으로 정한다.
+function lockInTarget(text, at, assigns, state, findSpec) {
+  const last = lastSegment(text, at, assigns);
+  const lockedLast = last !== null && isLockedName(last);
+  const target = lockedLast ? text : stripDerived(text);
+  const whole = wholeString(target, at, assigns);
+  const accept = last !== null && !lockedLast ? (lock) => lock.kind === 'log' : () => true;
+  const hit = scan([target], whole, state, findSpec, accept) ?? scan(followAssignments(target, at, assigns, !lockedLast), whole, state, findSpec, accept);
+  const named = hit && lockedLast && hit.kind !== 'log' ? classifyRest([last]) : null;
+  return named ? { ...hit, ...named } : hit;
 }
 
 function scriptHits(code, state, hits) {
@@ -547,6 +760,7 @@ export function checkLocks(input, { verifier = false, findSpec = findSpecForRun,
   const tool = input?.tool_name;
   const toolInput = input?.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
   const cwd = typeof input?.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
+  const sub = typeof input?.agent_id === 'string' && input.agent_id !== ''; // 하위 에이전트가 부른 호출
   let hits = [];
   if (FILE_TOOLS[tool]) {
     const raw = toolInput[FILE_TOOLS[tool]];
@@ -556,5 +770,5 @@ export function checkLocks(input, { verifier = false, findSpec = findSpecForRun,
     hits = bashLocks(toolInput.command, { cwd, home, findSpec });
   }
   const blocked = hits.find((hit) => !(verifier && hit.kind === 'results'));
-  return blocked ? lockMessage(blocked) : null;
+  return blocked ? lockMessage(blocked, { sub }) : null;
 }

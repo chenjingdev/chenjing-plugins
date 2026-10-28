@@ -23,11 +23,11 @@ import { fileURLToPath } from 'node:url';
 // scripts/run-log.mjs의 LOGGED_AGENTS와 같아야 한다(시험이 맞춰 본다). 여기서 따로 두는 것은 상관없는 호출이 모듈을 불러오지 않게 하려는 것이다.
 // `pact:` 앞머리까지 맞춘다. `tiers:worker`가 걸리면 안 된다.
 export const PACT_AGENTS = new Set(['pact:spec-checker', 'pact:reviewer', 'pact:worker', 'pact:verifier']);
-const PACT_TEXT = /\.pact\/|docs\/pact\/|\bpact:(?:spec-checker|reviewer|worker|verifier)\b|\bscripts\/(?:spec|verification|report|checklist|gallery|git-state)\.mjs\b/;
+const PACT_TEXT = /\.pact\/|docs\/pact\/|\bpact:(?:spec-checker|reviewer|worker|verifier)\b|\bscripts\/(?:spec|verification|report|checklist|gallery|git-state)\.mjs\b/i; // 대소문자를 가리지 않는다: 이 컴퓨터의 파일 시스템이 가리지 않아 `.PACT/`도 실제 `.pact/`다
 const ERROR_LOG = 'hook-error.log';
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 // Bash의 cwd가 실행 폴더(<프로젝트>/.pact/<run-id>) 안이면 명령에 `.pact/`가 없어도 pact 호출이다: `echo x > results.json`
-const RUN_CWD = /\/\.pact\/[^/]/;
+const RUN_CWD = /\/\.pact\/[^/]/i;
 
 // Claude Code가 플러그인에 주는 데이터 폴더. 훅 환경에 안 오면 설치된 플러그인이 받는 이름(<플러그인>-<마켓플레이스>)과 같은 곳으로 떨어진다.
 export function dataDir() {
