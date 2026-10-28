@@ -36,6 +36,8 @@ final class CUABarViewModel: ObservableObject {
     static let failuresBeforeProblem = 2
 
     /// A release by session id that fails for one of these reasons points at the extension reset (F3 case).
+    /// `browser_blocked` is not one: Codex itself refuses the browser to the engine's conversations (since Codex
+    /// 26.1023), so the guidance about the extension would send the person the wrong way.
     static let reasonsPointingAtTheExtension: Set<String> = ["unsupported", "cleanup_not_confirmed", "timeout"]
 
     /// The outcome of an action that has nothing to say.
@@ -695,6 +697,7 @@ final class CUABarViewModel: ObservableObject {
             switch action {
             case .releaseConnection(let id), .retryRelease(let id):
                 let result = try await engine.releaseConnection(id: id, earlierSessions: earlierSessions(of: id))
+                noteBrowserBlocked(result.reason)
                 return ActionResult(outcome: ActionMessages.releaseConnection(result), reason: result.reason)
             case .releaseSession(let id, let user):
                 let result = try await engine.releaseSession(id: id, user: user)
@@ -816,15 +819,23 @@ final class CUABarViewModel: ObservableObject {
     private func tidyEverything() async throws -> ActionResult {
         var steps: [TidyStep] = []
         var asksForTheExtension = false
+        // Codex refuses the browser to every conversation of the engine alike: once it has said so, the sessions
+        // that are left would only be refused the same way.
+        var browserBlocked = false
         for item in TidyPlan.items(in: lastStatus, tabsReleased: tabsReleasedIDs) {
             // A line whose own 정리 or 탭 풀기 is running is not asked the same again.
             if isRunningOnItsOwn(item) { continue }
+            if browserBlocked, case .session = item { continue }
             do {
                 switch item {
                 case .connection(let id, let way):
-                    steps.append(try await tidy(id, way))
+                    let step = try await tidy(id, way)
+                    steps.append(step)
+                    noteBrowserBlocked(step.reason)
+                    browserBlocked = browserBlocked || step.reason == ActionMessages.browserBlockedReason
                 case .session(let id):
                     let result = try await engine.releaseSession(id: id, user: false)
+                    browserBlocked = browserBlocked || result.reason == ActionMessages.browserBlockedReason
                     steps.append(TidyStep(session: result))
                     recordSession(
                         id, outcome: ActionMessages.releaseSession(result), reason: result.reason, released: result.ok && result.released)
@@ -867,6 +878,7 @@ final class CUABarViewModel: ObservableObject {
     /// extension reset opens the guidance for it, again if the person had closed it.
     private func recordSession(_ id: String, outcome: ActionOutcome, reason: String?, released: Bool) {
         sessionResults[id] = outcome
+        noteBrowserBlocked(reason)
         if released {
             failedSessionIDs.remove(id)
         } else if let reason, Self.reasonsPointingAtTheExtension.contains(reason) {
@@ -874,6 +886,12 @@ final class CUABarViewModel: ObservableObject {
         } else {
             failedSessionIDs.remove(id)
         }
+    }
+
+    /// Codex refused the browser to a conversation of the engine (`browser_blocked`): it does so for all of them, so
+    /// the automatic cleanup does not try its sessions again in this run of the app, whoever saw the refusal first.
+    private func noteBrowserBlocked(_ reason: String?) {
+        if reason == ActionMessages.browserBlockedReason { cleanupPlanner.markBrowserBlocked() }
     }
 
     /// The guidance at the bottom of the list, open.
@@ -909,13 +927,19 @@ final class CUABarViewModel: ObservableObject {
         guard !keys.isEmpty else { return }
         cleanupPlanner.markTried(keys)
         // Its time limit grows with what this status says it has to get through.
-        let load = ReleaseEndedLoad(status: status)
+        var load = ReleaseEndedLoad(status: status)
+        if cleanupPlanner.browserBlocked {
+            // Only ended connections are left to try, and the engine is told not to go on to the sessions.
+            load.claudeSessions = 0
+            load.withSessions = false
+        }
         let endedIDs = status.connections.filter { CleanupPlanner.isCandidate($0) }.map(\.id)
         cleaningIDs = Set(endedIDs)
         isCleaningUp = true
         automaticCleanupTask = Task { [weak self] in
             guard let self else { return }
-            _ = try? await self.engine.releaseEnded(load)
+            let result = try? await self.engine.releaseEnded(load)
+            for entry in result?.results ?? [] { self.noteBrowserBlocked(entry.reason) }
             self.automaticCleanupTask = nil
             self.cleaningIDs = []
             self.isCleaningUp = false

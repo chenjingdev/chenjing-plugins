@@ -161,8 +161,12 @@ def release_earlier_hosts(ctx, conn, reply):
     return {'ok': ok, 'released': released, 'reason': None if released and ok else reason, 'scope_count': count}
 
 
-def release_ended(ctx):
+def release_ended(ctx, sessions=True):
     """Release every ended connection; then every session of a dead bridge that may be released by id.
+
+    The connections are asked through their own control sockets and never reach the browser. The sessions are released
+    through the browser by a thread of the engine, which Codex refuses since 26.1023 (`browser_blocked`); `sessions`
+    False leaves them out, for the app that has been told so and asks only for the connections.
 
     A connection whose owner is still there is never touched: releasing the turn of a conversation that is still
     running would make its next browser calls hang. Sessions of a Codex thread wait for a click."""
@@ -176,7 +180,7 @@ def release_ended(ctx):
             fine.append(result.released or result.nothing)
     if results:
         view = build_view(ctx, with_folders=False, with_checks=False)    # the releases above changed the records
-    sessions = [item for item in view.maybe_left if item['agent'] == 'claude']
+    sessions = [item for item in view.maybe_left if item['agent'] == 'claude'] if sessions else []
     if sessions:
         outcome = release_sessions(ctx, [item['session_id'] for item in sessions], user=False, view=view)
         grouped = {}

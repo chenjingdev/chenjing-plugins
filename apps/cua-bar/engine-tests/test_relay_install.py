@@ -113,6 +113,25 @@ class Machine:
         (directory/'.mcp.json').write_text(json.dumps({'mcpServers': {'cua_repl': template if entry is None else entry}}))
         return directory
 
+    ACCESS_NAMES = ['BROWSER_USE_ACCESS_EXECUTOR_ID', 'BROWSER_USE_ACCESS_PIPE_PATH', 'BROWSER_USE_ACCESS_VERIFYING_IDENTITY']
+
+    def module(self, version=None):
+        """The module Codex 26.1023 preloads: require-browser-access.mjs of the plugin copy of this version."""
+        return self.codex_home/'plugins/cache/openai-bundled/unified-computer-use'/(version or self.version)/'require-browser-access.mjs'
+
+    def preload(self, form='split', value=None):
+        """The bundled server as Codex 26.1023 defines it: `--import <module>` (or `--import=<module>`) before the script,
+        and the three names of the browser access it inherits. Returns the arguments."""
+        script = self.definition['transport']['args'][-1]
+        value = self.module().as_uri() if value is None else value
+        args = ['--import', value, script] if form == 'split' else ['--import=' + value, script]
+        self.definition['transport']['args'] = list(args)
+        self.definition['transport']['env_vars'] = list(self.ACCESS_NAMES)
+        self.entry['args'] = list(args)
+        self.entry['env_vars'] = list(self.ACCESS_NAMES)
+        self.write_plugin()
+        return args
+
     def remove_copy(self):
         """As it is when Codex first starts after updating itself: no copy of this version yet."""
         shutil.rmtree(self.codex_home/'plugins/cache/openai-bundled/unified-computer-use'/self.version)
@@ -746,7 +765,7 @@ def relay_entry(machine, **changes):
 
 class TransportTests(MachineCase):
     def check(self, entry):
-        return relay_install.transport_is_relay(entry, self.machine.cua, self.machine.launcher)
+        return relay_install.transport_is_relay(entry, self.machine.cua, self.machine.launcher, self.machine.home)
 
     def test_the_exact_relay_is_accepted(self):
         self.assertTrue(self.check(relay_entry(self.machine)))
@@ -786,6 +805,174 @@ class TransportTests(MachineCase):
         entry['env']['CODEX_CUA_RELAY_NODE'] = str(link/'bin/node')
         entry['env']['CODEX_CUA_NATIVE_RUNTIME'] = str(link/'bin/node_repl')
         self.assertTrue(self.check(entry))
+
+
+class PreloadedModuleTests(MachineCase):
+    """Codex 26.1023 defines the bundled server as `node --import file:///…/require-browser-access.mjs …/cua-repl.mjs`
+    and has the server inherit BROWSER_USE_ACCESS_*. That is the bundled server, and so is the old form; nothing else is."""
+
+    def both_forms(self):
+        for form in ('split', 'joined'):
+            self.setUp()
+            yield form, self.machine.preload(form)
+
+    def test_both_ways_of_writing_the_option_are_the_bundled_server_and_the_relay_keeps_the_arguments_as_they_are(self):
+        for form, args in self.both_forms():
+            with self.subTest(form):
+                plan, reason = self.machine.plan()
+                self.assertIsNone(reason)
+                table = parse_override(plan.override)[1]
+                self.assertEqual(table['args'], args)
+                self.assertEqual(plan.table['args'], args)
+                self.assertEqual(table['env_vars'], self.machine.ACCESS_NAMES)
+                self.assertEqual(plan.script, args[-1])
+                self.assertEqual(plan.preload, args[:-1])
+                # The relay changes the environment and nothing else of the definition, and gives the CLI's parser the
+                # same table to read back (the last call of the plan).
+                expected = copy.deepcopy(self.machine.definition['transport']['env'])
+                expected.update(CUA_REPL_NODE_REPL_PATH=str(self.machine.launcher),
+                                CODEX_CUA_NATIVE_RUNTIME=str(self.machine.cua/'bin/node_repl'),
+                                CODEX_CUA_RELAY_NODE=str(self.machine.cua/'bin/node'))
+                self.assertEqual(table['env'], expected)
+                self.assertEqual(len(self.machine.cli.calls), 2)
+
+    def test_the_browser_access_values_are_neither_added_nor_changed_nor_taken_away(self):
+        self.machine.preload()
+        plan, _ = self.machine.plan()
+        self.assertFalse([name for name in plan.table['env'] if name.startswith('BROWSER_USE_ACCESS')])
+        self.assertEqual(plan.table['env_vars'], self.machine.ACCESS_NAMES, 'they are inherited by name, as in the bundled definition')
+        # Values that a definition does carry go through as they are, the empty one too.
+        self.setUp()
+        self.machine.preload()
+        for name, value in zip(self.machine.ACCESS_NAMES, ('', '/tmp/pipe with space', 'identity')):
+            self.machine.definition['transport']['env'][name] = value
+            self.machine.entry['env'][name] = value
+        self.machine.write_plugin()
+        plan, reason = self.machine.plan()
+        self.assertIsNone(reason)
+        self.assertEqual({name: plan.table['env'][name] for name in self.machine.ACCESS_NAMES},
+                         dict(zip(self.machine.ACCESS_NAMES, ('', '/tmp/pipe with space', 'identity'))))
+
+    def test_the_proxy_gets_the_arguments_before_the_script_as_one_json_argument(self):
+        self.machine.preload()
+        plan, _ = self.machine.plan()
+        arguments = plan.proxy_arguments()
+        [preload] = [item for item in arguments if item.startswith('--relay-preload=')]
+        self.assertEqual(json.loads(preload.split('=', 1)[1]), plan.preload)
+        self.assertEqual(arguments[arguments.index('--relay-script') + 1], plan.script)
+        self.setUp()
+        self.assertFalse([item for item in self.machine.plan()[0].proxy_arguments() if item.startswith('--relay-preload')],
+                         'the old form has no such argument')
+
+    def test_the_copy_that_is_not_there_yet_is_judged_by_where_it_will_be(self):
+        self.machine.preload()
+        self.machine.remove_copy()
+        self.machine.write_template()
+        plan, reason = self.machine.plan()
+        self.assertIsNone(reason)
+        self.assertEqual(plan.preload, ['--import', self.machine.module().as_uri()])
+
+    def test_any_other_way_to_start_the_server_is_not_bundled(self):
+        machine = self.machine
+        script = str(machine.cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
+        good = machine.module().as_uri()
+        cases = {
+            'a module of another plugin': ['--import', good.replace('unified-computer-use', 'other-plugin'), script],
+            'a module of another version': ['--import', good.replace('/fixture/', '/1.2.3/'), script],
+            'another module': ['--import', good.replace('require-browser-access', 'steal'), script],
+            'a module from elsewhere': ['--import', 'file:///tmp/require-browser-access.mjs', script],
+            'a module in another codex home': ['--import', (machine.root/'x/.codex/plugins/cache/openai-bundled/unified-computer-use/fixture/require-browser-access.mjs').as_uri(), script],
+            'a module that climbs out': ['--import', good.replace('/fixture/', '/fixture/../fixture/../../'), script],
+            'a link-like module path': ['--import', str(machine.module()) + '/x', script],
+            'a web address': ['--import', 'https://example.com/require-browser-access.mjs', script],
+            'a file URL of another host': ['--import', good.replace('file:///', 'file://elsewhere/'), script],
+            'a file URL with a query': ['--import', good + '?x=1', script],
+            'a relative module': ['--import', 'require-browser-access.mjs', script],
+            'an empty module': ['--import', '', script],
+            'an empty joined module': ['--import=', script],
+            'no module': ['--import', script],
+            'two imports': ['--import', good, '--import', good, script],
+            'a second import in the joined form': ['--import=' + good, '--import=' + good, script],
+            'another option first': ['--inspect', '--import', good, script],
+            'another option between': ['--import', good, '--inspect', script],
+            'another option after': ['--import', good, script, '--inspect'],
+            'a require instead': ['--require', good, script],
+            'a loader instead': ['--experimental-loader', good, script],
+            'the option twice joined with a space': ['--import ' + good, script],
+            'the script behind nothing but a module path': [good, script],
+            'another script': ['--import', good, '/elsewhere/cua-repl.mjs'],
+            'arguments that are not text': ['--import', 7, script],
+        }
+        for label, args in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                self.machine.definition['transport']['args'] = args
+                self.machine.entry['args'] = args
+                self.machine.write_plugin()
+                plan, reason = self.machine.plan()
+                self.assertIsNone(plan)
+                self.assertEqual(reason, 'not_bundled')
+
+    def test_without_a_known_plugin_copy_only_the_old_form_is_bundled(self):
+        self.machine.preload()
+        self.assertIsNotNone(relay_install.plugin_directory(self.machine.cua, str(self.machine.codex_home)))
+        self.assertIsNone(relay_install.plugin_directory(self.machine.cua, 'relative/.codex'))
+        (self.machine.app/'Contents/Info.plist').unlink()
+        # nothing of the app can be verified, so the plan stops before the arguments are looked at
+        self.assertIsNone(self.machine.plan()[0])
+        self.assertIsNone(relay_install.plugin_directory(self.machine.cua, str(self.machine.codex_home)))
+        self.assertEqual(relay_install.preload_arguments([str(self.machine.cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')],
+                                                         self.machine.cua, None),
+                         ([], str(self.machine.cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')))
+        self.assertIsNone(relay_install.preload_arguments(['--import', self.machine.module().as_uri(),
+                                                           str(self.machine.cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')],
+                                                          self.machine.cua, None))
+
+    def test_a_plain_path_or_a_file_url_with_blanks_in_it_names_the_same_module(self):
+        with tempfile.TemporaryDirectory(dir='/tmp', prefix='rin sp-') as folder:
+            machine = Machine(Path(folder).resolve())
+            for value in (machine.module().as_uri(), str(machine.module())):
+                with self.subTest(value=value):
+                    machine.preload(value=value)
+                    plan, reason = machine.plan()
+                    self.assertIsNone(reason)
+                    self.assertEqual(plan.table['args'][1], value, 'written as Codex wrote it')
+            self.assertIn('%20', machine.module().as_uri())
+
+    def test_the_bridge_takes_the_relay_in_front_of_the_new_definition_and_nothing_less(self):
+        for form, args in self.both_forms():
+            with self.subTest(form):
+                plan, reason = self.machine.plan()
+                self.assertIsNone(reason)
+                entry = relay_entry(self.machine)
+                self.assertEqual(entry['args'], args)
+                self.assertTrue(relay_install.transport_is_relay(entry, self.machine.cua, self.machine.launcher, self.machine.home))
+                shown = {'transport': {'type': 'stdio', **{k: entry[k] for k in ('command', 'args', 'env')}}}
+                self.assertTrue(relay_install.transport_is_relay(shown, self.machine.cua, self.machine.launcher, self.machine.home))
+                for label, changed in (('other module', ['--import', 'file:///tmp/require-browser-access.mjs', args[-1]]),
+                                       ('extra option', ['--inspect', *args]),
+                                       ('no script', args[:-1]), ('other script', [*args[:-1], '/elsewhere/cua-repl.mjs'])):
+                    self.assertFalse(relay_install.transport_is_relay(dict(entry, args=changed), self.machine.cua,
+                                                                      self.machine.launcher, self.machine.home), label)
+                # What the launcher kept in the host record is what a bridge hands to its own thread, arguments included.
+                registry = {'schema_version': 1, 'status': 'ready', 'relay': True, 'relay_launcher': str(self.machine.launcher),
+                            'relay_config': copy.deepcopy(plan.table)}
+                server = relay_install.relay_thread_server(registry, self.machine.cua, 'bridge-4242-1792345678', home=self.machine.home)
+                self.assertEqual(server['args'], args)
+                self.assertEqual(server['env_vars'], self.machine.ACCESS_NAMES)
+
+    def test_the_bridge_accepts_a_host_whose_config_shows_the_new_relay(self):
+        self.machine.preload()
+        relay_install.refresh_relay_files(self.machine.plugin, self.machine.data)
+        adapter = FakeAdapter(self.machine, Path('/private/tmp/host/run-1/rpc.sock'))
+
+        async def request(method, params):
+            return {'config': {'mcp_servers': {'cua_repl': relay_entry(self.machine)}}}
+        self.assertTrue(asyncio.run(relay_install.accept_relay(adapter, request, {'pluginId': None}, home=self.machine.home)))
+
+        async def other(method, params):
+            return {'config': {'mcp_servers': {'cua_repl': relay_entry(self.machine, args=['--import', 'file:///tmp/x.mjs', relay_entry(self.machine)['args'][-1]])}}}
+        self.assertFalse(asyncio.run(relay_install.accept_relay(adapter, other, {'pluginId': None}, home=self.machine.home)))
 
 
 class FakeAdapter:

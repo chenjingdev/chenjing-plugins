@@ -40,6 +40,9 @@ SNIPPET = '''await (async () => {
   nodeRepl.write("@@count " + (await c.tabs.list()).length);
 })();
 '''
+# What Codex says when the desktop app refuses the browser to a thread it did not start ("Local browser use is disabled
+# in Work settings"), or when it has no app to ask ("The browser access host is unavailable").
+BROWSER_BLOCKED_MARKERS = ('Local browser use is disabled', 'browser access host is unavailable')
 _VERSION = re.compile(r'^[0-9A-Za-z._+-]{1,64}$')
 _COUNT = re.compile(r'@@count ([0-9]{1,6})(?![0-9])')
 
@@ -103,6 +106,14 @@ def _count(result):
     return None
 
 
+def _browser_blocked(answer):
+    """The answer of the js call (a result, error or not, or a JSON-RPC error) says Codex refused the browser to this
+    thread: since Codex 26.1023 its browser service asks the desktop app (`browser/access`), which allows only the
+    threads it started or resumed itself. The texts are those of Codex; nothing of the answer is kept."""
+    from host_mcp import answer_texts
+    return any(marker in text for text in answer_texts(answer) for marker in BROWSER_BLOCKED_MARKERS)
+
+
 def _ignore(_):
     return None
 
@@ -135,8 +146,14 @@ async def _release_one(adapter, session, code, options):
         except (asyncio.TimeoutError, BridgeFailure, RpcFailure):
             pass
         return _failure('timeout')
-    except (BridgeFailure, RpcFailure):
+    except RpcFailure as refusal:
+        return _failure('browser_blocked' if _browser_blocked(refusal.error) else 'cleanup_not_confirmed')
+    except BridgeFailure:
         return _failure('cleanup_not_confirmed')
+    if _browser_blocked(result):
+        # Codex asked the desktop app and the app said no: it lets only the threads it started itself use the browser.
+        # That is Codex's access control, neither a setting of the user nor something to get around.
+        return _failure('browser_blocked')
     count = _count(result) if _succeeded(result) else None
     if count is None:
         # The browser could not be reached through the runtime: a targeted release is impossible now.
@@ -163,6 +180,7 @@ async def _release_batch(ctx, view, sessions, script, options, user, folder=None
         adapter.thread_cwd = folder
     code = release_code(script)
     results = {}
+    blocked = False
     try:
         started = asyncio.get_running_loop().time()
         try:
@@ -179,7 +197,13 @@ async def _release_batch(ctx, view, sessions, script, options, user, folder=None
         for session in sessions:
             # Nothing may have started to list the session since it was checked.
             reason = refusal(build_view(ctx, with_folders=False, with_checks=False), session, user)
-            results[session] = _failure(reason) if reason else await _release_one(adapter, session, code, options)
+            if reason:
+                results[session] = _failure(reason)
+            elif blocked:
+                results[session] = _failure('browser_blocked')      # the same thread would be refused again
+            else:
+                results[session] = await _release_one(adapter, session, code, options)
+                blocked = results[session]['reason'] == 'browser_blocked'
     finally:
         try:
             await asyncio.wait_for(adapter.close(), options['cleanup']+3)

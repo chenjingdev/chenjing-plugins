@@ -51,7 +51,7 @@ class ArgumentTests(CliCase):
         with contextlib.redirect_stdout(parser_text), self.assertRaises(SystemExit):
             setup.main(['--help'])
         for name in ('status', 'release', 'release-session', 'stop', 'restart-codex', 'unlock-reset', 'settings', 'diagnose',
-                     '--connection', '--ended', '--session', '--user', '--group', '--force', '--error-text'):
+                     '--connection', '--ended', '--connections-only', '--session', '--user', '--group', '--force', '--error-text'):
             self.assertIn(name, parser_text.getvalue())
         self.assertEqual(setup.ENGINE_COMMANDS, engine_cli.COMMANDS)
 
@@ -64,12 +64,14 @@ class ArgumentTests(CliCase):
                           ('diagnose', '--session', 'a'), ('settings',), ('settings', '--error-text', 'maybe'),
                           ('settings', '--error-text', 'on', '--force'), ('status', '--error-text', 'on'),
                           ('restart-codex', '--error-text', 'off'), ('unlock-reset', '--force'),
-                          ('unlock-reset', '--connection', 'a')):
+                          ('unlock-reset', '--connection', 'a'), ('release', '--connections-only'),
+                          ('release', '--connection', 'a', '--connections-only'), ('status', '--connections-only'),
+                          ('release-session', '--session', 'a', '--connections-only')):
             self.rejected(*arguments)
 
     def test_the_options_of_the_engine_do_not_leak_into_the_older_commands(self):
         for command in ('doctor', 'start', 'setup', 'uninstall', 'install'):
-            for option in (['--force'], ['--user'], ['--ended'], ['--group', 'all'], ['--session', 'x'], ['--connection', 'x'],
+            for option in (['--force'], ['--user'], ['--ended'], ['--connections-only'], ['--group', 'all'], ['--session', 'x'], ['--connection', 'x'],
                            ['--error-text', 'on']):
                 self.rejected(command, *option)
 
@@ -106,6 +108,7 @@ class JsonCommandTests(CliCase):
         self.assertEqual(self.run_json('release-session', '--session', SESSION_A, '--json'),
                          {'ok': False, 'released': False, 'reason': 'not_found', 'tab_count': None})
         self.assertEqual(self.run_json('release', '--ended', '--json'), {'ok': True, 'results': []})
+        self.assertEqual(self.run_json('release', '--ended', '--connections-only', '--json'), {'ok': True, 'results': []})
         self.assertEqual(self.run_json('stop', '--group', 'all', '--json'),
                          {'ok': True, 'stopped': 0, 'failed': 0, 'results': []})
 

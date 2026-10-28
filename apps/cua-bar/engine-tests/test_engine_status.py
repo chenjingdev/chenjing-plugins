@@ -334,6 +334,63 @@ class RelaySetupTests(StatusCase):
         self.write_host(relay=True)
         self.assertEqual(host(), {'relay_reason': None, 'restart_adds_relay': False})
 
+    def test_a_host_of_an_older_launcher_that_did_not_know_the_preloading_bundled_server_gets_the_relay_by_a_restart(self):
+        """Codex 26.1023 starts the bundled runtime as `node --import …/require-browser-access.mjs …/cua-repl.mjs`. A
+        launcher from before 0.8.7 took that for another server (not_bundled); this engine's launcher takes it."""
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world(relay=False)
+        cua = self.app/'Contents/Resources/cua_node'
+        plugin = self.home/'.codex/plugins/cache/openai-bundled/unified-computer-use'/APP_VERSION
+        module = (plugin/'require-browser-access.mjs').as_uri()
+        script = str(cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
+        host = lambda: {key: self.status()['host'][key] for key in ('relay_reason', 'restart_adds_relay')}
+
+        def old_launcher_host():
+            self.write_host(relay=False, relay_reason='not_bundled', engine_version='0.8.6')
+
+        def copy(args=None, **changes):
+            entry = {'command': str(cua/'bin/node'), 'args': [ '--import', module, script] if args is None else args,
+                     'env': {'CUA_REPL_NODE_REPL_PATH': str(cua/'bin/node_repl')}}
+            entry.update(changes)
+            (plugin/'.codex-plugin').mkdir(parents=True, exist_ok=True)
+            (plugin/'.codex-plugin/plugin.json').write_text(json.dumps({'name': 'unified-computer-use', 'version': APP_VERSION}))
+            (plugin/'.mcp.json').write_text(json.dumps({'mcpServers': {'cua_repl': entry}}))
+            os.chmod(plugin/'.mcp.json', 0o644)
+        old_launcher_host()
+        self.assertEqual(host(), {'relay_reason': 'not_bundled', 'restart_adds_relay': False}, 'no copy of the plugin to go by')
+        copy()
+        self.assertEqual(host(), {'relay_reason': 'not_bundled', 'restart_adds_relay': True})
+        copy(args=['--import=' + module, script])
+        self.assertEqual(host()['restart_adds_relay'], True)
+        # Only the new form: the old one was taken by the old launcher too, so a restart would refuse it for the same cause.
+        copy(args=[script])
+        self.assertEqual(host()['restart_adds_relay'], False)
+        for label, args in (('another module', ['--import', 'file:///tmp/require-browser-access.mjs', script]),
+                            ('another option', ['--inspect', '--import', module, script]),
+                            ('two modules', ['--import', module, '--import', module, script]),
+                            ('another script', ['--import', module, '/elsewhere/cua-repl.mjs'])):
+            copy(args=args)
+            self.assertEqual(host()['restart_adds_relay'], False, label)
+        copy(command='/usr/bin/node')
+        self.assertEqual(host()['restart_adds_relay'], False, 'another node')
+        copy(env={'CUA_REPL_NODE_REPL_PATH': '/elsewhere/node_repl'})
+        self.assertEqual(host()['restart_adds_relay'], False, 'another runtime')
+        copy()
+        os.chmod(plugin/'.mcp.json', 0o666)
+        self.assertEqual(host()['restart_adds_relay'], False, 'others may write the file')
+        os.chmod(plugin/'.mcp.json', 0o644)
+        self.assertEqual(host()['restart_adds_relay'], True)
+        # A host that the launcher of this engine started is refused for a cause a restart does not change.
+        self.write_host(relay=False, relay_reason='not_bundled')
+        self.assertEqual(host()['restart_adds_relay'], False)
+        # A host without the version, or with the relay, or with another reason, is not this case.
+        self.write_host(relay=False, relay_reason='not_bundled', older_launcher=True)
+        self.assertEqual(host()['restart_adds_relay'], True)
+        self.write_host(relay=False, relay_reason='unknown_field', engine_version='0.8.6')
+        self.assertEqual(host()['restart_adds_relay'], False)
+        self.write_host(relay=True, engine_version='0.8.6')
+        self.assertEqual(host(), {'relay_reason': None, 'restart_adds_relay': False})
+
     def test_the_host_must_name_this_plugins_launcher_to_count_as_having_the_relay(self):
         self.machine.add(5, 1, '/bin/x')
         self.start_world(relay=True)

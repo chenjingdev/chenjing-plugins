@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.6'
+VERSION = '0.8.7'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -37,6 +37,16 @@ LOST_DURING_CALL = ('The Codex host connection was lost while this call ran, so 
 TURN_ENDED_WITHOUT_HOST = ('The Codex host connection was lost, so the CUA turn of this connection could not be ended. '
                            'turn_ended never connects to Codex again; the next CUA tool call does.')
 NOTHING_TO_END = 'No CUA turn of this connection is open, so there was nothing to end.'
+# Since Codex 26.1023 the browser service asks the desktop app before every browser call, and the app allows only the
+# conversations it started or resumed itself. A conversation of the bridge is neither, so its js call is refused with
+# this text (without the app to ask: "The browser access host is unavailable"). It is Codex's access control and no
+# setting of the user, so the AI is told that, and nothing is done about it.
+BROWSER_BLOCKED_MARKER = 'Local browser use is disabled in Work settings'
+BROWSER_BLOCKED_NOTE = ('CUA Bar note: since Codex 26.1023, Codex refuses browser use in conversations it did not start '
+                        'itself, which includes Claude Code conversations that use CUA through CUA Bar. This is not a '
+                        'setting the user turned off; changing Work settings or resetting the Chrome extension will '
+                        'not help. Desktop apps still work. For browser work, tell the user to ask the Codex app '
+                        'directly.')
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
 JS_TIMEOUT_MS = 30000           # how long cua_repl runs js when a call gives no timeout_ms
@@ -71,6 +81,16 @@ def error_texts(answer):
     texts = [item.get('text') for item in content if isinstance(item, dict)] if isinstance(content, list) else []
     first = next((text for text in texts if isinstance(text, str) and text.strip()), None)
     return [text for text in (answer.get('message'), first) if isinstance(text, str)]
+
+
+def with_browser_note(name, answer):
+    """The answer of a js call, with one text added at its end when it is Codex's refusal of the browser to this
+    conversation (BROWSER_BLOCKED_MARKER). Every other answer is returned as it is."""
+    content = answer.get('content') if isinstance(answer, dict) else None
+    if (name != 'js' or not isinstance(content, list)
+            or not any(BROWSER_BLOCKED_MARKER in text for text in answer_texts({'content': content}))):
+        return answer
+    return {**answer, 'content': [*content, {'type': 'text', 'text': BROWSER_BLOCKED_NOTE}]}
 
 
 def failure(name, arguments, answer, ms):
@@ -133,6 +153,10 @@ def quiet_config(installed, config, server='cua_repl', keep_plugin=NATIVE_PLUGIN
     them, like the thread, for about half an hour after its last use (it does not unload a thread when its last client
     leaves). Built from the answers of plugin/installed and config/read; a name that cannot stand in a dotted key is
     left as it is.
+
+    A plugin is switched off with `plugins.<id>.enabled`. For a remote plugin that is not enough (Codex 26.1023 still
+    starts the local server of chatgpt-meetings, about 50 MB for each thread): its server is switched off as well, with
+    `plugins.<id>.mcp_servers.<name>.enabled`, checked on the live host to leave the server `disabled` and start nothing.
     """
     out = {}
     markets = installed.get('marketplaces') if isinstance(installed, dict) else None
@@ -144,6 +168,15 @@ def quiet_config(installed, config, server='cua_repl', keep_plugin=NATIVE_PLUGIN
             ident = plugin.get('id')
             if isinstance(ident, str) and ident != keep_plugin and CONFIG_NAME.match(ident):
                 out['plugins.' + ident + '.enabled'] = False
+                # A remote plugin (the curated ones, for example chatgpt-meetings) keeps starting its local MCP server
+                # when it is only switched off as a plugin; the server is switched off by name under the plugin. The
+                # server of a remote plugin carries the plugin's name, and asking the host for the name would be
+                # a network call (plugin/read), once for every plugin, at every start.
+                name = plugin.get('name')
+                source = plugin.get('source')
+                if (isinstance(name, str) and CONFIG_NAME.match(name)
+                        and isinstance(source, dict) and source.get('type') == 'remote'):
+                    out['plugins.' + ident + '.mcp_servers.' + name + '.enabled'] = False
     settings = config.get('config') if isinstance(config, dict) else None
     servers = settings.get('mcp_servers') if isinstance(settings, dict) else None
     for name, entry in servers.items() if isinstance(servers, dict) else ():
@@ -639,7 +672,8 @@ class HostMcp:
                     # The catalogue of the new host does not have this tool any more.
                     self.reply(ident, error={'code': -32601, 'message': 'The tool is not advertised by the owned host CUA server.'})
                     return
-                self.reply(ident, await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments)))
+                answer = await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments))
+                self.reply(ident, with_browser_note(name, answer))
             else:
                 self.reply(ident, error={'code': -32601, 'message': 'Unsupported MCP method.'})
         except RpcFailure as error:

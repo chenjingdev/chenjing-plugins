@@ -12,7 +12,7 @@ from engine_core import Context
 
 COMMANDS = ('status', 'release', 'release-session', 'stop', 'restart-codex', 'unlock-reset', 'settings', 'diagnose')
 # Which of the option flags each command accepts.
-OPTIONS = {'status': (), 'release': ('connection', 'ended'), 'release-session': ('session', 'user'),
+OPTIONS = {'status': (), 'release': ('connection', 'ended', 'connections_only'), 'release-session': ('session', 'user'),
            'stop': ('connection', 'group', 'force'), 'restart-codex': (), 'unlock-reset': (),
            'settings': ('error_text',), 'diagnose': ()}
 
@@ -20,12 +20,15 @@ OPTIONS = {'status': (), 'release': ('connection', 'ended'), 'release-session': 
 def validate(args, error):
     """error(message) must not return (argparse's parser.error ends the process with status 2)."""
     given = {'connection': args.connection, 'ended': args.ended, 'session': args.session, 'user': args.user,
-             'group': args.group, 'force': args.force, 'error_text': getattr(args, 'error_text', None)}
+             'group': args.group, 'force': args.force, 'error_text': getattr(args, 'error_text', None),
+             'connections_only': getattr(args, 'connections_only', False)}
     for name, value in given.items():
         if value and name not in OPTIONS[args.command]:
             error('--%s is not used by %s' % (name.replace('_', '-'), args.command))
     if args.command == 'release' and bool(args.connection) == bool(args.ended):
         error('release needs exactly one of --connection ID or --ended')
+    if getattr(args, 'connections_only', False) and not args.ended:
+        error('--connections-only goes with release --ended')
     if args.command == 'release-session' and not args.session:
         error('release-session needs --session ID')
     if args.command == 'stop' and bool(args.connection) == bool(args.group):
@@ -56,7 +59,9 @@ def execute(ctx, args):
         return release_session_command(ctx, args.session, user=args.user)
     if args.command == 'release':
         from engine_actions import release_connection, release_ended
-        return release_ended(ctx) if args.ended else release_connection(ctx, args.connection)
+        if args.ended:
+            return release_ended(ctx, sessions=not getattr(args, 'connections_only', False))
+        return release_connection(ctx, args.connection)
     from engine_actions import stop_connection, stop_group
     if args.group:
         return stop_group(ctx, args.group, force=args.force)

@@ -77,6 +77,18 @@ test('the runtime gets its arguments and the environment it would have had witho
   assert.equal(client.stderr, '');
 });
 
+test('the browser access of Codex 26.1023 reaches the runtime as it came: values kept, the empty one too, nothing added', async t => {
+  const given = {BROWSER_USE_ACCESS_EXECUTOR_ID: '', BROWSER_USE_ACCESS_PIPE_PATH: '/tmp/pipe with space/access.sock',
+    BROWSER_USE_ACCESS_VERIFYING_IDENTITY: 'identity-한'};
+  const {fixture} = await boot(t, {env: given});
+  assert.deepEqual(fixture.events('start')[0].access,
+    {executor: '', pipe: '/tmp/pipe with space/access.sock', identity: 'identity-한'});
+  // Not given, not there: the relay makes up no value.
+  const {fixture: bare} = await boot(t, {env: {BROWSER_USE_ACCESS_EXECUTOR_ID: undefined, BROWSER_USE_ACCESS_PIPE_PATH: undefined,
+    BROWSER_USE_ACCESS_VERIFYING_IDENTITY: undefined}});
+  assert.deepEqual(bare.events('start')[0].access, {executor: null, pipe: null, identity: null});
+});
+
 test('a bridge that names itself is the owner in the record, and the runtime never sees the name', async t => {
   const {fixture} = await boot(t, {env: {CODEX_CUA_OWNER: 'bridge-4242-1792345678'}});
   const record = await readRecord(fixture);

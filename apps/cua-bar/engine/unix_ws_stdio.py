@@ -64,9 +64,11 @@ def _launcher_trusted(path):
 class RelayRewrite:
     """Point the bundled cua_repl thread configuration of a client request at the relay launcher."""
 
-    def __init__(self, launcher, native_runtime, node, script, state_dir=None):
+    def __init__(self, launcher, native_runtime, node, script, state_dir=None, preload=()):
         self.launcher, self.native_runtime, self.node, self.script = launcher, native_runtime, node, script
         self.state_dir = state_dir
+        # The arguments of the bundled server before the script (Codex 26.1023: `--import <module>`).
+        self.arguments = [*preload, script]
 
     def __call__(self, body):
         if MARKER not in body:
@@ -84,7 +86,7 @@ class RelayRewrite:
         config = params.get('config') if isinstance(params, dict) else None
         entry = config.get(CONFIG_KEY) if isinstance(config, dict) else None
         env = entry.get('env') if isinstance(entry, dict) else None
-        if (not isinstance(env, dict) or entry.get('command') != self.node or entry.get('args') != [self.script]
+        if (not isinstance(env, dict) or entry.get('command') != self.node or entry.get('args') != self.arguments
                 or env.get(RUNTIME_PATH) != self.native_runtime or any(name in env for name in RELAY_NAMES)
                 or not _launcher_trusted(self.launcher)):
             return body
@@ -157,10 +159,19 @@ if __name__ == '__main__':
     parser.add_argument('--relay-node')
     parser.add_argument('--relay-script')
     parser.add_argument('--relay-state-dir')
+    parser.add_argument('--relay-preload', help='JSON list of the bundled arguments before the script')
     args = parser.parse_args()
     # The relay is all or nothing; a half-given set of paths means no rewriting at all.
     paths = (args.relay_launcher, args.relay_native_runtime, args.relay_node, args.relay_script)
-    relay = (RelayRewrite(*paths, args.relay_state_dir) if all(item and os.path.isabs(item) for item in paths) else None)
+    preload = []
+    if args.relay_preload is not None:
+        try:
+            preload = json.loads(args.relay_preload)
+        except ValueError:
+            preload = None
+    if not isinstance(preload, list) or not all(isinstance(item, str) and item for item in preload):
+        paths = ()      # arguments that cannot be told: no rewriting at all
+    relay = (RelayRewrite(*paths, args.relay_state_dir, preload) if paths and all(item and os.path.isabs(item) for item in paths) else None)
     try:
         asyncio.run(serve(args.socket, relay))
     except (Exception, KeyboardInterrupt) as error:

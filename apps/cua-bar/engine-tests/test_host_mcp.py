@@ -152,6 +152,27 @@ class QuietConfigTests(unittest.TestCase):
             'plugins.browser-use@openai-bundled.enabled': False, 'plugins.team-memory@team.enabled': False,
             'mcp_servers.honcho.enabled': False})
 
+    def test_a_remote_plugin_is_also_turned_off_by_the_name_of_its_server(self):
+        # Codex 26.1023 answers plugin/installed with `enabled: true` for chatgpt-meetings and still starts its local
+        # MCP server (node + python, about 50 MB) in a thread where only the plugin was switched off.
+        remote = 'openai-curated-remote'
+        installed = {'marketplaces': [
+            {'name': 'openai-bundled', 'plugins': [{'id': bridge.NATIVE_PLUGIN_ID, 'name': 'unified-computer-use',
+                                                    'enabled': True, 'source': {'type': 'local', 'path': '/x'}},
+                                                   {'id': 'browser@openai-bundled', 'name': 'browser', 'enabled': True,
+                                                    'source': {'type': 'local', 'path': '/y'}}]},
+            {'name': remote, 'path': None, 'plugins': [
+                {'id': 'chatgpt-meetings@' + remote, 'name': 'chatgpt-meetings', 'enabled': True, 'source': {'type': 'remote'}},
+                {'id': 'gmail@' + remote, 'name': 'gmail', 'enabled': False, 'source': {'type': 'remote'}},
+                {'id': 'odd@' + remote, 'name': 'odd name', 'enabled': True, 'source': {'type': 'remote'}},
+                {'id': 'nameless@' + remote, 'enabled': True, 'source': {'type': 'remote'}}]}]}
+        self.assertEqual(bridge.quiet_config(installed, {}), {
+            'plugins.browser@openai-bundled.enabled': False,
+            'plugins.chatgpt-meetings@openai-curated-remote.enabled': False,
+            'plugins.chatgpt-meetings@openai-curated-remote.mcp_servers.chatgpt-meetings.enabled': False,
+            'plugins.odd@openai-curated-remote.enabled': False,
+            'plugins.nameless@openai-curated-remote.enabled': False})
+
     def test_answers_that_are_missing_or_malformed_turn_nothing_off(self):
         for installed, config in ((None, None), ({}, {}), ({'marketplaces': 'x'}, {'config': {'mcp_servers': []}}),
                                   ([], 'x')):
@@ -431,6 +452,40 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                 'x-codex-turn-metadata': {'session_id': HOST_THREAD, 'turn_id': adapter.turn_id}}})
         self.assertNotIn('PRIVATE', json.dumps(logs))
         self.assertNotIn('foreign', json.dumps(sent))
+
+    async def test_the_browser_refusal_of_codex_gets_one_note_for_the_ai_at_the_end_and_nothing_else_does(self):
+        refusal = {'content': [{'type': 'text', 'text': 'Error: Local browser use is disabled in Work settings'},
+                               {'type': 'text', 'text': 'a console line'}], 'isError': True, '_meta': {'a': 1}}
+        note = ('CUA Bar note: since Codex 26.1023, Codex refuses browser use in conversations it did not start itself, '
+                'which includes Claude Code conversations that use CUA through CUA Bar. This is not a setting the user '
+                'turned off; changing Work settings or resetting the Chrome extension will not help. Desktop apps still '
+                'work. For browser work, tell the user to ask the Codex app directly.')
+        adapter, _, output, _, _ = self.fixture(result=refusal)
+        await self.initialize(adapter)
+        await adapter.handle(self.call())
+        self.assertEqual(output[-1]['result'], {**refusal, 'content': [*refusal['content'], {'type': 'text', 'text': note}]})
+        self.assertEqual(refusal['content'][-1]['text'], 'a console line')       # the answer itself is not changed
+        # The same words in a result that does not say it is Codex's refusal, a different refusal, a result that is no
+        # list, and the host's JSON-RPC error: all as they came.
+        for result in ({'content': [{'type': 'text', 'text': 'The browser access host is unavailable'}], 'isError': True},
+                       {'content': [{'type': 'text', 'text': 'Local browser use is disabled'}], 'isError': True},
+                       {'content': 'Local browser use is disabled in Work settings'},
+                       {'content': [{'type': 'image', 'data': 'x'}]}):
+            adapter, _, output, _, _ = self.fixture(result=result)
+            await self.initialize(adapter)
+            await adapter.handle(self.call())
+            self.assertEqual(output[-1]['result'], result)
+        adapter, _, output, _, _ = self.fixture(mode='rpc_error')
+        await self.initialize(adapter)
+        await adapter.handle(self.call())
+        self.assertNotIn('result', output[-1])
+
+    async def test_the_note_is_added_to_js_only(self):
+        refusal = {'content': [{'type': 'text', 'text': 'Local browser use is disabled in Work settings'}], 'isError': True}
+        self.assertIs(bridge.with_browser_note('js_reset', refusal), refusal)
+        self.assertIs(bridge.with_browser_note('turn_ended', refusal), refusal)
+        self.assertIs(bridge.with_browser_note('js', 'text'), 'text')
+        self.assertEqual(len(bridge.with_browser_note('js', refusal)['content']), 2)
 
     async def test_a_failed_call_tells_the_activity_log_why_in_one_word(self):
         locked = {'content': [{'type': 'text', 'text': 'SkyComputerUseError: The Mac is locked. Unlock it first.'}], 'isError': True}

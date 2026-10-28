@@ -21,6 +21,8 @@ NODE = '/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node'
 NODE_REPL = '/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl'
 SCRIPT = '/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
 APP = '/Applications/ChatGPT.app/Contents/MacOS/ChatGPT'
+# Codex 26.1023 starts the bundled runtime behind a module of its plugin that it preloads.
+PRELOAD = ['--import', 'file:///Users/x/.codex/plugins/cache/openai-bundled/unified-computer-use/26.1023.50603/require-browser-access.mjs']
 
 
 def thread_config(**changes):
@@ -71,6 +73,27 @@ class RewriteTests(Fixture):
                           'CODEX_CUA_NATIVE_RUNTIME', 'CODEX_CUA_RELAY_NODE'], 'the rest keeps its place')
         self.assertIn('한국어'.encode('utf-8'), result, 'text stays text')
         self.assertNotIn(b'\\u', result)
+
+    def test_the_bundled_server_that_preloads_a_module_is_pointed_at_the_relay_and_the_arguments_stay(self):
+        for preload in (PRELOAD, ['--import=' + PRELOAD[1]]):
+            with self.subTest(preload):
+                rewrite = unix_ws_stdio.RelayRewrite(str(self.launcher), NODE_REPL, NODE, SCRIPT, None, preload)
+                original = request(entry=thread_config(args=[*preload, SCRIPT]))
+                expected = copy.deepcopy(original)
+                env = expected['params']['config']['mcp_servers.cua_repl']['env']
+                env.update(CUA_REPL_NODE_REPL_PATH=str(self.launcher), CODEX_CUA_NATIVE_RUNTIME=NODE_REPL, CODEX_CUA_RELAY_NODE=NODE)
+                result = json.loads(rewrite(line(original)))
+                self.assertEqual(result, expected)
+                self.assertEqual(result['params']['config']['mcp_servers.cua_repl']['args'], [*preload, SCRIPT])
+                self.assertEqual(result['params']['config']['mcp_servers.cua_repl']['env']['BROWSER_USE_ACCESS_PIPE_PATH'], '/private/tmp/pipe')
+                # Only the arguments the launcher verified: the other form, a second module and the bare script are
+                # another server and go through as they came.
+                for args in ([SCRIPT], [*preload, '--import', 'file:///tmp/x.mjs', SCRIPT], ['--import', 'file:///tmp/x.mjs', SCRIPT],
+                             [*preload], [*preload, SCRIPT, '--flag'], ['--inspect', *preload, SCRIPT]):
+                    body = line(request(entry=thread_config(args=args)))
+                    self.assertEqual(rewrite(body), body, args)
+        body = line(request(entry=thread_config(args=[*PRELOAD, SCRIPT])))
+        self.assertEqual(self.rewrite(body), body, 'a relay verified for the bare script does not take the preloading one')
 
     def test_the_state_directory_is_added_when_there_is_one(self):
         rewrite = unix_ws_stdio.RelayRewrite(str(self.launcher), NODE_REPL, NODE, SCRIPT, '/private/state')
@@ -278,6 +301,24 @@ class ProcessTests(Fixture):
         self.assertEqual(frames[3], plain[2])
         self.assertEqual(frames[4], stub_app)
         self.assertEqual(frames[5], plain[3])
+
+    def test_the_preloaded_module_arrives_as_one_json_argument_and_the_request_matching_it_is_rewritten(self):
+        matching = request(entry=thread_config(args=[*PRELOAD, SCRIPT]))
+        old_form = request()
+        code, stdout, stderr, sent = self.run_proxy(
+            line(matching) + b'\n' + line(old_form) + b'\n',
+            *self.relay_arguments('--relay-preload=' + json.dumps(PRELOAD)))
+        self.assertEqual((code, stdout, stderr), (0, b'', b''))
+        first, second = sent.split(b'\n')[:2]
+        self.assertEqual(json.loads(first)['params']['config']['mcp_servers.cua_repl']['env']['CUA_REPL_NODE_REPL_PATH'], str(self.launcher))
+        self.assertEqual(second, line(old_form))
+        # An argument that is not a list of texts means no rewriting at all.
+        for bad in ('not json', '{"a": 1}', '[1]', '[""]', '"--import"'):
+            with self.subTest(bad):
+                self.sent.unlink()
+                body = line(matching) + b'\n'
+                code, stdout, stderr, sent = self.run_proxy(body, *self.relay_arguments('--relay-preload=' + bad))
+                self.assertEqual((code, stdout, stderr, sent), (0, b'', b'', body))
 
     def test_without_the_relay_arguments_the_transport_forwards_everything_as_it_always_did(self):
         body = [line(request()), line(request('thread/resume')), b'{"id":1,"method":"ping"}']

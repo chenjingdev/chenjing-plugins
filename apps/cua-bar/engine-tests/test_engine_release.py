@@ -120,6 +120,20 @@ class SuccessTests(ReleaseCase):
         self.assertTrue(self.release([SESSION_C])[SESSION_C]['released'])
         self.assertEqual(self.machine.signals, [])
 
+    def test_a_runtime_started_with_the_preloaded_module_of_codex_26_1023_is_ended_too(self):
+        self.dead()
+
+        def spawn():
+            self.add_runtime(3100, int(self.machine.now), relay=False, command=self.commands.cua_repl_import)
+            self.machine.cwds[3100] = os.path.realpath(self.hosts[-1].thread_params['cwd'])
+            # An ordinary conversation's runtime that started meanwhile works elsewhere and is left alone.
+            self.add_runtime(3200, int(self.machine.now), relay=False, command=self.commands.cua_repl_import)
+            self.machine.cwds[3200] = '/work/codex'
+        self.host_hooks['mcpServerStatus/list'] = spawn
+        self.assertTrue(self.release([SESSION_C])[SESSION_C]['released'])
+        self.assertEqual(self.machine.signals, [(3100, signal.SIGTERM)])
+        self.assertIn(3200, self.machine.procs)
+
     def test_a_failed_release_still_ends_the_threads_runtime(self):
         self.dead()
 
@@ -399,6 +413,40 @@ class MechanismFailureTests(ReleaseCase):
             self.assertTrue(all(call['arguments'].get('session_id') == OWN_THREAD
                                 for call in self.hosts[0].calls if call['tool'] == 'turn_ended'))
         self.assertTrue(directory.exists())
+
+    def test_a_browser_codex_refuses_to_the_thread_is_browser_blocked_not_unsupported(self):
+        # Codex 26.1023 asks the desktop app before every browser call and the app allows only its own threads.
+        directory = self.dead()
+        blocked = 'Local browser use is disabled in Work settings'
+        unavailable = 'The browser access host is unavailable'
+        for result in ({'isError': True, 'content': [{'type': 'text', 'text': 'Error: ' + blocked}]},
+                       {'content': [{'type': 'text', 'text': blocked}]},
+                       {'isError': True, 'content': [{'type': 'text', 'text': 'x'}, {'type': 'text', 'text': unavailable + ' (no env)'}]},
+                       {'__error__': {'code': -32000, 'message': blocked}}):
+            self.hosts.clear()
+            self.tools['js'] = AsyncMock(return_value=result)
+            self.assertEqual(self.release([SESSION_C])[SESSION_C], {'released': False, 'reason': 'browser_blocked', 'tab_count': None})
+            # The pair was never registered, so nothing of the session is asked to end.
+            self.assertTrue(all(call['arguments'].get('session_id') == OWN_THREAD
+                                for call in self.hosts[0].calls if call['tool'] == 'turn_ended'))
+        self.assertTrue(directory.exists())
+
+    def test_a_refused_browser_stops_the_rest_of_the_batch_from_calling(self):
+        self.dead(session=SESSION_C)
+        self.dead('d2', 7002, session=SESSION_D)
+        self.tools['js'] = AsyncMock(return_value={'isError': True, 'content': [
+            {'type': 'text', 'text': 'Local browser use is disabled in Work settings'}]})
+        results = self.release([SESSION_C, SESSION_D])
+        self.assertEqual({key: value['reason'] for key, value in results.items()},
+                         {SESSION_C: 'browser_blocked', SESSION_D: 'browser_blocked'})
+        self.assertEqual(self.tools['js'].call_count, 1)
+
+    def test_other_failures_stay_as_they_were(self):
+        self.dead()
+        for result in ({'isError': True, 'content': [{'type': 'text', 'text': 'Error: Extension is not connected'}]},
+                       {'content': [{'type': 'text', 'text': 'Local browser use'}]}):
+            self.tools['js'] = AsyncMock(return_value=result)
+            self.assertEqual(self.release([SESSION_C])[SESSION_C]['reason'], 'unsupported')
 
     def test_the_host_answering_with_an_error_cannot_confirm(self):
         self.dead()

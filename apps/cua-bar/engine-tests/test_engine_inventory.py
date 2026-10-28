@@ -62,6 +62,40 @@ class ClassificationTests(EngineCase):
         beta = '/Applications/ChatGPT - Beta.app/Contents/Resources/cua_node'
         self.assertTrue(inventory.is_cua_repl('%s/bin/node %s/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs' % (beta, beta)))
 
+    def test_a_runtime_that_preloads_a_module_is_still_a_runtime(self):
+        # Codex 26.1023.50603 starts it as `node --import file:///…/require-browser-access.mjs …/cua-repl.mjs`.
+        line = self.commands.cua_repl_import
+        self.assertIn(' --import file:///', line)
+        self.assertTrue(inventory.is_cua_repl(line))
+        node, _, rest = line.partition(' --import ')
+        module, _, script = rest.partition(' ')
+        self.assertTrue(inventory.is_cua_repl('%s --import=%s %s' % (node, module, script)))
+        self.assertTrue(inventory.is_cua_repl('%s --import %s --import=file:///x/other.mjs %s' % (node, module, script)))
+        self.assertTrue(inventory.is_cua_repl('%s --import %s %s --trailing' % (node, module, script)))
+        # Blanks in the paths do not split anything.
+        beta = '/Applications/ChatGPT - Beta.app/Contents/Resources/cua_node'
+        spaced = ('%s/bin/node --import file:///Users/Jo Doe/.codex/plugins/require-browser-access.mjs '
+                  '%s/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs' % (beta, beta))
+        self.assertTrue(inventory.is_cua_repl(spaced))
+        self.assertTrue(inventory.is_cua_repl(spaced.replace('--import ', '--import=', 1)))
+
+    def test_any_other_option_before_the_script_is_no_runtime(self):
+        line = self.commands.cua_repl_import
+        node, _, rest = line.partition(' --import ')
+        module, _, script = rest.partition(' ')
+        for other in ('--inspect', '-r /x/hook.js', '--require /x/hook.js', '--experimental-loader /x/l.mjs', '--import'):
+            self.assertFalse(inventory.is_cua_repl('%s %s %s' % (node, other, script)), other)
+            self.assertFalse(inventory.is_cua_repl('%s --import %s %s %s' % (node, module, other, script)), other)
+            self.assertFalse(inventory.is_cua_repl('%s %s --import %s %s' % (node, other, module, script)), other)
+        self.assertFalse(inventory.is_cua_repl('%s --import= %s' % (node, script)))
+        self.assertFalse(inventory.is_cua_repl('%s --import %s' % (node, script)))
+        self.assertFalse(inventory.is_cua_repl('%s --importer %s %s' % (node, module, script)))
+        self.assertFalse(inventory.is_cua_repl('/usr/bin/python3 --import %s %s' % (module, script)))
+        # The host's proxy line, as it is with the new Codex: node and the script as option values.
+        self.assertFalse(inventory.is_cua_repl(self.commands.host_proxy))
+        self.assertIn(' --relay-node ', self.commands.host_proxy)
+        self.assertIn(' --relay-script ', self.commands.host_proxy)
+
     def test_claude_bridges_of_this_and_older_plugins(self):
         root = Path('/work/plugins/cua')
         for command in (self.commands.bridge, self.commands.old_bridge,

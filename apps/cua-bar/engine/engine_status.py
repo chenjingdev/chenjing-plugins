@@ -636,8 +636,13 @@ class View:
         settings), so the copy must look as the launcher wants it, as far as the engine can tell, and have been
         written since the launcher started: a copy that was there before was refused for one of those, and a restart
         would refuse it again. The launcher of the next start is newer than the copy, so this never asks for a second
-        restart, whatever the cause."""
+        restart, whatever the cause.
+
+        `not_bundled` is the other case (see _bundled_with_preload): a launcher from before 0.8.7 that did not know the
+        bundled server of Codex 26.1023."""
         inv = self.inv
+        if self.relay_reason() == 'not_bundled':
+            return self._bundled_with_preload()
         if self.relay_reason() != 'plugin_entry' or not inv.app_version or not VERSION_NAME.match(inv.app_version):
             return False
         owner = (inv.host.registry or {}).get('owner_pid')
@@ -655,6 +660,39 @@ class View:
                     for info in files)
                 and isinstance(manifest, dict) and manifest.get('version') == inv.app_version
                 and max(info.st_mtime for info in files) >= launcher.start)
+
+    def _bundled_with_preload(self):
+        """True when the host that runs now went without the relay as `not_bundled` because its launcher is older than
+        this engine and did not know the bundled server of Codex 26.1023, which starts node with
+        `--import <require-browser-access.mjs of the plugin> <cua-repl.mjs>`, and Codex's copy of the plugin says that
+        now: the next start, by this engine's launcher, takes that form as the bundled one and has the relay.
+
+        A host started by this engine's launcher is not asked about again (a second restart would be refused the
+        same way), and neither is any other form of the server."""
+        inv = self.inv
+        if (not self.started_before_setup() or inv.installation is None or not inv.app_version
+                or not VERSION_NAME.match(inv.app_version)):
+            return False
+        from relay_install import ENV_RUNTIME_PATH, SERVER, _same_path, plugin_directory, preload_arguments
+        cua_root = inv.installation.cua_root
+        codex_home = self.ctx.environment.get('CODEX_HOME') or str(self.ctx.home/'.codex')
+        plugin = plugin_directory(cua_root, codex_home)
+        if plugin is None:
+            return False
+        try:
+            info = os.lstat(plugin/'.mcp.json')
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != self.ctx.uid or stat.S_IMODE(info.st_mode) & 0o022:
+                return False
+            loaded = json.loads((plugin/'.mcp.json').read_text())
+        except (OSError, ValueError):
+            return False
+        servers = loaded.get('mcpServers', loaded.get('mcp_servers')) if isinstance(loaded, dict) else None
+        entry = servers.get(SERVER) if isinstance(servers, dict) else None
+        env = entry.get('env') if isinstance(entry, dict) else None
+        split = preload_arguments(entry.get('args'), cua_root, plugin) if isinstance(entry, dict) else None
+        return (split is not None and bool(split[0]) and isinstance(env, dict)
+                and _same_path(entry.get('command'), cua_root/'bin/node')
+                and _same_path(env.get(ENV_RUNTIME_PATH), cua_root/'bin/node_repl'))
 
     def _codex(self):
         inv = self.inv

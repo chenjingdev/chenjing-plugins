@@ -70,7 +70,8 @@ struct CodexCUAEngineClient: EngineClient {
     }
 
     func releaseEnded(_ load: ReleaseEndedLoad) async throws -> ReleaseEndedResult {
-        try await json(ReleaseEndedResult.self, ["release", "--ended", "--json"], timeout: timeouts.releaseEnded(for: load))
+        let arguments = ["release", "--ended"] + (load.withSessions ? [] : ["--connections-only"]) + ["--json"]
+        return try await json(ReleaseEndedResult.self, arguments, timeout: timeouts.releaseEnded(for: load))
     }
 
     func releaseSession(id: String, user: Bool) async throws -> SessionReleaseResult {

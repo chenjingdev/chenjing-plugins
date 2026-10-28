@@ -323,6 +323,16 @@ class ReleaseBookingTests(KilledBridgeCase):
         self.assertFalse(bridge.exists())
         self.assertEqual(self.left(), [])
 
+    def test_an_ended_connection_is_released_through_its_own_writer_and_never_through_the_browser(self):
+        """The part of `release --ended` that is for connections asks the control socket of the writer. Nothing in it
+        opens a thread of the engine or calls the browser, so Codex's refusal of the browser (browser_blocked) cannot
+        reach it; only the sessions of the second part do (release_sessions)."""
+        bridge, _ = self.killed_bridge_and_its_runtime()
+        with patch.object(engine_actions, 'release_sessions', side_effect=AssertionError('the browser')):
+            self.assertEqual(engine_actions.release_ended(self.ctx(), sessions=False),
+                             {'ok': True, 'results': [{'connection_id': self.ENDED, 'released': True, 'reason': None}]})
+        self.assertFalse(bridge.exists())
+
     def test_only_the_sessions_the_connection_let_go_of_leave_the_dead_bridge(self):
         bridge, _ = self.killed_bridge_and_its_runtime(extra=[SESSION_B])
         engine_actions.release_ended(self.ctx())
@@ -528,6 +538,17 @@ class SessionReleaseInEndedTests(ActionCase):
         builder = self.state.bridge if kind == 'bridge' else self.state.relay
         return builder(name, pid, NOW-5000, cwd='/work/dead', scopes=[State.scope(session, last=at(1000))], cleanup='open',
                        **fields)
+
+    def test_the_connections_alone_never_reach_the_browser(self):
+        """`--connections-only`: for an app that was told Codex refuses the browser to the engine's threads. Ended
+        connections are asked through their own control sockets, so nothing of them needs the host."""
+        bridge = self.dead('d1', 7001, SESSION_C)
+        result = engine_actions.release_ended(self.ctx(), sessions=False)
+        self.assertEqual(result, {'ok': True, 'results': []})
+        self.assertEqual(self.hosts, [], 'no thread was opened and no browser call made')
+        self.assertTrue(bridge.exists(), 'the session of a dead bridge is left for a run that includes the sessions')
+        self.assertEqual(engine_actions.release_ended(self.ctx())['results'][0]['released'], True)
+        self.assertEqual(len(self.hosts), 1)
 
     def test_sessions_of_dead_bridges_are_released_and_those_of_codex_threads_are_left_for_a_click(self):
         bridge = self.dead('d1', 7001, SESSION_C)

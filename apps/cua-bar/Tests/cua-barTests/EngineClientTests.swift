@@ -229,6 +229,17 @@ struct EngineClientTests {
     }
 
     /// A limit shorter than the engine's own worst case (P4) kills an engine that would still
+    /// After Codex refused the browser the cleanup asks for the ended connections alone: the engine does not go on to the
+    /// sessions, and the limit has no time for them either.
+    @Test func releaseEndedForTheConnectionsAlone() async throws {
+        let runner = ScriptedRunner(stdout: #"{"ok": true, "results": []}"#)
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        _ = try await client.releaseEnded(ReleaseEndedLoad(endedConnections: 2, claudeSessions: 0, withSessions: false))
+        #expect(runner.calls.map(\.arguments) == [["release", "--ended", "--connections-only", "--json"]])
+        #expect(runner.calls.map(\.timeout) == [.seconds(60 + 2 * 35)])
+    }
+
     /// have finished, before its clean-up.
     @Test func eachLimitCoversTheEnginesWorstCase() async throws {
         let runner = ScriptedRunner(stdout: "{}")

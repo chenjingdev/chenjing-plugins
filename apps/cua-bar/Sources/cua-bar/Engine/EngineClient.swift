@@ -7,6 +7,9 @@ struct ReleaseEndedLoad: Equatable, Sendable {
     var endedConnections = 0
     /// Releasable Claude `maybe_left` sessions.
     var claudeSessions = 0
+    /// False after Codex refused the browser to the engine's conversations (`browser_blocked`): the command is then
+    /// asked for the ended connections alone (`--connections-only`), which never reach the browser.
+    var withSessions = true
 }
 
 extension ReleaseEndedLoad {

@@ -49,6 +49,12 @@ runtime; do not invent APIs from ordinary Node.js or Playwright examples.
   input was detected, that the request cannot be associated with a ChatGPT
   thread, or only that the Mac is locked, stop and ask the user to unlock the
   Mac. Never try to unlock the Mac or restart the service yourself.
+- If a browser call fails with "Local browser use is disabled in Work settings"
+  (or "The browser access host is unavailable"), Codex refused the browser:
+  since Codex 26.1023 it allows browser use only in conversations it started
+  itself. It is not a setting the user turned off. Do not suggest changing Work
+  settings, resetting the Chrome extension or releasing tabs, and do not retry.
+  Desktop apps still work; tell the user to give browser work to the Codex app.
 - Never replace a connection failure with a separately launched CUA engine,
   model proxy, changed permissions or automatic approval. Keep request
   payloads, screenshots and secrets out of diagnostic output.

@@ -85,13 +85,30 @@ def mark_live(records, procs, uid):
 def is_cua_repl(command):
     """A CUA runtime root: the bundled node running cua-repl.mjs (it starts node_repl or the relay).
 
-    That node is the program and the script its first argument, with no option before it. The host's proxy names
-    both as option values (`--relay-node <node> --relay-script <cua-repl.mjs>`) and is no runtime."""
+    That node is the program and the script its first argument. Only Node's preload option may stand between them:
+    `--import <module>` or `--import=<module>`, once or more (Codex 26.1023 starts the runtime with the module
+    require-browser-access.mjs). Any other option makes it no runtime, and so does the host's proxy, which names node
+    and the script as option values (`--relay-node <node> --relay-script <cua-repl.mjs>`).
+
+    The line is not split at every blank, because the paths in it may hold blanks; it is split before each word
+    that starts an option (a blank, then `-` or `--` and a letter)."""
     index = command.find(CUA_REPL_SCRIPT)
     if index <= 0:
         return False
-    head = command[:index]
-    return re.search(r'(?:^|/)node\s', head) is not None and re.search(r'\s--?[A-Za-z]', head) is None
+    parts = re.split(r'\s(?=--?[A-Za-z])', command[:index])
+    if len(parts) == 1:
+        return re.search(r'(?:^|/)node\s', parts[0]) is not None
+    program, options = parts[0], parts[1:]
+    if re.search(r'(?:^|/)node$', program) is None:
+        return False
+    for number, option in enumerate(options, 1):
+        if number < len(options):
+            if re.fullmatch(r'--import(?:=|\s+)\S.*', option) is None:
+                return False
+        # The last piece also holds the front of the script's own path, after a blank.
+        elif re.fullmatch(r'--import(?:=|\s+)\S.*?\s+/.*', option) is None:
+            return False
+    return True
 
 
 def is_bridge(command, plugin_root):

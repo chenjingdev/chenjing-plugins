@@ -98,6 +98,13 @@ struct TidyStep: Equatable, Sendable {
 enum ActionMessages {
     static let unknownReason = "확인되지 않음"
 
+    /// Since Codex 26.1023 the desktop app lets only the conversations it started itself use the browser, so the
+    /// engine's own conversations (the one a Claude bridge uses, the one a release works in) are refused. That is
+    /// Codex's access control, not a setting and not the Chrome extension: the extension reset does not help, so it
+    /// is not among the reasons that point at it (`CUABarViewModel.reasonsPointingAtTheExtension`).
+    static let browserBlockedReason = "browser_blocked"
+    static let browserBlocked = "Codex가 Claude 대화의 브라우저 사용을 막아서 풀 수 없어요"
+
     /// One line per reason of the contract (and its later additions); anything else is unknown.
     static func reason(_ raw: String?) -> String {
         switch raw {
@@ -107,6 +114,7 @@ enum ActionMessages {
         case "cleanup_not_confirmed": "정리가 확인되지 않았어요"
         case "relay_unavailable": "중계기를 쓸 수 없어요"
         case "unsupported": "하나만 골라 풀 방법이 없어요. 목록 맨 아래 안내를 보세요"
+        case browserBlockedReason: browserBlocked
         case "quit_cancelled": "Codex가 종료를 취소했어요"
         case "quit_pending": "Codex가 아직 꺼지는 중이에요"
         case "not_running": "Codex가 켜져 있지 않아요"
@@ -155,8 +163,13 @@ enum ActionMessages {
                 ? ActionOutcome(kind: .success, message: reason(result.reason))
                 : ActionOutcome(kind: .warning, message: noWayToRelease)
         }
+        if result.reason == browserBlockedReason { return blockedOutcome }
         return ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — \(reason(result.reason))")
     }
+
+    /// The one line a refused browser leaves where a tab release is told: the reason alone, with no lead-in and no
+    /// pointer to the guidance below the list.
+    private static let blockedOutcome = ActionOutcome(kind: .failure, message: browserBlocked)
 
     /// `release --connection` found nobody to ask: the runtime may still hold tabs.
     static let noWayToRelease = "탭을 풀 길을 확인하지 못했어요"
@@ -167,6 +180,7 @@ enum ActionMessages {
         if result.ok, result.released {
             return ActionOutcome(kind: .success, message: result.tabCount.map { "탭 \($0)개를 풀었어요" } ?? "탭을 풀었어요")
         }
+        if result.reason == browserBlockedReason { return blockedOutcome }
         return ActionOutcome(kind: .failure, message: "탭을 풀지 못했어요 — \(reason(result.reason))")
     }
 

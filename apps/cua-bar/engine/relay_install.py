@@ -28,6 +28,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import urllib.parse
 import weakref
 
 SERVER = 'cua_repl'
@@ -52,6 +53,10 @@ MAX_DEFINITION_BYTES = 1 << 20
 MAX_OVERRIDE_BYTES = 1 << 16
 PLUGIN_NAME = 'unified-computer-use'
 PLUGIN_MARKETPLACE = 'openai-bundled'
+CUA_REPL_SCRIPT = 'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs'
+# Since Codex 26.1023 the bundled server starts node with a module of the same plugin that it preloads first
+# (`--import <module> <cua-repl.mjs>`); the module asks the desktop app for browser access. It is part of the definition.
+PRELOAD_MODULE = 'require-browser-access.mjs'
 
 # What `mcp get cua_repl --json` may contain. Anything else is a field this code does not know how to reproduce.
 DEFINITION_FIELDS = frozenset(('name', 'enabled', 'disabled_reason', 'transport', 'enabled_tools',
@@ -318,7 +323,59 @@ def _timeout(value):
                              and math.isfinite(value) and value > 0)
 
 
-def bundled_definition(value, cua_root):
+def plugin_directory(cua_root, codex_home):
+    """Where Codex keeps its copy of the bundled computer-use plugin for the app version of `cua_root`
+    (<codex home>/plugins/cache/openai-bundled/unified-computer-use/<version>), or None when that is not known."""
+    try:
+        with (Path(cua_root).parent.parent.parent/'Contents/Info.plist').open('rb') as source:
+            version = plistlib.load(source).get('CFBundleShortVersionString')
+        if (not isinstance(version, str) or not re.fullmatch(r'[0-9A-Za-z._+-]+', version) or version.startswith('.')
+                or not isinstance(codex_home, str) or not os.path.isabs(codex_home)):
+            return None
+    except (OSError, ValueError, AttributeError, TypeError):
+        return None
+    return Path(codex_home)/'plugins/cache'/PLUGIN_MARKETPLACE/PLUGIN_NAME/version
+
+
+def _module_path(value):
+    """The file an `--import` value names: an absolute path, or a `file:` URL that names one on this machine."""
+    if not isinstance(value, str) or not value or '\0' in value:
+        return None
+    if value.startswith('file:'):
+        parts = urllib.parse.urlsplit(value)
+        if parts.scheme != 'file' or parts.netloc not in ('', 'localhost') or parts.query or parts.fragment:
+            return None
+        value = urllib.parse.unquote(parts.path)
+    return value if os.path.isabs(value) else None
+
+
+def preload_arguments(args, cua_root, plugin_dir):
+    """The arguments of the bundled server, split: (the ones before the script, the script), or None when they are not
+    the bundled ones.
+
+    The bundled ones are the script of the app's runtime alone, as before, or the script behind one `--import <module>`
+    or `--import=<module>` whose module is `require-browser-access.mjs` of the plugin copy `plugin_dir` (None: no
+    module is known, so only the first). Any other argument, a second `--import` or a module from elsewhere is not."""
+    if not _strings(args):
+        return None
+    if len(args) == 2 and args[0].startswith('--import='):
+        module = args[0][len('--import='):]
+    elif len(args) == 3 and args[0] == '--import':
+        module = args[1]
+    elif len(args) == 1:
+        module = None
+    else:
+        return None
+    if module is not None:
+        path = _module_path(module)
+        if plugin_dir is None or path is None or not _same_path(path, Path(plugin_dir)/PRELOAD_MODULE):
+            return None
+    if not _same_path(args[-1], Path(cua_root)/CUA_REPL_SCRIPT):
+        return None
+    return list(args[:-1]), args[-1]
+
+
+def bundled_definition(value, cua_root, plugin_dir=None):
     """Validate the effective definition; return it unchanged. It must be the bundled stdio server, nothing more."""
     if set(value) - DEFINITION_FIELDS:
         raise RelayRefused('unknown_field')
@@ -331,14 +388,14 @@ def bundled_definition(value, cua_root):
     if (value.get('name') != SERVER or value.get('enabled') is not True or value.get('disabled_reason') is not None
             or transport.get('cwd') is not None
             or not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items())
-            or not isinstance(transport.get('args'), list) or len(transport['args']) != 1
+            or not isinstance(transport.get('args'), list)
             or not _strings(transport.get('env_vars', []))
             or not _timeout(value.get('startup_timeout_sec')) or not _timeout(value.get('tool_timeout_sec'))
             or any(value.get(key) is not None and not _strings(value.get(key)) for key in ('enabled_tools', 'disabled_tools'))):
         raise RelayRefused('not_bundled')
     cua_root = Path(cua_root)
     if (not _same_path(transport.get('command'), cua_root/'bin/node')
-            or not _same_path(transport['args'][0], cua_root/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
+            or preload_arguments(transport['args'], cua_root, plugin_dir) is None
             or not _same_path(env.get(ENV_RUNTIME_PATH), cua_root/'bin/node_repl')):
         raise RelayRefused('not_bundled')
     if any(SECRET_NAME.search(name) for name in env):
@@ -480,7 +537,7 @@ def build_override(definition, hidden, launcher, state_dir=None):
 class RelayPlan:
     """What the launcher does for this start: the arguments of the backend and the proxy, and what was verified."""
 
-    def __init__(self, arguments, override, launcher, native_runtime, node, script, state_dir, table=None):
+    def __init__(self, arguments, override, launcher, native_runtime, node, script, state_dir, table=None, preload=()):
         self.arguments = arguments
         self.override = override
         self.table = table              # the override as data: what a Claude bridge gives its own thread
@@ -488,12 +545,15 @@ class RelayPlan:
         self.native_runtime = native_runtime
         self.node = node
         self.script = script
+        self.preload = list(preload)    # the arguments of the bundled server before the script (`--import <module>`)
         self.state_dir = state_dir
 
     def proxy_arguments(self):
         """For the desktop transport: the verified paths it needs to point the app's own threads at the relay."""
         arguments = ['--relay-launcher', str(self.launcher), '--relay-native-runtime', self.native_runtime,
                      '--relay-node', self.node, '--relay-script', self.script]
+        if self.preload:
+            arguments.append('--relay-preload=' + json.dumps(self.preload, separators=(',', ':')))
         if self.state_dir:
             arguments += ['--relay-state-dir', self.state_dir]
         return arguments
@@ -518,7 +578,9 @@ def _plan(native, arguments, environment, plugin_root, home, run):
     # override, then the subcommand's own.
     index = subcommand_index(arguments)
     root_flags, own_flags = config_flags(arguments[:index]), config_flags(arguments[index + 1:])
-    definition = bundled_definition(read_definition(native, root_flags + own_flags, environment, run), installation.cua_root)
+    codex_home = environment.get('CODEX_HOME') or str((Path(home) if home else Path.home())/'.codex')
+    definition = bundled_definition(read_definition(native, root_flags + own_flags, environment, run),
+                                    installation.cua_root, plugin_directory(installation.cua_root, codex_home))
     hidden = _hidden_fields(definition, *_bundled_plugin_entry(installation, definition, environment, home))
     state = environment.get(ENV_STATE)
     state = state if isinstance(state, str) and os.path.isabs(state) else None
@@ -530,7 +592,7 @@ def _plan(native, arguments, environment, plugin_root, home, run):
         raise RelayRefused('override_rejected')
     return RelayPlan(list(arguments[:index]) + ['-c', override] + list(arguments[index:]), override, launcher,
                      definition['transport']['env'][ENV_RUNTIME_PATH], definition['transport']['command'],
-                     definition['transport']['args'][0], state, table)
+                     definition['transport']['args'][-1], state, table, definition['transport']['args'][:-1])
 
 
 def plan_relay(native, arguments, environment, plugin_root, home=None, run=subprocess.run):
@@ -574,8 +636,10 @@ def _shown_server(result):
     return None
 
 
-def transport_is_relay(entry, cua_root, launcher):
-    """Is the server definition `config/read` shows the relay in front of the bundled runtime?"""
+def transport_is_relay(entry, cua_root, launcher, home=None):
+    """Is the server definition `config/read` shows the relay in front of the bundled runtime?
+
+    The arguments are the bundled ones (see preload_arguments; the module is looked for in this user's Codex home)."""
     if not isinstance(entry, dict):
         return False
     transport = entry['transport'] if isinstance(entry.get('transport'), dict) else entry
@@ -584,8 +648,9 @@ def transport_is_relay(entry, cua_root, launcher):
             or not all(isinstance(item, str) for item in args)):
         return False
     cua_root = Path(cua_root)
+    codex_home = os.environ.get('CODEX_HOME') or str((Path(home) if home else Path.home())/'.codex')
     return (_same_path(command, cua_root/'bin/node')
-            and len(args) == 1 and _same_path(args[0], cua_root/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
+            and preload_arguments(args, cua_root, plugin_directory(cua_root, codex_home)) is not None
             and env.get(ENV_RUNTIME_PATH) == str(launcher)
             and _same_path(env.get(ENV_NATIVE), cua_root/'bin/node_repl')
             and env.get(ENV_NODE) == command)
@@ -610,7 +675,7 @@ def relay_thread_server(registry, cua_root, owner=None, home=None):
         if registry.get('relay_launcher') != str(launcher) or not trusted_launcher(launcher):
             return None
         table = registry.get('relay_config')
-        if not isinstance(table, dict) or not _plain(table) or not transport_is_relay(table, cua_root, launcher):
+        if not isinstance(table, dict) or not _plain(table) or not transport_is_relay(table, cua_root, launcher, home):
             return None
         server = json.loads(json.dumps(table))
         if isinstance(owner, str) and OWNER_NAME.match(owner):
@@ -650,7 +715,7 @@ async def _decide(adapter, request, home):
             result = None
         shown = _shown_server(result)
         if shown is not None:
-            return transport_is_relay(shown, adapter.native_cua_root, launcher)
+            return transport_is_relay(shown, adapter.native_cua_root, launcher, home)
         return _registry(adapter.rpc.socket_path, launcher)
     except Exception:
         return False

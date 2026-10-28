@@ -160,6 +160,10 @@ class Commands:
         self.app_server = '%s -c features.code_mode_host=true app-server --analytics-default-enabled' % native
         node = app/'Contents/Resources/cua_node/bin/node'
         self.cua_repl = '%s %s' % (node, app/'Contents/Resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
+        # Since Codex 26.1023 the runtime preloads a module that asks the desktop app for browser access.
+        self.cua_repl_import = '%s --import %s %s' % (
+            node, (home/'.codex/plugins/cache/openai-bundled/unified-computer-use/26.1023.50603/require-browser-access.mjs').as_uri(),
+            app/'Contents/Resources/cua_node/lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
         self.node_repl = str(app/'Contents/Resources/cua_node/bin/node_repl')
         self.relay = '%s %s' % (node, home/'.local/share/codex-cua/relay/relay.mjs')
         # The host's proxy between the app and its app-server names node and cua-repl.mjs as option values.
@@ -506,11 +510,12 @@ class EngineCase(unittest.TestCase):
         self.machine.add(pid, owner, command or self.commands.bridge, start=start, rss_kb=rss_kb)
         return pid
 
-    def add_runtime(self, repl, start, relay=True, rss=(1000, 400, 2000), parent=1100):
+    def add_runtime(self, repl, start, relay=True, rss=(1000, 400, 2000), parent=1100, command=None):
         """A CUA runtime under the app-server: cua-repl, then (with a relay) the relay, then the original runtime.
 
-        pids: repl, repl+1 (the relay, or the runtime without a relay), repl+2 (the runtime behind a relay)."""
-        self.machine.add(repl, parent, self.commands.cua_repl, start=start, rss_kb=rss[0])
+        pids: repl, repl+1 (the relay, or the runtime without a relay), repl+2 (the runtime behind a relay).
+        `command` is the command line of cua-repl (the one without options, unless a test names another)."""
+        self.machine.add(repl, parent, command or self.commands.cua_repl, start=start, rss_kb=rss[0])
         if relay:
             self.machine.add(repl+1, repl, self.commands.relay, start=start, rss_kb=rss[1])
             self.machine.add(repl+2, repl+1, self.commands.node_repl, start=start, rss_kb=rss[2])
