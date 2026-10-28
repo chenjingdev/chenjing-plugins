@@ -41,7 +41,8 @@ export function resultsSha256(runDir) {
 }
 
 // 파일을 줄 단위로 읽는다. 멈추면 파일도 닫힌다. 하위 에이전트의 대화 기록은 수십 MB일 수 있어 첫 줄만 읽고 끝내려는 것이다.
-function* fileLines(file) {
+// scripts/transcript.mjs도 메인 대화 기록(수십 MB)을 읽을 때 쓴다.
+export function* fileLines(file) {
   const fd = openSync(file, 'r');
   try {
     const chunk = Buffer.alloc(1 << 16);
@@ -97,7 +98,10 @@ export function recordStop(input, { now = new Date() } = {}) {
   const found = findRunDir({ text: prompt ?? '', cwd });
   if (!found) {
     const why = error ? `; ${error}` : '';
-    return { runDir: null, record: null, problems: [`실행 폴더를 찾지 못해 ${agentType} 답을 log/에 남기지 못했다 (cwd: ${cwd}${why})`] };
+    // 어느 하위 에이전트의 멈춤이었는지 따라갈 수 있게 id와 대화 기록 경로도 남긴다(없으면 '없음').
+    const given = (value) => (typeof value === 'string' && value ? value : '없음');
+    const who = `agent_id: ${given(input.agent_id)}; agent_transcript_path: ${given(input.agent_transcript_path)}`;
+    return { runDir: null, record: null, problems: [`실행 폴더를 찾지 못해 ${agentType} 답을 log/에 남기지 못했다 (cwd: ${cwd}${why}; ${who})`] };
   }
   if (error) problems.push(error);
   const message = typeof input.last_assistant_message === 'string' ? input.last_assistant_message : '';

@@ -3,7 +3,9 @@
 // 그래서 첫 일은 pact와 상관있는지 싸게 가르는 것이다(도구 이름, agent_type, 문자열에 `.pact/`·`docs/pact/`·pact 에이전트 이름이 있는지).
 // 상관없으면 파일을 읽지도 쓰지도 않고, 아무것도 출력하지 않고, 종료 코드 0으로 끝난다(명세 R1).
 //
-//   PreToolUse   — 아직 아무것도 막지 않는다. 승인 관문·결과 잠금·걱정 붙이기는 handlePreToolUse에 더한다.
+//   PreToolUse   — 승인 관문(F2, 명세 R8·R9·R10): 메인 세션이 pact:worker를 부를 때 그 판에 승인·위임 기록이 없으면 막고,
+//                  하위 에이전트가 Bash로 spec.mjs approve·delegate·set-status를 부르거나 메인 세션이 approve·delegate 앞에 환경 변수를
+//                  덮어쓰면 막는다. 결과 잠금·걱정 붙이기는 handlePreToolUse에 더한다.
 //   SubagentStop — pact:spec-checker·reviewer·worker·verifier가 멈추면 마지막 답을 그 판의 <run-dir>/log/에 덧붙여 남기고,
 //                  verifier는 그때의 results.json 지문(sha256)도 남긴다(F4, R14, R15). scripts/run-log.mjs가 한다.
 //
@@ -67,11 +69,81 @@ export function touchesPact(input) {
   }
 }
 
+// ---------- 승인 관문 ----------
+// `spec.mjs approve|delegate|set-status`를 부르는 명령. 호출로 읽는 꼴은 둘이다: node(·bun·deno)가 spec.mjs를 실행하는 것,
+// 명령 맨 앞(`;`·`&&`·`|` 뒤 포함, 앞에 환경 변수 지정이 와도 된다)이 spec.mjs인 것. scripts/ 없이 spec.mjs만 불러도 잡으려고 PACT_TEXT와 따로 본다.
+// 글 속에서 이름만 언급한 것(커밋 메시지, grep, echo)은 호출이 아니다 — 하위 에이전트가 이 플러그인을 고치며 커밋 메시지에 쓰는 말이 막히면 안 된다.
+const SPEC_VIA_NODE = /\b(?:node|nodejs|bun|deno)\b[^\n;&|]*?(?<![\w.-])spec\.mjs["']?\s+(approve|delegate|set-status)(?![\w-])/g;
+const SPEC_DIRECT = /(?:^|[\n;&|(`])\s*(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)\s+)*["']?(?:[^\s"'|;&()]*\/)?spec\.mjs["']?\s+(approve|delegate|set-status)(?![\w-])/g;
+// 승인·위임 스크립트가 대화 기록을 찾는 데 쓰는 환경(HOME → ~/.claude, CLAUDE_CONFIG_DIR, CLAUDE_CODE_SESSION_ID)과, 스크립트 실행을 바꿀 수 있는 환경
+const PROTECTED_ENV = /^(?:HOME|USERPROFILE|HOMEDRIVE|HOMEPATH|XDG_\w+|CLAUDE_\w+|NODE_\w+|DYLD_\w+|LD_\w+|PATH|TMPDIR|PACT_\w+)$/;
+// 명령 앞의 `NAME=값`(HOME=/x node …), export·declare, env 명령 뒤의 지정. 따옴표 안의 `bash -c 'HOME=/x …'`도 본다.
+const ASSIGNMENT = /(?:^|[\s;&|(){}`'"])(?:(?:export|declare|typeset|readonly|local)\s+(?:-\w+\s+)*)?([A-Za-z_][A-Za-z0-9_]*)\+?=/g;
+
+const bashCommand = (input) => (input && input.tool_name === 'Bash' && input.tool_input && typeof input.tool_input === 'object' ? String(input.tool_input.command ?? '') : '');
+
+// 명령 안의 spec.mjs 호출들: [{ sub, end }] — end는 그 호출이 끝나는 자리(앞의 환경 변수 지정까지 포함해 거기까지의 글을 본다)
+function specCalls(command) {
+  if (!command.includes('spec.mjs')) return []; // 싼 거름: 대부분의 명령은 여기서 끝난다
+  const calls = [];
+  for (const re of [SPEC_VIA_NODE, SPEC_DIRECT]) for (const m of command.matchAll(re)) calls.push({ sub: m[1], end: m.index + m[0].length });
+  return calls.sort((a, b) => a.end - b.end);
+}
+
+function overriddenEnv(before) {
+  const names = [];
+  for (const m of before.matchAll(ASSIGNMENT)) if (PROTECTED_ENV.test(m[1]) && !names.includes(m[1])) names.push(m[1]);
+  return names;
+}
+
+// Bash 명령 하나. 하위 에이전트는 approve·delegate·set-status를 못 부르고, 메인 세션도 approve·delegate 앞에 환경 변수를 덮어쓸 수 없다.
+// 승인은 사용자 말을 이 대화 기록에서 찾아 맞춰 보는 일이라, 하위 에이전트나 덮어쓴 환경은 가짜 근거를 만들 수 있다(R14: 셸로 돌아가는 길을 다 막지는 못한다).
+function gateSpecCommand(calls, command, subAgent) {
+  if (!calls.length) return null;
+  if (subAgent) {
+    return denyOutput(
+      `하위 에이전트는 승인·위임 기록과 status를 바꾸지 않는다 (spec.mjs ${calls[0].sub}).`,
+      '승인과 status는 메인 세션이 사용자 말을 받아 처리한다. 바꿔야 할 것이 있으면 답장에 적어 메인 세션에 넘긴다.',
+    );
+  }
+  for (const call of calls) {
+    if (call.sub === 'set-status') continue;
+    const names = overriddenEnv(command.slice(0, call.end));
+    if (names.length) {
+      return denyOutput(
+        `${call.sub}는 이 대화의 기록에서 사용자 말을 찾아 맞춰 보는데, 환경 변수(${names.join(', ')})를 바꾸면 다른 기록을 가리킬 수 있다.`,
+        `환경 변수 없이 spec.mjs ${call.sub}를 다시 실행한다.`,
+      );
+    }
+  }
+  return null;
+}
+
+// 메인 세션이 pact:worker를 부를 때: 작업 지시의 판(findRunDir)에 승인이나 위임 기록이 있어야 한다. 옛 판(pact: 1)은 기록 없이 통과한다.
+// 판은 지시문에 든 경로로만 찾는다. cwd로 짐작한 판의 기록을 보면 지시문이 가리키는 다른 판이 승인 없이 지나간다.
+async function gateWorker(input, toolInput) {
+  const prompt = typeof toolInput.prompt === 'string' ? toolInput.prompt : '';
+  const { findRunDir } = await import('../scripts/run-dir.mjs');
+  const found = findRunDir({ text: prompt, cwd: typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd() });
+  if (!found || found.via !== 'prompt') {
+    return denyOutput('작업 지시에서 어느 pact 판인지 찾지 못해 승인 기록을 확인할 수 없다.', '맥락 칸에 run-dir과 작업 번호를 넣는다.');
+  }
+  const { checkStart } = await import('../scripts/approval.mjs');
+  const verdict = checkStart({ project: found.project, runId: found.runId, purpose: 'worker' });
+  return verdict.ok ? null : denyOutput(verdict.reason, verdict.instead);
+}
+
 // ---------- PreToolUse ----------
 // 돌려주는 값: 막거나 입력을 바꾸는 출력(denyOutput, allowOutput) 또는 null(그냥 통과).
-// 이번 판은 아무것도 막지 않는다. 2~5번 작업이 pact가 걸린 호출에 한해 여기에 규칙을 더한다.
+// 승인 관문 외의 규칙(결과 잠금, 걱정 붙이기)은 3~5번 작업이 pact가 걸린 호출에 한해 여기에 더한다.
 export async function handlePreToolUse(input) {
-  if (!touchesPact(input)) return null; // R1: 상관없는 호출은 파일을 읽지 않고 바로 통과
+  const command = bashCommand(input);
+  const calls = specCalls(command);
+  if (!touchesPact(input) && !calls.length) return null; // R1: 상관없는 호출은 파일을 읽지 않고 바로 통과
+  const subAgent = typeof input.agent_id === 'string' && input.agent_id !== ''; // agent_id가 없으면 메인 세션
+  const toolInput = input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
+  if (input.tool_name === 'Bash') return gateSpecCommand(calls, command, subAgent);
+  if (input.tool_name === 'Agent' && toolInput.subagent_type === 'pact:worker' && !subAgent) return gateWorker(input, toolInput);
   return null;
 }
 

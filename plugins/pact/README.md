@@ -30,7 +30,7 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
  │                  ("알아서"로 맡기면 3·4는 AI가 정하고 채팅에 알림)
  │   5. 명세 작성
  │   6. 명세 검수    다른 에이전트가 빌더 입장 + 요구 대조 → 사용자 몫만 한 번에 질문
- │   ── 사용자 승인 (유일한 승인) ──
+ │   ── 사용자 승인 (유일한 승인) → spec.mjs approve로 기록. 기록이 없으면 build가 시작되지 않는다 ──
  ├─ build    worker 구현 → reviewer 대조, 결정은 Ruling으로 기록
  └─ verify   시나리오 → 브라우저 실행 + 스크린샷 → 보고서. 실패하면 build로 되돌림
             고친 뒤엔 실패·의심·미검증과 고친 파일이 닿는 시나리오만 다시 검수
@@ -47,8 +47,25 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
 | `.pact/<날짜>-<주제>/report.html` | 검수 보고서. 맨 위에 결론과 할 일, 그다음 실패·의심·미검증과 명세와 다른 것. 통과·작업 기록·결정 기록은 접힘 |
 | `.pact/<날짜>-<주제>/` | 실행 폴더. 명세 파일명(날짜 포함)으로 구분한다. 체크리스트, 스케치, 작업 보고, 검수 기록(`verification.json`)이 들어가고 스스로 git에서 빠진다 |
 | `.pact/<날짜>-<주제>/log/subagents.jsonl` | 하위 에이전트가 끝날 때마다 훅이 마지막 답을 한 줄씩 덧붙인 기록 |
+| `.pact/<날짜>-<주제>/approvals.jsonl` | 승인·위임 기록. `spec.mjs approve`·`delegate`가 사용자 말을 대화 기록에서 찾아 맞춰 보고 한 줄씩 덧붙인다 |
 
 화면 검수에는 Codex CUA를 쓴다. 브라우저에서 결과물을 직접 써 보고 단계마다 스크린샷(JPEG)을 남긴다. 도구 이름은 호스트마다 달라 pact가 찾아 쓴다. 메인 세션이 검수 전에 한 번 확인해서, 쓸 수 없으면 오류를 바로 알리고 명령과 HTTP 요청으로 볼 수 있는 것만 확인한다. 화면으로만 볼 수 있는 단계는 `미검증`으로 남고, 미검증이 있으면 완료가 되지 않는다.
+
+## 승인 기록
+
+만들기는 승인이나 위임 기록이 있어야 시작한다. 사용자가 말로 한 승인을 코드가 기록으로 바꾼다.
+
+```
+node <pact>/scripts/spec.mjs approve  <명세> "<사용자 말>"   # 승인 질문의 답: "승인", "ㄱㄱ", "좋아, 만들어"
+node <pact>/scripts/spec.mjs delegate <명세> "<사용자 말>"   # 승인까지 맡긴다는 말: "끝까지 알아서 해", "승인 없이 만들어"
+```
+
+- 두 명령은 인용한 말을 이 대화의 기록(`<설정 폴더>/projects/*/<세션 id>.jsonl`, 세션 id는 `CLAUDE_CODE_SESSION_ID`)에서 사용자가 한 말로 찾아 맞춰 본다. 작업 알림, 대화 요약, 명령 메시지, `system-reminder`, 도구 결과 안의 말은 사용자 말이 아니다. 질문 도구(AskUserQuestion)로 고른 답은 사용자 말이다. 띄어쓰기와 문장부호는 빼고 맞춘다. 정리해서 10자 이하인 짧은 말("승인")은 메시지 전체와 같아야 하고, 그보다 길면 메시지 안에 들어 있으면 된다.
+- 승인은 spec-checker가 끝난 뒤의 말이어야 한다(`log/`의 가장 최근 spec-checker 기록보다 뒤). spec-checker 기록이 없으면 거절한다. 이미 기록이 있는데 다시 승인하면 앞 기록의 메시지보다 새 말이어야 한다. 위임은 처음 부탁에 있는 말이어도 된다. 질문 하나의 답으로 온 "알아서"는 그 질문만 맡긴 것이라 위임이 아니다.
+- 맞으면 인용, 메시지 전문, 메시지 uuid와 시각, 대화 기록 경로, 기록한 시각, 종류(approve 또는 delegate)를 `approvals.jsonl`에 한 줄 덧붙이고 status를 `approved`로 바꾼다. 못 찾거나 확인하지 못하면 거절하고(종료 코드 1) 까닭과 대신 할 일을 한 줄로 알린다.
+- 위험 항목: 기능·규칙 줄(케이스, 접힌 칸 포함)에 `[위험: 지우기|공개|비용]` 표시가 있거나 위험 낱말(지우기·삭제·덮어쓰기·공개·배포·push·결제·비용 같은 말)이 있으면 `delegate`가 거절하고 승인을 받으라고 알린다. `lint`는 낱말이 있는데 표시가 없는 줄을 `참고:`로만 알린다. 종료 코드는 그대로다.
+- 기록이 없으면 `set-status approved`·`building`, `pact:worker` 부르기(훅), `verification.mjs snapshot`이 거절한다. 위임 기록이면 만들기를 시작할 때(`set-status building`, `pact:worker`) 지금 명세를 다시 보고, 위험 항목이 생겼거나 인용을 다시 맞춰 볼 수 없으면 거절한다.
+- 옛 명세(frontmatter `pact: 1`이고 승인 기록이 없고 status가 approved·building·verifying·done)는 기록 없이 이어 가고 `참고: 옛 판이라 승인 기록 없음`을 알린다. `pact: 1`이어도 draft면 기록이 있어야 한다. `spec.mjs new`는 `pact: 2`로 쓴다.
 
 ## 완료 검사
 
@@ -70,7 +87,7 @@ node <pact>/scripts/verification.mjs finish <명세> <프로젝트>             
 
 `hooks/hooks.json`이 PreToolUse와 SubagentStop에 훅 하나(`hooks/guard.mjs`)를 건다. 플러그인 훅은 pact를 쓰지 않는 대화에서도 도는 터라, `.pact/`·`docs/pact/`를 만지지도 않고 pact 에이전트나 스크립트도 아닌 호출은 아무것도 읽지 않고 바로 통과시킨다.
 
-- PreToolUse: 지금은 아무것도 막지 않는다.
+- PreToolUse: 메인 세션이 `pact:worker`를 부를 때 작업 지시의 판(`맥락` 칸의 run-dir)에 승인·위임 기록이 없으면 막는다(옛 판은 통과). 지시문에서 판을 못 찾으면 "맥락 칸에 run-dir과 작업 번호를 넣는다"로 막는다. 위임 기록이면 지금 명세의 위험 항목과 인용을 다시 본다. 하위 에이전트가 Bash로 `spec.mjs approve`·`delegate`·`set-status`를 부르면 막고, 메인 세션도 approve·delegate 앞에 환경 변수(`HOME=`, `CLAUDE_CODE_SESSION_ID=`, `CLAUDE_CONFIG_DIR=` 등)를 덮어쓰면 막는다. 막을 때는 까닭과 대신 할 일을 한 줄로 알린다.
 - SubagentStop: `pact:spec-checker`·`pact:reviewer`·`pact:worker`·`pact:verifier`가 끝나면 마지막 답을 그 판의 `<run-dir>/log/subagents.jsonl`에 한 줄 덧붙인다. 실행 폴더는 하위 에이전트의 첫 지시에 든 경로로 찾고, 없으면 그 프로젝트에서 가장 최근에 바뀐 진행 중 명세로 찾는다. `pact:verifier`가 끝날 때는 그 순간의 `results.json` sha256도 같은 줄에 적는다.
 - 훅이 고장나도 대화를 막지 않는다. 오류는 플러그인 데이터 폴더(`${CLAUDE_PLUGIN_DATA}`, 없으면 `~/.claude/plugins/data/pact-chenjing-plugins`)의 `hook-error.log`에 한 줄 남는다.
 

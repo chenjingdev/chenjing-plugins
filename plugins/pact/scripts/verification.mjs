@@ -6,9 +6,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { lintSpec, parseSpec, setStatus, specRunDir } from './spec.mjs';
 import { evidenceIssues, effectiveResult } from './evidence.mjs';
+import { isMainModule } from './paths.mjs';
+import { checkStart, refusalLine } from './approval.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const nonempty = (value) => typeof value === 'string' && value.trim().length > 0;
@@ -114,6 +115,10 @@ export function snapshotVerification(specFile, targetDir, surface) {
   const current = input(specFile, targetDir);
   if (current.issues.length) throw new Error(current.issues.join('\n'));
   if (current.parsed.frontmatter.status !== 'verifying') throw new Error('snapshot은 status가 verifying일 때만 만들 수 있습니다');
+  // 검수는 승인이나 위임 기록이 있는 명세만 시작한다(F2). 옛 명세(pact: 1)는 기록 없이 통과하고 결과에 그렇다고 적는다(R5, R19).
+  const gate = checkStart({ specFile: current.specPath, purpose: 'snapshot' });
+  if (!gate.ok) throw new Error(refusalLine(gate));
+  const notes = gate.note ? { notes: [gate.note] } : {};
   const runDir = specRunDir(current.specPath);
   const file = path.join(runDir, 'verification.json');
   let old;
@@ -123,7 +128,7 @@ export function snapshotVerification(specFile, targetDir, surface) {
   const sameRun = old?.version === 1 && nonempty(old.verification_id) && old.spec === current.specPath;
   const inheritedHead = isSha(old?.head) && git(current.source.target, ['merge-base', '--is-ancestor', old.head, current.source.head]) !== null;
   if (sameRun && inheritedHead && old.spec_hash === current.specHash && old.target_fingerprint === current.source.fingerprint && old.target_identity === current.source.identity && old.surface === surface) {
-    return { runDir, verification: old, reused: true, changed_files: [], spec_changed: false, untracked: current.source.untracked };
+    return { runDir, verification: old, reused: true, changed_files: [], spec_changed: false, untracked: current.source.untracked, ...notes };
   }
   const previousFiles = sameRun && old.files && typeof old.files === 'object' ? old.files : null;
   const changed_files = previousFiles
@@ -139,7 +144,7 @@ export function snapshotVerification(specFile, targetDir, surface) {
     files: current.source.files,
   };
   writeJson(file, verification);
-  return { runDir, verification, reused: false, changed_files, spec_changed: sameRun ? old.spec_hash !== current.specHash : null, untracked: current.source.untracked };
+  return { runDir, verification, reused: false, changed_files, spec_changed: sameRun ? old.spec_hash !== current.specHash : null, untracked: current.source.untracked, ...notes };
 }
 
 // 완료할 수 있는지 본다. issues가 하나라도 있으면 완료할 수 없고, warnings는 알리기만 한다.
@@ -260,7 +265,7 @@ function main([command, specFile, targetDir, surface]) {
   return result.ok === false ? 1 : 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   try { process.exitCode = main(process.argv.slice(2)); }
   catch (error) { console.log(JSON.stringify({ ok: false, issues: [error.message] })); process.exitCode = 1; }
 }

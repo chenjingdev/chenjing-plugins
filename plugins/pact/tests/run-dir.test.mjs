@@ -155,6 +155,37 @@ test('a run-dir that does not exist yet is accepted when the run-id looks like o
   assert.equal(findRunDir({ text: `${project}/.pact/run.json`, cwd: elsewhere() }), null);
 });
 
+test('a ./ or ../ relative path names a run only when its spec or run folder really exists; absolute paths still may name one not made yet', () => {
+  const project = tmp();
+  const deep = path.join(project, 'packages', 'web');
+  mkdirSync(deep, { recursive: true });
+  const fresh = '2026-11-01-새-판';
+  // 아무것도 없다: run-id 꼴이어도 상대 경로는 짐작으로 받지 않는다(맨 상대 경로 `.pact/<id>`와 같은 기준)
+  for (const [text, cwd] of [
+    [`./.pact/${fresh}`, project],
+    [`../../.pact/${fresh}/wt`, deep],
+    [`./docs/pact/${fresh}.md`, project],
+    [`../.pact/${fresh}/tasks/1-report.md`, deep],
+    [`sub/dir/.pact/${fresh}`, project],
+    [`.pact/${fresh}`, project],
+  ]) {
+    assert.deepEqual(runDirCandidates(text, cwd), [], text);
+    assert.equal(findRunDir({ text, cwd }), null, text);
+  }
+  // 그런 곳을 가리키는 글이 길어도 만들 폴더가 생기지 않는다
+  assert.deepEqual(readdirSync(project), ['packages']);
+  // 실제로 있으면 받는다: 실행 폴더만 있어도, 명세만 있어도
+  runDir(project, fresh);
+  assert.equal(findRunDir({ text: `./.pact/${fresh}`, cwd: project })?.runDir, path.join(project, '.pact', fresh));
+  assert.equal(findRunDir({ text: `../../.pact/${fresh}/wt`, cwd: deep })?.runDir, path.join(project, '.pact', fresh));
+  const other = tmp();
+  spec(other, fresh);
+  assert.equal(findRunDir({ text: `./docs/pact/${fresh}.md`, cwd: other })?.runId, fresh);
+  // 절대 경로는 아직 없는 판도 run-id 꼴이면 받는다(호출하는 쪽이 만든다)
+  const none = tmp();
+  assert.equal(findRunDir({ text: `${none}/.pact/${fresh}`, cwd: elsewhere() })?.runId, fresh);
+});
+
 test('with several candidates, what really exists beats what is mentioned more, then more mentions, then the first', () => {
   const project = tmp();
   const real = '2026-10-20-진짜';

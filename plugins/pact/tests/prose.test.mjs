@@ -105,7 +105,10 @@ test('probe.md keeps the conversation rules and calls its tools', () => {
   for (const s of ['한 메시지에 질문 하나', '[사용자]', '[AI 가정]', 'checklist.mjs', 'gallery.mjs', 'pact:spec-checker']) {
     assert.ok(text.includes(s), s);
   }
-  assert.match(text, /set-status <명세> approved/);
+  // 승인은 말이 아니라 기록이다: 사용자 말을 그대로 넣는 approve, 승인까지 맡긴다는 말만 넣는 delegate
+  assert.match(text, /spec\.mjs approve <명세> "<사용자 말>"/);
+  assert.match(text, /spec\.mjs delegate <명세> "<사용자 말>"/);
+  assert.doesNotMatch(text, /set-status <명세> approved/, 'approved는 승인 기록 없이 바꾸지 않는다');
 });
 
 test('probe.md hands off to build.md on its last line', () => {
@@ -165,12 +168,67 @@ test('build and verify never ask the user to review a plan or pick an execution 
   }
 });
 
-test('delegation is not approval: probe asks for the one approval separately', () => {
+test('approval and delegation are recorded from the person\'s own words: an answer to the approval question is an approval, only words that hand over the approval are a delegation, a risk item always needs an approval', () => {
   const probe = read('skills/pact/probe.md');
-  assert.ok(probe.includes('위임은 승인이 아니다'));
+  // 승인 질문의 답은 승인이고 그 말을 그대로 approve에 넣는다
+  assert.ok(probe.includes('승인 질문의 답으로 온 "승인", "ㄱㄱ", "좋아, 만들어", "진행해"는 승인이다'));
+  assert.match(probe, /그 말을 그대로 `approve`에 넣는다/);
+  assert.match(probe, /"승인"처럼 짧은 말은 사용자 메시지 전체와 같아야 맞는다/);
+  assert.match(probe, /질문 도구\(AskUserQuestion\)로 고른 답도 같다/);
+  assert.match(probe, /이 질문은 spec-checker가 끝난 뒤에 한다/);
+  // 승인까지 맡긴다는 말만 delegate: 질문 하나의 답으로 온 "알아서"는 그 질문만 맡긴 것
+  assert.match(probe, /승인까지 맡긴다는 말\("끝까지 알아서 해", "승인 없이 만들어"\)만 위임이다/);
+  assert.match(probe, /"알아서", "네가 정해", "몰라", "기본안대로"는 그 질문만 맡긴 것이다/);
+  assert.match(probe, /위임으로 치지 않고 4의 승인 질문을 따로 한다/);
+  // 위험 항목이 있으면 위임이어도 승인을 받는다
+  assert.match(probe, /위험 항목이 있으면 위임이어도 승인을 받는다/);
+  assert.match(probe, /`delegate`가 거절한다/);
+  assert.match(probe, /만들기를 시작할 때\(`set-status building`, `pact:worker`\) 명세를 다시 보고/);
+  assert.match(probe, /승인이나 위임 기록이 없으면 build로 가지 않는다/);
   assert.ok(!probe.includes('바로 시작해도'), 'skip line must not read as "start building"');
+  assert.ok(!probe.includes('위임은 승인이 아니다'), '옛 문구: 승인까지 맡긴다는 말은 이제 위임 기록이다');
   assert.match(read('skills/pact/SKILL.md'), /명세 승인은 확인 질문이 아니라 계약/);
   assert.match(read('skills/pact/build.md'), /status가 `draft`면 build하지 않는다/);
+});
+
+test('probe 5 teaches the risk mark, and what to do with the 참고: lines lint prints', () => {
+  const probe = read('skills/pact/probe.md');
+  assert.ok(probe.includes('`[위험: 지우기|공개|비용]`'));
+  assert.ok(probe.includes('`- F2 지난 학기 자료 비우기 [위험: 지우기] [사용자]`'));
+  assert.match(probe, /표시가 있으면 위임으로는 만들기를 시작하지 못한다/);
+  assert.ok(probe.includes('lint의 위험 `참고:` 줄은 정말 위험 항목이면 표시를 달고 아니면 그대로 둔다'));
+  assert.match(probe, /`참고:`로 시작하는 줄은 문제가 아니다/);
+  assert.doesNotMatch(probe, /lint[^\n]*아무것도 출력하지 않아야/, 'lint가 참고를 출력하니 옛 문구는 맞지 않는다');
+  assert.match(read('skills/pact/SKILL.md'), /`\[위험: 지우기\|공개\|비용\]`/);
+});
+
+test('build starts only from an approval or delegation record, and tells the worker brief where the run is', () => {
+  const build = read('skills/pact/build.md');
+  assert.match(build, /승인이나 위임 기록\(`<run-dir>\/approvals\.jsonl`\)이 없으면 시작하지 못한다/);
+  assert.match(build, /`spec\.mjs approve`로 기록한다/);
+  assert.match(build, /승인이나 위임 기록이 없으면 거절한다/);
+  assert.match(build, /위임 기록이면 지금 명세를 다시 보고, 위험 항목/);
+  assert.match(build, /참고: 옛 판이라 승인 기록 없음/);
+  assert.match(build, /frontmatter `pact: 1`/);
+  assert.match(build, /run-dir은 `<프로젝트>\/\.pact\/<run-id>`의 절대 경로로 적는다/);
+  assert.match(build, /`pact:worker` 호출이 막히고/);
+  const skill = read('skills/pact/SKILL.md');
+  assert.match(skill, /## 승인과 위임 기록/);
+  assert.match(skill, /하위 에이전트는 이 명령과 `set-status`를 부르지 못한다/);
+});
+
+test('a new spec starts with pact: 2, and the README says how approval, delegation and the hook work', () => {
+  assert.match(read('skills/pact/spec-template.md'), /^---\npact: 2\n/);
+  const readme = read('README.md');
+  assert.ok(readme.includes('approvals.jsonl'));
+  assert.match(readme, /spec\.mjs approve  <명세> "<사용자 말>"/);
+  assert.match(readme, /spec\.mjs delegate <명세> "<사용자 말>"/);
+  assert.match(readme, /정리해서 10자 이하인 짧은 말\("승인"\)은 메시지 전체와 같아야 하고/);
+  assert.match(readme, /`참고: 옛 판이라 승인 기록 없음`/);
+  assert.match(readme, /`spec\.mjs new`는 `pact: 2`로 쓴다/);
+  assert.match(readme, /메인 세션이 `pact:worker`를 부를 때/);
+  assert.match(readme, /맥락 칸에 run-dir과 작업 번호를 넣는다/);
+  assert.doesNotMatch(readme, /PreToolUse: 지금은 아무것도 막지 않는다/);
 });
 
 test('build resumes an existing worktree instead of recreating it, and scopes workers to absolute worktree paths', () => {

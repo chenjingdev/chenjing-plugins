@@ -164,3 +164,17 @@ test('recordStop writes under the run-dir named in the first instruction and rep
   assert.match(lost.problems[0], /ENOENT/);
   assert.doesNotMatch(lost.problems[0], /\n/);
 });
+
+test('the line for a run that could not be found also names the agent and its transcript, so the stop can be traced', () => {
+  const missing = path.join(tmp(), 'missing.jsonl');
+  const lost = recordStop({ agent_type: AGENT.worker, agent_id: 'agent-7', agent_transcript_path: missing, cwd: tmp(), last_assistant_message: '끝' });
+  assert.equal(lost.runDir, null);
+  assert.equal(lost.problems.length, 1);
+  assert.match(lost.problems[0], /agent_id: agent-7/);
+  assert.ok(lost.problems[0].includes(`agent_transcript_path: ${missing}`), lost.problems[0]);
+  assert.doesNotMatch(lost.problems[0], /\n/);
+  // 두 값이 입력에 없어도 줄은 같은 모양이다
+  const bare = recordStop({ agent_type: AGENT.verifier, cwd: tmp(), last_assistant_message: '통과' });
+  assert.match(bare.problems[0], /agent_id: 없음/);
+  assert.match(bare.problems[0], /agent_transcript_path: 없음/);
+});

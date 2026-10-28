@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PACT_AGENTS, touchesPact, denyOutput, allowOutput } from '../hooks/guard.mjs';
 import { LOGGED_AGENTS, readRecords, latestSpecCheckerReply, latestWorkerReply, latestVerifierFingerprint } from '../scripts/run-log.mjs';
+import { grantApproval, specText, typed, writeTranscript, SESSION } from './approval-world.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOOK = path.join(ROOT, 'hooks', 'guard.mjs');
@@ -281,25 +282,281 @@ test('(a) a SubagentStop from an agent that is not a pact agent prints nothing, 
   assert.equal(existsSync(w.data), false);
 });
 
-test('a PreToolUse call that does touch pact is not blocked either (this version blocks nothing)', () => {
+test('PreToolUse calls that touch pact but are none of the gated ones still pass, whoever makes them (the locks on results and log come later)', () => {
   const w = busyWorld();
   const calls = [
     { tool_name: 'Write', tool_input: { file_path: path.join(w.run, 'results.json'), content: '{}' } },
     { tool_name: 'Edit', tool_input: { file_path: w.spec, old_string: 'a', new_string: 'b' } },
     { tool_name: 'MultiEdit', tool_input: { file_path: path.join(w.run, 'log', 'subagents.jsonl'), edits: [] } },
     { tool_name: 'NotebookEdit', tool_input: { notebook_path: path.join(w.run, 'x.ipynb') } },
-    { tool_name: 'Agent', tool_input: { subagent_type: 'pact:worker', prompt: `run-dir: ${w.run}` } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:reviewer', prompt: `${w.run}/tasks/1-report.md` } },
-    { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/spec.mjs set-status ${w.spec} approved` } },
+    { tool_name: 'Agent', tool_input: { subagent_type: 'pact:verifier', prompt: `run-dir: ${w.run}` } },
+    { tool_name: 'Agent', tool_input: { subagent_type: 'pact:spec-checker', prompt: `명세 경로: ${w.spec}` } },
     { tool_name: 'Bash', tool_input: { command: `echo x > ${w.run}/log/subagents.jsonl` } },
+    { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/spec.mjs status ${w.spec}` } },
+    { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/spec.mjs lint ${w.spec}` } },
+    { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/spec.mjs run-dir ${w.spec}` } },
+    { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/verification.mjs check ${w.spec} ${w.project}` } },
     { tool_name: 'SendMessage', tool_input: { to: 'agent-1', message: `고쳐 주세요: ${w.run}/tasks/1-report.md` } },
   ];
   const before = tree(w.root);
-  for (const [i, call] of calls.entries()) {
+  for (const call of calls) {
     assert.equal(touchesPact(call), true, `pact 호출로 보인다: ${JSON.stringify(call)}`);
-    const caller = i % 2 ? { agent_id: 'agent-1', agent_type: 'pact:worker' } : {};
-    const r = runHook(w, { hook_event_name: 'PreToolUse', session_id: 's', cwd: w.project, ...caller, ...call });
-    assert.equal(r.stdout, '', JSON.stringify(call));
+    for (const caller of [{}, { agent_id: 'agent-1', agent_type: 'pact:worker' }]) {
+      const r = runHook(w, { hook_event_name: 'PreToolUse', session_id: 's', cwd: w.project, ...caller, ...call });
+      assert.equal(r.stdout, '', JSON.stringify({ call, caller }));
+    }
+  }
+  assert.deepEqual(tree(w.root), before);
+});
+
+// ---------- 승인 기록이 없으면 pact:worker를 부르지 못한다 (F2) ----------
+
+const SUB = { agent_id: 'agent-9', agent_type: 'pact:worker' };
+
+// 하위 에이전트가 없는 입력은 메인 세션이다
+const pre = (w, call, caller = {}) => runHook(w, { hook_event_name: 'PreToolUse', session_id: 's', cwd: w.project, ...caller, ...call });
+const workerCall = (prompt) => ({ tool_name: 'Agent', tool_input: { subagent_type: 'pact:worker', description: '작업 2', prompt } });
+const brief = (w) => `## 목표\n훅을 넣는다\n## 맥락\nrun-dir: ${w.run} , 작업 번호 2. 보고서는 이 run-dir의 tasks/2-report.md.\nworktree: ${w.run}/wt\n## 범위\n…`;
+
+// 막았는지: 출력이 deny이고 까닭이 한 줄이다. 까닭 글을 돌려준다.
+function denied(r, label = '') {
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(Object.keys(out), ['hookSpecificOutput'], label);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PreToolUse', label);
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'deny', label);
+  const reason = out.hookSpecificOutput.permissionDecisionReason;
+  assert.match(reason, /^\[pact\] \S/, label);
+  assert.doesNotMatch(reason, /\n/, `${label}: 까닭은 한 줄이다`);
+  assert.equal(r.stderr, '', label);
+  return reason;
+}
+const passed = (r, label = '') => assert.equal(r.stdout, '', label || '통과: 출력이 없다');
+
+// 승인 기록을 스크립트로 받을 수 있는 판. 훅 시험의 world()에 대화 기록 자리를 더한다.
+function approvalWorld(options) {
+  const w = busyWorld();
+  if (options?.spec) writeFileSync(w.spec, options.spec);
+  return { ...w, id: ID, sessionId: SESSION, transcript: path.join(w.home, '.claude', 'projects', '-fake', `${SESSION}.jsonl`) };
+}
+
+test('(i) the main session calling pact:worker for a new spec with no approval record is denied, with the reason and what to do on one line', () => {
+  const w = approvalWorld();
+  const before = tree(w.root);
+  const reason = denied(pre(w, workerCall(brief(w))));
+  assert.match(reason, /승인 기록이 없다/);
+  assert.match(reason, /spec\.mjs approve <명세> "<사용자 말>"/);
+  assert.match(reason, /delegate/);
+  assert.deepEqual(tree(w.root), before, '막으면서 아무것도 만들지 않는다');
+  // 상대 경로로 가리켜도 같다
+  denied(pre(w, workerCall(`run-dir: .pact/${ID} , 작업 번호 1`)), '상대 경로');
+});
+
+test('(i) with an approval record the call goes through, and it goes through whether the record is an approval or a delegation', () => {
+  const w = approvalWorld();
+  grantApproval(w);
+  passed(pre(w, workerCall(brief(w))));
+  const d = approvalWorld();
+  grantApproval(d, { kind: 'delegate' });
+  passed(pre(d, workerCall(brief(d))));
+  assert.deepEqual(errorLines(w), []);
+  assert.deepEqual(errorLines(d), []);
+});
+
+test('(i) an old spec (pact: 1, status building) goes through with no record; an old draft is denied like a new spec', () => {
+  const old = approvalWorld({ spec: specText({ pact: 1, status: 'building' }) });
+  passed(pre(old, workerCall(brief(old))));
+  for (const status of ['approved', 'verifying', 'done']) {
+    writeFileSync(old.spec, specText({ pact: 1, status }));
+    passed(pre(old, workerCall(brief(old))), status);
+  }
+  writeFileSync(old.spec, specText({ pact: 1, status: 'draft' }));
+  assert.match(denied(pre(old, workerCall(brief(old)))), /승인 기록이 없다/);
+  // 날짜 없는 옛 실행 폴더(.pact/<주제>)로 불러도 날짜 붙은 명세로 옛 판인지 본다
+  writeFileSync(old.spec, specText({ pact: 1, status: 'building' }));
+  const undated = path.join(old.project, '.pact', '출결-관리');
+  mkdirSync(undated, { recursive: true });
+  passed(pre(old, workerCall(`run-dir: ${undated} , 작업 번호 3`)));
+});
+
+test('(i) a brief that names no run is denied with "put run-dir and the task number in the context", even when the cwd project has a run in progress', () => {
+  const w = approvalWorld();
+  grantApproval(w);
+  for (const prompt of ['## 목표\n훅을 넣는다\n## 맥락\n앞 작업이 만든 것: 없음', '', undefined, `보고서: tasks/1-report.md`]) {
+    const reason = denied(pre(w, workerCall(prompt)), String(prompt));
+    assert.match(reason, /맥락 칸에 run-dir과 작업 번호를 넣는다/);
+  }
+  // 프로젝트가 아닌 곳에서 불러도 같다
+  denied(pre(w, workerCall(brief({ run: '' })), {}), '빈 경로');
+  const elsewhere = path.join(w.root, 'elsewhere');
+  mkdirSync(elsewhere);
+  assert.match(denied(runHook(w, { hook_event_name: 'PreToolUse', session_id: 's', cwd: elsewhere, ...workerCall('경로 없음') })), /맥락 칸에 run-dir/);
+  // 없는 판을 가리키면(오타) 명세도 기록도 없다고 알린다
+  const typo = path.join(w.project, '.pact', '2026-11-01-없는-판');
+  assert.match(denied(pre(w, workerCall(`run-dir: ${typo} , 작업 번호 1`))), /명세를 찾지 못하고 승인 기록도 없다/);
+  assert.equal(existsSync(typo), false, '없는 판의 폴더를 만들지 않는다');
+});
+
+test('(i) a delegation is looked at again when the worker is called: a risk item in the spec now, or a transcript that no longer holds the quote, denies', () => {
+  const w = approvalWorld();
+  grantApproval(w, { kind: 'delegate' });
+  passed(pre(w, workerCall(brief(w))));
+  // 지금 명세에 위험 항목이 생겼다
+  writeFileSync(w.spec, specText({ status: 'building', rules: '- R2 오래된 기록을 삭제한다 [AI 가정]\n' }));
+  const risky = denied(pre(w, workerCall(brief(w))));
+  assert.match(risky, /위임으로 시작하려는데 지금 명세에 위험 항목이 있다: R2\(낱말 삭제\)/);
+  assert.match(risky, /사용자의 승인을 받아 spec\.mjs approve/);
+  writeFileSync(w.spec, specText({ status: 'building', features: '- F2 자료 비우기 [위험: 지우기] [사용자]\n' }));
+  assert.match(denied(pre(w, workerCall(brief(w)))), /F2\(위험 표시\)/);
+  // 위험이 없어지면 다시 통과한다
+  writeFileSync(w.spec, specText({ status: 'building' }));
+  passed(pre(w, workerCall(brief(w))));
+  // 인용을 다시 맞춰 볼 수 없다
+  const saved = readFileSync(w.transcript, 'utf8');
+  rmSync(w.transcript);
+  assert.match(denied(pre(w, workerCall(brief(w)))), /인용을 다시 맞춰 보지 못했다/);
+  writeTranscript(w, [typed('다른 말', '2026-10-29T01:00:00.000Z')]);
+  assert.match(denied(pre(w, workerCall(brief(w)))), /다시 찾지 못했다/);
+  writeFileSync(w.transcript, saved);
+  passed(pre(w, workerCall(brief(w))));
+  // 사용자가 위험을 보고 승인하면 이어 간다
+  writeFileSync(w.spec, specText({ status: 'building', rules: '- R2 오래된 기록을 삭제한다 [AI 가정]\n' }));
+  grantApproval(w, { kind: 'approve', text: '위험한 것도 알고 승인합니다' });
+  passed(pre(w, workerCall(brief(w))));
+});
+
+test('(i) only the main session is held to this: a sub-agent calling pact:worker, and the other pact agents, are not asked for a record', () => {
+  const w = approvalWorld(); // 승인 기록 없음
+  passed(pre(w, workerCall(brief(w)), SUB), '하위 에이전트');
+  for (const subagent_type of ['pact:reviewer', 'pact:verifier', 'pact:spec-checker']) {
+    passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type, prompt: brief(w) } }), subagent_type);
+  }
+  passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'tiers:worker', prompt: brief(w) } }), '다른 플러그인의 worker');
+});
+
+test('(i) a hook that cannot read the record is not a hook that blocks: it passes the call and logs the error', () => {
+  const w = approvalWorld();
+  mkdirSync(path.join(w.run, 'approvals.jsonl'), { recursive: true }); // 파일 자리에 폴더
+  const r = pre(w, workerCall(brief(w)));
+  passed(r);
+  const lines = errorLines(w);
+  assert.equal(lines.length, 1, lines.join('\n'));
+  assert.match(lines[0], /\[PreToolUse\]/);
+  assert.match(lines[0], /EISDIR/);
+});
+
+// ---------- (j) approve·delegate·set-status를 누가 부를 수 있나 ----------
+
+const SPEC_CLI_PATH = path.join(ROOT, 'scripts', 'spec.mjs');
+const bash = (command) => ({ tool_name: 'Bash', tool_input: { command } });
+
+test('(j) a sub-agent running spec.mjs approve, delegate or set-status through Bash is denied; looking at a spec is not', () => {
+  const w = approvalWorld();
+  const forms = [
+    (sub, rest = '') => `node ${SPEC_CLI_PATH} ${sub} ${w.spec} ${rest}`,
+    (sub, rest = '') => `node "${SPEC_CLI_PATH}" ${sub} "${w.spec}" ${rest}`,
+    (sub, rest = '') => `cd ${w.project} && node plugins/pact/scripts/spec.mjs   ${sub} ${rest}`,
+    (sub, rest = '') => `bash -c 'node ${SPEC_CLI_PATH} ${sub} ${w.spec} ${rest}'`,
+    (sub, rest = '') => `node ${SPEC_CLI_PATH} ${sub} ${w.spec} ${rest} | cat`,
+  ];
+  for (const form of forms) {
+    for (const [sub, rest] of [['approve', '"승인"'], ['delegate', '"끝까지 알아서 해"'], ['set-status', 'building'], ['set-status', 'approved']]) {
+      const reason = denied(pre(w, bash(form(sub, rest)), SUB), form(sub, rest));
+      assert.match(reason, /하위 에이전트는 승인·위임 기록과 status를 바꾸지 않는다/);
+      assert.match(reason, /메인 세션/);
+    }
+  }
+  // 읽기와 검사는 된다
+  for (const sub of ['status', 'lint', 'run-dir', 'new']) passed(pre(w, bash(`node ${SPEC_CLI_PATH} ${sub} ${w.spec}`), SUB), sub);
+  passed(pre(w, bash(`node ${ROOT}/scripts/verification.mjs check ${w.spec} ${w.project}`), SUB));
+  // scripts/ 없이 spec.mjs만 불러도 같다
+  denied(pre(w, bash(`node /x/y/spec.mjs approve ${w.spec} "승인"`), SUB), 'scripts/ 없는 경로');
+  denied(pre(w, bash(`./spec.mjs set-status ${w.spec} building`), SUB), '직접 실행');
+  // 다른 실행 꼴: node 경로, 환경 변수 지정, bun, 백그라운드, 직접 실행 앞의 명령과 환경 변수
+  for (const command of [
+    `/usr/local/bin/node /p/spec.mjs approve ${w.spec} "승인"`,
+    `NODE_NO_WARNINGS=1 node ./scripts/spec.mjs delegate ${w.spec} "끝까지 알아서 해"`,
+    `bun spec.mjs approve ${w.spec} "승인"`,
+    `nohup node spec.mjs set-status ${w.spec} approved &`,
+    `bash -lc "cd ${w.project} && node scripts/spec.mjs approve ${w.spec} 승인"`,
+    `cd ${w.project} && ./spec.mjs set-status ${w.spec} building`,
+    `ls; HOME=/x ./spec.mjs approve ${w.spec} "승인"`,
+    `FOO="a b" ./scripts/spec.mjs delegate ${w.spec} x`,
+  ]) denied(pre(w, bash(command), SUB), command);
+  // agent_id가 빈 문자열이면 하위 에이전트로 보지 않는다
+  passed(pre(w, bash(`node ${SPEC_CLI_PATH} set-status ${w.spec} verifying`), { agent_id: '' }));
+});
+
+test('(j) the main session may run approve, delegate and set-status through Bash', () => {
+  const w = approvalWorld();
+  for (const [sub, rest] of [['approve', '"승인"'], ['delegate', '"끝까지 알아서 해"'], ['set-status', 'building']]) {
+    passed(pre(w, bash(`node ${SPEC_CLI_PATH} ${sub} ${w.spec} ${rest}`)), sub);
+  }
+  passed(pre(w, bash(`cd ${w.project} && node "${SPEC_CLI_PATH}" approve ${w.spec} "좋아, 만들어"`)));
+});
+
+test('(j) even the main session is denied when approve or delegate is run with the environment overridden (HOME, CLAUDE_CODE_SESSION_ID, CLAUDE_CONFIG_DIR …)', () => {
+  const w = approvalWorld();
+  const cmd = (sub = 'approve') => `node ${SPEC_CLI_PATH} ${sub} ${w.spec} "승인"`;
+  const overridden = [
+    `HOME=/tmp/x ${cmd()}`,
+    `HOME=/tmp/x ${cmd('delegate')}`,
+    `CLAUDE_CODE_SESSION_ID=fake-session ${cmd()}`,
+    `CLAUDE_CONFIG_DIR=/tmp/x ${cmd()}`,
+    `HOME=/tmp/x CLAUDE_CODE_SESSION_ID=fake ${cmd()}`,
+    `export HOME=/tmp/x; ${cmd()}`,
+    `export CLAUDE_CODE_SESSION_ID=fake && ${cmd('delegate')}`,
+    `cd ${w.project} && HOME="/tmp/my home" ${cmd()}`,
+    `env HOME=/tmp/x ${cmd()}`,
+    `env -i HOME=/tmp/x CLAUDE_CODE_SESSION_ID=fake ${cmd()}`,
+    `bash -c 'HOME=/tmp/x ${cmd()}'`,
+    `USERPROFILE=/tmp/x ${cmd()}`,
+    `XDG_CONFIG_HOME=/tmp/x ${cmd()}`,
+    `NODE_OPTIONS="--require /tmp/fake.js" ${cmd()}`,
+    `declare -x HOME=/tmp/x; ${cmd()}`,
+    `CLAUDE_FAKE=1 ${cmd()}`,
+  ];
+  for (const command of overridden) {
+    const reason = denied(pre(w, bash(command)), command);
+    assert.match(reason, /환경 변수/, command);
+    assert.match(reason, /환경 변수 없이 spec\.mjs (approve|delegate)를 다시 실행한다/, command);
+  }
+  // 이름을 알려 준다
+  assert.match(denied(pre(w, bash(`CLAUDE_CODE_SESSION_ID=x HOME=/y ${cmd()}`))), /CLAUDE_CODE_SESSION_ID, HOME/);
+  // 직접 실행하는 꼴도 같다
+  for (const command of [`HOME=/tmp/x ./spec.mjs approve ${w.spec} "승인"`, `export HOME=/tmp/x; ./scripts/spec.mjs delegate ${w.spec} "x"`, `cd ${w.project} && CLAUDE_CODE_SESSION_ID=f ./spec.mjs approve ${w.spec} 승인`]) {
+    assert.match(denied(pre(w, bash(command)), command), /환경 변수 없이 spec\.mjs (approve|delegate)를 다시 실행한다/, command);
+  }
+  // 막지 않는 것: 명령 뒤에 있는 글, 다른 이름의 변수, approve·delegate가 아닌 명령, 하위 에이전트가 아닌 일반 환경 변수
+  const fine = [
+    `${cmd()} && HOME=/tmp/x ls`,
+    `node ${SPEC_CLI_PATH} approve ${w.spec} "HOME=/tmp/x 라고 쓰지 마"`,
+    `QUOTE=승인 ${cmd()}`,
+    `LANG=ko_KR.UTF-8 ${cmd()}`,
+    `HOME=/tmp/x node ${SPEC_CLI_PATH} set-status ${w.spec} building`,
+    `HOME=/tmp/x node ${SPEC_CLI_PATH} lint ${w.spec}`,
+  ];
+  for (const command of fine) passed(pre(w, bash(command)), command);
+});
+
+test('(j) a sub-agent that overrides the environment is denied for being a sub-agent first', () => {
+  const w = approvalWorld();
+  const reason = denied(pre(w, bash(`HOME=/tmp/x node ${SPEC_CLI_PATH} approve ${w.spec} "승인"`), SUB));
+  assert.match(reason, /하위 에이전트는/);
+});
+
+test('(j) a Bash command that only mentions spec.mjs without pact calls passes: nothing is read or written', () => {
+  const w = approvalWorld();
+  const before = tree(w.root);
+  for (const command of [
+    'grep -n "spec.mjs" README.md', 'ls scripts/spec.mjs.bak', 'cat spec.mjs.md', 'node other-spec.mjs approve x',
+    // 글 속에서 이름만 언급한 것은 호출이 아니다: 이 플러그인을 고치는 하위 에이전트의 커밋 메시지와 검색이 막히면 안 된다
+    'git commit -m "feat(pact): spec.mjs approve·delegate를 더한다"',
+    'git commit -m "$(cat <<\'EOF\'\nfeat(pact): spec.mjs approve와 set-status를 고친다\n\n- spec.mjs set-status building은 기록을 본다\nEOF\n)"',
+    'echo "spec.mjs approve"', 'grep -rn "spec.mjs set-status" skills/', 'sed -n 1,5p docs/spec.mjs.set-status.md',
+  ]) {
+    passed(pre(w, bash(command), SUB), command);
+    passed(pre(w, bash(command)), command);
   }
   assert.deepEqual(tree(w.root), before);
 });

@@ -87,12 +87,18 @@ function resolveMention({ kind, id, prefix }, cwd) {
   }
   if (!prefix.endsWith('/')) return null; // `x.pact/…`처럼 다른 이름의 끝이다
   let base = prefix.slice(0, -1) || '/';
-  if (base === '~' || base.startsWith('~/')) base = os.homedir() + base.slice(1);
-  else if (!path.isAbsolute(base)) base = path.resolve(cwd, base);
-  return probeAt(path.resolve(base));
+  const home = base === '~' || base.startsWith('~/');
+  const relative = !home && !path.isAbsolute(base);
+  if (home) base = os.homedir() + base.slice(1);
+  else if (relative) base = path.resolve(cwd, base);
+  const hit = probeAt(path.resolve(base));
+  // `./`·`../`로 시작하는 상대 경로는 맨 상대 경로(`.pact/<id>`)와 같은 기준으로 받는다: 명세나 실행 폴더가 실제로 있을 때만.
+  // 절대 경로와 ~ 경로는 아직 없는 판도 run-id 꼴이면 받는다(runDirCandidates). 상대 경로는 글쓴이의 cwd를 우리가 짐작한 것이라 틀리기 쉽다.
+  return relative && !(hit.specExists || hit.dirExists) ? null : hit;
 }
 
 // 글 안에서 실행 폴더를 가리키는 모든 곳. 프로젝트 폴더가 실제로 있고, 명세나 실행 폴더가 있거나 run-id 꼴인 것만 받는다.
+// 단 상대 경로(`./`, `../`, `.pact/<id>` 같은 것)는 명세나 실행 폴더가 실제로 있을 때만 받는다(resolveMention).
 // 틀린 글에서 엉뚱한 곳에 폴더를 만들지 않으려는 것이다.
 export function runDirCandidates(text, cwd = process.cwd()) {
   const found = [];

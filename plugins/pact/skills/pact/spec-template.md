@@ -1,5 +1,5 @@
 ---
-pact: 1
+pact: 2
 topic: <주제>
 status: draft
 created: <YYYY-MM-DD>

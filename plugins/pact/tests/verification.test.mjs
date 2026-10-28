@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { snapshotVerification, checkVerification, finishVerification, sourceFingerprint, declaredCases } from '../scripts/verification.mjs';
 import { parseSpec, setStatus } from '../scripts/spec.mjs';
+import { LEGACY_NOTE } from '../scripts/approval.mjs';
+import { makeWorld, grantApproval, runSpec } from './approval-world.mjs';
 
 const CLI = fileURLToPath(new URL('../scripts/verification.mjs', import.meta.url));
 const SPEC = `---
@@ -343,4 +345,60 @@ test('a non-zero exit code is evidence when the case expects an error', () => {
   f.save();
   const checked = checkVerification(f.spec, f.project);
   assert.equal(checked.ok, true, checked.issues.join('\n'));
+});
+
+// ---------- snapshot은 승인 기록이 있어야 한다(명세 F2, R8, R19) ----------
+
+// 승인 기록 시험용: 명세가 든 프로젝트를 git 저장소로 만든다(snapshot은 하지 않는다)
+function repoWorld(options) {
+  const w = makeWorld(options);
+  writeFileSync(path.join(w.project, 'app.js'), 'export const answer = 1;\n');
+  writeFileSync(path.join(w.project, '.gitignore'), '.pact/\ndocs/pact/\n');
+  git(w.project, 'init', '-q');
+  git(w.project, 'config', 'user.name', 'Pact Test');
+  git(w.project, 'config', 'user.email', 'pact@example.test');
+  git(w.project, 'add', '.');
+  git(w.project, 'commit', '-qm', 'initial');
+  return w;
+}
+
+test('snapshot is refused without an approval record on a new spec (pact: 2), and says what to do', () => {
+  const w = repoWorld({ status: 'verifying' });
+  assert.throws(() => snapshotVerification(w.spec, w.project, 'command'), (error) => {
+    assert.match(error.message, /승인 기록이 없다/);
+    assert.match(error.message, /spec\.mjs approve <명세> "<사용자 말>"/);
+    assert.doesNotMatch(error.message, /\n/);
+    return true;
+  });
+  assert.equal(existsSync(path.join(w.run, 'verification.json')), false, '기록이 없으면 검수 기록도 만들지 않는다');
+  const r = spawnSync(process.execPath, [CLI, 'snapshot', w.spec, w.project, 'command'], { encoding: 'utf8' });
+  assert.equal(r.status, 1);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.ok, false);
+  assert.match(out.issues[0], /승인 기록이 없다/);
+  // 옛 판(pact: 1)이라도 draft였던 명세는 새 규칙이라 같다. status가 verifying이 아니면 status 쪽 까닭이 먼저다
+  const old = repoWorld({ pact: 1, status: 'verifying' });
+  writeFileSync(old.spec, setStatus(readFileSync(old.spec, 'utf8'), 'draft'));
+  assert.throws(() => snapshotVerification(old.spec, old.project, 'command'), /verifying/);
+});
+
+test('snapshot goes on when a record exists, and an old spec (pact: 1) goes on without one and says so in the result', () => {
+  const w = repoWorld({ status: 'draft' });
+  grantApproval(w);
+  assert.equal(runSpec(w, ['set-status', w.spec, 'verifying']).status, 0);
+  const made = snapshotVerification(w.spec, w.project, 'command');
+  assert.equal(made.reused, false);
+  assert.equal(made.notes, undefined, '기록이 있으면 참고가 없다');
+  assert.equal(snapshotVerification(w.spec, w.project, 'command').reused, true, '같은 입력이면 있는 기록을 쓴다');
+
+  const old = repoWorld({ pact: 1, status: 'verifying' });
+  const result = snapshotVerification(old.spec, old.project, 'command');
+  assert.deepEqual(result.notes, [LEGACY_NOTE]);
+  assert.equal(LEGACY_NOTE, '참고: 옛 판이라 승인 기록 없음');
+  const again = snapshotVerification(old.spec, old.project, 'command');
+  assert.equal(again.reused, true);
+  assert.deepEqual(again.notes, [LEGACY_NOTE], '재사용한 기록에도 알린다');
+  const cli = spawnSync(process.execPath, [CLI, 'snapshot', old.spec, old.project, 'command'], { encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stdout + cli.stderr);
+  assert.deepEqual(JSON.parse(cli.stdout).notes, [LEGACY_NOTE]);
 });
