@@ -1,0 +1,166 @@
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import {
+  AGENT, LOGGED_AGENTS, logFile, appendRecord, readRecords, latestRecord, latestSpecCheckerReply, latestWorkerReply,
+  latestVerifierFingerprint, resultsSha256, firstUserPrompt, recordStop,
+} from '../scripts/run-log.mjs';
+
+const made = [];
+after(() => made.forEach((d) => rmSync(d, { recursive: true, force: true })));
+const tmp = () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'pact-runlog-'));
+  made.push(dir);
+  return dir;
+};
+const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const rec = (agent_type, extra = {}) => ({ time: '2026-10-29T00:00:00.000Z', agent_type, agent_id: 'a', task: null, message: '', ...extra });
+
+test('the four pact agents are logged, with the pact: prefix', () => {
+  assert.deepEqual(LOGGED_AGENTS, ['pact:spec-checker', 'pact:reviewer', 'pact:worker', 'pact:verifier']);
+  assert.equal(AGENT.worker, 'pact:worker');
+});
+
+test('appendRecord creates log/ and appends one line per stop without overwriting', () => {
+  const run = tmp();
+  assert.equal(logFile(run), path.join(run, 'log', 'subagents.jsonl'));
+  assert.deepEqual(readRecords(run), [], '기록이 없으면 빈 배열');
+  appendRecord(run, rec(AGENT.worker, { task: 1, message: '첫째\n줄바꿈 있음' }));
+  appendRecord(run, rec(AGENT.worker, { task: 1, message: '둘째' }));
+  const lines = readFileSync(logFile(run), 'utf8').split('\n');
+  assert.equal(lines.length, 3);
+  assert.equal(lines[2], '');
+  assert.equal(JSON.parse(lines[0]).message, '첫째\n줄바꿈 있음', '한 줄에 한 기록: 줄바꿈은 이스케이프된다');
+  assert.deepEqual(readRecords(run).map((r) => r.message), ['첫째\n줄바꿈 있음', '둘째']);
+});
+
+test('readRecords skips broken lines, so a line cut short does not hide the earlier records', () => {
+  const run = tmp();
+  appendRecord(run, rec(AGENT.specChecker, { message: '앞' }));
+  appendFileSync(logFile(run), '{"time":"2026-10-29T00:00:01.000Z","agent_type":"pact:wor\n');
+  appendFileSync(logFile(run), '\n\n[1,2]\n"문자열"\n');
+  appendRecord(run, rec(AGENT.specChecker, { message: '뒤' }));
+  assert.deepEqual(readRecords(run).map((r) => r.message), ['앞', '뒤']);
+});
+
+test('the readers return the latest spec-checker reply, the latest reply of worker task n, and the latest verifier fingerprint', () => {
+  const run = tmp();
+  appendRecord(run, rec(AGENT.specChecker, { time: '2026-10-29T01:00:00.000Z', message: '검수 1' }));
+  appendRecord(run, rec(AGENT.worker, { task: 1, message: '작업 1 첫 답' }));
+  appendRecord(run, rec(AGENT.worker, { task: 2, message: '작업 2 답' }));
+  appendRecord(run, rec(AGENT.reviewer, { task: 1, message: '검토' }));
+  appendRecord(run, rec(AGENT.worker, { task: 1, message: '작업 1 고친 답' }));
+  appendRecord(run, rec(AGENT.specChecker, { time: '2026-10-29T02:00:00.000Z', message: '검수 2' }));
+  appendRecord(run, rec(AGENT.verifier, { message: '검수', results_sha256: 'a'.repeat(64) }));
+  appendRecord(run, rec(AGENT.verifier, { time: '2026-10-29T03:00:00.000Z', message: '다시 검수', results_sha256: 'b'.repeat(64) }));
+
+  const checker = latestSpecCheckerReply(run);
+  assert.equal(checker.message, '검수 2');
+  assert.equal(checker.time, '2026-10-29T02:00:00.000Z');
+  assert.equal(latestWorkerReply(run, 1).message, '작업 1 고친 답');
+  assert.equal(latestWorkerReply(run, '2').message, '작업 2 답', '문자열 번호도 받는다');
+  assert.equal(latestWorkerReply(run, 3), null);
+  assert.equal(latestRecord(run, AGENT.reviewer).message, '검토');
+  const fingerprint = latestVerifierFingerprint(run);
+  assert.equal(fingerprint.results_sha256, 'b'.repeat(64));
+  assert.equal(fingerprint.time, '2026-10-29T03:00:00.000Z');
+
+  const empty = tmp();
+  assert.equal(latestSpecCheckerReply(empty), null);
+  assert.equal(latestWorkerReply(empty, 1), null);
+  assert.equal(latestVerifierFingerprint(empty), null);
+});
+
+test('a later verifier stop with no results.json is the latest fingerprint: it must not fall back to an older one', () => {
+  const run = tmp();
+  appendRecord(run, rec(AGENT.verifier, { results_sha256: 'a'.repeat(64) }));
+  appendRecord(run, rec(AGENT.verifier, { results_sha256: null }));
+  const fingerprint = latestVerifierFingerprint(run);
+  assert.notEqual(fingerprint, null);
+  assert.equal(fingerprint.results_sha256, null);
+});
+
+test('resultsSha256 hashes the bytes of results.json, is null when missing, and throws when it cannot be read', () => {
+  const run = tmp();
+  assert.equal(resultsSha256(run), null);
+  const bytes = Buffer.from('{"scenarios":[]}\n한글');
+  writeFileSync(path.join(run, 'results.json'), bytes);
+  assert.equal(resultsSha256(run), sha(bytes));
+  writeFileSync(path.join(run, 'results.json'), '{"scenarios":[1]}\n');
+  assert.notEqual(resultsSha256(run), sha(bytes), '파일이 바뀌면 지문도 바뀐다');
+  const broken = tmp();
+  mkdirSync(path.join(broken, 'results.json'));
+  assert.throws(() => resultsSha256(broken), /EISDIR/);
+});
+
+const transcript = (dir, lines) => {
+  const file = path.join(dir, `agent-${Math.random().toString(16).slice(2)}.jsonl`);
+  writeFileSync(file, `${lines.map((l) => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n')}\n`);
+  return file;
+};
+const user = (content) => ({ type: 'user', message: { role: 'user', content } });
+
+test('firstUserPrompt reads the first human message: a string, or the text blocks of an array', () => {
+  const dir = tmp();
+  assert.deepEqual(firstUserPrompt(transcript(dir, [user('첫 지시'), user('두 번째')])), { text: '첫 지시' });
+  assert.deepEqual(
+    firstUserPrompt(transcript(dir, [user([{ type: 'tool_result', content: 'x' }, { type: 'text', text: '앞' }, { type: 'text', text: '뒤' }])])),
+    { text: '앞\n뒤' },
+  );
+  // 앞에 사람 메시지가 아닌 기록(fork 참조, 첨부, 깨진 줄)이 있어도 건너뛴다
+  const mixed = transcript(dir, [{ type: 'fork-context-ref', id: 'x' }, 'not json', '', { type: 'attachment', attachment: {} }, { type: 'assistant', message: { content: 'x' } }, user('진짜 첫 지시')]);
+  assert.deepEqual(firstUserPrompt(mixed), { text: '진짜 첫 지시' });
+});
+
+test('firstUserPrompt reads a very long first line across read chunks and keeps multi-byte characters whole', () => {
+  const dir = tmp();
+  const long = '가나다라마바사'.repeat(30000); // 약 630KB: 64KB 단위 읽기를 여러 번 넘고, 글자가 단위 경계에 걸린다
+  assert.equal(firstUserPrompt(transcript(dir, [user(long), user('둘째')])).text, long);
+});
+
+test('firstUserPrompt gives a reason instead of throwing when there is nothing to read', () => {
+  const dir = tmp();
+  assert.match(firstUserPrompt(undefined).error, /agent_transcript_path/);
+  assert.match(firstUserPrompt('').error, /agent_transcript_path/);
+  assert.match(firstUserPrompt(path.join(dir, 'missing.jsonl')).error, /ENOENT/);
+  assert.match(firstUserPrompt(dir).error, /EISDIR/);
+  assert.match(firstUserPrompt(transcript(dir, [{ type: 'assistant', message: { content: 'x' } }])).error, /첫 지시를 찾지 못/);
+  assert.equal(firstUserPrompt(transcript(dir, [])).text, null);
+  // 앞 50줄 안에 사람 메시지가 없으면 더 찾지 않는다
+  const late = transcript(dir, [...Array.from({ length: 5 }, () => ({ type: 'attachment' })), user('늦은 지시')]);
+  assert.equal(firstUserPrompt(late, { maxLines: 3 }).text, null);
+  assert.equal(firstUserPrompt(late, { maxLines: 6 }).text, '늦은 지시');
+});
+
+test('recordStop ignores agents that are not pact agents without reading anything', () => {
+  const dir = tmp();
+  for (const agent_type of ['tiers:worker', 'Explore', 'worker', 'pact:workers', 'notpact:worker', 'pact', '', undefined]) {
+    assert.equal(recordStop({ agent_type, agent_transcript_path: path.join(dir, 'nope.jsonl'), cwd: dir, last_assistant_message: 'x' }), null);
+  }
+  assert.equal(recordStop(undefined), null);
+});
+
+test('recordStop writes under the run-dir named in the first instruction and reports problems as data', () => {
+  const project = tmp();
+  const id = '2026-10-29-출결-관리';
+  const run = path.join(project, '.pact', id);
+  mkdirSync(run, { recursive: true });
+  const file = transcript(tmp(), [user(`run-dir: ${run} , 작업 번호 3`)]);
+  const now = new Date('2026-10-29T12:34:56.789Z');
+  const out = recordStop({ agent_type: AGENT.worker, agent_id: 'abc', agent_transcript_path: file, cwd: tmp(), last_assistant_message: `끝\n보고서: ${run}/tasks/3-report.md` }, { now });
+  assert.equal(out.runDir, run);
+  assert.deepEqual(out.problems, []);
+  assert.deepEqual(readRecords(run), [{ time: '2026-10-29T12:34:56.789Z', agent_type: 'pact:worker', agent_id: 'abc', task: 3, message: `끝\n보고서: ${run}/tasks/3-report.md` }]);
+
+  // 못 찾으면 쓰지 않고 까닭을 한 줄로 돌려준다
+  const lost = recordStop({ agent_type: AGENT.reviewer, agent_transcript_path: path.join(project, 'missing.jsonl'), cwd: tmp(), last_assistant_message: '판정' });
+  assert.equal(lost.runDir, null);
+  assert.equal(lost.problems.length, 1);
+  assert.match(lost.problems[0], /실행 폴더를 찾지 못/);
+  assert.match(lost.problems[0], /pact:reviewer/);
+  assert.match(lost.problems[0], /ENOENT/);
+  assert.doesNotMatch(lost.problems[0], /\n/);
+});

@@ -46,6 +46,7 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
 | `docs/pact/<날짜>-<주제>.md` | 명세. 한 화면 분량, 항목마다 `[사용자]`/`[AI 가정]`, 결정 기록 |
 | `.pact/<날짜>-<주제>/report.html` | 검수 보고서. 맨 위에 결론과 할 일, 그다음 실패·의심·미검증과 명세와 다른 것. 통과·작업 기록·결정 기록은 접힘 |
 | `.pact/<날짜>-<주제>/` | 실행 폴더. 명세 파일명(날짜 포함)으로 구분한다. 체크리스트, 스케치, 작업 보고, 검수 기록(`verification.json`)이 들어가고 스스로 git에서 빠진다 |
+| `.pact/<날짜>-<주제>/log/subagents.jsonl` | 하위 에이전트가 끝날 때마다 훅이 마지막 답을 한 줄씩 덧붙인 기록 |
 
 화면 검수에는 Codex CUA를 쓴다. 브라우저에서 결과물을 직접 써 보고 단계마다 스크린샷(JPEG)을 남긴다. 도구 이름은 호스트마다 달라 pact가 찾아 쓴다. 메인 세션이 검수 전에 한 번 확인해서, 쓸 수 없으면 오류를 바로 알리고 명령과 HTTP 요청으로 볼 수 있는 것만 확인한다. 화면으로만 볼 수 있는 단계는 `미검증`으로 남고, 미검증이 있으면 완료가 되지 않는다.
 
@@ -64,6 +65,14 @@ node <pact>/scripts/verification.mjs finish <명세> <프로젝트>             
 고친 뒤에는 `snapshot`을 다시 만든다. 새 ID가 나오고 출력의 `changed_files`에 고친 파일이 든다. 실패·의심·미검증이었던 시나리오와 고친 파일이 닿는 시나리오만 다시 돌리고, 나머지는 앞 판의 결과를 그대로 둔다. 완료 검사는 같은 검수의 앞 판 ID를 인정한다.
 
 예전 방식의 `.pact/<주제>/` 폴더는 건드리지 않는다. 그 안에 `wt`가 남아 있으면 `run-dir`이 멈추고 사람이 정리한다.
+
+## 훅
+
+`hooks/hooks.json`이 PreToolUse와 SubagentStop에 훅 하나(`hooks/guard.mjs`)를 건다. 플러그인 훅은 pact를 쓰지 않는 대화에서도 도는 터라, `.pact/`·`docs/pact/`를 만지지도 않고 pact 에이전트나 스크립트도 아닌 호출은 아무것도 읽지 않고 바로 통과시킨다.
+
+- PreToolUse: 지금은 아무것도 막지 않는다.
+- SubagentStop: `pact:spec-checker`·`pact:reviewer`·`pact:worker`·`pact:verifier`가 끝나면 마지막 답을 그 판의 `<run-dir>/log/subagents.jsonl`에 한 줄 덧붙인다. 실행 폴더는 하위 에이전트의 첫 지시에 든 경로로 찾고, 없으면 그 프로젝트에서 가장 최근에 바뀐 진행 중 명세로 찾는다. `pact:verifier`가 끝날 때는 그 순간의 `results.json` sha256도 같은 줄에 적는다.
+- 훅이 고장나도 대화를 막지 않는다. 오류는 플러그인 데이터 폴더(`${CLAUDE_PLUGIN_DATA}`, 없으면 `~/.claude/plugins/data/pact-chenjing-plugins`)의 `hook-error.log`에 한 줄 남는다.
 
 ## 시험
 
