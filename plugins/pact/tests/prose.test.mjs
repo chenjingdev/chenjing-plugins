@@ -170,7 +170,7 @@ test('results.json is the verifier\'s alone, and verify.md, verifier.md and the 
   assert.ok(blocks, '막는 것의 목록');
   assert.equal(blocks[1].trim().split('\n').length, 9, '목록은 센 숫자와 같은 아홉 줄이다');
   assert.match(blocks[1], /^- spec-checker가 짚은 `검수 n`에 짝이 없는 것, 또는 spec-checker가 끝난 기록이 없는 것: 명세에 `\[사용자: 검수 n\]`, `\[AI 가정: 검수 n 맡김\]`, `## 확인 필요`의 `- 검수 n: 안 물은 까닭` 중 하나가 있어야 한다\.$/m);
-  assert.match(blocks[1], /^- 승인 뒤 바뀐 `\[사용자\]` 줄: 가장 최근 승인 기록의 `\[사용자\]` 줄과 지금 명세가 다르다\. 바꿔 달라고 한 사용자 말을 인용해 `spec\.mjs approve`로 다시 기록한다\(`build\.md`\)\.$/m);
+  assert.match(blocks[1], /^- 승인 기록과 `\[사용자\]` 줄: 새 명세에 승인 기록이 하나도 없거나, 가장 최근 기록에 `\[사용자\]` 줄이 없어 견줄 수 없거나, 승인 뒤 `\[사용자\]` 줄이 바뀌었다\(가장 최근 승인 기록의 `\[사용자\]` 줄과 지금 명세가 다르다\)\. 바꿔 달라고 한 사용자 말을 인용해 `spec\.mjs approve`로 다시 기록한다\(`build\.md`\)\.$/m);
   assert.match(blocks[1], /^- 읽지 못하거나 칸의 모양이 틀린 `summary\.json`: `headline`은 글, `todo`·`changes`는 배열, `decision`은 시나리오 id를 키로 하는 객체여야 한다\.$/m);
   assert.match(verify, /verifier가 끝난 뒤 바뀐 `results\.json`: 지금 파일의 지문이 가장 최근 verifier 기록과 다르거나, 그 기록이 없거나, 기록에 지문이 없다/);
   // 지문이 어긋난 두 경우를 나눠 적는다: 코드를 고쳐야 하면 build로, 코드는 맞고 결과만 바뀌었으면 verifier만 다시
@@ -450,6 +450,9 @@ test('spec-checker numbers the questions only the person can answer, "없음" wh
   assert.match(checker, /^검수 1\. <질문> \(기본안: …\) — <답에 따라 결과가 어떻게 달라지는지>$/m);
   assert.match(checker, /^검수 2\. …$/m);
   assert.doesNotMatch(checker, /^1\. <질문>/m, '옛 번호 목록은 없다');
+  // 다시 부르면 앞 회차의 번호 다음부터: 겹치면 묻지 않은 새 질문이 앞 회차의 짝으로 지나간다
+  assert.match(checker, /번호는 1부터 붙이되, 명세에 `검수 n` 번호가 이미 있으면\(`\[사용자: 검수 n\]`, `\[AI 가정: 검수 n 맡김\]`, `## 확인 필요`의 `- 검수 n:`\) 앞 회차에 붙은 번호이니 그 가운데 가장 큰 번호 다음부터 붙인다/);
+  assert.match(checker, /번호가 겹치면 앞 회차의 짝이 새 질문의 짝으로 읽혀 묻지 않은 질문이 지나간다/);
   assert.match(checker, /해당하는 것이 없는 무더기에는 "없음"이라고 적는다/);
   // 빠진 위험 표시: 뜻으로 보고, 사소함 — AI가 정함에 적는다
   assert.match(checker, /\*\*위험 표시 보기\.\*\*/);
@@ -470,6 +473,8 @@ test('probe 6 teaches the three pairs for a review number, the delegated default
   assert.match(probe, /항목마다 `검수 n` 번호가 붙어 온다/);
   assert.match(probe, /번호마다 명세에 짝을 단다\. 번호마다 아래 셋 중 하나가 있어야 한다\./);
   assert.match(probe, /그 답을 반영한 줄에 `\[사용자: 검수 n\]`을 단다/);
+  assert.match(probe, /답은 기능·규칙 줄이나 그 케이스에 단다\. `\[AI 가정\]` 항목의 케이스 줄에 달아도 되고, 그 케이스 줄만 `\[사용자\]` 줄로 지켜진다\(build\.md\)/);
+  assert.match(probe, /태그는 줄 끝에 달고 콜론은 반각 `:`으로 쓴다\. 목적·범위 칸이나 줄 가운데에 단 태그, 전각 콜론 `：`의 태그는 짝으로 세지 않는다/);
   assert.match(probe, /사용자가 그 질문을 맡겼으면\("네가 정해"\) 반영한 줄에 `\[AI 가정: 검수 n 맡김\]`을 단다/);
   assert.match(probe, /묻지 않았으면 `## 확인 필요`에 `- 검수 n: 안 물은 까닭`으로 적는다/);
   assert.match(probe, /번호 하나라도 짝이 없으면 `approve`·`delegate`와 완료 검사가 그 번호를 알리고 거절한다/);
@@ -513,6 +518,7 @@ test('build.md says what to do when a [사용자] item changes after the approva
   assert.match(build, /인용하는 말은 앞 기록\(승인이든 위임이든\)에 쓴 어떤 메시지보다 새것이어야 하니, 앞서 쓴 말로 다시 기록하지 못한다/);
   assert.match(build, /사용자가 명세 파일을 직접 고쳤으면 부탁한 말이 없다\. 거절이 알려 준 바뀐 줄을 보이고 이대로 두는지 한 번 묻는다\. 그 답을 인용해 다시 기록한다/);
   assert.match(build, /`\[사용자\]` 항목은 사용자가 바꾸라고 하기 전에 바꾸지 않는다/);
+  assert.match(build, /`\[AI 가정\]` 항목 밑의 케이스 줄에 `\[사용자\]`나 `\[사용자: …\]` 태그가 붙어 있으면\(검수 질문에 사용자가 답한 케이스\) 그 줄만 `\[사용자\]` 줄이다\. 머리 줄과 다른 케이스 줄은 알아서 고쳐도 되지만 그 케이스 줄은 사용자가 바꾸라고 하기 전에 바꾸지 않는다/);
   // 작업 지시 칸과 BLOCKED에서 이 절로 이어진다
   assert.match(build, /승인 뒤 `\[사용자\]` 줄이 바뀌었으면 `pact:worker` 호출이 막히고/);
   assert.match(build, /바꾸라는 답을 받으면 아래 "`\[사용자\]` 항목을 바꿀 때"를 따른다/);
@@ -536,6 +542,11 @@ test('SKILL.md, verify.md and the README say the same about the review pairs, th
   assert.match(readme, /그때의 `\[사용자\]` 줄\(`user_lines`\)을 `approvals\.jsonl`에 한 줄 덧붙인다/);
   assert.match(readme, /- 검수 번호의 짝\(F5\): spec-checker는 '사용자만 답할 수 있음' 항목마다 `검수 1`, `검수 2` … 번호를 붙인다/);
   assert.match(readme, /짝이 빠진 번호는 그 번호를 알리고 거절한다\. 칸이 "없음"이면 통과하고, 번호도 "없음"도 읽지 못하면 거절한다/);
+  assert.match(readme, /짝으로 세는 태그는 기능·공통 규칙 항목의 줄\(머리 줄과 케이스 줄, 접힌 칸 포함\) 끝에 단 것이다\. lint가 태그로 읽는 규칙 그대로라서 목적·범위 칸의 태그, 줄 가운데의 태그, 전각 콜론\(`：`\)의 태그는 세지 않는다\(전각 콜론이면 거절 문구가 그렇다고 알린다\)/);
+  assert.match(readme, /spec-checker는 번호를 1부터 붙이되 명세에 이미 번호가 있으면 가장 큰 번호 다음부터 붙인다/);
+  assert.match(readme, /답에 같은 이름의 머리말이 있어도 `#` 제목 칸을 먼저 보고, 번호나 "없음"을 읽은 칸을 고른다/);
+  assert.match(readme, /`\[AI 가정\]` 항목 밑 케이스 줄에 `\[사용자\]` 태그가 붙어 있으면\(검수 질문에 사용자가 답한 케이스\) 머리 줄은 빼고 그 줄만 따로 들어간다\(`F3\/1`: 그 항목의 `\[사용자\]` 케이스 줄 가운데 첫째\)/);
+  assert.match(readme, /그래서 머리 줄과 다른 케이스 줄은 AI가 고쳐도 걸리지 않고, F5가 짝으로 센 줄은 F3가 지킨다/);
   assert.match(readme, /완료 검사는 새 명세에 spec-checker 기록이 없으면 거절한다/);
   assert.match(readme, /- 승인 뒤 바뀐 `\[사용자\]` 줄\(F3\): /);
   assert.match(readme, /글·태그가 바뀌었거나 줄을 빼거나 더했으면 바뀐 줄을 알리고 거절한다/);

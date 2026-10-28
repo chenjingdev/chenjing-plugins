@@ -467,11 +467,43 @@ test('(g) a [사용자] line that changed and has not been approved again is war
   // [AI 가정]만 바뀐 것은 알리지 않는다
   const ai = approvedProject({ spec: v1.replace('화면 문구는 한국어', '화면 문구는 영어'), entries });
   assert.doesNotMatch(reportOf(ai), /아직 다시 승인되지 않았습니다/);
-  // 줄이 없는 옛 기록은 견줄 수 없다고 알린다
+  // 줄이 없는 옛 기록은 견줄 수 없다고 알린다: 바뀐 줄이 승인되지 않았다는 말과 다르다
   const unknown = approvedProject({ spec: v1, entries: [{ ...entryFor(v1), user_lines: undefined }] });
   const uHtml = reportOf(unknown);
   assert.match(uHtml, /가장 최근 기록에 \[사용자\] 줄이 없어 승인 뒤 바뀐 줄이 있는지 확인하지 못했습니다/);
-  assert.match(uHtml.slice(uHtml.indexOf('<section class="top">'), uHtml.indexOf('</section>')), /아직 다시 승인되지 않았습니다/);
+  const uTop = uHtml.slice(uHtml.indexOf('<section class="top">'), uHtml.indexOf('</section>'));
+  assert.match(uTop, /<p class="missing">가장 최근 승인 기록에 \[사용자\] 줄이 없어 승인 뒤 바뀐 줄이 있는지 확인하지 못했습니다\. 아래 승인 기록에 있습니다\.<\/p>/);
+  assert.doesNotMatch(uTop, /아직 다시 승인되지 않았습니다/, '견줄 수 없는 것과 바뀐 줄이 승인되지 않은 것은 다른 말이다');
+  assert.doesNotMatch(uHtml, /아직 다시 승인되지 않았습니다/);
+  // 바뀐 줄이 있을 때의 맨 위 문구는 그대로다
+  const changedTop = html.slice(html.indexOf('<section class="top">'), html.indexOf('</section>'));
+  assert.doesNotMatch(changedTop, /확인하지 못했습니다/);
+});
+
+test('(g) a change to the [사용자] case line of an [AI 가정] item is shown as that item\'s [사용자] line, before and after, and the AI head line is not mentioned', () => {
+  const v1 = approvalSpec({ features: '- F3 결석 사유 보기 — 기본은 선생님만 [AI 가정]\n  - 케이스: 학생이 봄 → 안 보임 [사용자: 검수 2]\n' });
+  const v2 = v1.replace('→ 안 보임', '→ 이름만 보임').replace('기본은 선생님만', '기본은 담임만');
+  const entries = [
+    entryFor(v1),
+    entryFor(v2, { quote: '학생에게는 이름만 보이게 바꿔 주세요', message: '학생에게는 이름만 보이게 바꿔 주세요', message_uuid: 'u2', message_time: '2026-10-29T02:00:00.000Z' }),
+  ];
+  const { run } = approvedProject({ spec: v2, entries });
+  const html = reportOf({ run });
+  const second = html.slice(html.indexOf('<strong>다시 승인</strong>'), html.indexOf('<h2>통과</h2>'));
+  assert.match(second, /<span class="tag">바뀜<\/span>F3의 \[사용자\] 줄 <del>케이스: 학생이 봄 → 안 보임 \[사용자: 검수 2\]<\/del> <ins>케이스: 학생이 봄 → 이름만 보임 \[사용자: 검수 2\]<\/ins>/);
+  assert.match(second, /<p class="quote">학생에게는 이름만 보이게 바꿔 주세요<\/p>/, '다시 승인한 인용이 바뀐 줄 옆에 있다');
+  assert.ok(!/기본은 (선생님|담임)만/.test(second), '[AI 가정] 머리 줄의 글은 바뀐 줄에 나오지 않는다');
+  assert.doesNotMatch(html, /아직 다시 승인되지 않았습니다/);
+  // 아직 다시 승인하지 않았으면 맨 위에서도 알린다
+  const pending = approvedProject({ spec: v2, entries: [entries[0]] });
+  const pHtml = reportOf(pending);
+  assert.match(pHtml.slice(pHtml.indexOf('<section class="top">'), pHtml.indexOf('</section>')), /승인 뒤 바뀐 \[사용자\] 줄이 아직 다시 승인되지 않았습니다/);
+  assert.match(pHtml, /<span class="tag">바뀜<\/span>F3의 \[사용자\] 줄 <del>/);
+  // 줄이 빠지거나 더해진 것도 케이스 줄로 알린다
+  const gone = approvedProject({ spec: v1.replace('  - 케이스: 학생이 봄 → 안 보임 [사용자: 검수 2]\n', ''), entries: [entries[0]] });
+  assert.match(reportOf(gone), /<span class="tag">빠짐<\/span>F3의 \[사용자\] 줄 <del>케이스: 학생이 봄 → 안 보임 \[사용자: 검수 2\]<\/del>/);
+  const added = approvedProject({ spec: v1, entries: [entryFor(v1.replace('  - 케이스: 학생이 봄 → 안 보임 [사용자: 검수 2]\n', ''))] });
+  assert.match(reportOf(added), /<span class="tag">더해짐<\/span>F3의 \[사용자\] 줄 <ins>케이스: 학생이 봄 → 안 보임 \[사용자: 검수 2\]<\/ins>/);
 });
 
 test('(g) an old spec says "옛 판이라 승인 기록 없음"; a new spec with no record, an unreadable record and no spec at all each say what they can', () => {

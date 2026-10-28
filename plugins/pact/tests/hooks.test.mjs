@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PACT_AGENTS, touchesPact, denyOutput, allowOutput } from '../hooks/guard.mjs';
 import { LOGGED_AGENTS, readRecords, latestSpecCheckerReply, latestWorkerReply, latestVerifierFingerprint } from '../scripts/run-log.mjs';
-import { grantApproval, specText, typed, writeTranscript, runSpec, assertRefused, T, SESSION } from './approval-world.mjs';
+import { grantApproval, specText, typed, writeTranscript, runSpec, assertRefused, checkerReply, T, SESSION } from './approval-world.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOOK = path.join(ROOT, 'hooks', 'guard.mjs');
@@ -500,6 +500,50 @@ test('(d) the call goes through again once the person is quoted in a newer messa
   writeFileSync(w.spec, USER_EDITS.글[0](USER_BASE).replace('15분', '20분'));
   denied(pre(w, workerCall(brief(w))));
   assertRefused(runSpec(w, ['approve', w.spec, '출석 닫는 시간을 15분으로 바꿔 주세요']), /앞 승인 기록에 쓴 메시지/);
+});
+
+// [AI 가정] 항목 밑 케이스 줄에 사용자의 답([사용자: 검수 1])이 달린 명세: F5가 짝으로 세는 그 줄을 F3도 지킨다
+const AI_CASE_BASE = USER_BASE.replace(
+  '- F3 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]\n',
+  '- F3 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]\n- F4 결석 사유 보기 — 기본은 선생님만 [AI 가정]\n  - 케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]\n  - 케이스: 교사가 봄 → 보임\n',
+);
+
+test('(d) the case line of an [AI 가정] item that carries the person\'s answer is held like any [사용자] line: the hook denies pact:worker when it changes, while the AI head line and the AI case lines around it change freely', () => {
+  assert.notEqual(AI_CASE_BASE, USER_BASE);
+  for (const kind of ['approve', 'delegate']) {
+    const w = approvalWorld({ spec: AI_CASE_BASE });
+    grantApproval(w, { kind, ...(kind === 'approve' ? { checkerMessage: checkerReply(['결석 사유를 학생도 볼 수 있나요?']) } : {}) }); // 검수 1의 짝은 케이스 줄의 태그다
+    passed(pre(w, workerCall(brief(w))), `${kind}: 그대로면 통과`);
+    for (const [label, edit] of Object.entries({
+      '머리 줄': (t) => t.replace('기본은 선생님만', '기본은 담임만'),
+      '다른 AI 케이스 줄': (t) => t.replace('교사가 봄 → 보임', '교사가 봄 → 이름만 보임'),
+      '앞에 AI 케이스 줄을 더함': (t) => t.replace('  - 케이스: 학생이 봄', '  - 케이스: 관리자가 봄 → 보임\n  - 케이스: 학생이 봄'),
+      '머리 줄에 번호 태그': (t) => t.replace('기본은 선생님만 [AI 가정]', '기본은 선생님만 [AI 가정: 검수 5 맡김]'),
+    })) {
+      writeFileSync(w.spec, edit(AI_CASE_BASE));
+      passed(pre(w, workerCall(brief(w))), `${kind} / ${label}: AI가 고치는 줄이라 통과`);
+    }
+    for (const [label, edit, named] of [
+      ['글', (t) => t.replace('학생이 봄 → 안 보임', '학생이 봄 → 이름만 보임'), 'F4의 [사용자] 줄 바뀜("케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]" → "케이스: 학생이 봄 → 이름만 보임 [사용자: 검수 1]")'],
+      ['번호 태그', (t) => t.replace('안 보임 [사용자: 검수 1]', '안 보임 [사용자]'), 'F4의 [사용자] 줄 바뀜'],
+      ['줄 빼기', (t) => t.replace('  - 케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]\n', ''), 'F4의 [사용자] 줄 빠짐("케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]")'],
+      ['[AI 가정]으로 바꾸기', (t) => t.replace('안 보임 [사용자: 검수 1]', '안 보임 [AI 가정]'), 'F4의 [사용자] 줄 빠짐'],
+      ['다른 케이스 줄에 [사용자]를 더함', (t) => t.replace('교사가 봄 → 보임\n', '교사가 봄 → 보임 [사용자]\n'), 'F4의 [사용자] 줄 더해짐("케이스: 교사가 봄 → 보임 [사용자]")'],
+    ]) {
+      writeFileSync(w.spec, edit(AI_CASE_BASE));
+      const before = tree(w.root);
+      const reason = denied(pre(w, workerCall(brief(w))), `${kind} / ${label}`);
+      assert.ok(reason.includes(named), `${kind} / ${label}: "${named}"를 알린다: ${reason}`);
+      assert.doesNotMatch(reason, /기본은 (선생님|담임)만/, `${kind} / ${label}: [AI 가정] 머리 줄의 글은 알리지 않는다`);
+      assert.deepEqual(tree(w.root), before, '막으면서 아무것도 만들지 않는다');
+    }
+    // 바꿔 달라고 한 새 말로 다시 기록하면 이어 간다
+    writeFileSync(w.spec, AI_CASE_BASE.replace('학생이 봄 → 안 보임', '학생이 봄 → 이름만 보임'));
+    denied(pre(w, workerCall(brief(w))), `${kind}: 바꾼 뒤 다시 기록하기 전`);
+    grantApproval(w, { kind, text: '학생에게는 이름만 보이게 바꿔 주세요', time: T(30), checker: false });
+    passed(pre(w, workerCall(brief(w))), `${kind}: 다시 기록한 뒤`);
+    assert.deepEqual(errorLines(w), []);
+  }
 });
 
 test('(d) a delegation does not get around it: the old delegation words cannot be written again after a [사용자] line changed', () => {

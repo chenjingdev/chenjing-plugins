@@ -47,6 +47,21 @@ function splitTrailing(rest) {
   return { text: text.trim(), rawTag, risk: risks.length ? risks.join(', ') : null };
 }
 
+// 태그 글(`[..]` 안의 글)을 이름과 콜론 뒤의 글로 나눈다: `사용자: 검수 1` → { name: '사용자', rest: '검수 1' }. 태그가 없으면 name이 null이다.
+// 이름은 첫 반각 콜론(:) 앞이다. lint가 태그를 읽는 규칙 그대로라서 전각 콜론(：)으로 쓴 `사용자： 검수 1`은 이름이 `사용자： 검수 1`이 되어 알 수 없는 태그다.
+// 검수 번호의 짝(reviewMarks)과 [사용자] 줄(userLinesOf)도 이 함수로 읽는다 — lint와 다르게 읽는 태그가 생기면 F5가 짝으로 센 줄을 F3가 지키지 못한다.
+function tagParts(rawTag) {
+  if (rawTag === null || rawTag === undefined) return { name: null, rest: '' };
+  const colon = rawTag.indexOf(':');
+  return colon < 0 ? { name: rawTag.trim(), rest: '' } : { name: rawTag.slice(0, colon).trim(), rest: rawTag.slice(colon + 1).trim() };
+}
+
+// 줄 끝의 태그: { raw, name, rest }. 위험 표시는 건너뛴다. lint가 항목 줄에서 읽는 것과 같고, 케이스 줄에도 같은 규칙을 쓴다.
+const lineTag = (line) => {
+  const raw = splitTrailing(String(line).trim()).rawTag;
+  return { raw, ...tagParts(raw) };
+};
+
 export function parseSpec(text) {
   const { raw, body } = splitFrontmatter(String(text ?? ''));
   const frontmatter = {};
@@ -75,7 +90,7 @@ export function parseSpec(text) {
     }
     const { text, rawTag, risk } = splitTrailing(it[2]);
     // [사용자: 10/8 회의]·[사용자: 검수 1]·[AI 가정: 검수 2 맡김]처럼 콜론 뒤에 출처나 번호를 붙여도 된다.
-    const baseTag = rawTag?.replace(/:.*$/, '').trim() ?? null;
+    const baseTag = tagParts(rawTag).name;
     items.push({
       id: it[1],
       text,
@@ -143,8 +158,8 @@ function itemUnits(text) {
     if (!ITEM_SECTIONS.includes(section)) continue;
     const head = /^-\s+([FR]\d+)\b\s*(.*?)\s*$/.exec(line);
     if (head) {
-      const base = splitTrailing(head[2]).rawTag?.replace(/:.*$/, '').trim() ?? null;
-      unit = { id: head[1], lines: [line], tag: TAGS.includes(base) ? base : null };
+      const { name } = lineTag(head[2]);
+      unit = { id: head[1], lines: [line], tag: TAGS.includes(name) ? name : null };
       units.push(unit);
     } else if (unit && /^\s+\S/.test(line)) unit.lines.push(line); // 들여쓴 줄은 앞 항목의 케이스
     else if (line.trim()) unit = null; // <details> 같은 항목이 아닌 줄에서 끊는다. 빈 줄에서는 끊지 않는다(접힌 칸 안)
@@ -163,16 +178,25 @@ export function riskUnits(text) {
 // 줄 비교용 꼴: 공백은 하나로, 앞뒤는 뺀다(들여쓰기·줄 끝 공백만 바뀐 것은 바뀐 것이 아니다)
 const squash = (line) => String(line).replace(/\s+/g, ' ').trim();
 
-// [사용자]나 [사용자: …] 태그가 붙은 F·R 항목의 줄들: { <번호>: [항목 줄, 케이스 줄, …] } (명세 F3, R12)
-// 승인을 기록할 때 이것을 남기고, 뒤에 지금 명세와 견준다. 같은 번호가 또 나오면(lint가 잡는 오류) `F1#2`처럼 이어 붙여 하나도 빠뜨리지 않는다.
+// 승인 뒤 바뀌면 다시 승인을 받아야 하는 [사용자] 줄들 (명세 F3, R12): { <키>: [줄, …] }. 승인을 기록할 때 이것을 남기고, 뒤에 지금 명세와 견준다.
+//   머리 줄이 [사용자]나 [사용자: …]인 F·R 항목은 항목 하나가 통째로 한 키다: `F2` → [항목 줄, 케이스 줄, …]
+//   머리 줄이 [사용자]가 아닌 항목(`[AI 가정]`)은 머리 줄과 AI의 케이스 줄을 담지 않고, 케이스 줄 가운데 [사용자] 태그가 붙은 줄만 그 줄 하나씩 담는다:
+//     `F3/1` → [그 케이스 줄]. 숫자는 그 항목의 [사용자] 케이스 줄 가운데 몇 번째인지다(줄 위치가 아니다 — AI가 앞에 케이스 줄을 더해도 키가 밀리지 않게).
+//     검수 질문에 사용자가 답한 케이스는 대개 이 꼴이고, 머리 줄은 AI가 알아서 고쳐도 되지만 사용자가 답한 케이스 줄은 묻지 않고 바뀌면 안 된다.
+// 같은 번호가 또 나오면(lint가 잡는 오류) `F1#2`처럼 이어 붙여 하나도 빠뜨리지 않는다. 태그는 lint와 같은 규칙으로 읽는다(줄 끝의 [..], 반각 콜론).
 export function userLinesOf(text) {
   const out = {};
   const seen = new Map();
   for (const unit of itemUnits(text)) {
-    if (unit.tag !== '사용자') continue;
     const times = (seen.get(unit.id) ?? 0) + 1;
     seen.set(unit.id, times);
-    out[times === 1 ? unit.id : `${unit.id}#${times}`] = unit.lines.map(squash);
+    const key = times === 1 ? unit.id : `${unit.id}#${times}`;
+    if (unit.tag === '사용자') {
+      out[key] = unit.lines.map(squash);
+      continue;
+    }
+    let n = 0;
+    for (const line of unit.lines.slice(1)) if (lineTag(line).name === '사용자') out[`${key}/${++n}`] = [squash(line)];
   }
   return out;
 }
@@ -181,15 +205,27 @@ export function userLinesOf(text) {
 //   answered   [사용자: 검수 n]  물어서 답을 받은 줄
 //   delegated  [AI 가정: 검수 n 맡김]  사용자가 맡긴 줄('맡김'이 없는 [AI 가정: 검수 n]은 AI가 알아서 정한 것이라 짝이 아니다)
 //   notAsked   `## 확인 필요`의 `- 검수 n: 안 물은 까닭` (까닭이 비면 짝이 아니다)  → Map(번호 → 까닭)
-// 태그는 `## 확인 필요`·`## 결정 기록` 밖의 어느 줄에서든 읽는다. 백틱으로 감싼 글은 예시라 읽지 않는다. 한 태그에 번호 여럿도 된다: [사용자: 검수 1, 3].
+// 태그는 기능·공통 규칙 항목의 줄(머리 줄과 케이스 줄, 접힌 칸 포함) 끝에 단 것만 센다. 목적·범위 칸의 태그와 줄 가운데의 태그는 세지 않는다.
+// lint가 태그로 읽는 것과 같은 규칙이다(tagParts): 그래야 F5가 짝으로 센 줄을 F3(userLinesOf)가 지킨다. 한 태그에 번호 여럿도 된다: [사용자: 검수 1, 3].
+// fullwidth는 전각 콜론(`[사용자： 검수 n]`)으로 쓴 태그의 번호다: 짝이 아니고(lint도 알 수 없는 태그로 알린다) 거절 문구가 그렇다고 알리는 데 쓴다.
 const REVIEW_LIST = String.raw`검수\s*(\d+(?:\s*[,，、·/]\s*\d+)*)`;
 const reviewNumbers = (text) => [...String(text).matchAll(new RegExp(REVIEW_LIST, 'gu'))].flatMap((m) => m[1].split(/\D+/).filter(Boolean).map(Number));
 const CONFIRM_LINE = new RegExp(String.raw`^\s*[-*]\s*${REVIEW_LIST}\s*[:：]\s*(\S.*?)\s*$`, 'u');
+const FULLWIDTH_TAG = /^\s*(?:사용자|AI 가정)\s*：(.*)$/u;
 export function reviewMarks(text) {
   const { body } = splitFrontmatter(String(text ?? ''));
   const answered = new Set();
   const delegated = new Set();
   const notAsked = new Map();
+  const fullwidth = new Set();
+  for (const unit of itemUnits(text)) {
+    for (const line of unit.lines) {
+      const { raw, name, rest } = lineTag(line);
+      if (name === '사용자') reviewNumbers(rest).forEach((n) => answered.add(n));
+      else if (name === 'AI 가정' && rest.includes('맡김')) reviewNumbers(rest).forEach((n) => delegated.add(n));
+      else if (raw !== null && FULLWIDTH_TAG.test(raw)) reviewNumbers(FULLWIDTH_TAG.exec(raw)[1]).forEach((n) => fullwidth.add(n));
+    }
+  }
   let section = null;
   for (const raw of body.split(/\r?\n/)) {
     const h = /^##\s+(.+?)\s*$/.exec(raw);
@@ -197,19 +233,11 @@ export function reviewMarks(text) {
       section = h[1];
       continue;
     }
-    if (section === '확인 필요') {
-      const m = CONFIRM_LINE.exec(raw);
-      if (m) for (const n of reviewNumbers(`검수 ${m[1]}`)) if (!notAsked.has(n)) notAsked.set(n, m[2]);
-      continue;
-    }
-    if (section === '결정 기록') continue;
-    for (const m of raw.replace(/`[^`]*`/g, '').matchAll(/\[\s*(사용자|AI 가정)\s*[:：]([^\]]*)\]/g)) {
-      const numbers = reviewNumbers(m[2]);
-      if (m[1] === '사용자') numbers.forEach((n) => answered.add(n));
-      else if (m[2].includes('맡김')) numbers.forEach((n) => delegated.add(n));
-    }
+    if (section !== '확인 필요') continue;
+    const m = CONFIRM_LINE.exec(raw);
+    if (m) for (const n of reviewNumbers(`검수 ${m[1]}`)) if (!notAsked.has(n)) notAsked.set(n, m[2]);
   }
-  return { answered, delegated, notAsked };
+  return { answered, delegated, notAsked, fullwidth };
 }
 
 export function setStatus(text, status) {

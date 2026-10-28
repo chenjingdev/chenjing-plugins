@@ -976,3 +976,79 @@ test('(g) report.mjs after a real completion check: its 참고 lines are in repo
   assert.match(changed.html, /<p class="missing">승인 뒤 바뀐 \[사용자\] 줄이 아직 다시 승인되지 않았습니다\. 아래 승인 기록에 있습니다\.<\/p>/);
   assert.match(changed.html, /<span class="tag">바뀜<\/span>F1 <del>목록을 연다 \[사용자: 검수 1\] \/ 케이스: 자료가 없음 → 빈 상태 표시<\/del> <ins>목록을 내보낸다 \[사용자: 검수 1\] \/ 케이스: 자료가 없음 → 빈 상태 표시<\/ins>/);
 });
+
+// ---------- F5가 짝으로 세는 줄을 F3가 지킨다: [AI 가정] 항목 밑 케이스 줄에 사용자의 답이 달린 경우 ----------
+
+// 명세의 사용자의 답은 [AI 가정] 항목 R2의 케이스 줄에 달렸다. spec-checker는 질문 하나(검수 1)를 짚었다.
+const ONE_QUESTION = checkerReply(['결석 사유를 학생도 볼 수 있나요?']);
+const AI_ITEM = NEW_SPEC.replace('## 공통 규칙\n', '## 공통 규칙\n- R2 결석 사유 보기 — 기본은 선생님만 [AI 가정]\n  - 케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]\n  - 케이스: 교사가 봄 → 보임\n');
+
+test('(a)(d) a [사용자: 검수 n] answer on the case line of an [AI 가정] item is a pair the completion check accepts, and the line is held: its change is named by the check, finish and snapshot, until it is approved again', () => {
+  const f = fixture({ specText: AI_ITEM, approved: true, checkerMessage: ONE_QUESTION });
+  verifierStopped(f);
+  const ok = checkVerification(f.spec, f.project);
+  assert.equal(ok.ok, true, issuesOf(ok)); // 짝은 케이스 줄의 태그다
+  const changed = AI_ITEM.replace('학생이 봄 → 안 보임', '학생이 봄 → 이름만 보임');
+  writeFileSync(f.spec, changed);
+  for (const checked of [checkVerification(f.spec, f.project), finishVerification(f.spec, f.project)]) {
+    const mine = blocked(checked, /승인 뒤 \[사용자\] 줄이 바뀌었다/);
+    assert.match(mine, /R2의 \[사용자\] 줄 바뀜\("케이스: 학생이 봄 → 안 보임 \[사용자: 검수 1\]" → "케이스: 학생이 봄 → 이름만 보임 \[사용자: 검수 1\]"\)/);
+    assert.doesNotMatch(mine, /기본은 선생님만/, '[AI 가정] 머리 줄의 글은 알리지 않는다');
+  }
+  assert.equal(parseSpec(readFileSync(f.spec, 'utf8')).frontmatter.status, 'verifying');
+  assert.throws(() => snapshotVerification(f.spec, f.project, 'command'), (error) => /R2의 \[사용자\] 줄 바뀜/.test(error.message) && !/\n/.test(error.message));
+  // 바꿔 달라고 한 말로 다시 기록하면(더 새 기록) snapshot이 되고 이 이유로는 막히지 않는다
+  seedApproval(f.project, '2026-10-25-list', f.spec, changed, { checker: false, time: '2026-10-25T00:20:00.000Z' });
+  assert.equal(snapshotVerification(f.spec, f.project, 'command').reused, false);
+  assert.doesNotMatch(issuesOf(checkVerification(f.spec, f.project)), /승인 뒤 \[사용자\] 줄이 바뀌었다/);
+});
+
+test('(e) the [AI 가정] head line and the other case lines of that item can change after the approval: the completion check, finish and snapshot pass', () => {
+  const edited = AI_ITEM.replace('기본은 선생님만', '기본은 담임만').replace('교사가 봄 → 보임', '교사가 봄 → 이름만 보임').replace('  - 케이스: 학생이 봄', '  - 케이스: 관리자가 봄 → 보임\n  - 케이스: 학생이 봄');
+  assert.notEqual(edited, AI_ITEM);
+  const f = fixture({ specText: edited, approvedText: AI_ITEM, approved: true, checkerMessage: ONE_QUESTION }); // 승인은 AI_ITEM, 지금 명세와 snapshot은 edited
+  verifierStopped(f);
+  const checked = checkVerification(f.spec, f.project);
+  assert.equal(checked.ok, true, issuesOf(checked));
+  assert.equal(finishVerification(f.spec, f.project).ok, true);
+});
+
+test('(a) a [사용자: 검수 n] that is not on an F or R line (the purpose section, the middle of a line) is no pair for the completion check either', () => {
+  const lookalikes = {
+    '목적 칸': NEW_SPEC.replace('# 목록\n', '# 목록\n## 목적\n교수자가 확인한다 [사용자: 검수 1]\n'),
+    '줄 가운데': NEW_SPEC.replace('- F1 목록을 연다 [사용자]', '- F1 목록을 연다 [사용자: 검수 1] 열 때 — 이유 [사용자]'),
+  };
+  for (const [label, text] of Object.entries(lookalikes)) {
+    const f = fixture({ specText: text, approved: true, checkerMessage: ONE_QUESTION });
+    verifierStopped(f);
+    assert.match(issuesOf(checkVerification(f.spec, f.project)), /검수 1\(.*\)에 명세의 짝이 없다/, label);
+  }
+});
+
+test('(a) a full-width colon in a tag is the same problem for the lint, the pair and the [사용자] lines, and the refusal says it is the colon', () => {
+  const f = fixture({ specText: PAIRED(), approved: true, checkerMessage: ONE_QUESTION }); // 검수 1의 짝은 F1 머리 줄의 태그다
+  verifierStopped(f);
+  assert.equal(checkVerification(f.spec, f.project).ok, true);
+  writeFileSync(f.spec, readFileSync(f.spec, 'utf8').replace('[사용자: 검수 1]', '[사용자： 검수 1]')); // snapshot은 lint가 먼저 거절하니 준비를 마친 뒤에 고친다
+  const issues = issuesOf(checkVerification(f.spec, f.project));
+  assert.match(issues, /F1: 알 수 없는 태그 \[사용자： 검수 1\]/, 'lint가 알린다');
+  assert.match(issues, /검수 1\(.*\)에 명세의 짝이 없다\. 검수 1의 태그는 콜론이 전각\(：\)이라 읽히지 않는다\. 반각 콜론\(:\)으로 고친다/, '짝이 없다고만 하지 않고 까닭을 알린다');
+  assert.match(issues, /F1 태그가 바뀜\(\[사용자： 검수 1\]\)/, '[사용자] 줄도 아니게 된 것으로 본다');
+});
+
+test('(c) the completion check line in report.mjs says which of the two top problems it is when the [사용자] lines cannot be compared: a record with no lines is "cannot compare", not "changed"', () => {
+  const REPORT = fileURLToPath(new URL('../scripts/report.mjs', import.meta.url));
+  const f = fixture({ specText: NEW_SPEC, approved: true });
+  verifierStopped(f);
+  const file = path.join(f.capture.runDir, 'approvals.jsonl');
+  const entry = JSON.parse(readFileSync(file, 'utf8'));
+  delete entry.user_lines;
+  writeFileSync(file, `${JSON.stringify(entry)}\n`);
+  const r = spawnSync(process.execPath, [REPORT, f.capture.runDir], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^완료 검사: 막힘 1개 — 가장 최근 승인 기록에 \[사용자\] 줄이 없어 승인 뒤 바뀐 줄이 있는지 확인하지 못한다\./m);
+  const html = readFileSync(path.join(f.capture.runDir, 'report.html'), 'utf8');
+  const top = html.slice(html.indexOf('<section class="top">'), html.indexOf('</section>'));
+  assert.match(top, /가장 최근 승인 기록에 \[사용자\] 줄이 없어 승인 뒤 바뀐 줄이 있는지 확인하지 못했습니다/);
+  assert.doesNotMatch(top, /아직 다시 승인되지 않았습니다/);
+});

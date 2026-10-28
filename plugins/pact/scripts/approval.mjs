@@ -11,7 +11,8 @@
 //   answer_question  AskUserQuestion의 답이면 그 질문, 아니면 null
 //   transcript       찾은 대화 기록 파일의 경로(만들기를 시작할 때 다시 맞춰 보려고)
 //   spec_checker_time  approve일 때 맞춰 본 spec-checker의 끝난 시각(위임은 null)
-//   user_lines       그때 명세의 [사용자] 줄들 { <번호>: [항목 줄, 케이스 줄, …] }(spec.mjs userLinesOf). 지문 대신 줄 글을 그대로 둔다:
+//   user_lines       그때 명세의 [사용자] 줄들(spec.mjs userLinesOf). 머리 줄이 [사용자]인 항목은 { F2: [항목 줄, 케이스 줄, …] },
+//                    [AI 가정] 항목 밑의 [사용자] 케이스 줄은 그 줄 하나씩 { 'F3/1': [케이스 줄] }. 지문 대신 줄 글을 그대로 둔다:
 //                    뒤에 지금 명세와 견줘 바뀐 줄을 알리고(F3), 보고서가 앞뒤 글을 보이려고
 // 이 폴더의 log/와 함께 훅과 스크립트만 쓴다(R14, scripts/locks.mjs가 건다).
 //
@@ -115,18 +116,8 @@ const REPLY_END = /^\s*(?:#{1,6}\s+\S|[*_]*\s*(?:이미 답이 있음|사소함\
 const REPLY_ITEM = /^\s*(?:[-*+•]\s*|\d+[.)]\s*)?[*_]*\s*(?:[\[(（【]\s*)?검수\s*(\d+)[*_]*/u;
 const REPLY_NONE = /^\s*(?:[-*+•]\s*)?[*_]*\s*(?:해당\s*)?없(?:음|다|습니다)/u;
 
-export function parseReviewReply(message) {
-  const lines = String(message ?? '').split(/\r?\n/);
-  let start = -1;
-  let inline = '';
-  for (let i = 0; i < lines.length && start < 0; i++) {
-    const m = REPLY_HEADING.exec(lines[i]);
-    if (m) {
-      start = i;
-      inline = m[1];
-    }
-  }
-  if (start < 0) return { found: false, none: false, items: [] };
+// 한 칸을 읽는다: start 줄(칸 제목)과 그 줄에 이어 쓴 글(inline), 다음 칸 제목 앞까지의 줄들. { items, none }
+function readSection(lines, { start, inline }) {
   const body = inline.trim() ? [inline] : [];
   for (let i = start + 1; i < lines.length && !REPLY_END.test(lines[i]); i++) body.push(lines[i]);
   const items = [];
@@ -138,7 +129,26 @@ export function parseReviewReply(message) {
     items.push({ n: Number(m[1]), text: line.slice(m[0].length).replace(/^[\s:.)\]）】—–*_-]+/u, '').trim() });
   }
   const first = body.map((line) => line.trim()).find(Boolean) ?? '';
-  return { found: true, none: !items.length && REPLY_NONE.test(first), items };
+  return { items, none: !items.length && REPLY_NONE.test(first) };
+}
+
+// 칸 제목 후보는 '사용자만 답할 수 있음'으로 시작하는 줄 모두다. 답 맨 위의 머리말("사용자만 답할 수 있음 2개를 찾았습니다.")도 후보라서
+// 첫 후보만 칸으로 잡으면 뒤의 진짜 칸을 못 읽는다. `#` 제목 줄을 먼저 보고 맨 줄 꼴은 그다음에 보며, 그 가운데 번호나 '없음'을 읽은 첫 후보를 칸으로 고른다.
+// 어느 후보에서도 못 읽으면 첫 후보(칸은 있는데 못 읽은 것)를 돌려준다.
+export function parseReviewReply(message) {
+  const lines = String(message ?? '').split(/\r?\n/);
+  const candidates = [];
+  lines.forEach((line, start) => {
+    const m = REPLY_HEADING.exec(line);
+    if (m) candidates.push({ start, inline: m[1], heading: /^\s*#/.test(line) });
+  });
+  if (!candidates.length) return { found: false, none: false, items: [] };
+  const ordered = [...candidates.filter((c) => c.heading), ...candidates.filter((c) => !c.heading)];
+  for (const candidate of ordered) {
+    const read = readSection(lines, candidate);
+    if (read.items.length || read.none) return { found: true, ...read };
+  }
+  return { found: true, ...readSection(lines, ordered[0]) };
 }
 
 const clip = (text, max) => {
@@ -163,9 +173,12 @@ export function pairingProblem(specText, record, afterwards = '') {
   const gaps = reply.items.filter(({ n }) => !marks.answered.has(n) && !marks.delegated.has(n) && !marks.notAsked.has(n));
   if (!gaps.length) return null;
   const list = gaps.map(({ n, text }) => (questionOf(text) ? `검수 ${n}("${clip(questionOf(text), 30)}")` : `검수 ${n}`)).join(', ');
+  // 전각 콜론(：)으로 쓴 태그는 lint가 알 수 없는 태그로 알리는데 approve는 lint를 돌리지 않는다. 짝이 없다고만 하면 태그를 단 사람이 영문을 모르니 그렇다고 알린다.
+  const wide = gaps.filter(({ n }) => marks.fullwidth.has(n)).map(({ n }) => `검수 ${n}`);
+  const hint = wide.length ? `${wide.join(', ')}의 태그는 콜론이 전각(：)이라 읽히지 않는다. 반각 콜론(:)으로 고친다. ` : '';
   return {
     reason: `spec-checker가 '사용자만 답할 수 있음'으로 짚은 ${list}에 명세의 짝이 없다.`,
-    instead: '물어서 답을 받은 줄에는 [사용자: 검수 n], 사용자가 맡긴 줄에는 [AI 가정: 검수 n 맡김]을 달고, 묻지 않은 것은 ## 확인 필요에 "- 검수 n: 안 물은 까닭"으로 적는다'
+    instead: `${hint}물어서 답을 받은 줄에는 [사용자: 검수 n], 사용자가 맡긴 줄에는 [AI 가정: 검수 n 맡김]을 기능·규칙 줄이나 그 케이스 줄의 끝에 달고, 묻지 않은 것은 ## 확인 필요에 "- 검수 n: 안 물은 까닭"으로 적는다`
       + "(위임 중이면 까닭은 '위임이라 기본안으로 정함'). 아직 안 물었고 물어야 하는 것이면 먼저 묻는다.",
   };
 }
@@ -175,7 +188,12 @@ export function pairingProblem(specText, record, afterwards = '') {
 const isLines = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
   && Object.values(value).every((lines) => Array.isArray(lines) && lines.every((line) => typeof line === 'string'));
 
-// 두 [사용자] 줄 묶음({ <번호>: [줄…] })의 다른 점: [{ id, kind: 'changed'|'removed'|'added', before, after }]
+// 키가 [AI 가정] 항목 밑 [사용자] 케이스 줄 하나(`F3/1`, `F1#2/1`)를 가리키는가. 아니면 항목 하나(`F2`, `F1#2`)다.
+export const isLineKey = (id) => /\/\d+$/.test(id);
+// 바뀐 줄을 가리키는 말: 항목은 번호 그대로, 케이스 줄은 `F3의 [사용자] 줄`
+export const changeLabel = (change) => (isLineKey(change.id) ? `${change.id.replace(/(?:#\d+)?\/\d+$/, '')}의 [사용자] 줄` : change.id);
+
+// 두 [사용자] 줄 묶음({ <키>: [줄…] })의 다른 점: [{ id, kind: 'changed'|'removed'|'added', before, after }]
 export function diffUserLines(before, after) {
   const changes = [];
   for (const [id, lines] of Object.entries(before)) {
@@ -194,7 +212,7 @@ export function userLineDrift(specText, entry) {
   if (!changes.length) return null;
   const items = parseSpec(specText).items;
   for (const change of changes) {
-    if (change.kind !== 'removed') continue;
+    if (change.kind !== 'removed' || isLineKey(change.id)) continue;
     const item = items.find((it) => it.id === change.id.replace(/#\d+$/, ''));
     if (item && item.tag !== '사용자') Object.assign(change, { kind: 'retagged', tag: item.rawTag });
   }
@@ -202,29 +220,32 @@ export function userLineDrift(specText, entry) {
 }
 
 // 줄 글을 사람이 읽기 쉽게: 항목 줄의 `- F1 `과 케이스 줄의 `- `를 떼고 ` / `로 잇는다
+// head가 true면 첫 줄이 항목 줄(`- F1 …`)이다. [AI 가정] 항목 밑 케이스 줄 하나를 담은 키(`F3/1`)는 항목 줄이 없어 head를 false로 부른다.
 const plainLine = (line, head) => String(line).replace(head ? /^-\s+[FR]\d+\s*/ : /^-\s+/, '');
-export const plainLines = (lines) => lines.map((line, i) => plainLine(line, i === 0)).join(' / ');
+export const plainLines = (lines, { head = true } = {}) => lines.map((line, i) => plainLine(line, head && i === 0)).join(' / ');
 
 // 한 항목의 줄 가운데 처음으로 달라진 곳: 항목 줄이 바뀌었으면 그 줄, 케이스만 바뀌었으면 그 케이스 줄
-function firstDifference(before, after) {
+function firstDifference(before, after, head) {
   for (let i = 0; i < Math.max(before.length, after.length); i++) {
-    if (before[i] !== after[i]) return { from: before[i] === undefined ? null : plainLine(before[i], i === 0), to: after[i] === undefined ? null : plainLine(after[i], i === 0) };
+    if (before[i] !== after[i]) return { from: before[i] === undefined ? null : plainLine(before[i], head && i === 0), to: after[i] === undefined ? null : plainLine(after[i], head && i === 0) };
   }
   return { from: null, to: null };
 }
 
 export function describeChange(change) {
   const quoted = (text) => `"${clip(text, 40)}"`;
+  const label = changeLabel(change);
+  const head = !isLineKey(change.id);
   switch (change.kind) {
     case 'changed': {
-      const { from, to } = firstDifference(change.before, change.after);
-      if (from === null) return `${change.id} 바뀜(줄이 더해짐 ${quoted(to)})`;
-      if (to === null) return `${change.id} 바뀜(줄이 빠짐 ${quoted(from)})`;
-      return `${change.id} 바뀜(${quoted(from)} → ${quoted(to)})`;
+      const { from, to } = firstDifference(change.before, change.after, head);
+      if (from === null) return `${label} 바뀜(줄이 더해짐 ${quoted(to)})`;
+      if (to === null) return `${label} 바뀜(줄이 빠짐 ${quoted(from)})`;
+      return `${label} 바뀜(${quoted(from)} → ${quoted(to)})`;
     }
-    case 'retagged': return `${change.id} 태그가 바뀜(${change.tag ? `[${change.tag}]` : '태그 없음'})`;
-    case 'removed': return `${change.id} 빠짐`;
-    default: return `${change.id} 더해짐(${quoted(plainLines(change.after))})`;
+    case 'retagged': return `${label} 태그가 바뀜(${change.tag ? `[${change.tag}]` : '태그 없음'})`;
+    case 'removed': return head ? `${label} 빠짐` : `${label} 빠짐(${quoted(plainLines(change.before, { head }))})`;
+    default: return `${label} 더해짐(${quoted(plainLines(change.after, { head }))})`;
   }
 }
 const describeChanges = (changes, limit = 4) => `${changes.slice(0, limit).map(describeChange).join(', ')}${changes.length > limit ? ` 외 ${changes.length - limit}개` : ''}`;

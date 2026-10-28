@@ -11,7 +11,7 @@ import { effectiveResult } from './evidence.mjs';
 import { checkVerification } from './verification.mjs';
 import { isMainModule } from './paths.mjs';
 import { decisionOf, readSummary, reportFields } from './summary.mjs';
-import { approvalOverview, notAskedItems, plainLines } from './approval.mjs';
+import { approvalOverview, changeLabel, isLineKey, notAskedItems, plainLines } from './approval.mjs';
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -83,7 +83,10 @@ ${scenarioBody(s, runDir)}
 // 승인 기록 칸(명세 R5, R8, R12). 기록마다 종류(승인·위임)와 인용한 말, 메시지 전문, 시각을 보이고, 앞 기록 뒤로 바뀐 [사용자] 줄은 다시 승인한 인용 옆에 둔다.
 // 지금 명세에서 바뀌었는데 아직 다시 승인하지 않은 줄은 따로 알린다. 옛 판은 승인 기록이 없다고 알린다. 아무것도 모르면(기록도 명세도 없다) 칸을 만들지 않는다.
 const CHANGE = { changed: '바뀜', removed: '빠짐', added: '더해짐', retagged: '태그 바뀜' };
-const renderChange = (c) => `<li><span class="tag">${CHANGE[c.kind]}</span>${esc(c.id)}${c.kind === 'retagged' ? ` ${c.tag ? esc(`[${c.tag}]`) : '태그 없음'}` : ''}${c.before.length ? ` <del>${esc(plainLines(c.before))}</del>` : ''}${c.after.length ? ` <ins>${esc(plainLines(c.after))}</ins>` : ''}</li>`;
+const renderChange = (c) => {
+  const head = !isLineKey(c.id); // F3/1처럼 [AI 가정] 항목 밑 케이스 줄 하나를 가리키는 키는 항목 줄이 없다
+  return `<li><span class="tag">${CHANGE[c.kind]}</span>${esc(changeLabel(c))}${c.kind === 'retagged' ? ` ${c.tag ? esc(`[${c.tag}]`) : '태그 없음'}` : ''}${c.before.length ? ` <del>${esc(plainLines(c.before, { head }))}</del>` : ''}${c.after.length ? ` <ins>${esc(plainLines(c.after, { head }))}</ins>` : ''}</li>`;
+};
 const renderChanges = (changes) => `<ul class="changes">${changes.map(renderChange).join('')}</ul>`;
 
 function renderApproval(approval) {
@@ -173,6 +176,10 @@ export function renderReport(results, { runDir, notes = [] }) {
   const todo = mainTodo === null && !asked.length ? undefined : [...(mainTodo ?? []), ...asked];
   const overview = approvalOverview(spec, runDir);
   const pending = overview.state === 'recorded' && overview.pending;
+  // 맨 위 경고는 두 가지다: 바뀐 줄이 아직 다시 승인되지 않았다 / 기록에 [사용자] 줄이 없어 바뀌었는지 견줄 수 없다
+  const pendingNote = !pending ? ''
+    : pending.unknown ? '<p class="missing">가장 최근 승인 기록에 [사용자] 줄이 없어 승인 뒤 바뀐 줄이 있는지 확인하지 못했습니다. 아래 승인 기록에 있습니다.</p>'
+      : '<p class="missing">승인 뒤 바뀐 [사용자] 줄이 아직 다시 승인되지 않았습니다. 아래 승인 기록에 있습니다.</p>';
   const html = `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
@@ -210,7 +217,7 @@ export function renderReport(results, { runDir, notes = [] }) {
 ${scenarios.length === 0 ? '<p class="missing">검수한 시나리오가 없습니다. 완료로 판정할 수 없습니다.</p>' : ''}
 ${stale ? `<p class="missing">이번 검수 기록과 이어지지 않는 결과 ${stale}개는 미검증으로 두었습니다.</p>` : ''}
 ${scenarios.length > 0 && !needsReceipt ? '<p class="missing">완료 검사를 두기 전의 옛 보고서입니다. 지금도 그대로인지는 다시 확인해야 합니다.</p>' : ''}
-${pending ? '<p class="missing">승인 뒤 바뀐 [사용자] 줄이 아직 다시 승인되지 않았습니다. 아래 승인 기록에 있습니다.</p>' : ''}
+${pendingNote}
 ${fields.headline ? `<p class="headline">${esc(fields.headline)}</p>` : ''}
 ${Array.isArray(todo) ? `<h2>할 일</h2>${list(todo)}` : ''}
 <p class="counts">시나리오 ${scenarios.length}개 · ${summary}</p>
