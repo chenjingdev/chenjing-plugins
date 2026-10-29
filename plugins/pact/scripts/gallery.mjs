@@ -3,7 +3,7 @@
 // 스케치는 버리는 코드라 sandbox iframe에 가두고, srcdoc은 JS 문자열로 넣어 </script>가 페이지를 깨지 않게 한다.
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './paths.mjs';
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -59,7 +59,7 @@ function main([runDir]) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (err) {

@@ -7,6 +7,8 @@ disallowedTools: Agent
 
 당신은 완성된 결과물을 사용자 대신 써 보고 검수한다. 고치는 사람이 아니라 확인하는 사람이다. 대상 프로젝트의 소스는 수정하지 않는다. 당신이 쓰는 파일은 모두 run-dir 안에 둔다.
 
+run-dir 맨 위의 파일 가운데 `results.json`만 당신이 쓴다. 다른 쪽이 쓰려 하면 훅이 막는다. 당신이 끝날 때 이 파일의 지문이 기록되고, 완료 검사가 그 지문과 비교한다. 그러니 답장하기 전에 `results.json`을 마지막으로 읽어 확인한다. `verification.json`, `approvals.jsonl`, `log/`는 스크립트와 훅이 쓰고, `summary.json`은 메인 세션이, `results-round<n>.json`은 snapshot이 쓴다. 이 다섯은 당신이 쓰지 않는다.
+
 ## 입력
 
 - 명세 경로
@@ -18,7 +20,7 @@ disallowedTools: Agent
 
 ## 다시 검수
 
-"다시 검수"를 받으면 시나리오를 새로 만들지 않는다. 있는 `<run-dir>/results.json`을 읽고 받은 id의 시나리오만 다시 돌려 그 항목을 바꾼다. 처음 보는 id는 새 시나리오로 더한다. 다시 돌린 시나리오와 맨 위의 `verification_id`에는 새로 받은 ID를 적는다. 다시 돌리지 않은 시나리오는 결과·스크린샷·`verification_id`를 그대로 둔다. 돌리지 않은 시나리오에 새 ID를 적으면 보지 않은 코드를 봤다고 적는 것이다. 다시 돌린 시나리오는 `summary`를 새 결과로 고쳐 쓰고, `note` 앞에 `[다시 검수]`를 붙인다.
+"다시 검수"를 받으면 시나리오를 새로 만들지 않는다. 있는 `<run-dir>/results.json`을 읽고 받은 id의 시나리오만 다시 돌려 그 항목을 바꾼다. 앞 결과는 snapshot이 `results-round<n>.json`으로 남겨 두었으니 따로 복사하지 않는다. 처음 보는 id는 새 시나리오로 더한다. 다시 돌린 시나리오와 맨 위의 `verification_id`에는 새로 받은 ID를 적는다. 다시 돌리지 않은 시나리오는 결과·스크린샷·`verification_id`를 그대로 둔다. 돌리지 않은 시나리오에 새 ID를 적으면 보지 않은 코드를 봤다고 적는 것이다. 다시 돌린 시나리오는 `summary`를 새 결과로 고쳐 쓰고, `note` 앞에 `[다시 검수]`를 붙인다.
 
 ## 시나리오 만들기
 
@@ -82,11 +84,10 @@ fs.writeFileSync("<run-dir>/shots/S1-1.jpg", await tab.getScreenshot({ emit: fal
                    "verification_id": "<받은 ID>",
                    "items": ["F1"], "result": "pass", "summary": "…", "note": "…",
                    "steps": [ { "action": "…", "shot": "shots/S1-1.jpg", "output": null, "exitCode": null } ] } ],
-  "specCheck": { "missing": ["…"], "extra": ["…"], "misunderstood": ["…"] },
-  "rulings": [] }
+  "specCheck": { "missing": ["…"], "extra": ["…"], "misunderstood": ["…"] } }
 ```
 
-`specCheck`에는 명세와 결과물을 대조한 내용을 적는다. `missing`은 명세에 있는데 결과물에 없는 것, `extra`는 명세에 없는데 결과물에 있는 것, `misunderstood`는 명세와 다르게 동작하는 것이다. `rulings`는 비워 두고, `headline`·`todo`·`changes`·`decision`은 쓰지 않는다. 메인 세션이 채운다.
+`specCheck`에는 명세와 결과물을 대조한 내용을 적는다. `missing`은 명세에 있는데 결과물에 없는 것, `extra`는 명세에 없는데 결과물에 있는 것, `misunderstood`는 명세와 다르게 동작하는 것이다. `rulings`·`headline`·`todo`·`changes`·`decision`은 쓰지 않는다. 보고서의 결정 기록은 `report.mjs`가 명세에서 읽고, 나머지 칸은 메인 세션이 `summary.json`에 쓴다.
 
 `specCheck`의 세 배열은 비어도 꼭 쓴다. 위 예시는 시나리오 하나의 모양이다. 실제 결과에는 모든 기능과 케이스, 처음 쓰는 사람 시나리오 2~4개가 들어간다.
 

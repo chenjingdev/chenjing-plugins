@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // build 단계를 시작하기 전에 작업 폴더가 git 저장소인지, 어느 브랜치인지, 안 커밋된 변경이 있는지 본다.
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './paths.mjs';
 
 const git = (dir, ...args) => {
   const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
@@ -33,7 +33,7 @@ export function gitState(dir) {
   return { repo: true, branch, dirty: changed.length > 0, changed, untracked };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   try {
     console.log(JSON.stringify(gitState(process.argv[2] ?? process.cwd())));
   } catch (err) {
