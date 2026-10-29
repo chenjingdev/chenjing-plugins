@@ -38,19 +38,13 @@ export function normalizeQuote(text) {
   return String(text ?? '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}\p{Cf}]+/gu, '');
 }
 
-// 문장 경계: 줄바꿈, 또는 마침표·느낌표·물음표·말줄임표 바로 뒤의 공백. "v1.2"의 점처럼 뒤에 공백이 없으면 경계가 아니다.
-const SENTENCE_BREAK = /\r?\n|(?<=[.!?。！？…])\s+/u;
-
-// sentences: 짧은 말이 메시지 전체가 아니라 그 안의 문장 하나와 같아도 맞는다. 슬래시 명령의 인자로 위임할 때만 켠다(approval.mjs):
-// 인자는 부탁 한 덩이를 한 줄에 이어 쓴 글이라 위임하는 말이 그 안의 문장 하나로 들어 있다("출결 앱 만들어 줘. 끝까지 알아서 해").
-// 문장 하나 안에 다른 말이 더 있으면("끝까지 알아서 해줘 근데 승인은 내가 할게") 여전히 맞지 않는다.
-export function quoteMatches(quote, message, { sentences = false } = {}) {
+// 어떤 메시지에도 같은 기준이다: 슬래시 명령의 인자도, 그냥 친 말도, 질문 도구의 답도 짧은 말은 메시지(명령이면 인자 글) 전체와 같아야 한다.
+// 문장 하나로 맞춰 보지 않는다: "좋아. 근데 F3은 바꿔 줘"에서 "좋아"가 맞으면 R3가 막으려는 꼴이 된다.
+export function quoteMatches(quote, message) {
   const q = normalizeQuote(quote);
   if (!q) return false;
   const m = normalizeQuote(message);
-  if (Array.from(q).length > SHORT_MAX) return m.includes(q);
-  if (m === q) return true;
-  return sentences && String(message ?? '').split(SENTENCE_BREAK).some((part) => normalizeQuote(part) === q);
+  return Array.from(q).length <= SHORT_MAX ? m === q : m.includes(q);
 }
 
 // ---------- 대화 기록 파일 찾기 ----------

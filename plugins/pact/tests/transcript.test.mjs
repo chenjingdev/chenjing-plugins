@@ -48,28 +48,23 @@ test('quoteMatches: a short quote must equal the whole message, a long one only 
   assert.equal(quoteMatches(' . ', '아무 말'), false);
 });
 
-test('quoteMatches with sentences: a short quote may equal one whole sentence of the message, never a part of a sentence', () => {
-  const args = '출결 앱 만들어 줘. 끝까지 알아서 해';
-  assert.equal(quoteMatches('끝까지 알아서 해', args), false, '켜지 않으면 짧은 말은 메시지 전체와 같아야 한다');
-  assert.equal(quoteMatches('끝까지 알아서 해', args, { sentences: true }), true);
-  assert.equal(quoteMatches('끝까지 알아서 해', args, { sentences: false }), false);
-  assert.equal(quoteMatches('출결 앱 만들어 줘', args, { sentences: true }), true, '앞 문장도 문장 하나다');
-  assert.equal(quoteMatches(' 끝까지, 알아서 해! ', args, { sentences: true }), true, '띄어쓰기·문장부호는 뺀다');
-  // 문장 하나 안에 다른 말이 더 있으면 맞지 않는다
-  assert.equal(quoteMatches('끝까지 알아서 해', '끝까지 알아서 해줘 근데 승인은 내가 할게', { sentences: true }), false);
-  assert.equal(quoteMatches('끝까지 알아서 해', '끝까지 알아서 해 근데 승인은 내가 할게', { sentences: true }), false);
-  assert.equal(quoteMatches('알아서 해', args, { sentences: true }), false, '문장의 뒷부분만이다');
-  assert.equal(quoteMatches('승인', '승인은 아직 아니야', { sentences: true }), false);
-  assert.equal(quoteMatches('승인', '네, 승인', { sentences: true }), false, '쉼표는 문장 경계가 아니다');
-  // 경계는 줄바꿈과 마침표·느낌표·물음표·말줄임표 뒤의 공백이다
-  assert.equal(quoteMatches('끝까지 알아서 해', '출결 앱 만들어 줘\n끝까지 알아서 해', { sentences: true }), true);
-  assert.equal(quoteMatches('끝까지 알아서 해', '출결 앱 만들어 줘!   끝까지 알아서 해', { sentences: true }), true);
-  assert.equal(quoteMatches('끝까지 알아서 해', '출결 앱 만들어 줘… 끝까지 알아서 해', { sentences: true }), true);
-  assert.equal(quoteMatches('끝까지 알아서 해', '출결 앱 v1.2 만들어 줘 끝까지 알아서 해', { sentences: true }), false, '뒤에 공백이 없는 점은 경계가 아니다');
-  // 긴 말은 켜든 말든 메시지 안에 들어 있으면 된다. 빈 말은 어떤 경우에도 맞지 않는다
-  assert.equal(quoteMatches('출결 앱 만들어 줘. 끝까지 알아서', args), true);
-  assert.equal(quoteMatches('', args, { sentences: true }), false);
-  assert.equal(quoteMatches(' . ', '...', { sentences: true }), false);
+test('quoteMatches gives every message the same rule (R3): a short quote is never matched against one sentence of a longer message', () => {
+  const args = '출결 앱 만들어 줘. 끝까지 알아서 해'; // 정리하면 14자
+  // 짧은 말은 메시지 전체와 같아야 한다. 문장 하나와 같아도 안 된다
+  assert.equal(quoteMatches('끝까지 알아서 해', args), false);
+  assert.equal(quoteMatches('출결 앱 만들어 줘', args), false, '앞 문장도 마찬가지다');
+  assert.equal(quoteMatches('좋아', '좋아. 근데 F3은 바꿔 줘'), false, '"좋아"가 문장 하나로 맞으면 R3가 막으려는 꼴이다');
+  assert.equal(quoteMatches('끝까지 알아서 해', '출결 앱 만들어 줘\n끝까지 알아서 해'), false, '줄바꿈도 경계가 아니다');
+  assert.equal(quoteMatches('끝까지 알아서 해', '끝까지 알아서 해. 출결 앱 만들어 줘'), false);
+  assert.equal(quoteMatches('끝까지 알아서 해', '끝까지 알아서 해줘 근데 승인은 내가 할게'), false);
+  // 문장 단위로 맞추는 옵션은 없다: 세 번째 인자를 줘도 같다
+  assert.equal(quoteMatches('끝까지 알아서 해', args, { sentences: true }), false);
+  // 전체와 같거나, 정리해서 10자를 넘는 부분을 인용하면(일부여도) 맞는다
+  assert.equal(quoteMatches('끝까지 알아서 해', '끝까지 알아서 해'), true);
+  assert.equal(quoteMatches(' 끝까지, 알아서 해! ', '끝까지 알아서 해'), true, '띄어쓰기·문장부호는 뺀다');
+  assert.equal(quoteMatches(args, args), true);
+  assert.equal(quoteMatches('만들어 줘. 끝까지 알아서 해', args), true, '정리하면 11자라 긴 말이다');
+  assert.equal(quoteMatches('줘 끝까지 알아서 해', args), false, '정리하면 8자라 짧은 말이다');
 });
 
 const texts = (file) => humanMessages(file).map((m) => m.text);

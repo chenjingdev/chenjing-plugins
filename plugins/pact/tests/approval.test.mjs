@@ -898,19 +898,21 @@ test('(h) the question of an old record can be an empty string: it is still an a
 
 // ---------- (i) 사람이 친 슬래시 명령의 인자는 사용자 말이다 (R9) ----------
 
-const ASK = '출결 앱 만들어 줘. 끝까지 알아서 해';
+const ASK = '출결 앱 만들어 줘. 끝까지 알아서 해'; // 정리하면 14자
+const MORE = '만들어 줘. 끝까지 알아서 해'; // 그 일부. 정리하면 11자라 R3의 긴 말이다(짧은 말은 10자 이하)
 
 test('(i) a delegation quoted from the arguments of a slash command the person typed is recorded, matched against the arguments only, and matched again when building starts', () => {
   const w = makeWorld();
   const cmd = commandLine('pact:pact', ASK, T(0));
   writeTranscript(w, [cmd, assistant('네, 만들어 볼게요', T(1))]);
-  const r = runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']);
+  // 인자의 일부여도 정리해서 10자를 넘으면 맞는다(R3의 긴 말)
+  const r = runSpec(w, ['delegate', w.spec, MORE]);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /위임을 기록했다: "끝까지 알아서 해" \(메시지 /);
+  assert.match(r.stdout, /위임을 기록했다: "만들어 줘\. 끝까지 알아서 해" \(메시지 /);
   const [entry] = approvalEntries(w);
   assert.deepEqual(
     [entry.kind, entry.quote, entry.message, entry.message_uuid, entry.message_time, entry.answer_question, entry.transcript],
-    ['delegate', '끝까지 알아서 해', ASK, cmd.uuid, T(0), null, w.transcript],
+    ['delegate', MORE, ASK, cmd.uuid, T(0), null, w.transcript],
     '기록하는 메시지는 인자 글이다: 명령 이름과 태그가 들어 있지 않다',
   );
   assert.equal(specStatus(w), 'approved');
@@ -925,7 +927,7 @@ test('(i) a delegation quoted from the arguments of a slash command the person t
   assert.equal(runSpec(w, ['set-status', w.spec, 'building']).status, 0);
 
   // 인자 전체를 인용해도 된다. 정리해서 10자를 넘는 말은 인자 안에 들어 있기만 하면 되고, 띄어쓰기·문장부호는 뺀다
-  for (const quote of [ASK, '출결 앱 만들어 줘. 끝까지 알아서', ' 출결 앱 만들어 줘, 끝까지 알아서 해! ']) {
+  for (const quote of [ASK, MORE, '출결 앱 만들어 줘. 끝까지 알아서', ' 출결 앱 만들어 줘, 끝까지 알아서 해! ']) {
     const world = makeWorld();
     writeTranscript(world, [commandLine('pact:pact', ASK, T(0))]);
     const ok = runSpec(world, ['delegate', world.spec, quote]);
@@ -984,10 +986,12 @@ test('(i) the arguments of a command typed before the spec-checker finished can 
   assert.ok(line.includes(T(5)), '검수가 끝난 시각을 알린다');
   assert.equal(specStatus(w), 'draft');
   assert.deepEqual(approvalEntries(w), []);
-  // 짧은 말로 승인하려 해도 거절이다: 승인은 늘 메시지 전체와 같아야 하고, 문장 하나로는 맞춰 보지 않는다
+  // 짧은 말은 승인도 위임도 인자 전체와 같아야 한다(R3). 문장 하나로는 맞춰 보지 않는다
   assertRefused(runSpec(w, ['approve', w.spec, '끝까지 알아서 해']), /짧은 말이라 사용자 메시지 전체와 같아야/);
-  // 위임은 처음 부탁에 있어도 된다
-  assert.equal(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']).status, 0);
+  assertRefused(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']), /짧은 말이라 사용자 메시지 전체와 같아야/);
+  assert.deepEqual(approvalEntries(w), []);
+  // 위임은 처음 부탁에 있어도 된다: 인자 전체나 긴 부분을 인용한다
+  assert.equal(runSpec(w, ['delegate', w.spec, MORE]).status, 0);
   assert.deepEqual(approvalEntries(w).map((e) => [e.kind, e.message_time, e.spec_checker_time]), [['delegate', T(0), null]]);
   // 검수가 끝난 뒤에 사람이 친 명령의 인자는 승인으로 쓸 수 있다(앞 기록보다 새 말이다)
   const later = commandLine('pact:pact', '승인', T(10));
@@ -997,34 +1001,44 @@ test('(i) the arguments of a command typed before the spec-checker finished can 
   assert.deepEqual(approvalEntries(w).map((e) => [e.kind, e.message_uuid, e.message]), [['delegate', approvalEntries(w)[0].message_uuid, ASK], ['approve', later.uuid, '승인']]);
 });
 
-test('(i) a short quote from command arguments must equal the whole arguments or one whole sentence of them, and only for a delegation; a typed message keeps the whole-message rule', () => {
+test('(i) command arguments follow R3 like a typed message: a short quote must equal the whole arguments, and the same text typed gets the same answer', () => {
   const cases = [
-    // [인자, 짧은 말 "끝까지 알아서 해"를 위임으로 인용하면 맞는가]
-    ['끝까지 알아서 해', true], // 인자 전체
-    [ASK, true], // 뒤 문장
-    ['끝까지 알아서 해. 출결 앱 만들어 줘', true], // 앞 문장
-    ['출결 앱 만들어 줘!  끝까지 알아서 해', true],
-    ['출결 앱 만들어 줘\n끝까지 알아서 해\n화면은 하나', true], // 줄바꿈도 경계다
-    ['출결 앱 만들어 줘 끝까지 알아서 해', false], // 문장 경계가 없다: 인자 전체를 인용해야 한다
-    ['출결 앱 만들어 줘, 끝까지 알아서 해', false], // 쉼표는 경계가 아니다
-    ['끝까지 알아서 해줘 근데 승인은 내가 할게', false], // 문장 하나 안에 다른 말이 더 있다
-    ['끝까지 알아서 해 근데 승인은 내가 할게', false],
-    ['출결 앱 v1.2 만들어 줘 끝까지 알아서 해', false], // 뒤에 공백이 없는 점은 경계가 아니다
+    // [글, 짧은 말 "끝까지 알아서 해"를 위임으로 인용하면 맞는가] — 글 전체와 같을 때만 맞는다
+    ['끝까지 알아서 해', true],
+    [' 끝까지, 알아서 해! ', true], // 띄어쓰기·문장부호는 뺀다
+    [ASK, false], // 같은 인자에서 짧은 말만 인용하면 거절된다
+    ['끝까지 알아서 해. 출결 앱 만들어 줘', false], // 앞 문장이어도
+    ['출결 앱 만들어 줘\n끝까지 알아서 해', false], // 줄바꿈 뒤여도
+    ['출결 앱 만들어 줘 끝까지 알아서 해', false],
+    ['끝까지 알아서 해줘 근데 승인은 내가 할게', false],
   ];
-  for (const [args, ok] of cases) {
-    const w = makeWorld();
-    writeTranscript(w, [commandLine('pact:pact', args, T(0))]);
-    const r = runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']);
-    if (ok) assert.equal(r.status, 0, `${JSON.stringify(args)}: ${r.stderr}`);
-    else {
-      assertRefused(r, /짧은 말이라 사용자 메시지 전체와 같아야 하는데, 더 긴 메시지의 일부로만 있다/, JSON.stringify(args));
-      // 인자 전체를 인용하면 된다(정리해서 10자를 넘는다)
-      assert.equal(runSpec(w, ['delegate', w.spec, args]).status, 0, `${JSON.stringify(args)}: 인자 전체`);
+  const sources = [
+    ['슬래시 명령의 인자', (text) => commandLine('pact:pact', text, T(0))],
+    ['그냥 친 메시지', (text) => typed(text, T(0))],
+  ];
+  for (const [text, ok] of cases) {
+    for (const [label, make] of sources) {
+      const w = makeWorld();
+      writeTranscript(w, [make(text)]);
+      const r = runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']);
+      const where = `${label} ${JSON.stringify(text)}`;
+      if (ok) assert.equal(r.status, 0, `${where}: ${r.stderr}`);
+      else {
+        const line = assertRefused(r, /짧은 말이라 사용자 메시지 전체와 같아야 하는데, 더 긴 메시지의 일부로만 있다/, where);
+        assert.match(line, /메시지 전체를 그대로 인용한다\(정리해서 10자를 넘는 말이면 일부만 인용해도 된다\)/, where);
+        assert.equal(specStatus(w), 'draft', where);
+        assert.deepEqual(approvalEntries(w), [], where);
+        // 글 전체를 인용하면 된다(정리해서 10자를 넘는다)
+        assert.equal(runSpec(w, ['delegate', w.spec, text]).status, 0, `${where}: 글 전체`);
+      }
     }
   }
-  // 사용자가 그냥 친 같은 글은 그대로 메시지 전체와 같아야 한다
-  const typedWorld = makeWorld();
-  writeTranscript(typedWorld, [typed(ASK, T(0))]);
-  assertRefused(runSpec(typedWorld, ['delegate', typedWorld.spec, '끝까지 알아서 해']), /짧은 말이라 사용자 메시지 전체와 같아야/);
-  assert.equal(runSpec(typedWorld, ['delegate', typedWorld.spec, ASK]).status, 0);
+  // 정리해서 10자를 넘는 부분은 일부여도 맞는다. 어느 쪽이든 같다
+  for (const [label, make] of sources) {
+    const w = makeWorld();
+    writeTranscript(w, [make(ASK)]);
+    const ok = runSpec(w, ['delegate', w.spec, MORE]);
+    assert.equal(ok.status, 0, `${label}: ${ok.stderr}`);
+    assert.equal(approvalEntries(w)[0].message, ASK, label);
+  }
 });

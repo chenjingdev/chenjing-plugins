@@ -280,10 +280,6 @@ function answerRefusal(said, question, { recorded = false } = {}) {
 // 기록이 질문 도구의 답으로 만든 것인가. answer_question은 빈 글('')일 수도 있어 null·undefined만 아닌지 본다.
 const madeFromAnswer = (entry) => entry?.answer_question !== null && entry?.answer_question !== undefined;
 
-// 슬래시 명령의 인자로 위임할 때만 짧은 말이 인자 안의 문장 하나와 같아도 맞는다(transcript.mjs quoteMatches의 sentences).
-// 승인은 늘 메시지 전체와 같아야 한다: 승인은 검수 뒤에 받는 답이지 처음 부탁 속에 섞인 말이 아니다(R9).
-const matchOptions = (kind, message) => ({ sentences: kind === 'delegate' && message.via === 'command' });
-
 const AGAIN = `바꿔 달라고 한 사용자 말을 인용해 ${approveCmd()}로 다시 기록한다(${HEREDOC_HOW}). 사용자가 파일을 직접 고쳤으면 한 번 묻고 그 답을 인용한다.`;
 
 // 승인 뒤 [사용자] 줄이 바뀌었는가. 바뀌었으면(또는 견줄 수 없으면) { reason, instead }, 같으면 null.
@@ -303,7 +299,7 @@ export function driftProblem(specText, entry) {
 // 기록 전에 보는 것: 위임이면 위험 표시, 승인이면 spec-checker가 끝난 뒤의 말인지, 둘 다 가장 최근 spec-checker 답의 검수 번호에 명세의 짝이 있는지(F5),
 // 앞 기록이 있으면 인용한 말이 앞 기록들의 어떤 메시지보다 새것인지(승인도 위임도 — 위임 중에 [사용자] 줄을 바꾸고 옛 위임 말로 다시 기록해 F3를 비켜 가지 못하게).
 // 인용을 맞춰 보는 말: 승인은 사용자가 친 말, 일하는 도중에 친 말, 질문 도구의 답, 슬래시 명령의 인자 글이다.
-// 위임은 질문 도구의 답만 뺀 나머지다(R2: 질문의 답은 그 질문만 맡긴 것). 위임만 슬래시 명령의 인자에서 짧은 말을 문장 하나로 맞춰 볼 수 있다(matchOptions).
+// 위임은 질문 도구의 답만 뺀 나머지다(R2: 질문의 답은 그 질문만 맡긴 것). 맞춰 보는 기준(R3)은 어느 말이든 같다: 짧은 말은 메시지(명령이면 인자 글) 전체와 같아야 한다.
 // 반환: { ok: true, entry, runDir, message } | { ok: false, reason, instead }. 읽지 못하면 던진다(부르는 쪽이 거절로 보인다).
 export function recordApproval(specFile, quote, kind, { env = process.env, now = new Date() } = {}) {
   const verb = kind === 'delegate' ? 'delegate' : 'approve';
@@ -353,7 +349,7 @@ export function recordApproval(specFile, quote, kind, { env = process.env, now =
 
   // 위임은 사용자가 직접 쓴 말만 받는다: 질문 도구의 답은 그 질문만 맡긴 것이다(R2). 승인은 질문의 답도 받는다.
   const pool = kind === 'delegate' ? messages.filter((message) => message.via !== 'answer') : messages;
-  const matches = pool.filter((message) => quoteMatches(said, message.text, matchOptions(kind, message)));
+  const matches = pool.filter((message) => quoteMatches(said, message.text));
   if (!matches.length) {
     // 직접 쓴 말에는 없고 질문 도구의 답으로만 있으면 까닭을 따로 알린다(그냥 '메시지에 없다'고 하면 왜 안 되는지 알 수 없다)
     const answered = kind === 'delegate' ? messages.find((message) => message.via === 'answer' && quoteMatches(said, message.text)) : null;
@@ -438,7 +434,7 @@ export function recheckEntry(entry) {
   const hit = messages.find((message) => message.uuid === entry.message_uuid && (message.question ?? null) === (entry.answer_question ?? null));
   if (!hit) return { ok: false, reason: `대화 기록에서 기록한 메시지(${entry.message_uuid})를 다시 찾지 못했다 (${file})` };
   if (hit.text !== entry.message) return { ok: false, reason: '대화 기록의 그 메시지 글이 기록한 글과 다르다' };
-  if (!quoteMatches(entry.quote, hit.text, matchOptions(entry.kind, hit))) return { ok: false, reason: '기록한 인용이 그 메시지와 맞지 않는다' };
+  if (!quoteMatches(entry.quote, hit.text)) return { ok: false, reason: '기록한 인용이 그 메시지와 맞지 않는다' };
   return { ok: true };
 }
 
