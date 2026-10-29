@@ -174,7 +174,7 @@ test('build.md: the brief carries no commit trailer, the worker status is DONE o
   assert.match(build, /걱정이 "없음"이거나 그 번호의 worker 기록이 없으면 붙이지 않는다\./);
   assert.match(build, /판은 찾았는데 작업 번호를 못 읽으면 훅이 호출을 막고 까닭과 대신 할 일을 한 줄로 알린다\./);
   assert.match(build, /reviewer는 답의 `## worker 걱정 처리`에 걱정마다 맞는지, 이번에 고칠지를 적는다\./);
-  assert.match(build, /worker 답의 `## 걱정·위험`이 "없음"이 아닌데 reviewer 답의 `## worker 걱정 처리`가 "없음"이면, 같은 reviewer에 `## worker 걱정` 제목을 달아 SendMessage로 넘긴다\./);
+  assert.match(build, /worker 답의 `## 걱정·위험`이 "없음"이 아닌데 reviewer 답의 `## worker 걱정 처리`가 "없음"이거나 아예 없으면, 같은 reviewer에 `## worker 걱정` 제목을 달아 SendMessage로 넘긴다\. 이 답이 첫 검토의 판정이고, 두 번째 검토로 세지 않는다\./);
   // 3.5: 두 번째 검토도 같은 길이다. 세 번째 검토는 없다는 문장은 그대로 이어진다
   assert.match(build, /reviewer는 이름 없이 띄우고, 두 번째 검토는 `to`에 agentId를 쓰고 글에 이 작업 보고서 경로를 넣는다\. 그러면 훅이 고친 뒤의 worker 답의 걱정을 message 끝에 `## worker 걱정`으로 붙인다\./);
   assert.ok(build.includes('한 번 더 검토받는다. reviewer는 이름 없이 띄우고,'), '두 번째 검토 문장 안에 있다');
@@ -662,7 +662,7 @@ test('the README lists what 0.6.0 changed in one short section, and says how the
   assert.match(hook, /아무것도 읽지 않고 바로 통과시킨다\(메인 세션이 agent id 꼴 `to`로 보내는 SendMessage만 예외다\. 받는 쪽이 reviewer인지 `log\/`를 읽어 본다\)\./);
   // worker 걱정 항목
   assert.match(hook, /- PreToolUse\(worker 걱정\): 메인 세션이 `pact:reviewer`를 부르면 지시문의 판\(보고서 경로의 run-dir\)과 작업 번호\(`작업 번호 n`, 없으면 보고서 경로가 하나일 때 그 번호\)로 `log\/`에서 그 작업의 가장 최근 worker 답을 찾아 `## 걱정·위험` 칸을 지시 끝에 `## worker 걱정`으로 붙이고 통과시킨다\(입력의 다른 칸은 그대로 둔다\)\./);
-  assert.match(hook, /판은 찾았는데 작업 번호를 못 읽으면 걱정이 말없이 빠지지 않게 호출을 막고, 까닭과 대신 할 일\(지시 맨 앞에 `작업 번호 n`을 적어 다시 부른다\)을 한 줄로 알린다\./);
+  assert.match(hook, /판은 찾았는데 작업 번호를 못 읽으면 걱정이 말없이 빠지지 않게 호출을 막고, 까닭과 대신 할 일\(지시 맨 앞에 `작업 번호 3`처럼 작업 번호를 숫자로 적어 다시 부른다\)을 한 줄로 알린다\./);
   assert.match(hook, /지시문에서 판을 못 찾았을 때, 그 번호의 worker 기록이 없을 때, 걱정이 '없음'이거나 비었을 때, 이미 `## worker 걱정`이 있을 때는 그대로 통과한다\./);
   assert.match(hook, /메인 세션이 같은 reviewer에 SendMessage로 보낼 때도, `to`가 `log\/`에 reviewer로 남은 agent id이면 그 작업의 가장 최근 worker 답\(고친 뒤의 답\)의 걱정을 message 끝에 붙인다\./);
   assert.match(hook, /이쪽은 막지 않고 그대로 통과한다: `to`가 agent id가 아니거나 `log\/`에 없을 때, 그 reviewer의 작업 번호를 모를 때, 글이 그 reviewer의 작업과 다른 작업 번호를 말할 때, 이미 `## worker 걱정`이 있을 때, worker 기록이 없거나 걱정이 없을 때\./);

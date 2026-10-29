@@ -186,7 +186,7 @@ async function attachToBrief(input, toolInput) {
   if (!found || found.via !== 'prompt') return null;
   const task = taskNumber({ prompt });
   if (task === null) {
-    return denyOutput('reviewer 지시에서 작업 번호를 못 읽어 worker 걱정을 붙일 수 없다.', '지시 맨 앞에 `작업 번호 n`을 적어 다시 부른다.');
+    return denyOutput('reviewer 지시에서 작업 번호를 못 읽어 worker 걱정을 붙일 수 없다.', '지시 맨 앞에 `작업 번호 3`처럼 작업 번호를 숫자로 적어 다시 부른다.');
   }
   const concerns = await latestConcerns(found.runDir, task);
   return concerns ? allowOutput({ ...toolInput, prompt: withConcerns(prompt, concerns) }) : null;
