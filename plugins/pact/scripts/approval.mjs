@@ -8,7 +8,9 @@
 //     transcript, session_id, recorded_at, spec, spec_checker_time, user_lines }
 //   quote            사용자 말로 넘긴 글(그대로)            message        대화 기록에서 찾은 메시지 전문
 //   message_uuid     그 메시지 줄의 uuid                   message_time   그 메시지의 timestamp
-//   answer_question  AskUserQuestion의 답이면 그 질문, 아니면 null
+//   answer_question  AskUserQuestion의 답이면 그 질문, 아니면 null. 승인(approve)에만 생긴다: 위임은 질문 도구의 답을 받지 않는다(R2).
+//                    이 규칙 전에 질문 도구의 답으로 만든 옛 위임 기록은 만들기를 시작할 때 거절한다(checkStart).
+//                    슬래시 명령의 인자 글(`/pact:pact 출결 앱 만들어 줘. 끝까지 알아서 해`의 뒤쪽)로 기록하면 message가 그 인자 글이다(R9).
 //   transcript       찾은 대화 기록 파일의 경로(만들기를 시작할 때 다시 맞춰 보려고)
 //   spec_checker_time  approve일 때 맞춰 본 spec-checker의 끝난 시각(위임은 null)
 //   user_lines       그때 명세의 [사용자] 줄들(spec.mjs userLinesOf). 머리 줄이 [사용자]인 항목은 { F2: [항목 줄, 케이스 줄, …] },
@@ -256,6 +258,32 @@ export function describeChange(change) {
 const describeChanges = (changes, limit = 4) => `${changes.slice(0, limit).map(describeChange).join(', ')}${changes.length > limit ? ` 외 ${changes.length - limit}개` : ''}`;
 
 const kindLabel = (entry) => (entry?.kind === 'delegate' ? '위임' : '승인');
+
+// ---------- 질문 도구의 답은 위임이 아니다 (명세 R2) ----------
+
+// 질문 도구(AskUserQuestion)의 답이라서 위임으로 받지 않을 때의 거절. "알아서"·"ㄱㄱ"가 질문의 답으로 오면 그 질문만 맡긴 것이다.
+// 이것까지 위임으로 치면 승인 묻기가 사라진다. 대신 할 일은 두 갈래다: 승인 질문의 답이면 approve로 기록하고, 위임은 사용자가 직접 쓴 말을 인용한다.
+// recorded: 지금 인용하는 말이 아니라 이미 남은 위임 기록(규칙이 생기기 전의 것)을 만들기를 시작할 때 거절하는 경우. 그 기록에 쓴 메시지는
+// 다시 기록할 때 쓸 수 없으니(앞 기록보다 새 말이어야 한다) 사용자에게 새로 받게 한다.
+const answerQuestion = (question) => (question ? `(질문: "${clip(question, 40)}")` : '');
+function answerRefusal(said, question, { recorded = false } = {}) {
+  return recorded
+    ? {
+      reason: `위임 기록의 인용이 질문 도구(AskUserQuestion)의 답이다: "${said}"${answerQuestion(question)}. 질문의 답은 그 질문만 맡긴 것이라 위임이 아니다.`,
+      instead: `사용자에게 승인을 다시 받아 ${approveCmd()}로 기록한다(${HEREDOC_HOW}). 위임이면 사용자가 직접 쓴 새 말을 인용해 ${approveCmd('delegate')}로 다시 기록한다.`,
+    }
+    : {
+      reason: `위임으로 인용한 말이 질문 도구(AskUserQuestion)의 답이다: "${said}"${answerQuestion(question)}. 질문의 답은 그 질문만 맡긴 것이라 위임으로 기록하지 않는다.`,
+      instead: `승인 질문의 답이면 ${approveCmd()}로 기록한다(${HEREDOC_HOW}). 위임은 사용자가 직접 쓴 말을 인용해 ${approveCmd('delegate')}로 기록한다.`,
+    };
+}
+// 기록이 질문 도구의 답으로 만든 것인가. answer_question은 빈 글('')일 수도 있어 null·undefined만 아닌지 본다.
+const madeFromAnswer = (entry) => entry?.answer_question !== null && entry?.answer_question !== undefined;
+
+// 슬래시 명령의 인자로 위임할 때만 짧은 말이 인자 안의 문장 하나와 같아도 맞는다(transcript.mjs quoteMatches의 sentences).
+// 승인은 늘 메시지 전체와 같아야 한다: 승인은 검수 뒤에 받는 답이지 처음 부탁 속에 섞인 말이 아니다(R9).
+const matchOptions = (kind, message) => ({ sentences: kind === 'delegate' && message.via === 'command' });
+
 const AGAIN = `바꿔 달라고 한 사용자 말을 인용해 ${approveCmd()}로 다시 기록한다(${HEREDOC_HOW}). 사용자가 파일을 직접 고쳤으면 한 번 묻고 그 답을 인용한다.`;
 
 // 승인 뒤 [사용자] 줄이 바뀌었는가. 바뀌었으면(또는 견줄 수 없으면) { reason, instead }, 같으면 null.
@@ -274,6 +302,8 @@ export function driftProblem(specText, entry) {
 // approve·delegate. quote는 사용자가 한 말이다. 맞으면 기록을 덧붙이고, status가 draft면 approved로 바꾼다(building·verifying이면 그대로 둔다).
 // 기록 전에 보는 것: 위임이면 위험 표시, 승인이면 spec-checker가 끝난 뒤의 말인지, 둘 다 가장 최근 spec-checker 답의 검수 번호에 명세의 짝이 있는지(F5),
 // 앞 기록이 있으면 인용한 말이 앞 기록들의 어떤 메시지보다 새것인지(승인도 위임도 — 위임 중에 [사용자] 줄을 바꾸고 옛 위임 말로 다시 기록해 F3를 비켜 가지 못하게).
+// 인용을 맞춰 보는 말: 승인은 사용자가 친 말, 일하는 도중에 친 말, 질문 도구의 답, 슬래시 명령의 인자 글이다.
+// 위임은 질문 도구의 답만 뺀 나머지다(R2: 질문의 답은 그 질문만 맡긴 것). 위임만 슬래시 명령의 인자에서 짧은 말을 문장 하나로 맞춰 볼 수 있다(matchOptions).
 // 반환: { ok: true, entry, runDir, message } | { ok: false, reason, instead }. 읽지 못하면 던진다(부르는 쪽이 거절로 보인다).
 export function recordApproval(specFile, quote, kind, { env = process.env, now = new Date() } = {}) {
   const verb = kind === 'delegate' ? 'delegate' : 'approve';
@@ -321,10 +351,18 @@ export function recordApproval(specFile, quote, kind, { env = process.env, now =
     }
   }
 
-  const matches = messages.filter((message) => quoteMatches(said, message.text));
+  // 위임은 사용자가 직접 쓴 말만 받는다: 질문 도구의 답은 그 질문만 맡긴 것이다(R2). 승인은 질문의 답도 받는다.
+  const pool = kind === 'delegate' ? messages.filter((message) => message.via !== 'answer') : messages;
+  const matches = pool.filter((message) => quoteMatches(said, message.text, matchOptions(kind, message)));
   if (!matches.length) {
+    // 직접 쓴 말에는 없고 질문 도구의 답으로만 있으면 까닭을 따로 알린다(그냥 '메시지에 없다'고 하면 왜 안 되는지 알 수 없다)
+    const answered = kind === 'delegate' ? messages.find((message) => message.via === 'answer' && quoteMatches(said, message.text)) : null;
+    if (answered) {
+      const refusal = answerRefusal(said, answered.question);
+      return refuse(refusal.reason, refusal.instead);
+    }
     const q = normalizeQuote(said);
-    const inside = Array.from(q).length <= SHORT_MAX && messages.some((message) => normalizeQuote(message.text).includes(q));
+    const inside = Array.from(q).length <= SHORT_MAX && pool.some((message) => normalizeQuote(message.text).includes(q));
     return inside
       ? refuse(`"${said}"은 짧은 말이라 사용자 메시지 전체와 같아야 하는데, 더 긴 메시지의 일부로만 있다.`, `메시지 전체를 그대로 인용한다(정리해서 ${SHORT_MAX}자를 넘는 말이면 일부만 인용해도 된다).`)
       : refuse(`인용한 말이 이 대화의 사용자 메시지에 없다: "${said}".`, '사용자가 실제로 한 말을 그대로 넣는다. 아직 사용자에게 묻지 않았으면 먼저 묻는다.');
@@ -400,7 +438,7 @@ export function recheckEntry(entry) {
   const hit = messages.find((message) => message.uuid === entry.message_uuid && (message.question ?? null) === (entry.answer_question ?? null));
   if (!hit) return { ok: false, reason: `대화 기록에서 기록한 메시지(${entry.message_uuid})를 다시 찾지 못했다 (${file})` };
   if (hit.text !== entry.message) return { ok: false, reason: '대화 기록의 그 메시지 글이 기록한 글과 다르다' };
-  if (!quoteMatches(entry.quote, hit.text)) return { ok: false, reason: '기록한 인용이 그 메시지와 맞지 않는다' };
+  if (!quoteMatches(entry.quote, hit.text, matchOptions(entry.kind, hit))) return { ok: false, reason: '기록한 인용이 그 메시지와 맞지 않는다' };
   return { ok: true };
 }
 
@@ -409,7 +447,8 @@ export function recheckEntry(entry) {
 // purpose: 'approved'(set-status approved) | 'building'(set-status building) | 'worker'(pact:worker 부르기) | 'snapshot'(verification.mjs snapshot)
 // 명세는 specFile로, 또는 훅처럼 프로젝트와 run-id로 가리킨다.
 //   기록이 있으면 통과. 없으면 옛 명세(R5, R19)만 통과하고 note를 준다.
-//   만들기를 시작할 때(building, worker) 마지막 기록이 위임이면 지금 명세를 다시 본다: 위험 항목이 생겼으면 거절하고, 인용도 다시 맞춰 본다.
+//   만들기를 시작할 때(building, worker) 마지막 기록이 위임이면 지금 명세를 다시 본다: 질문 도구의 답으로 만든 위임이면 거절하고(R2, 규칙이 생기기 전의 옛 기록),
+//   위험 항목이 생겼으면 거절하고, 인용도 다시 맞춰 본다.
 //   pact:worker를 부를 때와 검수를 시작할 때(worker, snapshot)는 가장 최근 기록 뒤로 [사용자] 줄이 바뀌었는지도 본다(F3): 바뀌었으면 거절하고 다시 승인을 받게 한다.
 // 반환: { ok: true, mode: 'record'|'legacy', note?, kind?, entry? } | { ok: false, reason, instead }
 // 승인 기록을 읽지 못하면 던진다(스크립트는 거절로 보이고, 훅은 오류로 기록하고 통과시킨다 — R7).
@@ -438,6 +477,8 @@ export function checkStart({ specFile, project, runId, purpose }) {
     return text;
   };
   if (last.kind === 'delegate' && (purpose === 'building' || purpose === 'worker')) {
+    // 질문 도구의 답으로 만든 위임은 위임이 아니다(R2). 이 규칙 전에 남은 옛 기록이 여기서 걸린다. 명세도 대화 기록도 읽지 않고 기록만 보고 안다.
+    if (madeFromAnswer(last)) return { ok: false, ...answerRefusal(last.quote, last.answer_question, { recorded: true }) };
     const now = specText();
     if (now === null) return { ok: false, reason: `위임 기록을 다시 확인하려는데 명세를 찾지 못했다 (판 ${ref.runId}).`, instead: '맥락 칸의 run-dir이 맞는지 확인하고, 명세를 보이고 승인을 받아 spec.mjs approve로 기록한다.' };
     const risks = riskItems(now);

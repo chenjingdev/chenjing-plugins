@@ -13,6 +13,11 @@
 //               origin이 task-notification(하위 에이전트가 쓴 글이 그대로 든다) · peer(다른 세션) · plugin 등 human이 아닌 것
 //               도구 결과(content가 tool_result 블록 배열), 명령 메시지(<command-name> 같은 태그로 시작), <system-reminder>·<local-command-…>
 //     예외      AskUserQuestion의 답은 그 줄의 toolUseResult.answers(질문 → 답)에 있다. 사람이 고른 말이라 인정한다.
+//               (승인에는 쓰고 위임에는 쓰지 않는다: 질문의 답은 그 질문만 맡긴 것이다. 거르는 곳은 approval.mjs, 여기서는 via로 알린다.)
+//     예외      사람이 친 슬래시 명령(origin이 human)의 줄은 `<command-message>이름</command-message>\n<command-name>/이름</command-name>`에
+//               인자가 있으면 `\n<command-args>글</command-args>`가 붙는다. 그 인자 글만 사용자 말이다(명령 이름과 태그는 뺀다).
+//               인자가 없거나 비었거나 공백뿐인 명령, origin 칸이 없는 내장 명령(/effort, /mcp …), origin이 human이 아닌 명령은 뺀다.
+//               모델이 Skill 도구로 부른 스킬은 assistant의 tool_use로만 남고 <command-name> user 줄이 없으며, 스킬 본문을 펼친 줄은 isMeta라서 섞이지 않는다.
 //   type이 attachment인 줄 — 에이전트가 일하는 도중에 사용자가 친 말은 user 줄이 아니라 이 꼴로만 남는다:
 //     { type: 'attachment', uuid, timestamp, attachment: { type: 'queued_command', commandMode: 'prompt', origin: { kind: 'human' }, prompt } }
 //     사람 말   attachment.type이 queued_command, commandMode가 prompt, attachment.origin.kind가 human인 것. 글은 attachment.prompt
@@ -33,11 +38,19 @@ export function normalizeQuote(text) {
   return String(text ?? '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}\p{Cf}]+/gu, '');
 }
 
-export function quoteMatches(quote, message) {
+// 문장 경계: 줄바꿈, 또는 마침표·느낌표·물음표·말줄임표 바로 뒤의 공백. "v1.2"의 점처럼 뒤에 공백이 없으면 경계가 아니다.
+const SENTENCE_BREAK = /\r?\n|(?<=[.!?。！？…])\s+/u;
+
+// sentences: 짧은 말이 메시지 전체가 아니라 그 안의 문장 하나와 같아도 맞는다. 슬래시 명령의 인자로 위임할 때만 켠다(approval.mjs):
+// 인자는 부탁 한 덩이를 한 줄에 이어 쓴 글이라 위임하는 말이 그 안의 문장 하나로 들어 있다("출결 앱 만들어 줘. 끝까지 알아서 해").
+// 문장 하나 안에 다른 말이 더 있으면("끝까지 알아서 해줘 근데 승인은 내가 할게") 여전히 맞지 않는다.
+export function quoteMatches(quote, message, { sentences = false } = {}) {
   const q = normalizeQuote(quote);
   if (!q) return false;
   const m = normalizeQuote(message);
-  return Array.from(q).length <= SHORT_MAX ? m === q : m.includes(q);
+  if (Array.from(q).length > SHORT_MAX) return m.includes(q);
+  if (m === q) return true;
+  return sentences && String(message ?? '').split(SENTENCE_BREAK).some((part) => normalizeQuote(part) === q);
 }
 
 // ---------- 대화 기록 파일 찾기 ----------
@@ -81,9 +94,19 @@ function plainText(content, allowBlocks) {
   return texts.length ? texts.join('\n') : null;
 }
 
-// 기록 파일에서 사람이 한 말을 쓴 순서대로: [{ uuid, time, text, line, via: 'typed'|'queued'|'answer', question? }]
-// via: typed는 user 줄의 말, queued는 일하는 도중에 친 말(attachment 줄), answer는 AskUserQuestion의 답.
-// line은 파일 안의 줄 번호(1부터)다. 파일을 읽지 못하면 던진다.
+// 사람이 친 슬래시 명령 줄의 글(진짜 기록에서 본 꼴): `<command-message>이름</command-message>`과 `<command-name>/이름</command-name>`이 한 번씩
+// (순서는 어느 쪽이든), 인자가 있으면 맨 끝에 `<command-args>글</command-args>`. 인자 글은 끝의 닫는 태그까지 그대로 읽어
+// 글 속에 태그 글자가 있어도 잘리지 않는다. 이 꼴이 아니면 null: 명령 줄이 아니거나 모르는 꼴이다(모르는 꼴은 시스템 글로 보고 뺀다).
+// 반환: { name, args } — args는 인자가 없으면 ''.
+const COMMAND_LINE = /^\s*(?:<command-message>[^<]*<\/command-message>\s*<command-name>([^<]*)<\/command-name>|<command-name>([^<]*)<\/command-name>\s*<command-message>[^<]*<\/command-message>)\s*(?:<command-args>([\s\S]*)<\/command-args>)?\s*$/;
+function commandLine(text) {
+  const m = COMMAND_LINE.exec(text);
+  return m ? { name: (m[1] ?? m[2]).trim(), args: m[3] ?? '' } : null;
+}
+
+// 기록 파일에서 사람이 한 말을 쓴 순서대로: [{ uuid, time, text, line, via: 'typed'|'queued'|'answer'|'command', question?, command? }]
+// via: typed는 user 줄의 말, queued는 일하는 도중에 친 말(attachment 줄), answer는 AskUserQuestion의 답, command는 사람이 친 슬래시 명령의 인자 글
+// (command에는 명령 이름, 예 `/pact:pact`). line은 파일 안의 줄 번호(1부터)다. 파일을 읽지 못하면 던진다.
 export function humanMessages(file) {
   const out = [];
   let line = 0;
@@ -122,6 +145,15 @@ export function humanMessages(file) {
     if (kind !== undefined && kind !== 'human') continue; // task-notification, peer, plugin …
     const text = plainText(rec.message?.content, kind === 'human');
     if (text === null || !text.trim()) continue;
+    // 사람이 친 슬래시 명령(origin이 human)은 인자 글만 사용자 말이다. 인자가 없거나 비었으면 말이 아니다.
+    // origin 칸이 없는 줄은 여기 오지 않는다: 내장 명령(/effort, /mcp …)과 옛 기록의 명령은 아래에서 시스템 글로 빠진다.
+    if (kind === 'human') {
+      const command = commandLine(text);
+      if (command) {
+        if (command.args.trim()) out.push({ ...base, text: command.args, via: 'command', command: command.name });
+        continue;
+      }
+    }
     // origin 칸이 없는 줄(옛 기록, claude -p)은 `<`로 시작하면 시스템 글로 본다. human 줄은 알려진 시스템 태그만 뺀다.
     if (kind === 'human' ? SYSTEM_TAG.test(text) : text.trimStart().startsWith('<')) continue;
     out.push({ ...base, text, via: 'typed' });

@@ -958,12 +958,16 @@ test('(g) report.mjs after a real completion check: its 참고 lines are in repo
   assert.equal(old.lines[3], '참고: 옛 판이고 verifier 기록이 없어 results.json이 verifier가 쓴 그대로인지는 확인하지 않았다');
   assert.match(old.html, /<p class="meta">참고: 옛 판이고 verifier 기록이 없어 results\.json이 verifier가 쓴 그대로인지는 확인하지 않았다<\/p>/);
   assert.match(old.html, /<h2>승인 기록<\/h2>\n<p class="missing">옛 판이라 승인 기록 없음<\/p>/);
+  // 맨 위 상자에도 옛 판이라고 적힌다(메인 세션이 summary.json에 무엇을 썼든 스크립트가 붙인다)
+  const topOf = (html) => html.slice(html.indexOf('<section class="top">'), html.indexOf('</section>'));
+  assert.match(topOf(old.html), /<p class="missing">옛 판이라 승인 기록 없음<\/p>/);
   // 새 명세: 승인 기록과 확인 필요의 검수 항목
   const spec = PAIRED('## 확인 필요\n- 검수 2: 위임이라 기본안으로 정함\n');
   const f = fixture({ specText: spec, approved: true, checkerMessage: TWO_QUESTIONS });
   verifierStopped(f);
   const ok = run(f);
   assert.equal(ok.lines[2], '완료 검사: 통과');
+  assert.doesNotMatch(ok.html, /옛 판이라 승인 기록 없음/, '새 판에는 옛 판 줄이 없다');
   assert.match(ok.html, /<strong>승인<\/strong> <span class="meta">기록 2026-10-25T00:10:00\.000Z · 메시지 2026-10-25T00:10:00\.000Z<\/span>/);
   assert.match(ok.html, /<p class="quote">승인<\/p>/);
   assert.match(ok.html, /<h2>할 일<\/h2><ul><li>검수 2: 위임이라 기본안으로 정함 \(질문: 결석 사유를 학생도 볼 수 있나요\?\)<\/li><\/ul>/);

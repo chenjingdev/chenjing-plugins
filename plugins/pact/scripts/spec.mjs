@@ -308,7 +308,7 @@ const USAGE = `사용법:
   spec.mjs new <projectDir> <주제>      명세 파일을 만들고 경로를 출력
   spec.mjs status <명세>                status 값을 출력
   spec.mjs approve <명세> -             사용자가 승인한 말을 표준 입력으로 받아 이 대화 기록에서 찾아 맞춰 보고, 맞으면 승인 기록을 남기고 status를 draft에서 approved로 바꿈
-  spec.mjs delegate <명세> -            승인까지 맡긴다는 말을 같은 방식으로 기록. 위험 표시가 있으면 거절
+  spec.mjs delegate <명세> -            승인까지 맡긴다는 말을 같은 방식으로 기록. 위험 표시가 있으면 거절. 질문 도구의 답은 거절(승인 질문의 답이면 approve)
     말은 따옴표 붙인 heredoc으로 넘긴다: spec.mjs approve <명세> - <<'EOF' (다음 줄에 말, 그다음 줄 맨 앞에 EOF).
     말 속의 백틱·$·따옴표가 셸에서 풀리지 않는다. 말을 인자로 줄 수도 있지만 그러면 셸이 말 속의 백틱·$를 먼저 푼다.
   spec.mjs set-status <명세> <값>       status를 바꿈 (${STATUSES.join(', ')}). approved·building은 승인 기록이 있어야 함

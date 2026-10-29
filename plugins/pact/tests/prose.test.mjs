@@ -655,7 +655,7 @@ test('the README lists what 0.6.0 changed in one short section, and says how the
   // 훅 절: 항목 머리말이 순서대로 다 있다(worker 걱정 항목을 더하다 다른 항목을 지우지 않았는지)
   const hook = /^## 훅\n([\s\S]*?)(?=\n## )/m.exec(readme)?.[1] ?? '';
   const hookBullets = hook.split('\n').filter((line) => line.startsWith('- '));
-  const heads = ['- PreToolUse: ', '- PreToolUse(결과 잠금): ', '- PreToolUse(worker 걱정): ', '- 한계: ', '- SubagentStop: ', '- 훅이 고장나도 대화를 막지 않는다. '];
+  const heads = ['- PreToolUse: ', '- PreToolUse(결과 잠금): ', '- 한계(결과 잠금): ', '- PreToolUse(worker 걱정): ', '- 한계: ', '- SubagentStop: ', '- 훅이 고장나도 대화를 막지 않는다. '];
   assert.equal(hookBullets.length, heads.length, hookBullets.map((line) => line.slice(0, 20)).join(' / '));
   heads.forEach((head, i) => assert.ok(hookBullets[i].startsWith(head), `${i + 1}번째 항목은 "${head}"로 시작한다: ${hookBullets[i].slice(0, 30)}`));
   // 머리말: 상관없는 호출은 읽지 않는다. 예외는 메인 세션의 SendMessage 하나다(guard.mjs 머리말과 같은 말)
@@ -674,4 +674,48 @@ test('the README lists what 0.6.0 changed in one short section, and says how the
   // SubagentStop: reviewer의 작업 번호는 훅이 붙인 걱정 칸 앞까지 읽는다
   assert.match(hook, /`pact:reviewer`의 작업 번호는 첫 지시에서 훅이 붙인 `## worker 걱정` 칸 앞까지만 읽는다\. 걱정 글 속의 번호와 경로가 작업 번호와 판을 바꾸지 않게 한다\./);
   assert.ok(!readme.includes('DONE_WITH_CONCERNS') && !readme.includes('PARTIAL'));
+});
+
+test('the README lists the shell writes the hook cannot read in its own 한계 item, and says a result file changed that way is caught by the fingerprint of the completion check (R14)', () => {
+  const readme = read('README.md');
+  const lines = readme.split('\n');
+  const limit = lines.find((line) => line.startsWith('- 한계(결과 잠금): '));
+  assert.ok(limit, '한계(결과 잠금) 항목');
+  for (const form of ['`perl -e`', '`ruby -e`', '`awk`', '`sed`의 `w` 명령', '`curl -o`', '`tar -C`', 'python의 `os.open`', 'node의 `fs.openSync`', '`fs.promises.writeFile`']) {
+    assert.ok(limit.includes(form), `훅이 못 보는 쓰기 꼴에 ${form}이 있다`);
+  }
+  assert.match(limit, /셸 한 줄 안의 쓰기 가운데 읽지 못하는 꼴이 있다: `perl -e`·`ruby -e`·`awk`, `sed`의 `w` 명령, `curl -o`, `tar -C`, python의 `os\.open`, node의 `fs\.openSync`·`fs\.promises\.writeFile`\. 이 꼴들은 막지 않는다\./);
+  assert.match(limit, /위 결과 잠금 항목에 적은 못 보는 길\(변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구\)도 마찬가지다\./);
+  assert.match(limit, /이 길들로 결과 파일을 바꾸면 완료 검사의 지문 비교가 잡는다\. 지문은 verifier가 끝날 때 훅이 남긴 `results\.json`의 sha256이고, 지금 파일과 다르면 완료 검사가 막는다\./);
+  // 결과 잠금 항목의 못 보는 길 문장은 그대로 있고, 한계 항목은 그 바로 뒤에 온다
+  const lockIndex = lines.findIndex((line) => line.startsWith('- PreToolUse(결과 잠금): '));
+  assert.ok(lines[lockIndex].includes('훅이 못 보는 길도 있다: 변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구'));
+  assert.equal(lines.indexOf(limit), lockIndex + 1);
+  // 쓰기 꼴 목록은 이 항목에만 있다
+  assert.equal(readme.split('`perl -e`').length - 1, 1, '쓰기 꼴 목록은 한계 항목에만 있다');
+});
+
+test('README and probe.md say that a delegation never takes an AskUserQuestion answer (R2), that a command a person typed counts through its arguments (R9), and that the report shows an old edition at the top (R5)', () => {
+  const readme = read('README.md');
+  const probe = read('skills/pact/probe.md');
+  // R2: 질문 도구의 답은 승인에만
+  assert.match(readme, /# 승인까지 맡긴다는 말: .*\(사용자가 직접 쓴 말만, 질문 도구의 답은 안 된다\)/);
+  assert.match(readme, /# 승인 질문의 답: .*\(질문 도구의 답도 된다\)/);
+  assert.match(readme, /단 질문 도구의 답은 승인에만 쓴다\./);
+  assert.match(readme, /위임은 질문 도구의 답을 받지 않는다\(R2\): 질문 하나의 답으로 온 "알아서"는 그 질문만 맡긴 것이라, `delegate`에 넣으면 질문 도구의 답이라고 거절하고 승인 질문의 답이면 `approve`로 기록하라고 알린다\./);
+  assert.match(readme, /위임은 사용자가 직접 쓴 말\(친 말, 일하는 도중에 친 말, 슬래시 명령의 인자\)을 인용한다\. 같은 말을 직접 쓴 것도 있으면 그쪽으로 기록한다\./);
+  assert.match(readme, /질문 도구의 답으로 만든 옛 위임 기록\(기록에 `answer_question`이 있다\)도 거절한다\. 사용자에게 승인을 다시 받아 `approve`로 기록하거나, 직접 쓴 새 말을 인용해 `delegate`로 다시 기록하면 이어 간다\./);
+  assert.match(probe, /질문 도구\(AskUserQuestion\)로 고른 답은 `delegate`가 거절한다\. 승인 질문의 답이면 `approve`로 기록하고, 위임은 사용자가 직접 쓴 말을 인용한다\./);
+  assert.match(probe, /질문 도구\(AskUserQuestion\)로 고른 답도 같다\. 승인은 명세 경로와 요지를 본 뒤의 명시적인 답에만 해당한다\./, '승인에는 질문 도구의 답을 그대로 쓴다');
+  // R9: 슬래시 명령의 인자
+  assert.match(readme, /작업 알림, 대화 요약, 인자 없는 명령 메시지, `system-reminder`/);
+  assert.match(readme, /- 슬래시 명령의 인자\(R9\): 사람이 친 슬래시 명령\(`\/pact:pact 출결 앱 만들어 줘\. 끝까지 알아서 해`\)의 인자 글도 사용자 말이다\./);
+  assert.match(readme, /origin이 human이고 `<command-args>`에 글이 있는 줄만 읽고, 인용은 그 인자 글에 대고 맞춰 본다\. 명령 이름과 태그는 뺀다\./);
+  assert.match(readme, /인자가 없거나 비었거나 공백뿐인 명령, origin이 없는 내장 명령\(`\/effort`, `\/mcp` 등\), 모델이 Skill 도구로 부른 스킬의 인자\(assistant의 `tool_use`로만 남는다\)는 사용자 말이 아니다\./);
+  assert.match(readme, /위임에 한해 짧은 말이 인자 전체나 인자 안의 문장 하나\(줄바꿈, 또는 `\.`·`!`·`\?`·`…` 뒤의 공백으로 나뉜 한 덩이\)와 같으면 맞는다\./);
+  assert.match(readme, /승인은 늘 메시지 전체와 같아야 한다\./);
+  assert.match(probe, /`\/pact:pact` 뒤에 적은 말\(명령 인자\)도 사용자가 직접 쓴 말이라, "\/pact:pact 출결 앱 만들어 줘\. 끝까지 알아서 해"의 "끝까지 알아서 해"로 위임할 수 있다\./);
+  // R5: 옛 판 표시는 맨 위 상자에도 있고 스크립트가 붙인다
+  assert.match(readme, /보고서 맨 위 상자와 승인 기록 칸에 '옛 판이라 승인 기록 없음'이라고 적는다/);
+  assert.match(readme, /이 줄은 맨 위 상자에도 늘 있다\. 메인 세션이 `summary\.json`에 쓴 headline과 상관없이 스크립트가 붙이고, 새 판에는 없다\./);
 });

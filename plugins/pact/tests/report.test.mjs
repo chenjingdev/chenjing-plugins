@@ -526,6 +526,51 @@ test('(g) an old spec says "옛 판이라 승인 기록 없음"; a new spec with
   assert.doesNotMatch(lostHtml, /아직 다시 승인되지 않았습니다/);
 });
 
+test('(g) an old spec (pact: 1, no record) says so in the box at the top whatever the summary says; a new spec never does', () => {
+  const LEGACY = '<p class="missing">옛 판이라 승인 기록 없음</p>';
+  const topOf = (html) => html.slice(html.indexOf('<section class="top">'), html.indexOf('</section>'));
+  const count = (html, text) => html.split(text).length - 1;
+  const old = approvedProject({ spec: approvalSpec({ pact: 1, status: 'verifying' }) });
+  // summary.json이 없어도 맨 위 상자에 있다. 승인 기록 칸에도 그대로 있다(두 군데)
+  const bare = reportOf(old);
+  assert.equal(count(topOf(bare), LEGACY), 1);
+  assert.equal(count(bare, LEGACY), 2);
+  assert.ok(bare.indexOf(LEGACY) < bare.indexOf('<h2>실패·의심'), '맨 위 상자의 줄이 먼저다');
+  // 메인이 headline·todo를 어떻게 썼든 스크립트가 붙인다: 결론이 옛 판을 말하지 않아도, 결론이 한껏 좋아도 있다
+  writeSummary(old.run, { headline: '출결 앱을 다 만들었고 명세대로 됩니다.', todo: ['빈 수업 화면 문구를 정해 주세요'], changes: [] });
+  const filled = reportOf(old);
+  const top = topOf(filled);
+  assert.equal(count(top, LEGACY), 1);
+  assert.ok(top.includes('<p class="headline">출결 앱을 다 만들었고 명세대로 됩니다.</p>'), '결론도 그대로 있다');
+  assert.ok(top.indexOf(LEGACY) < top.indexOf('<p class="headline">'), '결론 위에 있다');
+  writeSummary(old.run, { headline: '옛 판이라는 말은 한마디도 없는 결론', todo: [] });
+  assert.equal(count(topOf(reportOf(old)), LEGACY), 1);
+  // 새 판에는 없다: 기록이 있는 새 명세, 기록이 없는 새 명세, 옛 명세라도 draft였던 것, 그 뒤에 승인 기록이 생긴 옛 명세
+  const fresh = approvalSpec();
+  const olds = approvalSpec({ pact: 1, status: 'verifying' });
+  const without = [
+    ['기록이 있는 새 명세', approvedProject({ spec: fresh, entries: [entryFor(fresh)] })],
+    ['기록이 없는 새 명세', approvedProject({ spec: fresh })],
+    ['draft였던 옛 명세', approvedProject({ spec: approvalSpec({ pact: 1, status: 'draft' }) })],
+    ['승인 기록이 생긴 옛 명세', approvedProject({ spec: olds, entries: [entryFor(olds)] })],
+  ];
+  const broken = approvedProject({ spec: fresh });
+  mkdirSync(path.join(broken.run, 'approvals.jsonl')); // 기록을 읽지 못한 판
+  without.push(['승인 기록을 못 읽은 판', broken]);
+  for (const [label, project] of without) {
+    writeSummary(project.run, { headline: '결론이다', todo: [] });
+    const html = reportOf(project);
+    assert.ok(!html.includes('옛 판이라'), `${label}: 옛 판이라는 말이 어디에도 없다`);
+  }
+  // 명세도 기록도 없는 판은 말할 것이 없다
+  assert.ok(!renderReport(RESULTS, { runDir: tmp() }).html.includes('옛 판이라'));
+  // 명령줄(report.mjs)로 만든 보고서도 같다
+  writeFileSync(path.join(old.run, 'results.json'), JSON.stringify({ ...RESULTS, spec: SPEC_PATH, rulings: undefined }));
+  const r = spawnSync('node', [CLI, old.run], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(count(topOf(readFileSync(path.join(old.run, 'report.html'), 'utf8')), LEGACY), 1);
+});
+
 test('(g) the 참고 lines of the completion check (notes) are in the report, escaped', () => {
   const { run } = approvedProject({ spec: approvalSpec(), entries: [entryFor(approvalSpec())] });
   const notes = ['참고: 옛 판이고 verifier 기록이 없어 results.json이 verifier가 쓴 그대로인지는 확인하지 않았다', '참고: <b>둘째</b> 줄'];

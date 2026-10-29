@@ -121,6 +121,29 @@ export const commandMessage = (text, time) => ({
   type: 'user', ...base(time), message: { role: 'user', content: `<command-message>${text}</command-message>\n<command-name>/x</command-name>` },
   origin: { kind: 'human' },
 });
+// 사람이 친 슬래시 명령의 줄(진짜 기록에서 본 모양): 글은 <command-message>와 <command-name>, 인자가 있으면 끝에 <command-args>이고 origin은 human이다.
+// args를 안 주면 <command-args> 줄이 없다(인자 없이 부른 명령).
+export const commandLine = (name, args, time, extra = {}) => ({
+  type: 'user', ...base(time),
+  message: { role: 'user', content: `<command-message>${name}</command-message>\n<command-name>/${name}</command-name>${args === undefined ? '' : `\n<command-args>${args}</command-args>`}` },
+  origin: { kind: 'human' }, ...extra,
+});
+// origin 칸이 없는 내장 명령(/effort, /mcp …)의 줄: 태그 순서가 다르고 들여쓰기가 있고 <command-args>가 비었거나 글이 있다
+export const builtinCommand = (name, args, time) => ({
+  type: 'user', ...base(time),
+  message: { role: 'user', content: `<command-name>/${name}</command-name>\n            <command-message>${name}</command-message>\n            <command-args>${args}</command-args>` },
+});
+// 모델이 Skill 도구로 스킬을 부른 줄: assistant의 tool_use로만 남고 뒤에 <command-name>이 든 user 줄이 없다
+export const skillToolUse = (skill, args, time) => ({
+  type: 'assistant', ...base(time),
+  message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_skill', name: 'Skill', input: { skill, args } }] },
+});
+// 부른 스킬의 본문을 펼쳐 넣은 줄: isMeta이고 인자가 `ARGUMENTS:` 뒤에 다시 든다
+export const skillBody = (args, time) => ({
+  type: 'user', ...base(time),
+  message: { role: 'user', content: [{ type: 'text', text: `Base directory for this skill: /x/pact\n\nARGUMENTS: ${args}` }] },
+  isMeta: true,
+});
 export const systemReminder = (text, time) => ({
   type: 'user', ...base(time), message: { role: 'user', content: `<system-reminder>\n${text}\n</system-reminder>` }, isMeta: true,
 });

@@ -2,6 +2,7 @@
 // verify 단계의 검수 보고서. 명세를 승인한 사람이 맨 위만 읽고 끝낼 수 있게 결론·할 일·실패와 의심·명세와 다른 것을 위에 두고,
 // 근거(단계별 출력, 작업 기록, 통과한 시나리오, 결정 기록)는 접어 둔다.
 // 승인 기록(승인인지 위임인지, 인용한 말과 메시지, 승인 뒤 바뀐 [사용자] 줄과 다시 승인한 인용, 옛 판 표시)과 완료 검사의 참고 줄도 보인다(명세 R5, R8, R12).
+// 옛 판 표시는 맨 위 상자에도 늘 있다: summary.json의 headline과 상관없이 스크립트가 붙인다(R5).
 // 명세 `## 확인 필요`의 `- 검수 n: 안 물은 까닭`은 할 일 칸에 저절로 올라간다(R11).
 // 모든 시나리오는 단계마다 스크린샷(또는 명령 출력)을 남기므로, 빠진 스크린샷은 숨기지 않고 센다.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -82,6 +83,8 @@ ${scenarioBody(s, runDir)}
 
 // 승인 기록 칸(명세 R5, R8, R12). 기록마다 종류(승인·위임)와 인용한 말, 메시지 전문, 시각을 보이고, 앞 기록 뒤로 바뀐 [사용자] 줄은 다시 승인한 인용 옆에 둔다.
 // 지금 명세에서 바뀌었는데 아직 다시 승인하지 않은 줄은 따로 알린다. 옛 판은 승인 기록이 없다고 알린다. 아무것도 모르면(기록도 명세도 없다) 칸을 만들지 않는다.
+// 옛 판(승인 기록 없는 pact: 1 명세)이라는 줄: 맨 위 상자와 승인 기록 칸에 같은 글로 둔다.
+const LEGACY_LINE = '<p class="missing">옛 판이라 승인 기록 없음</p>';
 const CHANGE = { changed: '바뀜', removed: '빠짐', added: '더해짐', retagged: '태그 바뀜' };
 const renderChange = (c) => {
   const head = !isLineKey(c.id); // F3/1처럼 [AI 가정] 항목 밑 케이스 줄 하나를 가리키는 키는 항목 줄이 없다
@@ -92,7 +95,7 @@ const renderChanges = (changes) => `<ul class="changes">${changes.map(renderChan
 function renderApproval(approval) {
   const head = '<h2>승인 기록</h2>';
   switch (approval.state) {
-    case 'legacy': return `${head}\n<p class="missing">옛 판이라 승인 기록 없음</p>`;
+    case 'legacy': return `${head}\n${LEGACY_LINE}`;
     case 'missing': return `${head}\n<p class="missing">승인 기록이 없습니다.</p>`;
     case 'unreadable': return `${head}\n<p class="missing">승인 기록을 읽지 못했습니다(${esc(approval.reason)}).</p>`;
     case 'recorded': break;
@@ -175,6 +178,8 @@ export function renderReport(results, { runDir, notes = [] }) {
     .map(({ n, reason, question }) => `검수 ${n}: ${reason}${question ? ` (질문: ${question.length > 60 ? `${question.slice(0, 60)}…` : question})` : ''}`);
   const todo = mainTodo === null && !asked.length ? undefined : [...(mainTodo ?? []), ...asked];
   const overview = approvalOverview(spec, runDir);
+  // 옛 판이면 맨 위 상자에도 그렇다고 적는다(R5). 메인 세션이 summary.json에 무엇을 썼든 스크립트가 붙인다: 승인 기록 없이 시작한 판을 맨 위만 읽는 사람도 알게.
+  const legacyNote = overview.state === 'legacy' ? LEGACY_LINE : '';
   const pending = overview.state === 'recorded' && overview.pending;
   // 맨 위 경고는 두 가지다: 바뀐 줄이 아직 다시 승인되지 않았다 / 기록에 [사용자] 줄이 없어 바뀌었는지 견줄 수 없다
   const pendingNote = !pending ? ''
@@ -218,6 +223,7 @@ ${scenarios.length === 0 ? '<p class="missing">검수한 시나리오가 없습�
 ${stale ? `<p class="missing">이번 검수 기록과 이어지지 않는 결과 ${stale}개는 미검증으로 두었습니다.</p>` : ''}
 ${scenarios.length > 0 && !needsReceipt ? '<p class="missing">완료 검사를 두기 전의 옛 보고서입니다. 지금도 그대로인지는 다시 확인해야 합니다.</p>' : ''}
 ${pendingNote}
+${legacyNote}
 ${fields.headline ? `<p class="headline">${esc(fields.headline)}</p>` : ''}
 ${Array.isArray(todo) ? `<h2>할 일</h2>${list(todo)}` : ''}
 <p class="counts">시나리오 ${scenarios.length}개 · ${summary}</p>
