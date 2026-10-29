@@ -690,8 +690,9 @@ test('the README lists the shell writes the hook cannot read in its own 한계 i
   assert.match(limit, /셸 한 줄 안의 쓰기 가운데 읽지 못하는 꼴이 있다: `perl -e`·`ruby -e`·`awk`, `sed`의 `w` 명령, `curl -o`, `tar -C`, python의 `os\.open`, node의 `fs\.openSync`·`fs\.promises\.writeFile`\. 이 꼴들은 막지 않는다\./);
   assert.match(limit, /위 결과 잠금 항목에 적은 못 보는 길\(변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구\)도 마찬가지다\./);
   assert.match(limit, /이 길들로 `results\.json`을 바꾸면 완료 검사의 지문 비교가 잡는다\. 지문은 verifier가 끝날 때 훅이 남긴 `results\.json`의 sha256이고, 지금 파일과 다르면 완료 검사가 막는다\./);
-  // 지문이 지키는 것은 results.json 하나다: 승인 기록과 log/(verifier 지문 기록 포함)는 같은 길로 써도 잡는 그물이 없다
-  assert.match(limit, /지문이 지키는 것은 `results\.json` 하나다\. 같은 꼴로 `approvals\.jsonl`\(승인 기록\)이나 `log\/`\(verifier 지문 기록 포함\)에 쓰면 잡는 그물이 없다\./);
+  // 지문이 지키는 것은 results.json 하나다: 승인 기록, verification.json, log/(verifier 지문 기록 포함)는 같은 길로 써도 잡는 그물이 없다
+  assert.match(limit, /지문이 지키는 것은 `results\.json` 하나다\. 같은 꼴로 `approvals\.jsonl`\(승인 기록\)·`verification\.json`\(검수한 명세와 코드의 지문\)·`log\/`\(verifier 지문 기록 포함\)에 쓰면 잡는 그물이 없다\./);
+  assert.ok(limit.includes('`verification.json`의 지문을 지금 것으로 다시 쓰면 검수 뒤에 바뀐 코드가 다시 검수받지 않고 완료 검사를 지나간다.'));
   assert.match(limit, /꾸민 승인 기록으로 만들기가 시작되고\(승인 기록은 시작할 때 인용을 다시 맞춰 보지 않는다\. 다시 맞춰 보는 것은 위임 기록뿐이다\), `log\/`의 verifier 줄을 꾸미면\(완료 검사는 `log\/`의 가장 최근 verifier 줄을 믿는다\) `results\.json` 비교도 지나간다\./);
   assert.match(limit, /이 장치는 실수와 흔한 꼼수를 막는 것이고 일부러 속이는 쓰기까지 막지는 않는다\. 승인 기록의 인용은 보고서에 보이니 사용자가 거기서 본다\./);
   assert.doesNotMatch(limit, /결과 파일을 바꾸면/, '결과 파일이라고 뭉뚱그려 말하지 않는다: 지문이 지키는 것은 results.json이다');
@@ -700,9 +701,9 @@ test('the README lists the shell writes the hook cannot read in its own 한계 i
   assert.ok(lines[lockIndex].includes('훅이 못 보는 길도 있다: 변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구'));
   assert.equal(lines.indexOf(limit), lockIndex + 1);
   // 결과 잠금 항목과 결과 파일 절의 "그물"도 results.json으로 좁혔다. 승인 기록과 log/는 지키지 않는다고 한계 항목을 가리킨다
-  assert.ok(lines[lockIndex].endsWith('그 길로 `results.json`을 바꾸면 완료 검사의 지문 비교가 막는다. `approvals.jsonl`과 `log/`는 지문이 지키지 않는다(아래 한계).'));
+  assert.ok(lines[lockIndex].endsWith('그 길로 `results.json`을 바꾸면 완료 검사의 지문 비교가 막는다. `approvals.jsonl`·`verification.json`·`log/`는 지문이 지키지 않는다(아래 한계).'));
   assert.ok(!readme.includes('그 길은 완료 검사의 지문 비교가 막는다'), '지문이 막는 범위를 뭉뚱그린 옛 문장은 없다');
-  assert.match(readme, /로 `results\.json`이 바뀐 것을 잡는 마지막 그물이다\. `approvals\.jsonl`과 `log\/`는 이 그물이 지키지 않는다\(훅 절의 한계\)\./);
+  assert.match(readme, /로 `results\.json`이 바뀐 것을 잡는 마지막 그물이다\. `approvals\.jsonl`·`verification\.json`·`log\/`는 이 그물이 지키지 않는다\(훅 절의 한계\)\./);
   // 쓰기 꼴 목록은 이 항목에만 있다
   assert.equal(readme.split('`perl -e`').length - 1, 1, '쓰기 꼴 목록은 한계 항목에만 있다');
 });
