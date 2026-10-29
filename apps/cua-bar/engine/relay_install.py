@@ -349,6 +349,20 @@ def _module_path(value):
     return value if os.path.isabs(value) else None
 
 
+def _split_preload(args):
+    """(module, script) of the arguments of a server that runs the script of the app's runtime alone (module None) or
+    behind one `--import <module>` or `--import=<module>`; None for any other shape."""
+    if not _strings(args):
+        return None
+    if len(args) == 2 and args[0].startswith('--import='):
+        return args[0][len('--import='):], args[-1]
+    if len(args) == 3 and args[0] == '--import':
+        return args[1], args[-1]
+    if len(args) == 1:
+        return None, args[-1]
+    return None
+
+
 def preload_arguments(args, cua_root, plugin_dir):
     """The arguments of the bundled server, split: (the ones before the script, the script), or None when they are not
     the bundled ones.
@@ -356,16 +370,10 @@ def preload_arguments(args, cua_root, plugin_dir):
     The bundled ones are the script of the app's runtime alone, as before, or the script behind one `--import <module>`
     or `--import=<module>` whose module is `require-browser-access.mjs` of the plugin copy `plugin_dir` (None: no
     module is known, so only the first). Any other argument, a second `--import` or a module from elsewhere is not."""
-    if not _strings(args):
+    split = _split_preload(args)
+    if split is None:
         return None
-    if len(args) == 2 and args[0].startswith('--import='):
-        module = args[0][len('--import='):]
-    elif len(args) == 3 and args[0] == '--import':
-        module = args[1]
-    elif len(args) == 1:
-        module = None
-    else:
-        return None
+    module = split[0]
     if module is not None:
         path = _module_path(module)
         if plugin_dir is None or path is None or not _same_path(path, Path(plugin_dir)/PRELOAD_MODULE):
@@ -373,6 +381,30 @@ def preload_arguments(args, cua_root, plugin_dir):
     if not _same_path(args[-1], Path(cua_root)/CUA_REPL_SCRIPT):
         return None
     return list(args[:-1]), args[-1]
+
+
+def updating_preload(args, cua_root, plugin_dir):
+    """True when the arguments are the bundled form (`--import <module> <cua-repl.mjs>` of this app's runtime), but the
+    module is `require-browser-access.mjs` of this plugin's copy for ANOTHER app version, and this app version's copy
+    (`plugin_dir`, or its .mcp.json) is not there yet.
+
+    That is the first start after a Codex update: Codex has not written its copy for the new version yet, and its
+    definition of the server still names the module of the version before. A restart a few seconds later sees the new
+    one. The old module is never taken for the bundled one: it is a refusal, with a reason of its own. A module of
+    another plugin, a folder that is not a version of this plugin, or a copy that is there but names the other
+    version is no update in progress."""
+    split = _split_preload(args)
+    if split is None or split[0] is None or plugin_dir is None:
+        return False
+    module, script = split
+    path = _module_path(module)
+    if path is None or not _same_path(script, Path(cua_root)/CUA_REPL_SCRIPT) or os.path.basename(path) != PRELOAD_MODULE:
+        return False
+    folder, plugin_dir = os.path.dirname(path), Path(plugin_dir)
+    if (not re.fullmatch(r'[0-9A-Za-z._+-]+', os.path.basename(folder)) or os.path.basename(folder).startswith('.')
+            or not _same_path(os.path.dirname(folder), plugin_dir.parent) or _same_path(folder, plugin_dir)):
+        return False
+    return not os.path.lexists(plugin_dir/'.mcp.json')
 
 
 def bundled_definition(value, cua_root, plugin_dir=None):
@@ -395,9 +427,11 @@ def bundled_definition(value, cua_root, plugin_dir=None):
         raise RelayRefused('not_bundled')
     cua_root = Path(cua_root)
     if (not _same_path(transport.get('command'), cua_root/'bin/node')
-            or preload_arguments(transport['args'], cua_root, plugin_dir) is None
             or not _same_path(env.get(ENV_RUNTIME_PATH), cua_root/'bin/node_repl')):
         raise RelayRefused('not_bundled')
+    if preload_arguments(transport['args'], cua_root, plugin_dir) is None:
+        raise RelayRefused('plugin_updating' if updating_preload(transport['args'], cua_root, plugin_dir)
+                           else 'not_bundled')
     if any(SECRET_NAME.search(name) for name in env):
         raise RelayRefused('secret_env')
     if any(name in env for name in RELAY_ENV):

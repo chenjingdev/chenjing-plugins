@@ -625,9 +625,17 @@ class View:
         host = self.inv.host
         return host.relay_reason if host.state == 'ready' and not host.relay else None
 
+    def _launcher_start(self):
+        """When the launcher that started the host that runs now began (epoch seconds), or None when it is gone or the
+        record names no process."""
+        owner = (self.inv.host.registry or {}).get('owner_pid')
+        launcher = self.inv.procs.get(owner) if isinstance(owner, int) and not isinstance(owner, bool) else None
+        return launcher.start if launcher is not None else None
+
     def restart_adds_relay(self):
         """True when the host that runs now went without the relay only because Codex's own copy of its computer-use
-        plugin was not there yet when the host's launcher looked (`plugin_entry`), and a good copy is there now.
+        plugin was not there yet when the host's launcher looked (`plugin_entry`, `plugin_updating`), and a good copy
+        is there now.
 
         Codex writes that copy for a new version of itself as it starts after an update, a few seconds after the
         launcher has looked. Since 0.8.4 the launcher takes the plugin inside the app while there is no copy, so the
@@ -639,16 +647,17 @@ class View:
         would refuse it again. The launcher of the next start is newer than the copy, so this never asks for a second
         restart, whatever the cause.
 
-        `not_bundled` is the other case (see _bundled_with_preload): a launcher from before 0.8.7 that did not know the
-        bundled server of Codex 26.1023."""
+        `plugin_updating` and `not_bundled` are the other case (see _bundled_with_preload): the launcher read Codex's
+        definition of the server before the copy for the new version was written, so it still named the module of the
+        version before (`plugin_updating` since 0.8.9; an older launcher said `not_bundled`), or a launcher from before
+        0.8.7 did not know the bundled server of Codex 26.1023."""
         inv = self.inv
-        if self.relay_reason() == 'not_bundled':
+        if self.relay_reason() in ('not_bundled', 'plugin_updating'):
             return self._bundled_with_preload()
         if self.relay_reason() != 'plugin_entry' or not inv.app_version or not VERSION_NAME.match(inv.app_version):
             return False
-        owner = (inv.host.registry or {}).get('owner_pid')
-        launcher = inv.procs.get(owner) if isinstance(owner, int) and not isinstance(owner, bool) else None
-        if launcher is None:
+        launched = self._launcher_start()
+        if launched is None:
             return False
         codex_home = self.ctx.environment.get('CODEX_HOME') or str(self.ctx.home/'.codex')
         plugin = Path(codex_home)/'plugins/cache/openai-bundled/unified-computer-use'/inv.app_version
@@ -660,19 +669,22 @@ class View:
         return (all(stat.S_ISREG(info.st_mode) and info.st_uid == self.ctx.uid and not stat.S_IMODE(info.st_mode) & 0o022
                     for info in files)
                 and isinstance(manifest, dict) and manifest.get('version') == inv.app_version
-                and max(info.st_mtime for info in files) >= launcher.start)
+                and max(info.st_mtime for info in files) >= launched)
 
     def _bundled_with_preload(self):
-        """True when the host that runs now went without the relay as `not_bundled` because its launcher is older than
-        this engine and did not know the bundled server of Codex 26.1023, which starts node with
-        `--import <require-browser-access.mjs of the plugin> <cua-repl.mjs>`, and Codex's copy of the plugin says that
-        now: the next start, by this engine's launcher, takes that form as the bundled one and has the relay.
+        """True when the host that runs now went without the relay as `not_bundled` or `plugin_updating`, and Codex's
+        copy of the plugin for this app version now says what the launcher takes for the bundled server of Codex
+        26.1023, which starts node with `--import <require-browser-access.mjs of the plugin> <cua-repl.mjs>`: the next
+        start takes that form as the bundled one and has the relay.
 
-        A host started by this engine's launcher is not asked about again (a second restart would be refused the
-        same way), and neither is any other form of the server."""
+        Two ways the host can have missed it. Its launcher is older than this engine and did not know that form
+        (started before this setup). Or the launcher read Codex's definition before Codex wrote its copy of the plugin
+        for the version it had just been updated to, so the definition still named the module of the version before:
+        the copy was written since the launcher started (as for `plugin_entry`), and the next start reads the new one.
+        A host started by this engine's launcher with a copy that was there before it is not asked about again (a
+        second restart would be refused the same way), and neither is any other form of the server."""
         inv = self.inv
-        if (not self.started_before_setup() or inv.installation is None or not inv.app_version
-                or not VERSION_NAME.match(inv.app_version)):
+        if inv.installation is None or not inv.app_version or not VERSION_NAME.match(inv.app_version):
             return False
         from relay_install import ENV_RUNTIME_PATH, SERVER, _same_path, plugin_directory, preload_arguments
         cua_root = inv.installation.cua_root
@@ -687,6 +699,10 @@ class View:
             loaded = json.loads((plugin/'.mcp.json').read_text())
         except (OSError, ValueError):
             return False
+        if not self.started_before_setup():
+            launched = self._launcher_start()
+            if launched is None or info.st_mtime < launched:
+                return False
         servers = loaded.get('mcpServers', loaded.get('mcp_servers')) if isinstance(loaded, dict) else None
         entry = servers.get(SERVER) if isinstance(servers, dict) else None
         env = entry.get('env') if isinstance(entry, dict) else None

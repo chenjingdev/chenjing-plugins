@@ -458,8 +458,11 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                                {'type': 'text', 'text': 'a console line'}], 'isError': True, '_meta': {'a': 1}}
         note = ('CUA Bar note: since Codex 26.1023, Codex refuses browser use in conversations it did not start itself, '
                 'which includes Claude Code conversations that use CUA through CUA Bar. This is not a setting the user '
-                'turned off; changing Work settings or resetting the Chrome extension will not help. Desktop apps still '
-                'work. For browser work, tell the user to ask the Codex app directly.')
+                'turned off and not a refusal of this site or action; changing Work settings or resetting the Chrome '
+                'extension will not help, and retrying the browser call will fail again. For web pages, use Playwright '
+                'if it is available on this computer. If the page needs the user\'s signed-in Chrome or a tab the user '
+                'has open, or Playwright is not available, operate Chrome as an ordinary desktop app through CUA '
+                '(cua.getApp("Google Chrome")). Only if neither can do it, tell the user to ask the Codex app directly.')
         adapter, _, output, _, _ = self.fixture(result=refusal)
         await self.initialize(adapter)
         await adapter.handle(self.call())

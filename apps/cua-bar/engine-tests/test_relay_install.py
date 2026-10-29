@@ -913,6 +913,75 @@ class PreloadedModuleTests(MachineCase):
                 self.assertIsNone(plan)
                 self.assertEqual(reason, 'not_bundled')
 
+    def test_the_module_of_the_version_before_is_plugin_updating_while_this_versions_copy_is_not_there_yet(self):
+        """The first start after a Codex update: the launcher reads Codex's definition before Codex has written its copy
+        of the plugin for the new version, so the definition still names the module of the version before. That is
+        refused as `plugin_updating`, not `not_bundled`, and never taken for the bundled server."""
+        def start(form='split', version='1.2.2', copy=False, **changes):
+            self.setUp()
+            machine = self.machine
+            script = machine.definition['transport']['args'][-1]
+            module = machine.module(version).as_uri()
+            args = ['--import', module, script] if form == 'split' else ['--import=' + module, script]
+            machine.definition['transport']['args'] = list(args)
+            machine.entry['args'] = list(args)
+            machine.write_plugin()
+            if not copy:
+                machine.remove_copy()
+            for name, value in changes.items():
+                machine.definition['transport'][name] = value
+            return machine
+        for form in ('split', 'joined'):
+            with self.subTest(form):
+                plan, reason = start(form).plan()
+                self.assertIsNone(plan)
+                self.assertEqual(reason, 'plugin_updating')
+        # The copy is there but half written (the folder without its .mcp.json): still updating.
+        machine = start()
+        (machine.codex_home/'plugins/cache/openai-bundled/unified-computer-use'/machine.version).mkdir()
+        self.assertEqual(machine.plan()[1], 'plugin_updating')
+        # Never an acceptance: with a plugin directory that is not there, the old module is no preload of this one.
+        script = str(machine.cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
+        here = machine.codex_home/'plugins/cache/openai-bundled/unified-computer-use'/machine.version
+        old = ['--import', machine.module('1.2.2').as_uri(), script]
+        self.assertIsNone(relay_install.preload_arguments(old, machine.cua, here))
+        self.assertTrue(relay_install.updating_preload(old, machine.cua, here))
+        self.assertFalse(relay_install.updating_preload(old, machine.cua, None), 'no plugin directory is known')
+        self.assertFalse(relay_install.updating_preload(['--import', machine.module().as_uri(), script], machine.cua, here),
+                         'the module of this very version is the bundled one')
+        self.assertFalse(relay_install.updating_preload([script], machine.cua, here), 'the old form has no module')
+        # The copy of this version is there, yet the definition names another version: that is not an update in progress.
+        self.assertEqual(start(copy=True).plan()[1], 'not_bundled')
+        # Anything else that is not the bundled server stays not_bundled, copy or no copy.
+        good = start().definition['transport']['args'][1]
+        script = start().definition['transport']['args'][-1]
+        cases = {
+            'a module of another plugin': ['--import', good.replace('unified-computer-use', 'other-plugin'), script],
+            'another module': ['--import', good.replace('require-browser-access', 'steal'), script],
+            'a module from elsewhere': ['--import', 'file:///tmp/require-browser-access.mjs', script],
+            'a module in a hidden folder': ['--import', good.replace('/1.2.2/', '/.1.2.2/'), script],
+            'a module deeper down': ['--import', good.replace('/1.2.2/', '/1.2.2/x/'), script],
+            'a module of another codex home': ['--import', good.replace('/home/.codex/', '/home/.other/'), script],
+            'a module that climbs out': ['--import', good.replace('/1.2.2/', '/1.2.2/../1.2.2/../../'), script],
+            'a web address': ['--import', 'https://example.com/unified-computer-use/1.2.2/require-browser-access.mjs', script],
+            'two imports': ['--import', good, '--import', good, script],
+            'another option': ['--inspect', '--import', good, script],
+            'another script': ['--import', good, '/elsewhere/cua-repl.mjs'],
+            'an option after the script': ['--import', good, script, '--inspect'],
+        }
+        for label, args in cases.items():
+            with self.subTest(label):
+                machine = start()
+                machine.definition['transport']['args'] = args
+                self.assertEqual(machine.plan()[1], 'not_bundled')
+        for label, changes in (('another node', {'command': '/usr/bin/node'}),
+                               ('a relative node', {'command': 'node'})):
+            with self.subTest(label):
+                self.assertEqual(start(**changes).plan()[1], 'not_bundled')
+        machine = start()
+        machine.definition['transport']['env']['CUA_REPL_NODE_REPL_PATH'] = '/elsewhere/proxy'
+        self.assertEqual(machine.plan()[1], 'not_bundled', 'another runtime')
+
     def test_without_a_known_plugin_copy_only_the_old_form_is_bundled(self):
         self.machine.preload()
         self.assertIsNotNone(relay_install.plugin_directory(self.machine.cua, str(self.machine.codex_home)))

@@ -329,7 +329,7 @@ class RelaySetupTests(StatusCase):
         self.assertEqual(host()['restart_adds_relay'], True)
         self.write_host(relay=False, relay_reason='plugin_entry', owner=4999)
         self.assertEqual(host()['restart_adds_relay'], False, 'a launcher that is gone cannot be compared')
-        self.write_host(relay=False, relay_reason='not_bundled')       # Codex's own setting: a restart changes nothing
+        self.write_host(relay=False, relay_reason='not_bundled')       # a copy that says no bundled server: a restart changes nothing
         self.assertEqual(host(), {'relay_reason': 'not_bundled', 'restart_adds_relay': False})
         self.write_host(relay=True)
         self.assertEqual(host(), {'relay_reason': None, 'restart_adds_relay': False})
@@ -380,7 +380,10 @@ class RelaySetupTests(StatusCase):
         self.assertEqual(host()['restart_adds_relay'], False, 'others may write the file')
         os.chmod(plugin/'.mcp.json', 0o644)
         self.assertEqual(host()['restart_adds_relay'], True)
-        # A host that the launcher of this engine started is refused for a cause a restart does not change.
+        # A host that the launcher of this engine started, with a copy that was there before the launcher looked, is
+        # refused for a cause a restart does not change (a copy written since is the next test).
+        launched = NOW-7200
+        os.utime(plugin/'.mcp.json', (launched-60, launched-60))
         self.write_host(relay=False, relay_reason='not_bundled')
         self.assertEqual(host()['restart_adds_relay'], False)
         # A host without the version, or with the relay, or with another reason, is not this case.
@@ -389,6 +392,73 @@ class RelaySetupTests(StatusCase):
         self.write_host(relay=False, relay_reason='unknown_field', engine_version='0.8.6')
         self.assertEqual(host()['restart_adds_relay'], False)
         self.write_host(relay=True, engine_version='0.8.6')
+        self.assertEqual(host(), {'relay_reason': None, 'restart_adds_relay': False})
+
+    def test_a_host_that_read_the_definition_before_codex_wrote_its_copy_for_the_new_version_gets_the_relay_by_a_restart(self):
+        """The first start after a Codex update (0.8.9): the launcher of this engine read Codex's definition of the server
+        while it still named the module of the version before (`plugin_updating`; `not_bundled` from a launcher that
+        had no word for it). Codex wrote its copy for the new version seconds later; the next start reads that."""
+        self.machine.add(5, 1, '/bin/x')
+        self.start_world(relay=False)
+        cua = self.app/'Contents/Resources/cua_node'
+        plugin = self.home/'.codex/plugins/cache/openai-bundled/unified-computer-use'/APP_VERSION
+        module = (plugin/'require-browser-access.mjs').as_uri()
+        script = str(cua/'lib/node_modules/@oai/cua-repl/bin/cua-repl.mjs')
+        host = lambda: {key: self.status()['host'][key] for key in ('relay_reason', 'restart_adds_relay')}
+        launched = NOW-7200            # the launcher is the app's pid 1000 here
+
+        def copy(args=None, written=None, **changes):
+            entry = {'command': str(cua/'bin/node'), 'args': ['--import', module, script] if args is None else args,
+                     'env': {'CUA_REPL_NODE_REPL_PATH': str(cua/'bin/node_repl')}}
+            entry.update(changes)
+            (plugin/'.codex-plugin').mkdir(parents=True, exist_ok=True)
+            (plugin/'.codex-plugin/plugin.json').write_text(json.dumps({'name': 'unified-computer-use', 'version': APP_VERSION}))
+            (plugin/'.mcp.json').write_text(json.dumps({'mcpServers': {'cua_repl': entry}}))
+            os.chmod(plugin/'.mcp.json', 0o644)
+            if written is not None:
+                os.utime(plugin/'.mcp.json', (written, written))
+        for reason in ('plugin_updating', 'not_bundled'):
+            with self.subTest(reason):
+                self.write_host(relay=False, relay_reason=reason)      # started by this engine's launcher
+                shutil.rmtree(plugin, ignore_errors=True)
+                self.assertEqual(host(), {'relay_reason': reason, 'restart_adds_relay': False}, 'no copy of this version yet')
+                # A copy that was there before the launcher looked was refused for a lasting cause (or is not what the
+                # launcher saw): a restart would refuse it again.
+                copy(written=launched-60)
+                self.assertEqual(host()['restart_adds_relay'], False, 'there before the launcher looked')
+                copy(written=launched+10)
+                self.assertEqual(host(), {'relay_reason': reason, 'restart_adds_relay': True}, 'written since')
+                copy(args=['--import=' + module, script], written=launched+10)
+                self.assertEqual(host()['restart_adds_relay'], True, 'the joined form')
+                # The file that decides is the .mcp.json: an old manifest next to a new one changes nothing.
+                os.utime(plugin/'.codex-plugin/plugin.json', (launched-60, launched-60))
+                self.assertEqual(host()['restart_adds_relay'], True)
+                # A launcher that is gone cannot be compared with.
+                self.write_host(relay=False, relay_reason=reason, owner=4999)
+                self.assertEqual(host()['restart_adds_relay'], False, 'a launcher that is gone')
+                self.write_host(relay=False, relay_reason=reason)
+                # Not the bundled server, whatever the time: nothing a restart brings.
+                for label, args in (('the old form', [script]),
+                                    ('another module', ['--import', 'file:///tmp/require-browser-access.mjs', script]),
+                                    ('the module of the version before', ['--import', module.replace(APP_VERSION, '1.2.2'), script]),
+                                    ('another option', ['--inspect', '--import', module, script]),
+                                    ('two modules', ['--import', module, '--import', module, script]),
+                                    ('another script', ['--import', module, '/elsewhere/cua-repl.mjs'])):
+                    copy(args=args, written=launched+10)
+                    self.assertEqual(host()['restart_adds_relay'], False, label)
+                copy(command='/usr/bin/node', written=launched+10)
+                self.assertEqual(host()['restart_adds_relay'], False, 'another node')
+                copy(env={'CUA_REPL_NODE_REPL_PATH': '/elsewhere/node_repl'}, written=launched+10)
+                self.assertEqual(host()['restart_adds_relay'], False, 'another runtime')
+                copy(written=launched+10)
+                os.chmod(plugin/'.mcp.json', 0o666)
+                self.assertEqual(host()['restart_adds_relay'], False, 'others may write the file')
+                os.chmod(plugin/'.mcp.json', 0o644)
+                self.assertEqual(host()['restart_adds_relay'], True)
+        # Another reason, or the relay itself, is not this case.
+        self.write_host(relay=False, relay_reason='unknown_field')
+        self.assertEqual(host()['restart_adds_relay'], False)
+        self.write_host(relay=True)
         self.assertEqual(host(), {'relay_reason': None, 'restart_adds_relay': False})
 
     def test_the_host_must_name_this_plugins_launcher_to_count_as_having_the_relay(self):

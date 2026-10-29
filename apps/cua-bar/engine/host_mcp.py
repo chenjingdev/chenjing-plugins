@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.8'
+VERSION = '0.8.9'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -46,9 +46,12 @@ BROWSER_BLOCKED_MARKER = 'Local browser use is disabled in Work settings'
 BROWSER_BLOCKED_MARKERS = ('Local browser use is disabled', 'browser access host is unavailable')
 BROWSER_BLOCKED_NOTE = ('CUA Bar note: since Codex 26.1023, Codex refuses browser use in conversations it did not start '
                         'itself, which includes Claude Code conversations that use CUA through CUA Bar. This is not a '
-                        'setting the user turned off; changing Work settings or resetting the Chrome extension will '
-                        'not help. Desktop apps still work. For browser work, tell the user to ask the Codex app '
-                        'directly.')
+                        'setting the user turned off and not a refusal of this site or action; changing Work settings '
+                        'or resetting the Chrome extension will not help, and retrying the browser call will fail '
+                        'again. For web pages, use Playwright if it is available on this computer. If the page needs '
+                        'the user\'s signed-in Chrome or a tab the user has open, or Playwright is not available, '
+                        'operate Chrome as an ordinary desktop app through CUA (cua.getApp("Google Chrome")). Only if '
+                        'neither can do it, tell the user to ask the Codex app directly.')
 _WS_LOGGER = logging.getLogger('codex_computer_use.websocket')
 _WS_LOGGER.disabled = True  # WebSocket debug/error logs may contain frames.
 JS_TIMEOUT_MS = 30000           # how long cua_repl runs js when a call gives no timeout_ms

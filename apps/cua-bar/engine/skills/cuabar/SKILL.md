@@ -5,7 +5,8 @@ description: Use the installed CUA MCP to inspect and operate Mac desktop apps a
 
 # Mac computer use
 
-Use the `cuabar` MCP tools for the user's requested computer or browser task.
+Use the `cuabar` MCP tools for the user's requested computer task, and for
+browser work as described below.
 The tools execute in a dedicated thread on the running Codex host. Read and
 follow the live tool descriptions and the API documentation returned by the
 runtime; do not invent APIs from ordinary Node.js or Playwright examples.
@@ -18,7 +19,9 @@ runtime; do not invent APIs from ordinary Node.js or Playwright examples.
   filesystem paths are available. Use the documented image output facilities
   to return screenshots; Claude's scratchpad is not automatically writable.
 - Keep browser and runtime security refusals intact. Report an unsupported action
-  or blocked URL rather than retrying it through another route.
+  or blocked URL rather than retrying it through another route, Playwright
+  included. Codex refusing the browser to this whole conversation is not such a
+  refusal; see below.
 - When finished with this connection's CUA work, call `turn_ended` with `{}` if
   advertised. The bridge supplies its own thread and turn identifiers.
   `turn_ended` never connects to Codex and never reopens it: if the Codex host
@@ -49,12 +52,23 @@ runtime; do not invent APIs from ordinary Node.js or Playwright examples.
   input was detected, that the request cannot be associated with a ChatGPT
   thread, or only that the Mac is locked, stop and ask the user to unlock the
   Mac. Never try to unlock the Mac or restart the service yourself.
+- For web pages, use Playwright when it is available on this computer: a
+  Playwright MCP server in this session, or a Playwright library that runs here
+  with its browser installed. Run it on its own, never inside the cuabar `js`
+  tool. Its browser is not the user's Chrome: it is not signed in and cannot see
+  the user's tabs. So when the task needs the user's signed-in session or a tab
+  the user has open, or Playwright is not available, operate Chrome as an
+  ordinary desktop app through CUA: `cua.getApp("Google Chrome")`, then read the
+  window and click, type and press keys as in any other app. Only the active tab
+  of a window is readable that way; leave the user's tabs as you found them.
 - If a browser call fails with "Local browser use is disabled in Work settings"
   (or "The browser access host is unavailable"), Codex refused the browser:
   since Codex 26.1023 it allows browser use only in conversations it started
-  itself. It is not a setting the user turned off. Do not suggest changing Work
-  settings, resetting the Chrome extension or releasing tabs, and do not retry.
-  Desktop apps still work; tell the user to give browser work to the Codex app.
+  itself. It is not a setting the user turned off, and not a refusal of the site
+  or action. Do not suggest changing Work settings, resetting the Chrome
+  extension or releasing tabs, and do not retry the browser call; do the work
+  with Playwright or with Chrome as a desktop app, as above. Only when neither
+  can do it, tell the user to give the browser work to the Codex app.
 - Never replace a connection failure with a separately launched CUA engine,
   model proxy, changed permissions or automatic approval. Keep request
   payloads, screenshots and secrets out of diagnostic output.
