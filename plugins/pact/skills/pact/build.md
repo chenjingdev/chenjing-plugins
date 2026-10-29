@@ -5,7 +5,7 @@
 ## 0. 들어오기 전에
 
 - 명세 status가 `draft`면 build하지 않는다. 승인을 받지 않은 것이니 `probe.md` 5에서 명세를 마저 쓰고 6에서 승인을 받는다. status가 `approved`여도 승인이나 위임 기록(`<run-dir>/approvals.jsonl`)이 없으면 시작하지 못한다. 손으로 status만 고친 명세가 그렇다. 사용자의 승인을 받아 `spec.mjs approve`로 기록한다.
-- 0.6.0 전에 만든 명세(frontmatter `pact: 1`)는 승인 기록 없이 이어 간다. `set-status`가 `참고: 옛 판이라 승인 기록 없음`을 알리면 보고서에도 그렇다고 적는다. `pact: 1`이어도 `draft`였던 명세는 기록이 있어야 한다.
+- 0.6.0 전에 만든 명세(frontmatter `pact: 1`)는 승인 기록 없이 이어 간다. `set-status`가 `참고: 옛 판이라 승인 기록 없음`을 알려도 보고서에는 따로 적지 않는다. `report.mjs`가 보고서 맨 위 상자와 승인 기록 칸에 옛 판 줄을 붙이니 `summary.json`의 headline에 또 쓰지 않는다. `pact: 1`이어도 `draft`였던 명세는 기록이 있어야 한다.
 - `node <pact>/scripts/spec.mjs run-dir <명세>`로 run-dir을 얻는다. 명세 파일명(날짜 포함, 확장자 제외)이 `<run-id>`다. 예: `2026-10-25-출결.md` → `.pact/2026-10-25-출결/`, 브랜치 `pact/2026-10-25-출결`.
 - 예전 방식의 `.pact/<주제>/` 폴더(보고서, 사진)는 그대로 둔다. 그 안에 `wt`가 남아 있으면 `run-dir`이 멈춘다. 어느 명세의 작업인지 확인하고 사용자에게 알린 뒤에 정리한다.
 - `<run-dir>/wt`가 이미 있으면 이어 하는 중이다(중단됐거나 verify에서 되돌아왔다). 폴더만 보고 믿지 않고 `<run-dir>/plan.md` 머리의 명세 경로가 이번 명세와 같은지, `git -C <run-dir>/wt branch --show-current`가 `pact/<run-id>`인지 본다. 맞으면 1·2를 건너뛰고 `plan.md`와 `<run-dir>/tasks/*-report.md`를 읽은 뒤 남은 작업이나 verify가 넘긴 실패부터 3으로 이어 간다. 다르면 멈추고 알린다.

@@ -351,6 +351,9 @@ test('build starts only from an approval or delegation record, and tells the wor
   assert.match(build, /승인이나 위임 기록이 없으면 거절한다/);
   assert.match(build, /위임 기록이면 지금 명세를 다시 보고, 위험 항목\(`\[위험: …\]` 표시가 있는 기능·규칙 줄\)이 생겼으면 거절한다/);
   assert.match(build, /참고: 옛 판이라 승인 기록 없음/);
+  // 옛 판 줄은 report.mjs가 보고서 맨 위 상자에 붙인다: 메인이 headline에 또 쓰지 않는다
+  assert.match(build, /`set-status`가 `참고: 옛 판이라 승인 기록 없음`을 알려도 보고서에는 따로 적지 않는다\. `report\.mjs`가 보고서 맨 위 상자와 승인 기록 칸에 옛 판 줄을 붙이니 `summary\.json`의 headline에 또 쓰지 않는다\./);
+  assert.doesNotMatch(build, /보고서에도 그렇다고 적는다/);
   assert.match(build, /frontmatter `pact: 1`/);
   assert.match(build, /run-dir은 `<프로젝트>\/\.pact\/<run-id>`의 절대 경로로 적는다/);
   assert.match(build, /`pact:worker` 호출이 막히고/);
@@ -686,11 +689,20 @@ test('the README lists the shell writes the hook cannot read in its own 한계 i
   }
   assert.match(limit, /셸 한 줄 안의 쓰기 가운데 읽지 못하는 꼴이 있다: `perl -e`·`ruby -e`·`awk`, `sed`의 `w` 명령, `curl -o`, `tar -C`, python의 `os\.open`, node의 `fs\.openSync`·`fs\.promises\.writeFile`\. 이 꼴들은 막지 않는다\./);
   assert.match(limit, /위 결과 잠금 항목에 적은 못 보는 길\(변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구\)도 마찬가지다\./);
-  assert.match(limit, /이 길들로 결과 파일을 바꾸면 완료 검사의 지문 비교가 잡는다\. 지문은 verifier가 끝날 때 훅이 남긴 `results\.json`의 sha256이고, 지금 파일과 다르면 완료 검사가 막는다\./);
+  assert.match(limit, /이 길들로 `results\.json`을 바꾸면 완료 검사의 지문 비교가 잡는다\. 지문은 verifier가 끝날 때 훅이 남긴 `results\.json`의 sha256이고, 지금 파일과 다르면 완료 검사가 막는다\./);
+  // 지문이 지키는 것은 results.json 하나다: 승인 기록과 log/(verifier 지문 기록 포함)는 같은 길로 써도 잡는 그물이 없다
+  assert.match(limit, /지문이 지키는 것은 `results\.json` 하나다\. 같은 꼴로 `approvals\.jsonl`\(승인 기록\)이나 `log\/`\(verifier 지문 기록 포함\)에 쓰면 잡는 그물이 없다\./);
+  assert.match(limit, /꾸민 승인 기록으로 만들기가 시작되고\(승인 기록은 시작할 때 인용을 다시 맞춰 보지 않는다\. 다시 맞춰 보는 것은 위임 기록뿐이다\), `log\/`의 verifier 줄을 꾸미면\(완료 검사는 `log\/`의 가장 최근 verifier 줄을 믿는다\) `results\.json` 비교도 지나간다\./);
+  assert.match(limit, /이 장치는 실수와 흔한 꼼수를 막는 것이고 일부러 속이는 쓰기까지 막지는 않는다\. 승인 기록의 인용은 보고서에 보이니 사용자가 거기서 본다\./);
+  assert.doesNotMatch(limit, /결과 파일을 바꾸면/, '결과 파일이라고 뭉뚱그려 말하지 않는다: 지문이 지키는 것은 results.json이다');
   // 결과 잠금 항목의 못 보는 길 문장은 그대로 있고, 한계 항목은 그 바로 뒤에 온다
   const lockIndex = lines.findIndex((line) => line.startsWith('- PreToolUse(결과 잠금): '));
   assert.ok(lines[lockIndex].includes('훅이 못 보는 길도 있다: 변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구'));
   assert.equal(lines.indexOf(limit), lockIndex + 1);
+  // 결과 잠금 항목과 결과 파일 절의 "그물"도 results.json으로 좁혔다. 승인 기록과 log/는 지키지 않는다고 한계 항목을 가리킨다
+  assert.ok(lines[lockIndex].endsWith('그 길로 `results.json`을 바꾸면 완료 검사의 지문 비교가 막는다. `approvals.jsonl`과 `log/`는 지문이 지키지 않는다(아래 한계).'));
+  assert.ok(!readme.includes('그 길은 완료 검사의 지문 비교가 막는다'), '지문이 막는 범위를 뭉뚱그린 옛 문장은 없다');
+  assert.match(readme, /로 `results\.json`이 바뀐 것을 잡는 마지막 그물이다\. `approvals\.jsonl`과 `log\/`는 이 그물이 지키지 않는다\(훅 절의 한계\)\./);
   // 쓰기 꼴 목록은 이 항목에만 있다
   assert.equal(readme.split('`perl -e`').length - 1, 1, '쓰기 꼴 목록은 한계 항목에만 있다');
 });
@@ -704,6 +716,7 @@ test('README and probe.md say that a delegation never takes an AskUserQuestion a
   assert.match(readme, /단 질문 도구의 답은 승인에만 쓴다\./);
   assert.match(readme, /위임은 질문 도구의 답을 받지 않는다\(R2\): 질문 하나의 답으로 온 "알아서"는 그 질문만 맡긴 것이라, `delegate`에 넣으면 질문 도구의 답이라고 거절하고 승인 질문의 답이면 `approve`로 기록하라고 알린다\./);
   assert.match(readme, /위임은 사용자가 직접 쓴 말\(친 말, 일하는 도중에 친 말, 슬래시 명령의 인자\)을 인용한다\. 같은 말을 직접 쓴 것도 있으면 그쪽으로 기록한다\./);
+  assert.match(readme, /다만 코드가 가려내는 것은 질문 도구의 답뿐이다\. 채팅으로 물은 질문에 사용자가 친 답은 코드가 가리지 못하니 `probe\.md`를 따른다\(질문 하나의 답은 위임으로 치지 않는다\)\./);
   assert.match(readme, /질문 도구의 답으로 만든 옛 위임 기록\(기록에 `answer_question`이 있다\)도 거절한다\. 사용자에게 승인을 다시 받아 `approve`로 기록하거나, 직접 쓴 새 말을 인용해 `delegate`로 다시 기록하면 이어 간다\./);
   assert.match(probe, /질문 도구\(AskUserQuestion\)로 고른 답은 `delegate`가 거절한다\. 승인 질문의 답이면 `approve`로 기록하고, 위임은 사용자가 직접 쓴 말을 인용한다\./);
   assert.match(probe, /질문 도구\(AskUserQuestion\)로 고른 답도 같다\. 승인은 명세 경로와 요지를 본 뒤의 명시적인 답에만 해당한다\./, '승인에는 질문 도구의 답을 그대로 쓴다');

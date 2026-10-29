@@ -772,7 +772,7 @@ test('a file with only broken lines is no record: the gate refuses (new spec) or
 
 // ---------- (h) 위임은 사용자가 직접 쓴 말만 받는다: 질문 도구의 답은 그 질문만 맡긴 것이다 (R2) ----------
 
-test('(h) delegate refuses a quote that is only an AskUserQuestion answer, and says why and what to do; the same answer is recorded by approve after the spec-checker finished', () => {
+test('(h) delegate refuses a quote that is only an AskUserQuestion answer, and says why and what to do; the same words answering the approval question are recorded by approve after the spec-checker finished', () => {
   const w = makeWorld();
   const asked = answers({ '출력 파일 이름은 어떻게 할까요?': '알아서 해' }, T(10));
   writeTranscript(w, [typed('출결 관리 만들어 줘', T(0)), assistant('질문', T(9)), asked]);
@@ -795,14 +795,39 @@ test('(h) delegate refuses a quote that is only an AskUserQuestion answer, and s
   assertRefused(runSpec(w, ['delegate', w.spec, '이대로 만들어 주세요 지금 바로 시작합니다']), /질문 도구\(AskUserQuestion\)의 답이다/);
   assert.deepEqual(approvalEntries(w), []);
 
-  // 같은 답을 spec-checker가 끝난 뒤에 approve로 인용하면 기록된다(승인 질문의 답)
-  writeTranscript(w, [typed('출결 관리 만들어 줘', T(0)), assistant('질문', T(9)), asked]);
+  // 같은 말이 승인 질문("이 명세대로 만들까요?")에 대한 답이면 spec-checker가 끝난 뒤에 approve로 인용해 기록한다
+  const approvalAnswer = answers({ '이 명세대로 만들까요?': '알아서 해' }, T(10));
+  writeTranscript(w, [typed('출결 관리 만들어 줘', T(0)), assistant('명세를 검수했어요. 이 명세대로 만들까요?', T(9)), approvalAnswer]);
   addCheckerRecord(w, T(5));
   const ok = runSpec(w, ['approve', w.spec, '알아서 해']);
   assert.equal(ok.status, 0, ok.stderr);
   const [entry] = approvalEntries(w);
-  assert.deepEqual([entry.kind, entry.message, entry.message_uuid, entry.answer_question], ['approve', '알아서 해', asked.uuid, '출력 파일 이름은 어떻게 할까요?']);
+  assert.deepEqual([entry.kind, entry.message, entry.message_uuid, entry.answer_question], ['approve', '알아서 해', approvalAnswer.uuid, '이 명세대로 만들까요?']);
   assert.equal(specStatus(w), 'approved');
+});
+
+test('(h) when the quote is an answer and also only a part of a longer message the person wrote, the refusal says both: the answer is no delegation, and a short quote must be the whole message', () => {
+  const w = makeWorld();
+  const longer = '끝까지 알아서 해 줘. 출결 앱 만들어 줘';
+  writeTranscript(w, [typed(longer, T(1)), assistant('질문', T(2)), answers({ '승인까지 맡기시겠어요?': '끝까지 알아서 해' }, T(5))]);
+  const line = assertRefused(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']), /위임으로 인용한 말이 질문 도구\(AskUserQuestion\)의 답이다: "끝까지 알아서 해"/);
+  assert.match(line, /승인 질문의 답이면 spec\.mjs approve <명세> - <<'EOF'로 기록한다/);
+  assert.match(line, /같은 말이 사용자가 직접 쓴 더 긴 메시지 안에도 있는데 짧은 말이라 일부로는 맞지 않는다\. 메시지 전체를 그대로 인용한다\(정리해서 10자를 넘는 말이면 일부만 인용해도 된다\)\./);
+  assert.deepEqual(approvalEntries(w), []);
+  // 안내대로 그 메시지 전체를 인용하면 사용자가 직접 쓴 말로 기록된다
+  assert.equal(runSpec(w, ['delegate', w.spec, longer]).status, 0);
+  assert.deepEqual(approvalEntries(w).map((e) => [e.kind, e.message, e.answer_question]), [['delegate', longer, null]]);
+  // 긴 메시지 안에 없으면 짧은 말 안내는 붙지 않는다
+  const only = makeWorld();
+  writeTranscript(only, [typed('출결 관리 만들어 줘', T(1)), answers({ '승인까지 맡기시겠어요?': '끝까지 알아서 해' }, T(5))]);
+  const alone = assertRefused(runSpec(only, ['delegate', only.spec, '끝까지 알아서 해']), /질문 도구\(AskUserQuestion\)의 답이다/);
+  assert.doesNotMatch(alone, /더 긴 메시지 안에도 있는데|짧은 말이라/);
+  // 질문 도구의 답이 아닌 쪽의 안내는 그대로다: 직접 쓴 더 긴 메시지의 일부로만 있으면 짧은 말 거절 하나만 나온다
+  const typedOnly = makeWorld();
+  writeTranscript(typedOnly, [typed(longer, T(1))]);
+  const shortOnly = assertRefused(runSpec(typedOnly, ['delegate', typedOnly.spec, '끝까지 알아서 해']), /짧은 말이라 사용자 메시지 전체와 같아야 하는데, 더 긴 메시지의 일부로만 있다\./);
+  assert.match(shortOnly, /메시지 전체를 그대로 인용한다\(정리해서 10자를 넘는 말이면 일부만 인용해도 된다\)\./);
+  assert.doesNotMatch(shortOnly, /질문 도구/);
 });
 
 test('(h) when the same words were also said by the person, a delegation is recorded from what the person said, not from the newer answer', () => {

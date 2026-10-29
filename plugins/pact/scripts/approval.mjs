@@ -108,6 +108,8 @@ function describeRisk(units) {
 const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';
 const approveCmd = (verb = 'approve') => `spec.mjs ${verb} <명세> - <<'EOF'`;
 const ASK_APPROVAL = `명세를 보이고 사용자의 승인을 받아 ${approveCmd()}로 기록한다(${HEREDOC_HOW}).`;
+// 짧은 말이 더 긴 메시지의 일부로만 있을 때 대신 할 일(R3)
+const SHORT_HINT = `메시지 전체를 그대로 인용한다(정리해서 ${SHORT_MAX}자를 넘는 말이면 일부만 인용해도 된다).`;
 
 // ---------- 사용자만 답할 수 있음 항목의 짝 (명세 F5, R11) ----------
 
@@ -351,16 +353,18 @@ export function recordApproval(specFile, quote, kind, { env = process.env, now =
   const pool = kind === 'delegate' ? messages.filter((message) => message.via !== 'answer') : messages;
   const matches = pool.filter((message) => quoteMatches(said, message.text));
   if (!matches.length) {
+    const q = normalizeQuote(said);
+    // 짧은 말이 사용자가 직접 쓴 더 긴 메시지의 일부로만 있는가(짧은 말은 메시지 전체와 같아야 한다)
+    const inside = Array.from(q).length <= SHORT_MAX && pool.some((message) => normalizeQuote(message.text).includes(q));
     // 직접 쓴 말에는 없고 질문 도구의 답으로만 있으면 까닭을 따로 알린다(그냥 '메시지에 없다'고 하면 왜 안 되는지 알 수 없다)
     const answered = kind === 'delegate' ? messages.find((message) => message.via === 'answer' && quoteMatches(said, message.text)) : null;
     if (answered) {
       const refusal = answerRefusal(said, answered.question);
-      return refuse(refusal.reason, refusal.instead);
+      // 같은 말이 사용자가 직접 쓴 더 긴 메시지 안에도 있으면, 그쪽은 짧은 말이라 일부로는 안 맞는다는 안내도 붙인다
+      return refuse(refusal.reason, inside ? `${refusal.instead} 같은 말이 사용자가 직접 쓴 더 긴 메시지 안에도 있는데 짧은 말이라 일부로는 맞지 않는다. ${SHORT_HINT}` : refusal.instead);
     }
-    const q = normalizeQuote(said);
-    const inside = Array.from(q).length <= SHORT_MAX && pool.some((message) => normalizeQuote(message.text).includes(q));
     return inside
-      ? refuse(`"${said}"은 짧은 말이라 사용자 메시지 전체와 같아야 하는데, 더 긴 메시지의 일부로만 있다.`, `메시지 전체를 그대로 인용한다(정리해서 ${SHORT_MAX}자를 넘는 말이면 일부만 인용해도 된다).`)
+      ? refuse(`"${said}"은 짧은 말이라 사용자 메시지 전체와 같아야 하는데, 더 긴 메시지의 일부로만 있다.`, SHORT_HINT)
       : refuse(`인용한 말이 이 대화의 사용자 메시지에 없다: "${said}".`, '사용자가 실제로 한 말을 그대로 넣는다. 아직 사용자에게 묻지 않았으면 먼저 묻는다.');
   }
 
