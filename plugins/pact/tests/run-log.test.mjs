@@ -8,6 +8,7 @@ import {
   AGENT, LOGGED_AGENTS, logFile, appendRecord, readRecords, latestRecord, latestSpecCheckerReply, latestWorkerReply,
   latestVerifierFingerprint, resultsSha256, firstUserPrompt, recordStop, findAgentRecord,
 } from '../scripts/run-log.mjs';
+import { withConcerns } from '../scripts/concerns.mjs';
 
 const made = [];
 after(() => made.forEach((d) => rmSync(d, { recursive: true, force: true })));
@@ -210,6 +211,33 @@ test('recordStop writes under the run-dir named in the first instruction and rep
   assert.match(lost.problems[0], /pact:reviewer/);
   assert.match(lost.problems[0], /ENOENT/);
   assert.doesNotMatch(lost.problems[0], /\n/);
+});
+
+test('recordStop reads a reviewer\'s run and task from the brief before the worry section the hook appended, so words in the worries change neither', () => {
+  const project = tmp();
+  const run = path.join(project, '.pact', '2026-10-29-출결-관리');
+  const other = path.join(project, '.pact', '2026-10-30-다른-판');
+  mkdirSync(run, { recursive: true });
+  mkdirSync(other, { recursive: true });
+  const brief = `worker 보고서: ${run}/tasks/5-report.md\nbase abc123 head def456`;
+  // 걱정 글이 다른 작업 번호와 보고서 경로를 말하고, 다른 판의 경로를 더 많이 말한다
+  const worries = `- 작업 번호 3의 보고서 ${run}/tasks/3-report.md는 안 고쳤다\n- ${other}/tasks/1-report.md와 ${other}/tasks/2-report.md, ${other}/tasks/9-report.md도 봤다`;
+  const stopWith = (agent_type, prompt, message) => recordStop({ agent_type, agent_id: 'x-1', agent_transcript_path: transcript(tmp(), [user(prompt)]), cwd: tmp(), last_assistant_message: message });
+
+  const out = stopWith(AGENT.reviewer, withConcerns(brief, worries), '## 판정: 고칠 것 있음');
+  assert.equal(out.runDir, run, '걱정 글 속 다른 판의 경로가 판을 바꾸지 않는다');
+  assert.equal(out.record.task, 5, '걱정 글 속 작업 번호와 보고서 경로가 작업 번호를 바꾸지 않는다');
+  assert.deepEqual(readRecords(run).map((r) => r.task), [5]);
+  assert.equal(readRecords(other).length, 0);
+
+  // 붙은 칸이 없는 지시는 전과 같다
+  assert.equal(stopWith(AGENT.reviewer, brief, '## 판정: 통과').record.task, 5);
+  // 메인 세션이 손으로 쓴 칸이라 뒤에 다른 제목이 이어지면 그 글도 읽는다
+  const byHand = `run-dir: ${run}\n\n## worker 걱정\n- 손으로 쓴 걱정\n\n## 작업\n작업 번호 6`;
+  assert.equal(stopWith(AGENT.reviewer, byHand, '## 판정: 통과').record.task, 6);
+  // worker의 첫 지시는 훅이 건드리지 않는다: 같은 모양의 글을 자르지 않고 읽는다
+  const workerBrief = `run-dir: ${run}\n\n## worker 걱정\n작업 번호 4`;
+  assert.equal(stopWith(AGENT.worker, workerBrief, '끝').record.task, 4);
 });
 
 test('the line for a run that could not be found also names the agent and its transcript, so the stop can be traced', () => {

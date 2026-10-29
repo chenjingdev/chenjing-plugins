@@ -1114,15 +1114,14 @@ test('(b) a worry field that says "없음", is empty, or is missing passes the c
   assert.equal(concernOf(attached(pre(m, reviewerCall(reviewerBrief(m, 2)))).prompt), '- 없음. 다만 Node 18에서는 못 돌렸다');
 });
 
-test('(c) a prompt with no task number, or with several report paths, or with a number no worker record has, passes unchanged; the same for a run the prompt does not name', () => {
+test('(c) a number no worker record has, a run the prompt does not name, and a prompt that is not text all pass unchanged', () => {
   const w = reviewWorld();
   workerStops(w, 2, ['- 걱정 하나']);
-  passed(pre(w, reviewerCall(`run-dir: ${w.run}\n작업을 검토해 줘.`)), '작업 번호 없음');
-  passed(pre(w, reviewerCall(`${w.run}/tasks/1-report.md 와 ${w.run}/tasks/2-report.md`)), '보고서 경로가 여럿');
   passed(pre(w, reviewerCall(reviewerBrief(w, 3))), '3번의 worker 기록이 없다');
   // 번호는 있어도 판을 글로 못 찾는다. cwd 프로젝트에 진행 중 명세가 있어도 짐작하지 않는다
   writeSpec(w.project, ID);
   passed(pre(w, reviewerCall('작업 번호 2를 검토해 줘.')), '경로가 없다');
+  passed(pre(w, reviewerCall('작업을 검토해 줘.')), '경로도 번호도 없다: 판을 모르니 막지도 않는다');
   passed(pre(w, reviewerCall(undefined)), 'prompt가 없다');
   passed(pre(w, reviewerCall('')), 'prompt가 비었다');
   passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'pact:reviewer', prompt: { text: reviewerBrief(w, 2) } } }), 'prompt가 글이 아니다');
@@ -1131,6 +1130,69 @@ test('(c) a prompt with no task number, or with several report paths, or with a 
   passed(pre(fresh, reviewerCall(reviewerBrief(fresh, 2))), '기록이 없다');
   assert.deepEqual(errorLines(w), []);
   assert.deepEqual(errorLines(fresh), []);
+});
+
+// 판은 지시문 경로로 찾았는데 작업 번호를 못 읽는 지시: 걱정이 말없이 빠지지 않게 막는다
+const NUMBERLESS = (w) => ({
+  '번호 표시도 보고서 경로도 없다': `run-dir: ${w.run}\n작업을 검토해 줘.`,
+  '보고서 경로가 둘이고 번호 표시가 없다': `pact build 작업 5를 검토해 줘.\n- 완료 기준 (a): ${w.run}/tasks/2-report.md\n- worker 보고서: ${w.run}/tasks/5-report.md`,
+  '숫자가 아닌 작업 이름': `worker 보고서: ${w.run}/tasks/T2b-report.md`,
+  '명세 경로만': `명세: ${w.spec} 를 검토해 줘.`,
+  '작업 번호라는 말만 있고 숫자가 없다': `작업 번호를 몰라서 run-dir만 적는다: ${w.run}`,
+});
+
+test('(c) the run is named by a path but the task number cannot be read: the main session is denied with the reason and what to do on one line, and nothing is written', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 작업 2의 걱정']);
+  workerStops(w, 5, ['- 작업 5의 걱정']);
+  const before = tree(w.root);
+  for (const [label, prompt] of Object.entries(NUMBERLESS(w))) {
+    const reason = denied(pre(w, reviewerCall(prompt)), label);
+    assert.match(reason, /^\[pact\] reviewer 지시에서 작업 번호를 못 읽어 worker 걱정을 붙일 수 없다\. /, label);
+    assert.match(reason, /지시 맨 앞에 `작업 번호 n`을 적어 다시 부른다\.$/, label);
+  }
+  assert.deepEqual(tree(w.root), before, '막으면서 아무것도 만들지 않는다');
+  assert.deepEqual(errorLines(w), []);
+});
+
+test('(c) the same prompt with "작업 번호 5" at the front goes through and gets the worry of task 5, even with two report paths in it', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 작업 2의 걱정']);
+  workerStops(w, 5, ['- 작업 5의 걱정']);
+  const twoPaths = NUMBERLESS(w)['보고서 경로가 둘이고 번호 표시가 없다'];
+  denied(pre(w, reviewerCall(twoPaths)));
+  const fixed = `작업 번호 5\n${twoPaths}`;
+  const updated = attached(pre(w, reviewerCall(fixed)));
+  assert.equal(updated.prompt, `${fixed}\n\n## worker 걱정\n- 작업 5의 걱정`);
+  // 번호를 고쳐 쓰면 그 작업의 걱정이다
+  assert.equal(concernOf(attached(pre(w, reviewerCall(`작업 번호 2\n${twoPaths}`))).prompt), '- 작업 2의 걱정');
+  // 번호만 있고 worker 기록이 없는 작업이나 걱정이 없는 작업은 막지도 붙이지도 않는다
+  passed(pre(w, reviewerCall(`작업 번호 7\n${twoPaths}`)), '7번의 worker 기록이 없다');
+  workerStops(w, 5, ['- 없음']);
+  passed(pre(w, reviewerCall(fixed)), '가장 최근 답에 걱정이 없다');
+});
+
+test('(c) the order of the checks: an existing worry section and a run the prompt does not name pass before the number is looked at, and only the main session is held to the number', () => {
+  const w = reviewWorld();
+  workerStops(w, 5, ['- 작업 5의 걱정']);
+  for (const [label, prompt] of Object.entries(NUMBERLESS(w))) {
+    // 이미 걱정 칸이 있으면 번호를 보지 않고 통과한다
+    passed(pre(w, reviewerCall(`${prompt}\n\n## worker 걱정\n- 메인 세션이 옮긴 걱정`)), `칸이 이미 있다: ${label}`);
+    passed(pre(w, reviewerCall(`${prompt}\n\n## worker가 남긴 걱정(상태 DONE_WITH_CONCERNS)\n- 손으로 단 제목`)), `손으로 단 제목: ${label}`);
+    // 하위 에이전트와 다른 종류의 Agent 호출은 번호를 묻지 않는다
+    passed(pre(w, reviewerCall(prompt), SUB), `하위 에이전트: ${label}`);
+    passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'pact:verifier', prompt } }), `verifier: ${label}`);
+    passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'pact:spec-checker', prompt } }), `spec-checker: ${label}`);
+    passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'tiers:worker', prompt } }), `다른 플러그인: ${label}`);
+  }
+  // 판을 글로 못 찾으면 번호가 없어도 통과한다(cwd로 짐작한 판은 믿지 않는다)
+  writeSpec(w.project, ID);
+  passed(pre(w, reviewerCall('작업을 검토해 줘. 경로는 모른다.')), '판 경로가 없다');
+  // SendMessage는 번호를 못 읽어도 막지 않는다
+  reviewerStops(w, 5, 'agent-r5');
+  stop(w, stopInput(w, 'pact:reviewer', `run-dir: ${w.run}\n검토해 줘`, '## 판정: 통과', { agent_id: 'agent-rx' }));
+  passed(pre(w, messageCall('agent-rx', '다시 봐 주세요.')), '번호를 모르는 reviewer에게 보낸다');
+  assert.deepEqual(errorLines(w), []);
 });
 
 test('(c) records that cannot be tied to the task are not used: a worker record with no task number, another task\'s record, another run\'s record, another agent\'s record', () => {
@@ -1246,6 +1308,19 @@ test('(f) a message that names another task than the reviewer\'s own passes unch
   assert.equal(asked(`앞 보고서 ${w.run}/tasks/1-report.md 와 ${w.run}/tasks/3-report.md도 봤습니다.`), '- 작업 2의 걱정');
 });
 
+test('(f) the reviewer that was given the worries is logged with the task of its brief, not with a number in the worries: the second review finds its task and gets the fixed answer\'s worry', () => {
+  const w = reviewWorld();
+  // 걱정 글이 다른 작업 번호와 보고서 경로를 말한다
+  workerStops(w, 5, [`- 작업 번호 3의 보고서 ${w.run}/tasks/3-report.md는 이번에도 안 고쳤다`, `- ${w.run}/tasks/1-report.md와 ${w.run}/tasks/2-report.md도 같은 말이다`]);
+  const updated = attached(pre(w, reviewerCall(reviewerBrief(w, 5))));
+  assert.match(updated.prompt, /작업 번호 3의 보고서/);
+  stop(w, stopInput(w, 'pact:reviewer', updated.prompt, '## worker 걱정 처리\n- 안 고친다\n## 판정: 고칠 것 있음', { agent_id: 'agent-r5' })); // 훅이 바꾼 지시가 reviewer의 첫 지시다
+  assert.equal(readRecords(w.run).find((r) => r.agent_id === 'agent-r5').task, 5);
+  workerStops(w, 5, ['- 고친 뒤의 걱정'], { agent_id: 'agent-w5' });
+  assert.equal(concernOf(attached(pre(w, messageCall('agent-r5', '고쳤습니다. 다시 봐 주세요.'))).message), '- 고친 뒤의 걱정');
+  assert.deepEqual(errorLines(w), []);
+});
+
 test('(f) the run is found from the main session\'s cwd (the project, a folder under it, the worktree) or from a path in the message; from nowhere the call passes', () => {
   const w = reviewWorld();
   workerStops(w, 2, ['- 걱정 하나']);
@@ -1298,7 +1373,7 @@ test('(R7) when the log cannot be read the hook passes the call and logs one err
   passed(pre(w, messageCall('agent-r2', '다시.\n\n## worker 걱정\n- 메인 세션이 옮긴 걱정')));
   passed(pre(w, messageCall('agent-r2', '다시 봐 주세요.'), SUB));
   passed(pre(w, reviewerCall(`${reviewerBrief(w, 2)}\n\n## worker 걱정\n- 메인 세션이 옮긴 걱정`)));
-  passed(pre(w, reviewerCall(`run-dir: ${w.run}\n작업을 검토해 줘.`)));
+  denied(pre(w, reviewerCall(`run-dir: ${w.run}\n작업을 검토해 줘.`))); // 번호를 못 읽으면 기록을 읽기 전에 막는다
   assert.equal(errorLines(w).length, 2, '위 호출들은 기록을 읽지 않았다');
 });
 

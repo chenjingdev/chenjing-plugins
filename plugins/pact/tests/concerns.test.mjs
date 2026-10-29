@@ -3,7 +3,7 @@
 // 15개는 칸 안에 빈 줄이 있고, 2개는 보고서 줄 없이 답이 끝나고, 1개는 다음 제목으로 끝난다)를 따른다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONCERNS_HEADING, concernsOf, hasConcernsSection, withConcerns } from '../scripts/concerns.mjs';
+import { CONCERNS_HEADING, concernsOf, hasConcernsSection, withConcerns, withoutConcerns } from '../scripts/concerns.mjs';
 
 const REPORT = '보고서: /p/.pact/2026-10-29-x/tasks/2-report.md';
 // worker 답 한 편: 머리말, 칸들, 마지막 줄. concerns는 `## 걱정·위험` 아래 줄들이다.
@@ -136,4 +136,26 @@ test('withConcerns appends the heading and the lines after one blank line, keepi
   assert.ok(withConcerns('지시', lines).endsWith(lines), '걱정 글로 끝난다');
   // 붙인 글은 붙은 칸으로 읽힌다: 같은 글에 다시 붙이지 않는다
   assert.equal(hasConcernsSection(withConcerns('지시', lines)), true);
+});
+
+test('withoutConcerns gives the text before the section the hook appended at the end, so words in the worries cannot be read as part of the brief', () => {
+  const brief = '작업 번호 5\nworker 보고서: /p/.pact/r/tasks/5-report.md';
+  const worries = '- 작업 번호 3의 보고서 /p/.pact/r/tasks/3-report.md는 안 고쳤다\n- tasks/9-report.md도 봤다';
+  assert.equal(withoutConcerns(withConcerns(brief, worries)), brief);
+  // 끝 줄바꿈이 있는 글에 붙었어도 앞 글만 남는다(끝의 줄바꿈 하나는 남을 수 있다)
+  assert.equal(withoutConcerns(withConcerns(`${brief}\n`, worries)).trimEnd(), brief);
+  assert.equal(withoutConcerns(withConcerns(`${brief}\n\n`, worries)).trimEnd(), brief);
+  // Windows 줄바꿈
+  assert.equal(withoutConcerns(withConcerns(brief, worries).replace(/\n/g, '\r\n')).trimEnd(), brief.replace(/\n/g, '\r\n'));
+  // 칸이 없는 글, 칸이 가운데에 있어 뒤에 다른 제목이 이어지는 글(메인 세션이 손으로 쓴 칸), 처리 제목, 글이 아닌 것은 그대로다
+  for (const text of [
+    brief, '', `${brief}\n\n## worker 걱정\n- 손으로 쓴 걱정\n\n## 관련 명세 항목\n- 작업 번호 5`, `${brief}\n\n## worker 걱정 처리\n- 앞 검토 때 쓴 것`,
+    '## worker 걱정\n- 맨 앞이라 앞 글이 없다', `${brief} 그리고 ## worker 걱정 이라는 말`,
+  ]) assert.equal(withoutConcerns(text), text, JSON.stringify(text));
+  assert.equal(withoutConcerns(undefined), '');
+  assert.equal(withoutConcerns(null), '');
+  // 제목이 둘이면 맨 뒤의 것까지만 자른다: 훅은 끝에 붙인다
+  const twice = `${brief}\n\n## worker 걱정\n- 앞의 칸\n\n## 다른 제목\n- 글`;
+  assert.equal(withoutConcerns(twice), twice, '맨 뒤 제목이 다른 제목이면 그대로');
+  assert.equal(withoutConcerns(withConcerns(twice, worries)), twice, '그 뒤에 훅이 붙인 칸만 자른다');
 });

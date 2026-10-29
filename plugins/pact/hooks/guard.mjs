@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // pact 훅 — PreToolUse와 SubagentStop에 거는 스크립트 하나. 플러그인 훅은 pact를 쓰지 않는 대화에서도 도구를 부를 때마다 돈다.
 // 그래서 첫 일은 pact와 상관있는지 싸게 가르는 것이다(도구 이름, agent_type, 문자열에 `.pact/`·`docs/pact/`·pact 에이전트 이름이 있는지).
-// 상관없으면 파일을 읽지도 쓰지도 않고, 아무것도 출력하지 않고, 종료 코드 0으로 끝난다(명세 R1).
+// 상관없으면 파일을 읽지도 쓰지도 않고, 아무것도 출력하지 않고, 종료 코드 0으로 끝난다(명세 R1). 예외는 하나다: 메인 세션이 agent id 꼴 `to`로 보내는
+// SendMessage는 글에 pact 흔적이 없어도 받는 쪽이 reviewer인지 알아야 해서 cwd 프로젝트의 .pact/ 밑 log/를 읽는다(읽기만 한다).
 //
 //   PreToolUse   — 승인 관문(F2·F3, 명세 R8·R9·R10·R12): 메인 세션이 pact:worker를 부를 때 그 판에 승인·위임 기록이 없거나
 //                  승인 뒤 [사용자] 줄이 바뀌었으면 막고(바뀐 줄을 알리고 새 인용으로 다시 approve하게 한다),
@@ -11,7 +12,9 @@
 //                  아무도(훅과 pact 스크립트만) 쓰지 못하게 Edit·Write·MultiEdit·NotebookEdit와 Bash의 쓰기 꼴을 막는다. scripts/locks.mjs가 한다.
 //                  worker 걱정 붙이기(F6, R16): 메인 세션이 pact:reviewer를 부르면 지시문의 판과 작업 번호로 log/에서 그 작업의 가장 최근 worker 답을 찾아
 //                  `## 걱정·위험` 칸을 지시 끝에 `## worker 걱정`으로 붙이고 통과시킨다(updatedInput). 같은 reviewer에 SendMessage로 보내는 글에도 붙인다 —
-//                  받는 쪽이 reviewer인지와 작업 번호는 log/의 reviewer 기록(agent_id, task)으로 안다. 붙일 것이 없으면 그냥 통과한다. scripts/concerns.mjs가 글을 다룬다.
+//                  받는 쪽이 reviewer인지와 작업 번호는 log/의 reviewer 기록(agent_id, task)으로 안다. 붙일 것이 없으면 그냥 통과한다.
+//                  단 하나만 막는다: reviewer 지시에서 판은 찾았는데 작업 번호를 못 읽으면(통과시키면 걱정이 말없이 빠진다) 호출을 막고 `작업 번호 n`을 맨 앞에 적게 한다.
+//                  scripts/concerns.mjs가 글을 다룬다.
 //   SubagentStop — pact:spec-checker·reviewer·worker·verifier가 멈추면 마지막 답을 그 판의 <run-dir>/log/에 덧붙여 남기고,
 //                  verifier는 그때의 results.json 지문(sha256)도 남긴다(F4, R14, R15). scripts/run-log.mjs가 한다.
 //
@@ -154,7 +157,7 @@ async function gateLocks(input) {
 
 // ---------- worker 걱정 붙이기 (F6, R16) ----------
 // worker가 마지막 답의 `## 걱정·위험`에 쓴 것을 reviewer가 받는 글 끝에 `## worker 걱정`으로 붙인다. 붙일 것이 없으면 null: 막지 않고 그대로 통과한다
-// (걱정이 '없음'이거나 비었다, 작업 번호나 그 번호의 worker 기록을 못 찾았다, 이미 붙어 있다).
+// (걱정이 '없음'이거나 비었다, 그 번호의 worker 기록이 없다, 이미 붙어 있다, 판을 지시문 경로로 못 찾았다).
 // 걱정은 worker 보고 파일이 아니라 log/의 worker 답에서 가져온다(R16). 훅이 남긴 기록이라 worker가 나중에 고칠 수 없다.
 // SendMessage의 to가 id 꼴인가. 공백이나 `[ref]`가 든 주소와 빈 값은 아니다. 이름(`reviewer`)도 이 꼴이라 걸러지지 않는다 — log/에 그 id의 reviewer 기록이 있는지가 가른다.
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
@@ -170,7 +173,9 @@ async function latestConcerns(runDir, task) {
 }
 
 // 메인 세션이 pact:reviewer를 부를 때: 지시문의 판(findRunDir)과 작업 번호(taskNumber)로 그 작업의 worker 걱정을 찾아 prompt 끝에 붙인다.
-// 판은 지시문에 든 경로로만 찾는다(gateWorker와 같다). cwd로 짐작한 판의 기록을 붙이면 다른 판의 걱정이 섞인다. 작업 번호가 null이면 '못 찾음'이다.
+// 순서: 이미 걱정 칸이 있으면 통과 → 지시문 경로로 판을 못 찾으면 통과(cwd로 짐작한 판의 기록을 붙이면 다른 판의 걱정이 섞인다, gateWorker와 같다)
+// → 판은 찾았는데 작업 번호를 못 읽으면 막는다 → 번호를 읽었는데 그 번호의 worker 기록이 없거나 걱정이 없으면 통과.
+// 번호를 못 읽을 때 통과시키면 걱정이 아무 말 없이 빠진다. 메인 세션은 바뀐 지시를 보지 못해서 빠진 줄도 모른다(F6이 조용히 빈다).
 async function attachToBrief(input, toolInput) {
   const prompt = typeof toolInput.prompt === 'string' ? toolInput.prompt : '';
   if (!prompt) return null;
@@ -180,7 +185,9 @@ async function attachToBrief(input, toolInput) {
   const found = findRunDir({ text: prompt, cwd: cwdOf(input) });
   if (!found || found.via !== 'prompt') return null;
   const task = taskNumber({ prompt });
-  if (task === null) return null;
+  if (task === null) {
+    return denyOutput('reviewer 지시에서 작업 번호를 못 읽어 worker 걱정을 붙일 수 없다.', '지시 맨 앞에 `작업 번호 n`을 적어 다시 부른다.');
+  }
   const concerns = await latestConcerns(found.runDir, task);
   return concerns ? allowOutput({ ...toolInput, prompt: withConcerns(prompt, concerns) }) : null;
 }

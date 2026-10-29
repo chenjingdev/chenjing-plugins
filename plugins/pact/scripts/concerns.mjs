@@ -54,3 +54,18 @@ export function withConcerns(text, concerns) {
   const gap = !base || base.endsWith('\n\n') ? '' : base.endsWith('\n') ? '\n' : '\n\n';
   return `${base}${gap}${CONCERNS_HEADING}\n${concerns}`;
 }
+
+// 글에서 훅이 붙인 걱정 칸 앞까지. reviewer의 첫 지시를 읽어 판과 작업 번호를 정할 때(scripts/run-log.mjs), 걱정 글 속의 `작업 번호 3`이나
+// 다른 판·보고서 경로가 지시 본문의 것으로 읽히지 않게 한다. 훅은 칸을 맨 끝에 붙이므로, 글의 맨 마지막 제목 줄이 `## worker 걱정`이고 그 앞에 글이 있을 때만 자른다.
+// 메인 세션이 손으로 쓴 칸은 뒤에 다른 제목이 이어지는 것이 보통이라 그대로 읽는다. 걱정 글에는 제목 줄이 들어갈 수 없다(concernsOf가 제목에서 칸을 끝낸다).
+export function withoutConcerns(text) {
+  const s = String(text ?? '');
+  const lines = s.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!/^[ \t]*#{1,6}[ \t]+\S/u.test(lines[i])) continue;
+    if (lines[i].trimEnd() !== CONCERNS_HEADING) return s;
+    const before = lines.slice(0, i).join('\n').trimEnd();
+    return before || s;
+  }
+  return s;
+}

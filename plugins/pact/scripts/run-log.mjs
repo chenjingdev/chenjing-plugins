@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ensureRunDir } from './paths.mjs';
 import { findRunDir, taskNumber } from './run-dir.mjs';
+import { withoutConcerns } from './concerns.mjs';
 
 export const AGENT = {
   specChecker: 'pact:spec-checker',
@@ -95,7 +96,10 @@ export function recordStop(input, { now = new Date() } = {}) {
   const problems = [];
   const { text: prompt, error } = firstUserPrompt(input.agent_transcript_path);
   const cwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
-  const found = findRunDir({ text: prompt ?? '', cwd });
+  // reviewer의 첫 지시 끝에는 훅이 붙인 `## worker 걱정` 칸이 있을 수 있다. 걱정 글 속의 `작업 번호 3`이나 다른 판·보고서 경로가
+  // 지시 본문의 것으로 읽히지 않게 그 앞까지만 읽는다(판과 작업 번호 둘 다). worker의 첫 지시는 훅이 건드리지 않아 그대로 읽는다.
+  const brief = agentType === AGENT.reviewer ? withoutConcerns(prompt ?? '') : prompt ?? '';
+  const found = findRunDir({ text: brief, cwd });
   if (!found) {
     const why = error ? `; ${error}` : '';
     // 어느 하위 에이전트의 멈춤이었는지 따라갈 수 있게 id와 대화 기록 경로도 남긴다(없으면 '없음').
@@ -110,7 +114,7 @@ export function recordStop(input, { now = new Date() } = {}) {
     time: now.toISOString(),
     agent_type: agentType,
     agent_id: typeof input.agent_id === 'string' ? input.agent_id : null,
-    task: agentType === AGENT.worker || agentType === AGENT.reviewer ? taskNumber({ prompt: prompt ?? '', reply: message }) : null,
+    task: agentType === AGENT.worker || agentType === AGENT.reviewer ? taskNumber({ prompt: brief, reply: message }) : null,
     message,
   };
   if (agentType === AGENT.verifier) {

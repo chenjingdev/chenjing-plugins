@@ -167,14 +167,18 @@ test('build.md: the brief carries no commit trailer, the worker status is DONE o
   // 3.2: 상태는 둘, 걱정은 읽고 알릴 것을 본다, 넘기는 일은 훅이 한다
   assert.match(build, /^2\. 답장의 상태를 본다\. 상태는 `DONE`과 `BLOCKED` 둘이다\. `## 걱정·위험`이 "없음"이 아니면 읽고 사용자에게 알릴 것이 있는지 본다/m);
   assert.match(build, /걱정을 검토자에게 넘기는 일은 훅이 한다\. 직접 옮겨 적지 않는다\./);
-  // 3.3: 훅이 붙이는 것, 붙지 않는 때, reviewer의 처리 칸
-  assert.match(build, /보고서 경로는 이 작업 것\(`<run-dir>\/tasks\/<n>-report\.md`\)을 적고, 다른 작업의 보고서 경로를 같이 적으면 `작업 번호 n`도 적는다\./);
-  assert.match(build, /훅이 이 번호와 run-dir로 그 작업의 가장 최근 worker 답에서 `## 걱정·위험` 칸을 꺼내 지시 끝에 `## worker 걱정`으로 붙인다/);
-  assert.match(build, /걱정이 "없음"이거나 판이나 작업 번호를 못 찾으면 붙이지 않는다\./);
+  // 3.3: 번호는 늘 맨 앞에, 훅이 붙이는 것, 붙지 않는 때, 번호를 못 읽을 때의 거절, reviewer의 처리 칸, 처리 칸이 "없음"일 때
+  assert.match(build, /보고서 경로는 이 작업 것\(`<run-dir>\/tasks\/<n>-report\.md`\)이다\. reviewer 지시 맨 앞에 늘 `작업 번호 n`을 적는다\./);
+  assert.doesNotMatch(build, /다른 작업의 보고서 경로를 같이 적으면 `작업 번호 n`도 적는다/, '조건부 규칙은 없어졌다');
+  assert.match(build, /훅이 이 경로로 판을 찾고 그 번호로 그 작업의 가장 최근 worker 답에서 `## 걱정·위험` 칸을 꺼내 지시 끝에 `## worker 걱정`으로 붙인다\./);
+  assert.match(build, /걱정이 "없음"이거나 그 번호의 worker 기록이 없으면 붙이지 않는다\./);
+  assert.match(build, /판은 찾았는데 작업 번호를 못 읽으면 훅이 호출을 막고 까닭과 대신 할 일을 한 줄로 알린다\./);
   assert.match(build, /reviewer는 답의 `## worker 걱정 처리`에 걱정마다 맞는지, 이번에 고칠지를 적는다\./);
+  assert.match(build, /worker 답의 `## 걱정·위험`이 "없음"이 아닌데 reviewer 답의 `## worker 걱정 처리`가 "없음"이면, 같은 reviewer에 `## worker 걱정` 제목을 달아 SendMessage로 넘긴다\./);
   // 3.5: 두 번째 검토도 같은 길이다. 세 번째 검토는 없다는 문장은 그대로 이어진다
-  assert.match(build, /`to`에 reviewer의 agent id를 쓰면 훅이 고친 뒤의 worker 답의 걱정을 message 끝에 `## worker 걱정`으로 붙인다\./);
-  assert.ok(build.includes('한 번 더 검토받는다. `to`에 reviewer의 agent id를 쓰면'), '두 번째 검토 문장 안에 있다');
+  assert.match(build, /reviewer는 이름 없이 띄우고, 두 번째 검토는 `to`에 agentId를 쓰고 글에 이 작업 보고서 경로를 넣는다\. 그러면 훅이 고친 뒤의 worker 답의 걱정을 message 끝에 `## worker 걱정`으로 붙인다\./);
+  assert.ok(build.includes('한 번 더 검토받는다. reviewer는 이름 없이 띄우고,'), '두 번째 검토 문장 안에 있다');
+  assert.ok(build.includes('이 두 번째 검토에서도 고칠 것이 있으면 당신이 직접 고치고 완료 기준 명령을 돌린 뒤 넘어간다. 세 번째 검토는 없다.'));
   // 문서와 코드가 같은 제목·칸 이름을 말한다
   const { CONCERNS_HEADING } = await import('../scripts/concerns.mjs');
   assert.equal(CONCERNS_HEADING, '## worker 걱정');
@@ -645,19 +649,29 @@ test('the README lists what 0.6.0 changed in one short section, and says how the
   const names = ['훅', '승인·위임 기록', '결과 잠금', '`summary.json`', '검수 번호 짝', '`[사용자]` 줄 확인', 'worker 걱정 넘기기', 'worker 상태'];
   names.forEach((name, i) => assert.ok(bullets[i].startsWith(`- ${name}: `), `${i + 1}번째는 ${name}: ${bullets[i]}`));
   assert.ok(bullets.every((line) => line.length < 260), '한 줄이 짧다');
+  assert.match(bullets[0], /pact와 상관없는 호출은 읽지도 않고 통과시킨다\(메인 세션이 agent id 꼴 `to`로 보내는 SendMessage만 받는 쪽을 찾으려고 `log\/`를 읽는다\)\./);
   assert.match(bullets[6], /reviewer를 부를 때 훅이 그 작업의 worker 답에서 `## 걱정·위험`을 꺼내 지시 끝에 `## worker 걱정`으로 붙이고, reviewer는 답의 `## worker 걱정 처리`에 걱정마다 어떻게 했는지 적는다/);
   assert.match(bullets[7], /`DONE`과 `BLOCKED` 둘이다\. 마음에 걸리는 것은 상태와 상관없이 `## 걱정·위험`에 쓰고, 작업 지시에는 커밋 꼬리말을 넣지 않는다/);
   // 훅 절: 항목 머리말이 순서대로 다 있다(worker 걱정 항목을 더하다 다른 항목을 지우지 않았는지)
   const hook = /^## 훅\n([\s\S]*?)(?=\n## )/m.exec(readme)?.[1] ?? '';
   const hookBullets = hook.split('\n').filter((line) => line.startsWith('- '));
-  const heads = ['- PreToolUse: ', '- PreToolUse(결과 잠금): ', '- PreToolUse(worker 걱정): ', '- SubagentStop: ', '- 훅이 고장나도 대화를 막지 않는다. '];
+  const heads = ['- PreToolUse: ', '- PreToolUse(결과 잠금): ', '- PreToolUse(worker 걱정): ', '- 한계: ', '- SubagentStop: ', '- 훅이 고장나도 대화를 막지 않는다. '];
   assert.equal(hookBullets.length, heads.length, hookBullets.map((line) => line.slice(0, 20)).join(' / '));
   heads.forEach((head, i) => assert.ok(hookBullets[i].startsWith(head), `${i + 1}번째 항목은 "${head}"로 시작한다: ${hookBullets[i].slice(0, 30)}`));
-  assert.match(hook, /- PreToolUse\(worker 걱정\): 메인 세션이 `pact:reviewer`를 부르면 지시문의 판과 작업 번호\(`<run-dir>\/tasks\/<n>-report\.md`나 `작업 번호 n`\)로 `log\/`에서 그 작업의 가장 최근 worker 답을 찾아 `## 걱정·위험` 칸을 지시 끝에 `## worker 걱정`으로 붙이고 통과시킨다/);
-  assert.match(hook, /메인 세션이 같은 reviewer에 SendMessage로 보낼 때도, `to`가 `log\/`에 reviewer로 남은 agent id이면 그 작업의 가장 최근 worker 답\(고친 뒤의 답\)의 걱정을 message 끝에 붙인다/);
-  assert.match(hook, /걱정이 '없음'이거나 비었을 때, 판이나 작업 번호나 그 번호의 worker 기록을 못 찾았을 때, `to`가 agent id가 아니거나 `log\/`에 없을 때, SendMessage 글이 그 reviewer의 작업과 다른 작업 번호를 말할 때, 이미 `## worker 걱정`이 있을 때는 그대로 통과한다\. 막지는 않는다\./);
+  // 머리말: 상관없는 호출은 읽지 않는다. 예외는 메인 세션의 SendMessage 하나다(guard.mjs 머리말과 같은 말)
+  assert.match(hook, /아무것도 읽지 않고 바로 통과시킨다\(메인 세션이 agent id 꼴 `to`로 보내는 SendMessage만 예외다\. 받는 쪽이 reviewer인지 `log\/`를 읽어 본다\)\./);
+  // worker 걱정 항목
+  assert.match(hook, /- PreToolUse\(worker 걱정\): 메인 세션이 `pact:reviewer`를 부르면 지시문의 판\(보고서 경로의 run-dir\)과 작업 번호\(`작업 번호 n`, 없으면 보고서 경로가 하나일 때 그 번호\)로 `log\/`에서 그 작업의 가장 최근 worker 답을 찾아 `## 걱정·위험` 칸을 지시 끝에 `## worker 걱정`으로 붙이고 통과시킨다\(입력의 다른 칸은 그대로 둔다\)\./);
+  assert.match(hook, /판은 찾았는데 작업 번호를 못 읽으면 걱정이 말없이 빠지지 않게 호출을 막고, 까닭과 대신 할 일\(지시 맨 앞에 `작업 번호 n`을 적어 다시 부른다\)을 한 줄로 알린다\./);
+  assert.match(hook, /지시문에서 판을 못 찾았을 때, 그 번호의 worker 기록이 없을 때, 걱정이 '없음'이거나 비었을 때, 이미 `## worker 걱정`이 있을 때는 그대로 통과한다\./);
+  assert.match(hook, /메인 세션이 같은 reviewer에 SendMessage로 보낼 때도, `to`가 `log\/`에 reviewer로 남은 agent id이면 그 작업의 가장 최근 worker 답\(고친 뒤의 답\)의 걱정을 message 끝에 붙인다\./);
+  assert.match(hook, /이쪽은 막지 않고 그대로 통과한다: `to`가 agent id가 아니거나 `log\/`에 없을 때, 그 reviewer의 작업 번호를 모를 때, 글이 그 reviewer의 작업과 다른 작업 번호를 말할 때, 이미 `## worker 걱정`이 있을 때, worker 기록이 없거나 걱정이 없을 때\./);
   assert.match(hook, /걱정은 worker 보고서가 아니라 `log\/`의 worker 답에서 가져온다\./);
   assert.match(hook, /에이전트에 이름을 붙여 이름으로 보내면 받는 쪽을 알 수 없어 붙이지 않는다\./);
   assert.match(hook, /SendMessage는 글에 pact 흔적이 없어도 `to`가 id 꼴이면 cwd 프로젝트\(또는 글이 가리키는 프로젝트\)의 `\.pact\/` 밑 `log\/`를 읽어 받는 쪽을 찾는다\. pact 프로젝트가 아니면 읽을 것이 없고, 아무것도 쓰지 않는다\./);
+  // 한계: tiers와 같이 켜졌을 때(메인이 정함)
+  assert.match(hook, /- 한계: tiers 플러그인의 delegate가 켜져 있으면 같은 `pact:reviewer` 호출에 tiers\(model 고정\)와 pact\(걱정 붙이기\)가 둘 다 입력을 바꾸고, 어느 쪽이 남는지는 정해져 있지 않다\(불확실\)\. tiers delegate는 기본으로 꺼져 있다\./);
+  // SubagentStop: reviewer의 작업 번호는 훅이 붙인 걱정 칸 앞까지 읽는다
+  assert.match(hook, /`pact:reviewer`의 작업 번호는 첫 지시에서 훅이 붙인 `## worker 걱정` 칸 앞까지만 읽는다\. 걱정 글 속의 번호와 경로가 작업 번호와 판을 바꾸지 않게 한다\./);
   assert.ok(!readme.includes('DONE_WITH_CONCERNS') && !readme.includes('PARTIAL'));
 });
