@@ -4,7 +4,7 @@
 // 기록은 판마다 `<run-dir>/log/subagents.jsonl` 한 파일에 멈춤 하나당 한 줄이다.
 //   { time, agent_type, agent_id, task, message }          — time은 ISO 8601 UTC, task는 worker·reviewer의 작업 번호(모르면 null)
 //   verifier 줄에는 results_sha256이 더 든다: 그때 <run-dir>/results.json의 sha256(파일이 없으면 null)
-import { closeSync, appendFileSync, mkdirSync, openSync, readFileSync, readSync } from 'node:fs';
+import { closeSync, appendFileSync, mkdirSync, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ensureRunDir } from './paths.mjs';
@@ -128,15 +128,8 @@ export function recordStop(input, { now = new Date() } = {}) {
 
 // ---------- 읽기 (뒤 작업의 검사가 쓴다) ----------
 
-// 기록을 쓴 순서대로. 기록이 없으면 []. 깨진 줄은 건너뛴다(마지막 줄이 쓰다 끊겨도 앞 기록은 읽힌다).
-export function readRecords(runDir) {
-  let raw;
-  try {
-    raw = readFileSync(logFile(runDir), 'utf8');
-  } catch (error) {
-    if (error.code === 'ENOENT') return [];
-    throw error;
-  }
+// 기록 파일의 글을 기록 목록으로. 깨진 줄(쓰다 끊긴 줄)과 객체가 아닌 줄은 건너뛴다.
+function parseRecords(raw) {
   const records = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
@@ -146,6 +139,18 @@ export function readRecords(runDir) {
     } catch { /* 깨진 줄 */ }
   }
   return records;
+}
+
+// 기록을 쓴 순서대로. 기록이 없으면 []. 깨진 줄은 건너뛴다(마지막 줄이 쓰다 끊겨도 앞 기록은 읽힌다).
+export function readRecords(runDir) {
+  let raw;
+  try {
+    raw = readFileSync(logFile(runDir), 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+  return parseRecords(raw);
 }
 
 // 그 에이전트의 가장 최근 기록. task를 주면 그 작업 번호의 것만 본다. 없으면 null.
@@ -166,3 +171,35 @@ export const latestSpecCheckerReply = (runDir) => latestRecord(runDir, AGENT.spe
 export const latestWorkerReply = (runDir, task) => latestRecord(runDir, AGENT.worker, { task });
 // 가장 최근 verifier가 끝날 때의 지문: { time, results_sha256, ... } | null. results_sha256이 null이면 그때 results.json이 없었다.
 export const latestVerifierFingerprint = (runDir) => latestRecord(runDir, AGENT.verifier);
+
+// 프로젝트의 판들(<프로젝트>/.pact/<run-id>/) 가운데 agent_id가 agentId인 agentType 에이전트의 가장 최근 기록과 그 판: { runDir, record } | null
+// SendMessage의 받는 쪽(agent id)이 어느 판의 reviewer인지 알려고 쓴다. id는 호출마다 달라서 맞으면 그 판이다.
+// 판이 많아도 싸게: 기록 파일에 id 글자가 없으면 줄을 읽지 않는다. 읽지 못하는 기록은 '없음'이 아니라 던진다(readRecords와 같다).
+export function findAgentRecord(project, agentId, agentType) {
+  if (typeof project !== 'string' || !project || typeof agentId !== 'string' || !agentId || typeof agentType !== 'string' || !agentType) return null;
+  const base = path.join(project, '.pact');
+  let names;
+  try {
+    names = readdirSync(base);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+    throw error;
+  }
+  for (const name of names.sort().reverse()) { // 날짜가 앞에 붙는 run-id라 새 판부터
+    if (name.startsWith('.')) continue; // `.gitignore` 같은 것은 판이 아니다
+    const runDir = path.join(base, name);
+    let raw;
+    try {
+      raw = readFileSync(logFile(runDir), 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') continue; // log/가 없는 판, 폴더가 아닌 파일
+      throw error;
+    }
+    if (!raw.includes(agentId)) continue;
+    const records = parseRecords(raw);
+    for (let i = records.length - 1; i >= 0; i--) {
+      if (records[i].agent_type === agentType && records[i].agent_id === agentId) return { runDir, record: records[i] };
+    }
+  }
+  return null;
+}

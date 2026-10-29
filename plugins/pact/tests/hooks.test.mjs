@@ -9,7 +9,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PACT_AGENTS, touchesPact, denyOutput, allowOutput } from '../hooks/guard.mjs';
-import { LOGGED_AGENTS, readRecords, latestSpecCheckerReply, latestWorkerReply, latestVerifierFingerprint } from '../scripts/run-log.mjs';
+import { LOGGED_AGENTS, appendRecord, readRecords, latestSpecCheckerReply, latestWorkerReply, latestVerifierFingerprint } from '../scripts/run-log.mjs';
 import { grantApproval, specText, typed, writeTranscript, runSpec, assertRefused, checkerReply, T, SESSION } from './approval-world.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1015,6 +1015,291 @@ test('lock (R7): when the lock module itself is broken, the hook passes the call
   assert.equal(errorLines(w).length, 1);
   // 고장나지 않은 훅은 같은 호출을 막는다
   denied(pre(w, locked));
+});
+
+// ---------- worker 걱정 붙이기 (F6, R16) ----------
+// 걱정은 보고서 파일이 아니라 훅이 남긴 log/의 worker 답에서 가져온다. 시험도 같은 길로 기록을 만든다(SubagentStop 입력을 훅에 넣는다).
+
+const reviewWorld = () => {
+  const w = world();
+  mkdirSync(w.run, { recursive: true });
+  return w;
+};
+const workerBrief = (w, n) => `## 목표\n훅을 넣는다\n## 맥락\nrun-dir: ${w.run} , 작업 번호 ${n}. 보고서는 이 run-dir의 tasks/${n}-report.md.\nworktree: ${w.run}/wt\n## 범위\n…`;
+const workerAnswer = (w, n, concerns) => [
+  '## 상태: DONE', '## 바꾼 파일', '- hooks/guard.mjs — 훅', '## 확인', '- node --test tests/ → 통과 459, 실패 0', '## 정한 것', '- 없음',
+  '## 걱정·위험', ...concerns, `보고서: ${w.run}/tasks/${n}-report.md`,
+].join('\n');
+const workerStops = (w, n, concerns, extra = {}) => stop(w, stopInput(w, 'pact:worker', workerBrief(w, n), workerAnswer(w, n, concerns), extra));
+const reviewerBrief = (w, n) => `pact build 작업 ${n}을 검토해 줘.\n\n- worktree: ${w.run}/wt\n- base SHA: abc123\n- head SHA: def456\n- worker 보고서: ${w.run}/tasks/${n}-report.md\n\n## 관련 명세 항목\n- F6 worker 보고의 걱정이 reviewer 작업 지시에 저절로 붙는다 [사용자]`;
+const reviewerStops = (w, n, agent_id, message = '## 판정: 고칠 것 있음') => stop(w, stopInput(w, 'pact:reviewer', reviewerBrief(w, n), message, { agent_id }));
+const reviewerCall = (prompt, extra = {}) => ({ tool_name: 'Agent', tool_input: { subagent_type: 'pact:reviewer', description: '작업 2 검토', prompt, ...extra } });
+const messageCall = (to, message, extra = {}) => ({ tool_name: 'SendMessage', tool_input: { to, summary: '두 번째 검토', message, ...extra } });
+
+// 걱정이 붙어 통과한 출력: 막지 않고(allow) 바뀐 입력(updatedInput)만 낸다. 바뀐 입력을 돌려준다.
+function attached(r, label = '') {
+  const out = JSON.parse(r.stdout);
+  assert.deepEqual(Object.keys(out), ['hookSpecificOutput'], label);
+  assert.deepEqual(Object.keys(out.hookSpecificOutput).sort(), ['hookEventName', 'permissionDecision', 'updatedInput'], label);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PreToolUse', label);
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'allow', label);
+  assert.equal(r.stderr, '', label);
+  return out.hookSpecificOutput.updatedInput;
+}
+const concernOf = (text) => text.split('\n\n## worker 걱정\n')[1];
+
+test('(a) the main session calls pact:reviewer for task 2: the two worry lines of the latest worker reply are appended to the prompt as "## worker 걱정", and every other field stays as it was', () => {
+  const w = reviewWorld();
+  const concerns = ['- 실제 Claude Code에서는 안 돌려 봤다(R18 몫).', '- 작업 번호가 null인 worker가 123개 중 35개라 null은 "못 찾음"으로 다뤘다.'];
+  workerStops(w, 2, concerns);
+  const call = reviewerCall(reviewerBrief(w, 2), { model: 'opus', run_in_background: true });
+  const before = tree(w.root);
+  const updated = attached(pre(w, call));
+  assert.equal(updated.prompt, `${call.tool_input.prompt}\n\n## worker 걱정\n${concerns.join('\n')}`);
+  assert.ok(updated.prompt.startsWith(call.tool_input.prompt), '지시 본문은 그대로이고 끝에 붙는다');
+  assert.deepEqual(Object.keys(updated), Object.keys(call.tool_input), 'tool_input의 칸이 늘거나 줄지 않는다');
+  assert.deepEqual({ ...updated, prompt: 0 }, { ...call.tool_input, prompt: 0 }, 'prompt 말고는 그대로다');
+  assert.deepEqual(tree(w.root), before, '아무 파일도 만들거나 고치지 않는다');
+  assert.deepEqual(errorLines(w), []);
+});
+
+test('(a) the worry text is the whole field as written: lines, blank lines and nested items, without the report line', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 첫째 걱정', '  - 둘째 줄 설명', '', '- 셋째 걱정']);
+  const updated = attached(pre(w, reviewerCall(reviewerBrief(w, 2))));
+  assert.equal(concernOf(updated.prompt), '- 첫째 걱정\n  - 둘째 줄 설명\n\n- 셋째 걱정');
+  assert.doesNotMatch(updated.prompt, /\n보고서: .*\/tasks\/2-report\.md$/, '답의 마지막 줄 `보고서: …`는 붙이지 않는다');
+});
+
+test('(a) the task number is read from the prompt the way the log reads it: a "작업 번호 n" wins over the report paths of earlier tasks listed beside it', () => {
+  const w = reviewWorld();
+  workerStops(w, 1, ['- 작업 1의 걱정']);
+  workerStops(w, 2, ['- 작업 2의 걱정']);
+  const prompt = `작업 번호 2를 검토해 줘.\n앞 작업 보고서: ${w.run}/tasks/1-report.md\nworker 보고서: ${w.run}/tasks/2-report.md`;
+  assert.equal(concernOf(attached(pre(w, reviewerCall(prompt))).prompt), '- 작업 2의 걱정');
+});
+
+test('(a) only the main session is given the concerns: a sub-agent calling pact:reviewer is left alone, and so is every other kind of Agent call', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 걱정 하나']);
+  const prompt = reviewerBrief(w, 2);
+  passed(pre(w, reviewerCall(prompt), SUB), '하위 에이전트');
+  passed(pre(w, reviewerCall(prompt), { agent_id: 'agent-9', agent_type: 'pact:reviewer' }), 'reviewer라는 하위 에이전트');
+  for (const subagent_type of ['pact:verifier', 'pact:spec-checker', 'tiers:worker', 'Explore', 'pact:reviewers', 'reviewer']) {
+    passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type, prompt } }), subagent_type);
+  }
+  passed(pre(w, { tool_name: 'Agent', tool_input: { prompt } }), 'subagent_type 없음');
+  assert.ok(concernOf(attached(pre(w, reviewerCall(prompt))).prompt), '메인 세션이면 붙는다');
+});
+
+test('(b) a worry field that says "없음", is empty, or is missing passes the call unchanged: no output at all', () => {
+  for (const [label, lines] of Object.entries({
+    '- 없음': ['- 없음'], 없음: ['없음'], '없음.': ['- 없음.'], 굵게: ['- **없음**'], '빈 칸': [], '빈 줄만': ['', ''], '목록 표시만': ['-'],
+  })) {
+    const w = reviewWorld();
+    workerStops(w, 2, lines);
+    passed(pre(w, reviewerCall(reviewerBrief(w, 2))), label);
+    assert.deepEqual(errorLines(w), [], label);
+  }
+  // 칸이 아예 없는 답(BLOCKED)과 빈 답
+  const w = reviewWorld();
+  stop(w, stopInput(w, 'pact:worker', workerBrief(w, 2), 'BLOCKED: 질문이 있다\n1. 결정할 것: 이름\n   - 기본값: 가'));
+  passed(pre(w, reviewerCall(reviewerBrief(w, 2))), 'BLOCKED');
+  const e = reviewWorld();
+  stop(e, stopInput(e, 'pact:worker', workerBrief(e, 2), undefined));
+  passed(pre(e, reviewerCall(reviewerBrief(e, 2))), '빈 답');
+  // '없음'으로 시작해도 이어서 말하면 걱정이다
+  const m = reviewWorld();
+  workerStops(m, 2, ['- 없음. 다만 Node 18에서는 못 돌렸다']);
+  assert.equal(concernOf(attached(pre(m, reviewerCall(reviewerBrief(m, 2)))).prompt), '- 없음. 다만 Node 18에서는 못 돌렸다');
+});
+
+test('(c) a prompt with no task number, or with several report paths, or with a number no worker record has, passes unchanged; the same for a run the prompt does not name', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 걱정 하나']);
+  passed(pre(w, reviewerCall(`run-dir: ${w.run}\n작업을 검토해 줘.`)), '작업 번호 없음');
+  passed(pre(w, reviewerCall(`${w.run}/tasks/1-report.md 와 ${w.run}/tasks/2-report.md`)), '보고서 경로가 여럿');
+  passed(pre(w, reviewerCall(reviewerBrief(w, 3))), '3번의 worker 기록이 없다');
+  // 번호는 있어도 판을 글로 못 찾는다. cwd 프로젝트에 진행 중 명세가 있어도 짐작하지 않는다
+  writeSpec(w.project, ID);
+  passed(pre(w, reviewerCall('작업 번호 2를 검토해 줘.')), '경로가 없다');
+  passed(pre(w, reviewerCall(undefined)), 'prompt가 없다');
+  passed(pre(w, reviewerCall('')), 'prompt가 비었다');
+  passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'pact:reviewer', prompt: { text: reviewerBrief(w, 2) } } }), 'prompt가 글이 아니다');
+  // worker 기록이 아직 없는 판
+  const fresh = reviewWorld();
+  passed(pre(fresh, reviewerCall(reviewerBrief(fresh, 2))), '기록이 없다');
+  assert.deepEqual(errorLines(w), []);
+  assert.deepEqual(errorLines(fresh), []);
+});
+
+test('(c) records that cannot be tied to the task are not used: a worker record with no task number, another task\'s record, another run\'s record, another agent\'s record', () => {
+  const w = reviewWorld();
+  const other = path.join(w.project, '.pact', '2026-10-30-다른-판');
+  mkdirSync(other, { recursive: true });
+  const record = (agent_type, task, message) => ({ time: '2026-10-29T01:00:00.000Z', agent_type, agent_id: 'a', task, message });
+  appendRecord(w.run, record('pact:worker', null, workerAnswer(w, 2, ['- 번호를 모르는 답의 걱정'])));
+  appendRecord(w.run, record('pact:worker', 3, workerAnswer(w, 3, ['- 작업 3의 걱정'])));
+  appendRecord(w.run, record('pact:reviewer', 2, workerAnswer(w, 2, ['- reviewer 기록의 글'])));
+  appendRecord(w.run, record('tiers:worker', 2, workerAnswer(w, 2, ['- 다른 플러그인 worker의 글'])));
+  appendRecord(other, record('pact:worker', 2, workerAnswer({ run: other }, 2, ['- 다른 판 작업 2의 걱정'])));
+  passed(pre(w, reviewerCall(reviewerBrief(w, 2))));
+  assert.equal(concernOf(attached(pre(w, reviewerCall(reviewerBrief(w, 3)))).prompt), '- 작업 3의 걱정', '번호가 맞는 기록은 쓴다');
+  // 다른 판을 가리키는 글이면 그 판의 기록을 쓴다
+  const prompt = `worker 보고서: ${other}/tasks/2-report.md`;
+  assert.equal(concernOf(attached(pre(w, reviewerCall(prompt))).prompt), '- 다른 판 작업 2의 걱정');
+});
+
+test('(d) a prompt that already has a worker worry section is not given a second one, at any heading level and in the wording the main session used by hand', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 걱정 하나']);
+  for (const heading of ['## worker 걱정', '### worker 걱정', '## worker가 남긴 걱정(상태 DONE_WITH_CONCERNS)']) {
+    passed(pre(w, reviewerCall(`${reviewerBrief(w, 2)}\n\n${heading}\n- 메인 세션이 옮긴 걱정`)), heading);
+  }
+  passed(pre(w, reviewerCall(`## worker 걱정\n- 맨 앞에 있다\n\n${reviewerBrief(w, 2)}`)), '맨 앞');
+  // 칸이 아닌 것은 붙는다: 제목이 아닌 말, reviewer 답의 `## worker 걱정 처리` 제목
+  assert.ok(attached(pre(w, reviewerCall(`${reviewerBrief(w, 2)}\n앞서 worker 걱정을 봤다.`))).prompt.endsWith('\n- 걱정 하나'));
+  assert.ok(attached(pre(w, reviewerCall(`${reviewerBrief(w, 2)}\n\n## worker 걱정 처리\n- 앞 검토 때 쓴 것`))).prompt.endsWith('\n- 걱정 하나'));
+});
+
+test('(e) with two worker replies for one task the latest one\'s worry is used, other tasks\' replies are never mixed in, and a later reply with no worry does not bring the earlier one back', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 첫 답의 걱정']);
+  workerStops(w, 3, ['- 작업 3의 걱정']);
+  workerStops(w, 2, ['- 고친 뒤의 걱정']); // SendMessage로 돌아온 같은 worker의 답
+  assert.equal(concernOf(attached(pre(w, reviewerCall(reviewerBrief(w, 2)))).prompt), '- 고친 뒤의 걱정');
+  assert.equal(concernOf(attached(pre(w, reviewerCall(reviewerBrief(w, 3)))).prompt), '- 작업 3의 걱정');
+  workerStops(w, 2, ['- 없음']);
+  passed(pre(w, reviewerCall(reviewerBrief(w, 2))), '가장 최근 답에 걱정이 없다');
+  assert.equal(concernOf(attached(pre(w, reviewerCall(reviewerBrief(w, 3)))).prompt), '- 작업 3의 걱정', '작업 3은 그대로다');
+});
+
+test('(f) SendMessage to the agent id the log holds as the reviewer of task 2: the worry of the latest worker reply of that task (the one after the fix) is appended to the message', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 첫 답의 걱정'], { agent_id: 'agent-w2' });
+  reviewerStops(w, 2, 'agent-r2');
+  workerStops(w, 2, ['- 고친 뒤의 걱정 하나', '- 고친 뒤의 걱정 둘'], { agent_id: 'agent-w2' }); // SendMessage로 돌아온 같은 worker의 답
+  workerStops(w, 3, ['- 작업 3의 걱정'], { agent_id: 'agent-w3' });
+  const call = messageCall('agent-r2', '고쳤습니다. 커밋 범위 abc123..def456을 다시 봐 주세요.', { notify_when_idle: false });
+  const before = tree(w.root);
+  const updated = attached(pre(w, call));
+  assert.equal(updated.message, `${call.tool_input.message}\n\n## worker 걱정\n- 고친 뒤의 걱정 하나\n- 고친 뒤의 걱정 둘`);
+  assert.deepEqual(Object.keys(updated), Object.keys(call.tool_input));
+  assert.deepEqual({ ...updated, message: 0 }, { ...call.tool_input, message: 0 }, 'message 말고는 그대로다(to, summary, notify_when_idle)');
+  assert.deepEqual(tree(w.root), before, '아무 파일도 만들거나 고치지 않는다');
+  assert.deepEqual(errorLines(w), []);
+  // 같은 reviewer가 두 번째 검토를 끝낸 뒤에도 기록은 같은 id의 가장 최근 줄로 읽는다
+  reviewerStops(w, 2, 'agent-r2', '## 판정: 통과');
+  assert.equal(concernOf(attached(pre(w, call)).message), '- 고친 뒤의 걱정 하나\n- 고친 뒤의 걱정 둘');
+});
+
+test('(f) a SendMessage that is not to a logged reviewer passes unchanged: an unknown id, a name, a worker\'s id, a reviewer whose task is unknown', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 걱정 하나'], { agent_id: 'agent-w2' });
+  reviewerStops(w, 2, 'agent-r2');
+  stop(w, stopInput(w, 'pact:reviewer', `run-dir: ${w.run}\n검토해 줘`, '## 판정: 통과', { agent_id: 'agent-rx' })); // 보고서 경로도 작업 번호도 없는 지시
+  stop(w, stopInput(w, 'pact:spec-checker', w.spec, '## 사용자만 답할 수 있음\n없음', { agent_id: 'agent-s1' }));
+  const before = tree(w.root);
+  for (const to of ['agent-unknown', 'reviewer', 'main', 'worker [3fa9c1]', 'agent-w2', 'agent-rx', 'agent-s1', 'agent-r', 'AGENT-R2', 'agent-r2 ', ' agent-r2', '', '*']) {
+    passed(pre(w, messageCall(to, '다시 봐 주세요.')), JSON.stringify(to));
+  }
+  for (const to of [undefined, null, 7, ['agent-r2'], { id: 'agent-r2' }]) {
+    passed(pre(w, { tool_name: 'SendMessage', tool_input: { to, message: '다시 봐 주세요.' } }), JSON.stringify(to));
+  }
+  passed(pre(w, { tool_name: 'SendMessage', tool_input: { message: '다시 봐 주세요.' } }), 'to 없음');
+  passed(pre(w, { tool_name: 'SendMessage' }), 'tool_input 없음');
+  assert.deepEqual(tree(w.root), before);
+  assert.deepEqual(errorLines(w), []);
+  assert.ok(concernOf(attached(pre(w, messageCall('agent-r2', '다시 봐 주세요.'))).message), '같은 판에서 reviewer의 id에는 붙는다');
+});
+
+test('(f) a message that is empty or not text (a pure idle-notice request), one that already has the section, a worry that is "없음", and a sub-agent sender all pass unchanged', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 걱정 하나']);
+  reviewerStops(w, 2, 'agent-r2');
+  for (const message of ['', '  \n', undefined, null, 7, { text: '고쳤습니다' }, ['고쳤습니다']]) {
+    passed(pre(w, { tool_name: 'SendMessage', tool_input: { to: 'agent-r2', notify_when_idle: true, message } }), JSON.stringify(message));
+  }
+  passed(pre(w, { tool_name: 'SendMessage', tool_input: { to: 'agent-r2', notify_when_idle: true } }), 'message 없음');
+  passed(pre(w, messageCall('agent-r2', '다시.\n\n## worker 걱정\n- 메인 세션이 옮긴 걱정')), '이미 있다');
+  passed(pre(w, messageCall('agent-r2', '다시 봐 주세요.'), SUB), '하위 에이전트');
+  workerStops(w, 2, ['- 없음']);
+  passed(pre(w, messageCall('agent-r2', '다시 봐 주세요.')), '가장 최근 worker 답에 걱정이 없다');
+  const fresh = reviewWorld();
+  reviewerStops(fresh, 2, 'agent-r2'); // 그 작업의 worker 기록이 없다
+  passed(pre(fresh, messageCall('agent-r2', '다시 봐 주세요.')), 'worker 기록 없음');
+  assert.deepEqual(errorLines(w), []);
+});
+
+test('(f) a message that names another task than the reviewer\'s own passes unchanged: a reviewer used again for a second task must not be given the first task\'s worry', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 작업 2의 걱정']);
+  workerStops(w, 3, ['- 작업 3의 걱정']);
+  reviewerStops(w, 2, 'agent-r2');
+  passed(pre(w, messageCall('agent-r2', `이번에는 작업 번호 3을 검토해 주세요. worker 보고서: ${w.run}/tasks/3-report.md`)), '작업 번호 3');
+  passed(pre(w, messageCall('agent-r2', `${w.run}/tasks/3-report.md를 검토해 주세요.`)), '보고서 경로 3');
+  // 같은 작업을 말하거나, 작업을 말하지 않거나, 번호가 여럿이면(어느 작업을 말하는지 모른다) reviewer 기록의 작업 번호로 붙는다
+  const asked = (message) => concernOf(attached(pre(w, messageCall('agent-r2', message))).message);
+  assert.equal(asked('작업 번호 2를 고쳤습니다.'), '- 작업 2의 걱정');
+  assert.equal(asked(`${w.run}/tasks/2-report.md를 고쳤습니다.`), '- 작업 2의 걱정');
+  assert.equal(asked('고쳤습니다. 다시 봐 주세요.'), '- 작업 2의 걱정');
+  assert.equal(asked(`앞 보고서 ${w.run}/tasks/1-report.md 와 ${w.run}/tasks/3-report.md도 봤습니다.`), '- 작업 2의 걱정');
+});
+
+test('(f) the run is found from the main session\'s cwd (the project, a folder under it, the worktree) or from a path in the message; from nowhere the call passes', () => {
+  const w = reviewWorld();
+  workerStops(w, 2, ['- 걱정 하나']);
+  reviewerStops(w, 2, 'agent-r2');
+  const sub = path.join(w.project, 'plugins', 'pact');
+  const wt = path.join(w.run, 'wt', 'plugins', 'pact');
+  const elsewhere = path.join(w.root, 'elsewhere');
+  for (const dir of [sub, wt, elsewhere]) mkdirSync(dir, { recursive: true });
+  const at = (cwd, call) => runHook(w, { hook_event_name: 'PreToolUse', session_id: 's', cwd, ...call });
+  for (const cwd of [w.project, sub, wt]) assert.equal(concernOf(attached(at(cwd, messageCall('agent-r2', '다시 봐 주세요.')), cwd).message), '- 걱정 하나', cwd);
+  passed(at(elsewhere, messageCall('agent-r2', '다시 봐 주세요.')), '프로젝트 밖이고 글에도 판이 없다');
+  const named = `${w.run}/tasks/2-report.md를 고쳤습니다.`;
+  assert.equal(attached(at(elsewhere, messageCall('agent-r2', named))).message, `${named}\n\n## worker 걱정\n- 걱정 하나`, '글이 판을 가리키면 프로젝트 밖에서도 된다');
+});
+
+test('(f) another run\'s reviewer id is found in the same project, and a SendMessage in a conversation that has nothing to do with pact reads nothing and writes nothing', () => {
+  const w = reviewWorld();
+  const earlier = path.join(w.project, '.pact', '2026-10-01-앞-판');
+  mkdirSync(earlier, { recursive: true });
+  const worker = { time: '2026-10-01T01:00:00.000Z', agent_type: 'pact:worker', agent_id: 'agent-w1', task: 4, message: workerAnswer({ run: earlier }, 4, ['- 앞 판의 걱정']) };
+  appendRecord(earlier, worker);
+  appendRecord(earlier, { ...worker, agent_type: 'pact:reviewer', agent_id: 'agent-r4', message: '## 판정: 고칠 것 있음' });
+  workerStops(w, 2, ['- 이 판의 걱정']);
+  assert.equal(concernOf(attached(pre(w, messageCall('agent-r4', '다시 봐 주세요.'))).message), '- 앞 판의 걱정', '그 reviewer가 있는 판의 worker 답을 쓴다');
+  // pact 프로젝트가 아닌 곳: 읽거나 쓰지 않는다
+  const plain = world();
+  rmSync(path.join(plain.project, 'docs'), { recursive: true });
+  const before = tree(plain.root);
+  passed(runHook(plain, { hook_event_name: 'PreToolUse', session_id: 's', cwd: plain.project, ...messageCall('agent-r4', '다시 봐 주세요.') }));
+  assert.deepEqual(tree(plain.root), before);
+  assert.equal(existsSync(plain.data), false, '플러그인 데이터 폴더도 만들지 않는다');
+});
+
+test('(R7) when the log cannot be read the hook passes the call and logs one error line, for the reviewer brief and for the message', () => {
+  const w = reviewWorld();
+  mkdirSync(path.join(w.run, 'log', 'subagents.jsonl'), { recursive: true }); // 파일 자리에 폴더
+  passed(pre(w, reviewerCall(reviewerBrief(w, 2))));
+  let lines = errorLines(w);
+  assert.equal(lines.length, 1, lines.join('\n'));
+  assert.match(lines[0], /\[PreToolUse\]/);
+  assert.match(lines[0], /EISDIR/);
+  passed(pre(w, messageCall('agent-r2', '다시 봐 주세요.')));
+  lines = errorLines(w);
+  assert.equal(lines.length, 2, lines.join('\n'));
+  assert.match(lines[1], /EISDIR/);
+  // 기록을 읽지 않는 호출은 읽을 수 없는 기록이 있어도 오류를 내지 않는다: id 꼴이 아닌 to, 글이 없거나 비었거나 이미 칸이 있는 글, 하위 에이전트가 보내는 글
+  for (const to of ['worker [3fa9c1]', 'agent-r2 ', '', '*']) passed(pre(w, messageCall(to, '다시 봐 주세요.')), JSON.stringify(to));
+  passed(pre(w, { tool_name: 'SendMessage', tool_input: { to: 'agent-r2', notify_when_idle: true } }));
+  passed(pre(w, messageCall('agent-r2', '  ')));
+  passed(pre(w, messageCall('agent-r2', '다시.\n\n## worker 걱정\n- 메인 세션이 옮긴 걱정')));
+  passed(pre(w, messageCall('agent-r2', '다시 봐 주세요.'), SUB));
+  passed(pre(w, reviewerCall(`${reviewerBrief(w, 2)}\n\n## worker 걱정\n- 메인 세션이 옮긴 걱정`)));
+  passed(pre(w, reviewerCall(`run-dir: ${w.run}\n작업을 검토해 줘.`)));
+  assert.equal(errorLines(w).length, 2, '위 호출들은 기록을 읽지 않았다');
 });
 
 // ---------- (b) worker ----------

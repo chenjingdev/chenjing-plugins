@@ -31,13 +31,26 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
  │   5. 명세 작성
  │   6. 명세 검수    다른 에이전트가 빌더 입장 + 요구 대조 → 사용자 몫만 한 번에 질문
  │   ── 사용자 승인 (유일한 승인) → spec.mjs approve로 기록. 기록이 없으면 build가 시작되지 않는다 ──
- ├─ build    worker 구현 → reviewer 대조, 결정은 Ruling으로 기록
+ ├─ build    worker 구현 → reviewer 대조(worker 걱정은 훅이 reviewer 지시에 붙인다), 결정은 Ruling으로 기록
  └─ verify   시나리오 → 브라우저 실행 + 스크린샷 → 보고서. 실패하면 build로 되돌림
             고친 뒤엔 실패·의심·미검증과 고친 파일이 닿는 시나리오만 다시 검수
             완료 검사 통과 → 로컬 커밋·합치기 → 보고서로 알림 (push만 물음)
 ```
 
 중간에 멈춰도 명세의 `status`(draft → approved → building → verifying → done)를 보고 이어 한다.
+
+## 0.6.0에서 바뀐 것
+
+지난 판들에서 지시로만 지키던 곳이 샜다. 0.6.0은 그곳을 코드와 기록으로 지킨다. 자세한 것은 아래 절에 있다.
+
+- 훅: `hooks/guard.mjs` 하나가 PreToolUse와 SubagentStop에 걸린다. pact와 상관없는 호출은 읽지도 않고 통과시킨다.
+- 승인·위임 기록: `spec.mjs approve`·`delegate`가 사용자 말을 대화 기록에서 찾아 남긴 기록이 있어야 만들기가 시작된다.
+- 결과 잠금: `results.json`은 verifier만, `verification.json`·`approvals.jsonl`·`log/`는 훅과 스크립트만 쓴다. 완료 검사가 verifier가 끝날 때 남긴 지문과 `results.json`을 비교한다.
+- `summary.json`: 보고서 맨 위 칸은 `results.json` 대신 메인 세션이 여기에 쓴다.
+- 검수 번호 짝: spec-checker가 '사용자만 답할 수 있음' 항목마다 `검수 n`을 붙이고, 명세에 짝이 없으면 승인과 완료 검사가 거절한다.
+- `[사용자]` 줄 확인: 승인 뒤 `[사용자]` 줄이 바뀌면 worker 부르기·`snapshot`·완료 검사가 거절하고, 사용자 말을 인용해 다시 승인하면 이어 간다.
+- worker 걱정 넘기기: reviewer를 부를 때 훅이 그 작업의 worker 답에서 `## 걱정·위험`을 꺼내 지시 끝에 `## worker 걱정`으로 붙이고, reviewer는 답의 `## worker 걱정 처리`에 걱정마다 어떻게 했는지 적는다.
+- worker 상태: `DONE`과 `BLOCKED` 둘이다. 마음에 걸리는 것은 상태와 상관없이 `## 걱정·위험`에 쓰고, 작업 지시에는 커밋 꼬리말을 넣지 않는다.
 
 ## 남는 것
 
@@ -46,7 +59,7 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
 | `docs/pact/<날짜>-<주제>.md` | 명세. 한 화면 분량, 항목마다 `[사용자]`/`[AI 가정]`, 결정 기록 |
 | `.pact/<날짜>-<주제>/report.html` | 검수 보고서. 맨 위에 결론과 할 일(명세 `## 확인 필요`의 검수 항목이 저절로 올라온다), 그다음 실패·의심·미검증과 명세와 다른 것, 승인 기록(승인인지 위임인지, 인용한 말, 승인 뒤 바뀐 `[사용자]` 줄). 통과·작업 기록·결정 기록은 접힘 |
 | `.pact/<날짜>-<주제>/` | 실행 폴더. 명세 파일명(날짜 포함)으로 구분한다. 체크리스트, 스케치, 작업 보고, 검수 기록(`verification.json`)이 들어가고 스스로 git에서 빠진다 |
-| `.pact/<날짜>-<주제>/log/subagents.jsonl` | 하위 에이전트가 끝날 때마다 훅이 마지막 답을 한 줄씩 덧붙인 기록 |
+| `.pact/<날짜>-<주제>/log/subagents.jsonl` | 하위 에이전트가 끝날 때마다 훅이 마지막 답을 한 줄씩 덧붙인 기록. reviewer에게 붙일 worker 걱정도 여기서 읽는다 |
 | `.pact/<날짜>-<주제>/approvals.jsonl` | 승인·위임 기록. `spec.mjs approve`·`delegate`가 사용자 말을 대화 기록에서 찾아 맞춰 보고 한 줄씩 덧붙인다. 그때의 `[사용자]` 줄도 담는다 |
 | `.pact/<날짜>-<주제>/results.json` | 검수 결과. verifier만 쓴다. 앞 검수의 결과는 `snapshot`이 `results-round<n>.json`으로 남긴다 |
 | `.pact/<날짜>-<주제>/summary.json` | 보고서 맨 위 칸(`headline`·`todo`·`changes`·시나리오별 `decision`). 메인 세션이 쓴다 |
@@ -113,6 +126,7 @@ node <pact>/scripts/verification.mjs finish <명세> <프로젝트>             
 
 - PreToolUse: 메인 세션이 `pact:worker`를 부를 때 작업 지시의 판(`맥락` 칸의 run-dir)에 승인·위임 기록이 없거나 승인 뒤 `[사용자]` 줄이 바뀌었으면 막는다(옛 판은 통과). 지시문에서 판을 못 찾으면 "맥락 칸에 run-dir과 작업 번호를 넣는다"로 막는다. 위임 기록이면 지금 명세의 위험 항목과 인용을 다시 본다. 하위 에이전트가 Bash로 `spec.mjs approve`·`delegate`·`set-status`를 부르면 막고, 메인 세션도 approve·delegate 앞에 환경 변수(`HOME=`, `CLAUDE_CODE_SESSION_ID=`, `CLAUDE_CONFIG_DIR=` 등)를 덮어쓰면 막는다. 막을 때는 까닭과 대신 할 일을 한 줄로 알린다.
 - PreToolUse(결과 잠금): 실행 폴더 바로 밑의 파일은 정해진 쪽만 쓴다. `results.json`·`results-round*.json`은 `pact:verifier`만, `verification.json`은 `verification.mjs snapshot`만, `approvals.jsonl`과 `log/` 밑은 훅과 pact 스크립트만 쓴다. 메인 세션과 다른 하위 에이전트가 Edit·Write·MultiEdit·NotebookEdit로 쓰거나 Bash로 쓰면(`>`·`>>`·`tee`·`sed -i`·`perl -i`, `cp`·`mv`·`rm`·`truncate`·`touch`의 대상, `python -c`·`node -e`·heredoc 한 줄 스크립트의 `open(…, 'w')`·`writeFileSync` 같은 쓰기) 막고, 까닭과 대신 할 일을 한 줄로 알린다. 읽기(`cat`·`jq`·`grep`)와 pact 스크립트 호출은 막지 않는다. `<run-dir>/wt/` 밑, `summary.json`·`report.html`·`shots/`·`plan.md`·`tasks/`, 그리고 명세(`docs/pact/<run-id>.md`)가 없는 폴더는 대상이 아니다. 옛 판도 똑같이 건다. 이름은 대소문자를 가리지 않고 본다(이 컴퓨터의 파일 시스템이 가리지 않는다). 훅이 못 보는 길도 있다: 변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구(메인 세션도 CUA의 `js`로 `fs.writeFileSync`를 불러 실행 폴더에 쓸 수 있고, MCP 도구는 `hooks.json`의 matcher에 없다). 그 길은 완료 검사의 지문 비교가 막는다.
+- PreToolUse(worker 걱정): 메인 세션이 `pact:reviewer`를 부르면 지시문의 판과 작업 번호(`<run-dir>/tasks/<n>-report.md`나 `작업 번호 n`)로 `log/`에서 그 작업의 가장 최근 worker 답을 찾아 `## 걱정·위험` 칸을 지시 끝에 `## worker 걱정`으로 붙이고 통과시킨다(입력의 다른 칸은 그대로 둔다). 메인 세션이 같은 reviewer에 SendMessage로 보낼 때도, `to`가 `log/`에 reviewer로 남은 agent id이면 그 작업의 가장 최근 worker 답(고친 뒤의 답)의 걱정을 message 끝에 붙인다. 걱정이 '없음'이거나 비었을 때, 판이나 작업 번호나 그 번호의 worker 기록을 못 찾았을 때, `to`가 agent id가 아니거나 `log/`에 없을 때, SendMessage 글이 그 reviewer의 작업과 다른 작업 번호를 말할 때, 이미 `## worker 걱정`이 있을 때는 그대로 통과한다. 막지는 않는다. 걱정은 worker 보고서가 아니라 `log/`의 worker 답에서 가져온다. 에이전트에 이름을 붙여 이름으로 보내면 받는 쪽을 알 수 없어 붙이지 않는다. SendMessage는 글에 pact 흔적이 없어도 `to`가 id 꼴이면 cwd 프로젝트(또는 글이 가리키는 프로젝트)의 `.pact/` 밑 `log/`를 읽어 받는 쪽을 찾는다. pact 프로젝트가 아니면 읽을 것이 없고, 아무것도 쓰지 않는다.
 - SubagentStop: `pact:spec-checker`·`pact:reviewer`·`pact:worker`·`pact:verifier`가 끝나면 마지막 답을 그 판의 `<run-dir>/log/subagents.jsonl`에 한 줄 덧붙인다. 실행 폴더는 하위 에이전트의 첫 지시에 든 경로로 찾고, 없으면 그 프로젝트에서 가장 최근에 바뀐 진행 중 명세로 찾는다. `pact:verifier`가 끝날 때는 그 순간의 `results.json` sha256도 같은 줄에 적는다. 완료 검사가 이 지문과 지금 파일을 비교한다.
 - 훅이 고장나도 대화를 막지 않는다. 오류는 플러그인 데이터 폴더(`${CLAUDE_PLUGIN_DATA}`, 없으면 `~/.claude/plugins/data/pact-chenjing-plugins`)의 `hook-error.log`에 한 줄 남는다.
 

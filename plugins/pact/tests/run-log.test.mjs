@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   AGENT, LOGGED_AGENTS, logFile, appendRecord, readRecords, latestRecord, latestSpecCheckerReply, latestWorkerReply,
-  latestVerifierFingerprint, resultsSha256, firstUserPrompt, recordStop,
+  latestVerifierFingerprint, resultsSha256, firstUserPrompt, recordStop, findAgentRecord,
 } from '../scripts/run-log.mjs';
 
 const made = [];
@@ -72,6 +72,53 @@ test('the readers return the latest spec-checker reply, the latest reply of work
   assert.equal(latestSpecCheckerReply(empty), null);
   assert.equal(latestWorkerReply(empty, 1), null);
   assert.equal(latestVerifierFingerprint(empty), null);
+});
+
+test('findAgentRecord finds the latest record of an agent id of one type across the runs of a project, and the run it is in', () => {
+  const project = tmp();
+  const runA = path.join(project, '.pact', '2026-10-28-가');
+  const runB = path.join(project, '.pact', '2026-10-29-나');
+  appendRecord(runA, rec(AGENT.reviewer, { agent_id: 'r-old', task: 1, message: '가 판의 검토' }));
+  appendRecord(runB, rec(AGENT.worker, { agent_id: 'w-1', task: 2, message: '작업 2' }));
+  appendRecord(runB, rec(AGENT.reviewer, { agent_id: 'r-1', task: 2, message: '첫 검토' }));
+  appendRecord(runB, rec(AGENT.reviewer, { agent_id: 'r-other', task: 3, message: '다른 검토' }));
+  appendRecord(runB, rec(AGENT.reviewer, { agent_id: 'r-1', task: 2, message: '두 번째 검토' })); // SendMessage로 돌아온 같은 reviewer
+  const hit = findAgentRecord(project, 'r-1', AGENT.reviewer);
+  assert.equal(hit.runDir, runB);
+  assert.equal(hit.record.message, '두 번째 검토', '가장 최근 기록이다');
+  assert.equal(hit.record.task, 2);
+  assert.equal(findAgentRecord(project, 'r-old', AGENT.reviewer).runDir, runA, '다른 판의 것도 찾는다');
+  assert.equal(findAgentRecord(project, 'w-1', AGENT.worker).record.message, '작업 2');
+  assert.equal(findAgentRecord(project, 'w-1', AGENT.reviewer), null, '종류가 다르면 그 id가 있어도 없다');
+  assert.equal(findAgentRecord(project, 'r-', AGENT.reviewer), null, 'id는 통째로 같아야 한다');
+  assert.equal(findAgentRecord(project, 'r-1 ', AGENT.reviewer), null);
+  assert.equal(findAgentRecord(project, 'unknown', AGENT.reviewer), null);
+});
+
+test('findAgentRecord has nothing to find without a .pact folder, a log, an id or a project, skips folders and files that are not runs, and reads past broken lines', () => {
+  const project = tmp();
+  assert.equal(findAgentRecord(project, 'r-1', AGENT.reviewer), null, '.pact가 없다');
+  const run = path.join(project, '.pact', '2026-10-29-가');
+  mkdirSync(run, { recursive: true });
+  assert.equal(findAgentRecord(project, 'r-1', AGENT.reviewer), null, 'log/가 없다');
+  writeFileSync(path.join(project, '.pact', '.gitignore'), '*\n');
+  writeFileSync(path.join(project, '.pact', 'notes.md'), '실행 폴더가 아닌 파일');
+  mkdirSync(path.join(project, '.pact', '.hidden', 'log'), { recursive: true });
+  writeFileSync(path.join(project, '.pact', '.hidden', 'log', 'subagents.jsonl'), `${JSON.stringify(rec(AGENT.reviewer, { agent_id: 'r-1', task: 1 }))}\n`);
+  assert.equal(findAgentRecord(project, 'r-1', AGENT.reviewer), null, '점으로 시작하는 폴더는 판이 아니다');
+  appendRecord(run, rec(AGENT.reviewer, { agent_id: 'r-1', task: 1 }));
+  appendFileSync(logFile(run), '{"agent_id":"r-1","agent_type":"pact:rev\n[1,2]\n"r-1"\n'); // 깨진 줄과 객체가 아닌 줄
+  assert.equal(findAgentRecord(project, 'r-1', AGENT.reviewer).runDir, run);
+  for (const [dir, id, type] of [[undefined, 'r-1', AGENT.reviewer], [null, 'r-1', AGENT.reviewer], ['', 'r-1', AGENT.reviewer], [project, '', AGENT.reviewer], [project, undefined, AGENT.reviewer], [project, 42, AGENT.reviewer], [project, 'r-1', undefined]]) {
+    assert.equal(findAgentRecord(dir, id, type), null, JSON.stringify([dir, id, type]));
+  }
+  assert.equal(findAgentRecord(path.join(project, 'nope'), 'r-1', AGENT.reviewer), null, '없는 프로젝트');
+});
+
+test('findAgentRecord throws when a log it must read cannot be read, as readRecords does, instead of reporting "not found"', () => {
+  const project = tmp();
+  mkdirSync(path.join(project, '.pact', '2026-10-29-가', 'log', 'subagents.jsonl'), { recursive: true }); // 파일 자리에 폴더
+  assert.throws(() => findAgentRecord(project, 'r-1', AGENT.reviewer), /EISDIR/);
 });
 
 test('a later verifier stop with no results.json is the latest fingerprint: it must not fall back to an older one', () => {

@@ -74,11 +74,44 @@ test('spec-checker ends with the one-round line', () => {
   assert.equal(lines.at(-1), '질문 라운드는 이것 한 번뿐입니다.');
 });
 
-test('worker reports with DONE_WITH_CONCERNS and Ruling lines', () => {
+test('worker reports with Ruling lines and a status of DONE or BLOCKED, and writes every worry in its own field whatever the status', () => {
   const text = read('agents/worker.md');
-  assert.ok(text.includes('DONE_WITH_CONCERNS'));
   assert.ok(text.includes('Ruling:'));
   assert.ok(text.includes('Ruling: <무엇을 정했나> — <왜> — <틀리면 무엇을 잃나>'));
+  // 상태는 둘이다. 걱정은 상태가 아니라 칸에 쓴다(F7, R16)
+  assert.ok(!text.includes('DONE_WITH_CONCERNS'), 'DONE_WITH_CONCERNS는 없어졌다');
+  assert.ok(!text.includes('PARTIAL'), 'PARTIAL도 없어졌다');
+  assert.match(text, /^## 상태: DONE \| BLOCKED$/m);
+  assert.match(text, /상태는 둘이다\. 끝냈으면 `DONE`, 멈추고 물어야 하면 `BLOCKED`다\. 마음에 걸리는 것은 상태와 상관없이 `## 걱정·위험`에 쓴다\. 없으면 "없음"이다\./);
+  assert.match(text, /^## 걱정·위험\n- <마음에 걸리는 것 한 줄에 하나\. 메인 세션이 봐야 할 것, 지시 안의 모순> \(없으면 "없음"\)\n보고서: <run-dir>\/tasks\/<n>-report\.md$/m);
+  assert.match(text, /훅이 이 칸을 reviewer의 작업 지시 끝에 붙이고 reviewer가 걱정마다 맞는지 보니, 한 줄에 하나씩 쓴다/);
+  // 마지막 줄은 그대로다: 훅이 작업 번호를 이 줄에서 읽는다
+  assert.match(text, /\n보고서: <run-dir>\/tasks\/<n>-report\.md\n```/);
+});
+
+test('worker uses the commit trailer its own harness gives and does not raise a trailer that differs from the brief or from other commits as a worry (R17)', () => {
+  const text = read('agents/worker.md');
+  assert.match(text, /커밋 꼬리말\(`Co-Authored-By` 등\)은 당신의 하네스가 주는 대로 쓴다\. 지시나 다른 곳의 꼬리말과 다르다는 것은 걱정으로 올리지 않는다\./);
+  assert.match(text, /^5\. 작업 하나가 끝나면 worktree 안에서 커밋한다\. push는 하지 않는다\. 커밋 꼬리말/m, '커밋하는 단계에서 말한다');
+});
+
+test('reviewer answers every worry attached to its brief in a "## worker 걱정 처리" field: whether it is true and whether to fix it now, "없음" when none is attached', () => {
+  const text = read('agents/reviewer.md');
+  // 입력: 지시 끝에 붙은 걱정은 훅이 붙인 worker의 주장이다
+  assert.match(text, /- 지시 끝의 `## worker 걱정`\(없을 수 있다\)\. worker가 마지막 답의 `## 걱정·위험`에 쓴 것을 훅이 붙였다\. 이것도 확인하지 않은 주장이다\./);
+  assert.match(text, /- \*\*worker 걱정\*\*: 지시 끝에 `## worker 걱정`이 있으면 걱정마다 diff와 파일로 맞는지 보고 이번에 고칠지 정한다\. 이번에 고칠 것은 `## 지적`에도 올린다\./);
+  // 결과 형식: 지적 다음, 판정 앞. 판정이 맨 끝에 남는다
+  const format = /## 결과 — 이 형식 그대로\n\n```\n([\s\S]*?)\n```/.exec(text)?.[1] ?? '';
+  const headings = format.split('\n').filter((line) => /^## /.test(line));
+  assert.deepEqual(headings, ['## 명세 대조', '## 지적', '## worker 걱정 처리', '## 판정: 통과 | 고칠 것 있음']);
+  assert.match(format, /^## worker 걱정 처리\n- <걱정 한 줄 요약> — 맞음 \| 틀림 \| 확인 못 함 — 이번에 고친다 \| 안 고친다\(<이유>\)  \(붙은 걱정이 없으면 "없음"\)\n## 판정/m);
+  // 처리하는 법
+  assert.match(text, /지시 끝에 `## worker 걱정`이 붙어 있으면 걱정마다 한 줄씩 `## worker 걱정 처리`에 적는다: 맞는지, 이번에 고칠지\./);
+  assert.match(text, /붙은 걱정이 없으면 "없음"이라고 쓴다\./);
+  assert.match(text, /이번에 고치기로 한 것은 `## 지적`의 중요 이상에 올리니 판정이 `고칠 것 있음`이 된다\./);
+  assert.match(text, /안 고치는 걱정은 이유를 적는다/);
+  assert.match(text, /두 번째 검토 메시지 끝에 붙은 걱정은 고친 뒤의 worker 답의 것이다\. 같은 형식으로 처리한다\./);
+  assert.equal(text.trimEnd().split('\n').at(-1).includes('고칠 것 있음'), true, '판정을 말하는 문단이 맨 끝이다');
 });
 
 test('verifier writes results.json with scenario kinds including newcomer', () => {
@@ -122,6 +155,33 @@ test('build.md checks git, uses worker and reviewer, records Rulings', () => {
   }
   assert.match(text, /set-status <명세> building/);
   assert.equal(text.trimEnd().split('\n').at(-1), '다음: verify.md');
+});
+
+test('build.md: the brief carries no commit trailer, the worker status is DONE or BLOCKED, and the worker worries reach the reviewer through the hook while the main session reads them', async () => {
+  const build = read('skills/pact/build.md');
+  assert.ok(!build.includes('DONE_WITH_CONCERNS'), '옛 3.2는 없어졌다');
+  assert.ok(!build.includes('PARTIAL'));
+  assert.doesNotMatch(build, /걱정을 읽고 검토자에게 같이 넘긴다/);
+  // 작업 지시(네 칸)에 꼬리말을 넣지 않는다(R17)
+  assert.match(build, /커밋 꼬리말\(`Co-Authored-By`, 세션 줄\)은 네 칸 어디에도 넣지 않는다\. worker가 자기 하네스가 주는 꼬리말을 쓴다\. 꼬리말이 다르다는 것은 걱정으로 올라오지 않는다\./);
+  // 3.2: 상태는 둘, 걱정은 읽고 알릴 것을 본다, 넘기는 일은 훅이 한다
+  assert.match(build, /^2\. 답장의 상태를 본다\. 상태는 `DONE`과 `BLOCKED` 둘이다\. `## 걱정·위험`이 "없음"이 아니면 읽고 사용자에게 알릴 것이 있는지 본다/m);
+  assert.match(build, /걱정을 검토자에게 넘기는 일은 훅이 한다\. 직접 옮겨 적지 않는다\./);
+  // 3.3: 훅이 붙이는 것, 붙지 않는 때, reviewer의 처리 칸
+  assert.match(build, /보고서 경로는 이 작업 것\(`<run-dir>\/tasks\/<n>-report\.md`\)을 적고, 다른 작업의 보고서 경로를 같이 적으면 `작업 번호 n`도 적는다\./);
+  assert.match(build, /훅이 이 번호와 run-dir로 그 작업의 가장 최근 worker 답에서 `## 걱정·위험` 칸을 꺼내 지시 끝에 `## worker 걱정`으로 붙인다/);
+  assert.match(build, /걱정이 "없음"이거나 판이나 작업 번호를 못 찾으면 붙이지 않는다\./);
+  assert.match(build, /reviewer는 답의 `## worker 걱정 처리`에 걱정마다 맞는지, 이번에 고칠지를 적는다\./);
+  // 3.5: 두 번째 검토도 같은 길이다. 세 번째 검토는 없다는 문장은 그대로 이어진다
+  assert.match(build, /`to`에 reviewer의 agent id를 쓰면 훅이 고친 뒤의 worker 답의 걱정을 message 끝에 `## worker 걱정`으로 붙인다\./);
+  assert.ok(build.includes('한 번 더 검토받는다. `to`에 reviewer의 agent id를 쓰면'), '두 번째 검토 문장 안에 있다');
+  // 문서와 코드가 같은 제목·칸 이름을 말한다
+  const { CONCERNS_HEADING } = await import('../scripts/concerns.mjs');
+  assert.equal(CONCERNS_HEADING, '## worker 걱정');
+  for (const [name, text] of [['build.md', build], ['reviewer.md', read('agents/reviewer.md')], ['README.md', read('README.md')]]) {
+    assert.ok(text.includes(`\`${CONCERNS_HEADING}\``), `${name}가 붙는 제목 ${CONCERNS_HEADING}를 말한다`);
+  }
+  assert.ok(read('agents/worker.md').includes('## 걱정·위험'));
 });
 
 test('the report is written for the person who approved the spec: plain fields on top, working notes folded', () => {
@@ -569,4 +629,35 @@ test('the refusals the scripts and the hook print tell only the standard-input w
   const approval = read('scripts/approval.mjs');
   assert.match(approval, /const approveCmd = \(verb = 'approve'\) => `spec\.mjs \$\{verb\} <명세> - <<'EOF'`;/);
   assert.match(approval, /const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';/);
+});
+
+test('plugin.json is at 0.6.0', () => {
+  const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
+  assert.equal(manifest.name, 'pact');
+  assert.equal(manifest.version, '0.6.0');
+});
+
+test('the README lists what 0.6.0 changed in one short section, and says how the hook hands the worker worries to the reviewer, in the brief and in a message', () => {
+  const readme = read('README.md');
+  const section = /^## 0\.6\.0에서 바뀐 것\n([\s\S]*?)(?=\n## )/m.exec(readme)?.[1] ?? '';
+  const bullets = section.split('\n').filter((line) => line.startsWith('- '));
+  assert.equal(bullets.length, 8, '바뀐 것 여덟 가지가 한 줄씩이다');
+  const names = ['훅', '승인·위임 기록', '결과 잠금', '`summary.json`', '검수 번호 짝', '`[사용자]` 줄 확인', 'worker 걱정 넘기기', 'worker 상태'];
+  names.forEach((name, i) => assert.ok(bullets[i].startsWith(`- ${name}: `), `${i + 1}번째는 ${name}: ${bullets[i]}`));
+  assert.ok(bullets.every((line) => line.length < 260), '한 줄이 짧다');
+  assert.match(bullets[6], /reviewer를 부를 때 훅이 그 작업의 worker 답에서 `## 걱정·위험`을 꺼내 지시 끝에 `## worker 걱정`으로 붙이고, reviewer는 답의 `## worker 걱정 처리`에 걱정마다 어떻게 했는지 적는다/);
+  assert.match(bullets[7], /`DONE`과 `BLOCKED` 둘이다\. 마음에 걸리는 것은 상태와 상관없이 `## 걱정·위험`에 쓰고, 작업 지시에는 커밋 꼬리말을 넣지 않는다/);
+  // 훅 절: 항목 머리말이 순서대로 다 있다(worker 걱정 항목을 더하다 다른 항목을 지우지 않았는지)
+  const hook = /^## 훅\n([\s\S]*?)(?=\n## )/m.exec(readme)?.[1] ?? '';
+  const hookBullets = hook.split('\n').filter((line) => line.startsWith('- '));
+  const heads = ['- PreToolUse: ', '- PreToolUse(결과 잠금): ', '- PreToolUse(worker 걱정): ', '- SubagentStop: ', '- 훅이 고장나도 대화를 막지 않는다. '];
+  assert.equal(hookBullets.length, heads.length, hookBullets.map((line) => line.slice(0, 20)).join(' / '));
+  heads.forEach((head, i) => assert.ok(hookBullets[i].startsWith(head), `${i + 1}번째 항목은 "${head}"로 시작한다: ${hookBullets[i].slice(0, 30)}`));
+  assert.match(hook, /- PreToolUse\(worker 걱정\): 메인 세션이 `pact:reviewer`를 부르면 지시문의 판과 작업 번호\(`<run-dir>\/tasks\/<n>-report\.md`나 `작업 번호 n`\)로 `log\/`에서 그 작업의 가장 최근 worker 답을 찾아 `## 걱정·위험` 칸을 지시 끝에 `## worker 걱정`으로 붙이고 통과시킨다/);
+  assert.match(hook, /메인 세션이 같은 reviewer에 SendMessage로 보낼 때도, `to`가 `log\/`에 reviewer로 남은 agent id이면 그 작업의 가장 최근 worker 답\(고친 뒤의 답\)의 걱정을 message 끝에 붙인다/);
+  assert.match(hook, /걱정이 '없음'이거나 비었을 때, 판이나 작업 번호나 그 번호의 worker 기록을 못 찾았을 때, `to`가 agent id가 아니거나 `log\/`에 없을 때, SendMessage 글이 그 reviewer의 작업과 다른 작업 번호를 말할 때, 이미 `## worker 걱정`이 있을 때는 그대로 통과한다\. 막지는 않는다\./);
+  assert.match(hook, /걱정은 worker 보고서가 아니라 `log\/`의 worker 답에서 가져온다\./);
+  assert.match(hook, /에이전트에 이름을 붙여 이름으로 보내면 받는 쪽을 알 수 없어 붙이지 않는다\./);
+  assert.match(hook, /SendMessage는 글에 pact 흔적이 없어도 `to`가 id 꼴이면 cwd 프로젝트\(또는 글이 가리키는 프로젝트\)의 `\.pact\/` 밑 `log\/`를 읽어 받는 쪽을 찾는다\. pact 프로젝트가 아니면 읽을 것이 없고, 아무것도 쓰지 않는다\./);
+  assert.ok(!readme.includes('DONE_WITH_CONCERNS') && !readme.includes('PARTIAL'));
 });

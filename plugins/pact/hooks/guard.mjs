@@ -9,7 +9,9 @@
 //                  덮어쓰면 막는다.
 //                  결과 잠금(F1, R14): 실행 폴더 바로 밑의 results*.json은 pact:verifier만, verification.json·approvals.jsonl·log/는
 //                  아무도(훅과 pact 스크립트만) 쓰지 못하게 Edit·Write·MultiEdit·NotebookEdit와 Bash의 쓰기 꼴을 막는다. scripts/locks.mjs가 한다.
-//                  worker 걱정 붙이기(F6)는 뒤 작업이 handlePreToolUse에 더한다.
+//                  worker 걱정 붙이기(F6, R16): 메인 세션이 pact:reviewer를 부르면 지시문의 판과 작업 번호로 log/에서 그 작업의 가장 최근 worker 답을 찾아
+//                  `## 걱정·위험` 칸을 지시 끝에 `## worker 걱정`으로 붙이고 통과시킨다(updatedInput). 같은 reviewer에 SendMessage로 보내는 글에도 붙인다 —
+//                  받는 쪽이 reviewer인지와 작업 번호는 log/의 reviewer 기록(agent_id, task)으로 안다. 붙일 것이 없으면 그냥 통과한다. scripts/concerns.mjs가 글을 다룬다.
 //   SubagentStop — pact:spec-checker·reviewer·worker·verifier가 멈추면 마지막 답을 그 판의 <run-dir>/log/에 덧붙여 남기고,
 //                  verifier는 그때의 results.json 지문(sha256)도 남긴다(F4, R14, R15). scripts/run-log.mjs가 한다.
 //
@@ -71,6 +73,7 @@ export function touchesPact(input) {
     case 'MultiEdit': return PACT_TEXT.test(String(ti.file_path ?? ''));
     case 'NotebookEdit': return PACT_TEXT.test(String(ti.notebook_path ?? ''));
     // 받는 쪽이 pact 에이전트인지는 id로는 모른다. 보내는 글에 pact 흔적이 있는지만 본다.
+    // (메인 세션이 reviewer에게 보내는 글은 handlePreToolUse가 log/로 따로 본다: 글에 pact 흔적이 없어도 id로 알 수 있어서다.)
     case 'SendMessage': return PACT_TEXT.test(JSON.stringify(ti));
     default: return false;
   }
@@ -149,19 +152,83 @@ async function gateLocks(input) {
   return verdict ? denyOutput(verdict.reason, verdict.instead) : null;
 }
 
+// ---------- worker 걱정 붙이기 (F6, R16) ----------
+// worker가 마지막 답의 `## 걱정·위험`에 쓴 것을 reviewer가 받는 글 끝에 `## worker 걱정`으로 붙인다. 붙일 것이 없으면 null: 막지 않고 그대로 통과한다
+// (걱정이 '없음'이거나 비었다, 작업 번호나 그 번호의 worker 기록을 못 찾았다, 이미 붙어 있다).
+// 걱정은 worker 보고 파일이 아니라 log/의 worker 답에서 가져온다(R16). 훅이 남긴 기록이라 worker가 나중에 고칠 수 없다.
+// SendMessage의 to가 id 꼴인가. 공백이나 `[ref]`가 든 주소와 빈 값은 아니다. 이름(`reviewer`)도 이 꼴이라 걸러지지 않는다 — log/에 그 id의 reviewer 기록이 있는지가 가른다.
+const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+const cwdOf = (input) => (typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd());
+
+// 그 판의 작업 n의 가장 최근 worker 답의 걱정 글, 없으면 null
+async function latestConcerns(runDir, task) {
+  const { latestWorkerReply } = await import('../scripts/run-log.mjs');
+  const { concernsOf } = await import('../scripts/concerns.mjs');
+  const reply = latestWorkerReply(runDir, task);
+  return reply ? concernsOf(reply.message) : null;
+}
+
+// 메인 세션이 pact:reviewer를 부를 때: 지시문의 판(findRunDir)과 작업 번호(taskNumber)로 그 작업의 worker 걱정을 찾아 prompt 끝에 붙인다.
+// 판은 지시문에 든 경로로만 찾는다(gateWorker와 같다). cwd로 짐작한 판의 기록을 붙이면 다른 판의 걱정이 섞인다. 작업 번호가 null이면 '못 찾음'이다.
+async function attachToBrief(input, toolInput) {
+  const prompt = typeof toolInput.prompt === 'string' ? toolInput.prompt : '';
+  if (!prompt) return null;
+  const { hasConcernsSection, withConcerns } = await import('../scripts/concerns.mjs');
+  if (hasConcernsSection(prompt)) return null;
+  const { findRunDir, taskNumber } = await import('../scripts/run-dir.mjs');
+  const found = findRunDir({ text: prompt, cwd: cwdOf(input) });
+  if (!found || found.via !== 'prompt') return null;
+  const task = taskNumber({ prompt });
+  if (task === null) return null;
+  const concerns = await latestConcerns(found.runDir, task);
+  return concerns ? allowOutput({ ...toolInput, prompt: withConcerns(prompt, concerns) }) : null;
+}
+
+// 메인 세션이 SendMessage로 글을 보낼 때: 받는 쪽(to)이 log/에 pact:reviewer로 남은 agent_id이면, 그 기록의 작업 번호로
+// 그 작업의 가장 최근 worker 답(고친 뒤의 답)의 걱정을 message 끝에 붙인다. to가 id가 아니거나 log/에서 못 찾으면 그대로 통과한다.
+// 글이 reviewer 기록과 다른 작업 번호를 말하면 그것도 못 찾음처럼 통과한다(reviewer를 다른 작업에 다시 쓰는 경우).
+// reviewer가 어느 판에 있는지는 id로만 안다. 글이 가리키는 프로젝트와 cwd 프로젝트의 판들을 본다.
+async function attachToMessage(input, toolInput) {
+  const { to, message } = toolInput;
+  // 글이 없거나 글이 아니면(알림만 신청하는 호출) 붙이지 않는다. 붙이면 알림 신청이 reviewer에게 가는 글이 된다.
+  if (typeof to !== 'string' || !AGENT_ID.test(to) || typeof message !== 'string' || !message.trim()) return null;
+  const { hasConcernsSection, withConcerns } = await import('../scripts/concerns.mjs');
+  if (hasConcernsSection(message)) return null;
+  const { projectOfCwd, runDirCandidates, taskNumber } = await import('../scripts/run-dir.mjs');
+  const { findAgentRecord, AGENT } = await import('../scripts/run-log.mjs');
+  const cwd = cwdOf(input);
+  const projects = [...new Set([...runDirCandidates(message, cwd).map((c) => c.project), projectOfCwd(cwd)].filter(Boolean))];
+  for (const project of projects) {
+    const hit = findAgentRecord(project, to, AGENT.reviewer);
+    if (!hit) continue;
+    if (typeof hit.record.task !== 'number') return null; // 작업 번호를 모르면 어느 worker 답인지 모른다
+    const named = taskNumber({ prompt: message });
+    if (named !== null && named !== hit.record.task) return null; // 글이 다른 작업을 말한다: reviewer를 다른 작업에 다시 쓰는 것이면 첫 작업의 걱정을 붙이지 않는다
+    const concerns = await latestConcerns(hit.runDir, hit.record.task);
+    return concerns ? allowOutput({ ...toolInput, message: withConcerns(message, concerns) }) : null;
+  }
+  return null;
+}
+
 // ---------- PreToolUse ----------
 // 돌려주는 값: 막거나 입력을 바꾸는 출력(denyOutput, allowOutput) 또는 null(그냥 통과).
-// worker 걱정 붙이기(F6)는 뒤 작업이 pact가 걸린 호출에 한해 여기에 더한다.
 export async function handlePreToolUse(input) {
   const command = bashCommand(input);
   const calls = specCalls(command);
   const inRun = input && input.tool_name === 'Bash' && typeof input.cwd === 'string' && RUN_CWD.test(input.cwd);
+  const subAgent = Boolean(input) && typeof input.agent_id === 'string' && input.agent_id !== ''; // agent_id가 없으면 메인 세션
+  const toolInput = input && input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
+  // 메인 세션의 SendMessage는 싼 검사 앞에서 본다. 받는 쪽이 reviewer인지는 글에 pact 흔적이 없어도 log/로 알 수 있다.
+  // to가 id 꼴이고 글이 있을 때만 파일을 읽고(cwd 프로젝트의 .pact/ 밑 기록), 그 밖에는 아무것도 읽지 않는다.
+  if (input && input.tool_name === 'SendMessage' && !subAgent) return attachToMessage(input, toolInput);
   if (!touchesPact(input) && !calls.length && !inRun) return null; // R1: 상관없는 호출은 파일을 읽지 않고 바로 통과
-  const subAgent = typeof input.agent_id === 'string' && input.agent_id !== ''; // agent_id가 없으면 메인 세션
-  const toolInput = input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
   if (input.tool_name === 'Bash') return gateSpecCommand(calls, command, subAgent) ?? gateLocks(input);
   if (FILE_TOOLS.has(input.tool_name)) return gateLocks(input);
-  if (input.tool_name === 'Agent' && toolInput.subagent_type === 'pact:worker' && !subAgent) return gateWorker(input, toolInput);
+  if (input.tool_name === 'Agent' && !subAgent) {
+    if (toolInput.subagent_type === 'pact:worker') return gateWorker(input, toolInput);
+    if (toolInput.subagent_type === 'pact:reviewer') return attachToBrief(input, toolInput);
+  }
   return null;
 }
 
