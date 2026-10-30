@@ -148,7 +148,7 @@ struct SetupFlowTests {
         await auto.runWhatWasPutOff()
         #expect(rig.runner.calls.filter { $0.isInstallEngine }.count == 1, "the engine was already the app's")
         #expect(rig.runner.calls.contains(rig.mcpAdd()))
-        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
+        #expect(rig.claude.mcpState(launcher: rig.launcher) == .ready)
         #expect(rig.setup.waitingFor.isEmpty)
     }
 

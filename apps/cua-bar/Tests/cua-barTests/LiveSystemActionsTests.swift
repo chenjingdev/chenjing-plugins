@@ -114,7 +114,6 @@ struct LiveSystemActionsTests {
         var mcpRemove: StepRunner.Call {
             .init(executable: claudePath, arguments: ["mcp", "remove", "-s", "user", "cuabar"], timeout: .seconds(120))
         }
-        var skillSourceBody: String { (try? String(contentsOf: bundle.skillSource, encoding: .utf8)) ?? "" }
     }
 
     /// - engine: the status the engine answers with (an error: no engine); a current one says the app's version.
@@ -135,7 +134,6 @@ struct LiveSystemActionsTests {
         let home = try TempHome()
         let bundleRoot = home.url.appendingPathComponent("Bundle/engine", isDirectory: true)
         try home.write("#!/bin/sh\nexit 0\n", to: bundleRoot.appendingPathComponent("setup.sh"))
-        try home.write("the bundled skill\n", to: bundleRoot.appendingPathComponent("skills/cuabar/SKILL.md"))
         let bundle = BundledEngine(root: bundleRoot)
         let launcher = home.launcher
         let claudePath = home.claudeCLI.path
@@ -189,15 +187,14 @@ struct LiveSystemActionsTests {
 
     // MARK: The first install
 
-    @Test func aFirstInstallUnpacksTheEngineThenPutsTheMCPServerAndTheSkillIntoClaudeCode() async throws {
+    @Test func aFirstInstallUnpacksTheEngineThenPutsTheMCPServerIntoClaudeCode() async throws {
         let rig = try rig()
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall, rig.mcpAdd()])
         #expect(rig.claude.mcpState(launcher: rig.launcher) == .ready)
-        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
-        #expect(try String(contentsOf: rig.home.skillFolder.appendingPathComponent("SKILL.md"), encoding: .utf8) == rig.skillSourceBody)
+        #expect(!FileManager.default.fileExists(atPath: rig.home.skillFolder.path), "since 0.8.10 the MCP server says how to use CUA")
         #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
         #expect(rig.setup.phase == .idle)
         #expect(rig.setup.waitingFor.isEmpty && !rig.setup.developerToolsNeeded)
@@ -252,7 +249,6 @@ struct LiveSystemActionsTests {
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try currentEngine(rig.home).get())
         try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck], "only looked")
         #expect(outcome == InstallMessages.nothingToSay)
@@ -266,7 +262,6 @@ struct LiveSystemActionsTests {
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try currentEngine(rig.home, version: "0.6.0").get())
         try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall], "the launcher is the same whatever the version")
         #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
@@ -290,7 +285,7 @@ struct LiveSystemActionsTests {
         #expect(rig.setup.waitingFor == [.status, .claudeCode])
     }
 
-    @Test func aStatusThatRunsOutOfTimeStillPutsInTheMCPServerAndTheSkillAndOnlyTheEngineStepWaits() async throws {
+    @Test func aStatusThatRunsOutOfTimeStillPutsInTheMCPServerAndOnlyTheEngineStepWaits() async throws {
         // The launcher is one path whatever the engine's version, so Claude Code's part does not need the answer.
         let rig = try rig(engine: .failure(.timeout))
         defer { rig.home.remove() }
@@ -299,7 +294,6 @@ struct LiveSystemActionsTests {
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.mcpAdd(rig.launcher)], "no install-engine")
         #expect(rig.claude.mcpState(launcher: nil) == .ready)
-        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
         #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
         #expect(rig.setup.waitingFor == [.status], "the engine step comes back with the first read that works")
         #expect(rig.setup.phase == .idle)
@@ -307,19 +301,18 @@ struct LiveSystemActionsTests {
 
     @Test func withoutTheEnginesAnswerOrItsLauncherTheMCPServerWaitsWithTheEngineStep() async throws {
         // An app engine was never unpacked here (an old command answers slowly): a server pointing at nothing would
-        // fail in every new conversation. The skill does not depend on it.
+        // fail in every new conversation. Nothing else is put in, so nothing is said.
         let rig = try rig(engine: .failure(.timeout))
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck], "no install-engine and no MCP server yet")
         #expect(rig.claude.mcpState(launcher: nil) == .missing)
-        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
-        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(outcome == InstallMessages.nothingToSay)
         #expect(rig.setup.waitingFor == [.status])
     }
 
-    @Test func aSkillOrServerOfAnotherIsStillLeftAloneWhileTheStatusCannotBeHad() async throws {
+    @Test func aServerOfAnotherIsStillLeftAloneWhileTheStatusCannotBeHad() async throws {
         let rig = try rig(engine: .failure(.timeout))
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
@@ -356,7 +349,6 @@ struct LiveSystemActionsTests {
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try engineWith(part.0, part.1, home: rig.home))
         try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall], "\(part): the card's 고치기 must do something")
         // Nothing in Claude Code changed, so it is not a new conversation that has something.
@@ -371,7 +363,6 @@ struct LiveSystemActionsTests {
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try engineWith("login_environment", "conflict", home: rig.home))
         try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck])
         #expect(outcome == InstallMessages.nothingToSay)
@@ -385,7 +376,6 @@ struct LiveSystemActionsTests {
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try engineWith("relay", "unavailable", home: rig.home))
         try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls.contains(rig.installEngineCall))
         #expect(outcome == ActionOutcome(kind: .warning, message: "다시 설정했지만 고쳐지지 않은 곳이 있어요 — 점검 탭에서 보세요"))
@@ -399,7 +389,6 @@ struct LiveSystemActionsTests {
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try engineWith("dependencies", "missing", home: rig.home))
         try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         #expect(await rig.actions.setUp() == ActionOutcome(kind: .success, message: "연결 설정을 마쳤어요"))
         #expect(LiveSystemActions.setupIsSettled(in: Data(#"{"setup": {"command": "ready", "login_environment": "conflict", "relay": "ready"}}"#.utf8)))
         #expect(!LiveSystemActions.setupIsSettled(in: Data(#"{"setup": {"command": "ready", "login_environment": "failed", "relay": "ready"}}"#.utf8)))
@@ -442,10 +431,12 @@ struct LiveSystemActionsTests {
         #expect(!fixed.setup.claudeCodeUnusable)
     }
 
-    @Test func theCardSaysNothingAboutMCPAndSkillForAClaudeThatCannotStart() {
-        let unusable = ClaudeSetupState(claudeCodeFound: true, claudeCodeUnusable: true, mcp: .missing, skill: .conflict)
-        #expect(StatusEvaluator.claudeIssues(in: unusable).isEmpty)
-        #expect(StatusEvaluator.conflictProblem(in: unusable) == nil)
+    @Test func theCardSaysNothingAboutTheMCPServerForAClaudeThatCannotStart() {
+        for mcp in [ClaudeSetupState.Part.missing, .conflict] {
+            let unusable = ClaudeSetupState(claudeCodeFound: true, claudeCodeUnusable: true, mcp: mcp)
+            #expect(StatusEvaluator.claudeIssues(in: unusable).isEmpty)
+            #expect(StatusEvaluator.conflictProblem(in: unusable) == nil)
+        }
     }
 
     @Test func aMatchingEngineWithNothingBrokenIsNotSetUpAgain() async throws {
@@ -454,7 +445,6 @@ struct LiveSystemActionsTests {
         rig.engine.setStatus(try currentEngine(rig.home).get())
         try rig.home.installClaudeCode()
         try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         _ = await rig.actions.setUp()
         #expect(!rig.runner.calls.contains { $0.isInstallEngine })
     }
@@ -503,7 +493,6 @@ struct LiveSystemActionsTests {
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try currentEngine(rig.home).get())
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         // The app's own, from a time the launcher was a version folder.
         try rig.home.addMcp(command: rig.home.engineCopies.appendingPathComponent("0.6.0/start-mcp.sh").path)
         let outcome = await rig.actions.setUp()
@@ -517,7 +506,6 @@ struct LiveSystemActionsTests {
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try currentEngine(rig.home).get())
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         try rig.home.addMcp(command: rig.launcher, args: ["--debug"])
         _ = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.mcpRemove, rig.mcpAdd()])
@@ -528,7 +516,6 @@ struct LiveSystemActionsTests {
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try currentEngine(rig.home).get())
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         try rig.home.addMcp(command: "/Users/someone/.claude/plugins/cache/chenjing-plugins/cua/0.7.0/start-mcp.sh")
         let before = try Data(contentsOf: rig.home.claudeConfig)
         let outcome = await rig.actions.setUp()
@@ -539,37 +526,23 @@ struct LiveSystemActionsTests {
         #expect(rig.setup.phase == .idle, "a conflict is not a failed install")
     }
 
-    @Test func aSkillFolderWithoutTheAppsMarkIsNeverTouchedAndIsToldAsAConflict() async throws {
-        let rig = try rig()
-        defer { rig.home.remove() }
-        try rig.home.installClaudeCode()
-        rig.engine.setStatus(try currentEngine(rig.home).get())
-        try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: nil, body: "someone else's skill\n")
-        let outcome = await rig.actions.setUp()
-        #expect(try String(contentsOf: rig.home.skillFolder.appendingPathComponent("SKILL.md"), encoding: .utf8) == "someone else's skill\n")
-        #expect(!FileManager.default.fileExists(atPath: rig.home.skillFolder.appendingPathComponent(".cua-bar.json").path))
-        #expect(outcome == ActionOutcome(kind: .warning, message: InstallMessages.conflict))
-    }
-
-    @Test func aMarkedSkillOfAnotherVersionIsWrittenOverAndAMissingOneIsWritten() async throws {
-        let rig = try rig()
-        defer { rig.home.remove() }
-        try rig.home.installClaudeCode()
-        rig.engine.setStatus(try currentEngine(rig.home).get())
-        try rig.home.addMcp(command: rig.launcher)
-        try rig.home.addSkill(version: "0.6.0", body: "the old skill\n")
-        let outcome = await rig.actions.setUp()
-        #expect(try String(contentsOf: rig.home.skillFolder.appendingPathComponent("SKILL.md"), encoding: .utf8) == rig.skillSourceBody)
-        let mark = try JSONSerialization.jsonObject(with: Data(contentsOf: rig.home.skillFolder.appendingPathComponent(".cua-bar.json"))) as? [String: String]
-        #expect(mark == ["version": "0.7.0"])
-        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
-        #expect(rig.runner.calls == [rig.developerToolsCheck], "the MCP server was fine")
-
-        // A marked folder whose skill was deleted by hand is written again.
-        try FileManager.default.removeItem(at: rig.home.skillFolder.appendingPathComponent("SKILL.md"))
-        _ = await rig.actions.setUp()
-        #expect(rig.claude.skillState(source: rig.bundle.skillSource, appVersion: "0.7.0") == .ready)
+    @Test func aSkillFolderIsNeitherWrittenNorTakenAwayWhateverIsInIt() async throws {
+        // Since 0.8.10 the app installs no skill. The one 0.8.x put in (marked) is told on the 점검 tab and left for the
+        // person to remove (F9); one without the mark is the person's own and is not even told.
+        for version in ["0.8.9", nil] {
+            let rig = try rig()
+            defer { rig.home.remove() }
+            try rig.home.installClaudeCode()
+            rig.engine.setStatus(try currentEngine(rig.home).get())
+            try rig.home.addMcp(command: rig.launcher)
+            try rig.home.addSkill(version: version, body: "a skill\n")
+            let outcome = await rig.actions.setUp()
+            #expect(rig.runner.calls == [rig.developerToolsCheck], "the MCP server was fine")
+            #expect(outcome == InstallMessages.nothingToSay, "neither a conflict nor something to put right")
+            #expect(try String(contentsOf: rig.home.skillFolder.appendingPathComponent("SKILL.md"), encoding: .utf8) == "a skill\n")
+            #expect(FileManager.default.fileExists(atPath: rig.home.skillFolder.appendingPathComponent(".cua-bar.json").path) == (version != nil))
+            #expect(rig.claude.leftovers().retiredSkill == (version != nil))
+        }
     }
 
     // MARK: What the install waits for
@@ -598,7 +571,7 @@ struct LiveSystemActionsTests {
         #expect(rig.setup.waitingFor.isEmpty)
     }
 
-    @Test func withoutClaudeCodeTheEngineIsInstalledAndTheMCPServerAndSkillWait() async throws {
+    @Test func withoutClaudeCodeTheEngineIsInstalledAndTheMCPServerWaits() async throws {
         let rig = try rig(claudeInstalled: false)
         defer { rig.home.remove() }
         let outcome = await rig.actions.setUp()
@@ -653,7 +626,6 @@ struct LiveSystemActionsTests {
         #expect(outcome == ActionOutcome(kind: .failure, message: "Claude Code에 CUA를 연결하지 못했어요"))
         #expect(!outcome.message.contains("SECRET"))
         #expect(rig.setup.phase == .failed)
-        #expect(!FileManager.default.fileExists(atPath: rig.home.skillFolder.path), "it stopped there")
     }
 
     @Test func anMCPAddThatSaysOkButLeavesNoServerIsAFailureBecauseTheFileIsWhatCounts() async throws {

@@ -1,13 +1,13 @@
 import Foundation
 
-/// What the install waits for before it can do its work: the Codex app, Claude Code (where the MCP server and
-/// the skill go), and an answer from the engine. The app looks again after a status read and installs once
+/// What the install waits for before it can do its work: the Codex app, Claude Code (where the MCP server
+/// goes), and an answer from the engine. The app looks again after a status read and installs once
 /// what it waited for has come.
 enum SetupWait: Hashable, Sendable {
     case codex
     case claudeCode
     /// The engine could not be asked (its status ran out of time): the engine step waits for the first read
-    /// that works. The MCP server and the skill do not wait for it.
+    /// that works. The MCP server does not wait for it.
     case status
 }
 
@@ -46,7 +46,7 @@ final class SetupActivity {
     }
 
     /// The last run found a `claude` that cannot start (exit 127). It is not waited for (nothing tells when it
-    /// changes), so the next start of the app tries again; until then the card says nothing about MCP and skill.
+    /// changes), so the next start of the app tries again; until then the card says nothing about the MCP server.
     private(set) var claudeCodeUnusable = false {
         didSet { if oldValue != claudeCodeUnusable { onChange?() } }
     }

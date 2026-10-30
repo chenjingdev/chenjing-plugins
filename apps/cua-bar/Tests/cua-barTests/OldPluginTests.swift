@@ -32,7 +32,7 @@ struct OldPluginTests {
         let system = RecordingSystemActions()
         let claude = ClaudeIntegration(home: home.url, claude: ClaudeCLILocator(home: home.url, isExecutableFile: { _ in false }))
         var inspector: (@Sendable (String?) -> ClaudeSetupState)?
-        if withClaude { inspector = { claude.inspect(launcher: $0, skillSource: nil, appVersion: appVersion) } }
+        if withClaude { inspector = { claude.inspect(launcher: $0) } }
         let model = CUABarViewModel(
             engine: CodexCUAEngineClient(locator: CommandLocator(home: home.url), timeouts: timeouts), appVersion: appVersion,
             systemActions: system, pasteboard: RecordingPasteboard(), clock: { Fixtures.now }, calendar: Fixtures.utc, sleep: ManualSleeper().sleep,

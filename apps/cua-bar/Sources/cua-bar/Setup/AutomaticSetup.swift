@@ -1,6 +1,6 @@
 import Foundation
 
-/// The install the app runs by itself (F1, R1): the engine, then Claude Code's MCP server and skill.
+/// The install the app runs by itself (F1, R1): the engine, then Claude Code's MCP server.
 ///
 /// It starts when the app starts, once per app run whatever came of it (a later try is the person's click
 /// on the status card). The one other time is what the start put off because Codex or Claude Code was not

@@ -412,7 +412,7 @@ struct NotificationViewModelTests {
     @Test func codexWithoutItsHostIsNotToldWhileTheCardAsksForTheSetupToBeFixedFirst() throws {
         // The card said 고치기 (Claude Code had no CUA), and the notification offered 다시 켜기, which fixes nothing.
         let status = try codexProblem()
-        let broken = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .missing, skill: .ready))
+        let broken = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .missing))
         #expect(StatusEvaluator.problem(in: status, appVersion: "0.7.0", facts: broken)?.kind == .setupIncomplete)
         var planner = NotificationPlanner()
         #expect(planner.due(status: status, appVersion: "0.7.0", now: Fixtures.now, cleanupTried: [], cleanupRunning: false, facts: broken).isEmpty)
@@ -446,7 +446,7 @@ struct NotificationViewModelTests {
         let claude = ClaudeBox()
         let rig = await Rig(try codexProblem(), claude: claude)
         let key = try #require(rig.notifier.delivered.first?.key)
-        claude.state = ClaudeSetupState(claudeCodeFound: true, mcp: .missing, skill: .ready)
+        claude.state = ClaudeSetupState(claudeCodeFound: true, mcp: .missing)
         await rig.model.refresh()
         #expect(rig.model.summary.fix == .runSetup)
         rig.notifier.tap(.restartCodex(key: key))

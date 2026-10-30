@@ -1,15 +1,13 @@
 import Foundation
 
 /// The engine the app carries in its bundle (`Contents/Resources/engine`). `setup.sh install-engine` of this
-/// folder puts a copy under `~/.local/share/codex-cua/engine/<version>/`; the skill the app installs into
-/// Claude Code is the one in here.
+/// folder puts a copy under `~/.local/share/codex-cua/engine/<version>/`.
 ///
 /// A build that does not run from an app bundle has none, and then the app installs nothing.
 struct BundledEngine: Equatable, Sendable {
     var root: URL
 
     var setupScript: URL { root.appendingPathComponent("setup.sh") }
-    var skillSource: URL { root.appendingPathComponent("skills/cuabar/SKILL.md") }
 
     static func locate(in bundle: Bundle = .main) -> BundledEngine? {
         guard let resources = bundle.resourceURL else { return nil }

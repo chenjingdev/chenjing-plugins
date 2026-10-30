@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.9'
+VERSION = '0.8.10'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -37,6 +37,38 @@ LOST_DURING_CALL = ('The Codex host connection was lost while this call ran, so 
 TURN_ENDED_WITHOUT_HOST = ('The Codex host connection was lost, so the CUA turn of this connection could not be ended. '
                            'turn_ended never connects to Codex again; the next CUA tool call does.')
 NOTHING_TO_END = 'No CUA turn of this connection is open, so there was nothing to end.'
+STOPPING = 'This owned CUA connection is stopping.'
+# What every Claude conversation is told when it connects (initialize): how to use CUA through this bridge. It is in every
+# conversation, so it stays this short; what only matters when something fails is a note at the end of that failure.
+# Since 0.8.10 it replaces the cuabar skill, which the app wrote at once while a running bridge kept its old text.
+INSTRUCTIONS = (
+    'CUA Bar: these tools operate the user\'s Mac apps through Codex computer use (CUA). Each connection runs in its own '
+    'new Codex thread and sees no Codex chat. On the first `js` call, or after `js_reset`, run one documented entrypoint '
+    'such as `await cua.getState();` and follow the documentation it returns. The REPL is not Node.js or Playwright: it '
+    'has no `process` global or file system, and screenshots come back through the documented image output. For web '
+    'pages, use Playwright when it is available on this computer, run on its own and never inside `js`. When the task '
+    'needs the user\'s signed-in Chrome or a tab the user has open, or Playwright is not available, operate Chrome as an '
+    'ordinary app with `cua.getApp("Google Chrome")`; only a window\'s active tab is readable that way, and leave the '
+    'user\'s tabs as you found them. Report an unsupported action or a blocked URL instead of retrying it another way, '
+    'Playwright included; Codex refusing the browser to this whole conversation is not such a refusal. When finished, '
+    'call `turn_ended` with `{}`. Never quit Codex, change permissions, or run `codex-cua` release, release-session, '
+    'dismiss-session, stop, restart-codex or unlock-reset yourself; the user does those through CUA Bar.')
+# Notes the bridge puts at the end of the errors they are about (0.8.10, from the cuabar skill). Facts only, and only what
+# the error itself does not say.
+# A call that lost its host (LOST_BEFORE_SEND, LOST_DURING_CALL): those say it was not sent again and the next call connects.
+LOST_NOTE = ('CUA Bar note: the next call may open Codex in the background. Do not replay clicks, submits or sends: look '
+             'at the current state first and decide from what you see. Treat the first `js` call after reconnecting like '
+             'a first call; earlier handles may be gone.')
+# turn_ended without a host (TURN_ENDED_WITHOUT_HOST): that says it never connects and the next call does.
+TURN_ENDED_NOTE = 'CUA Bar note: do not retry turn_ended.'
+# Any other failure of the bridge itself: no host to attach to, a Codex without the host, a broken setup.
+HOST_NOTE = ('CUA Bar note: run `~/.local/bin/codex-cua doctor --probe --json` (it releases and stops nothing, like '
+             '`status --json` and `diagnose`) and tell the user which of setup, transport, tool discovery and the native '
+             'call failed; keep request payloads, screenshots and secrets out of what you report. Broken setup is fixed '
+             'with CUA Bar\'s 고치기 or `codex-cua setup`. Codex running without the CUA host needs one restart by the user '
+             '(CUA Bar\'s 다시 켜기, or \u2318Q and reopen once the Codex work is done); never quit Codex yourself, and do '
+             'not replace it with a separately launched CUA engine, model proxy, changed permissions or automatic '
+             'approval. Retry discovery after reconnecting; do not replay uncertain clicks or submits.')
 # Since Codex 26.1023 the browser service asks the desktop app before every browser call, and the app allows only the
 # conversations it started or resumed itself. A conversation of the bridge is neither, so its js call is refused with
 # this text (without the app to ask: "The browser access host is unavailable"). It is Codex's access control and no
@@ -46,9 +78,9 @@ BROWSER_BLOCKED_MARKER = 'Local browser use is disabled in Work settings'
 BROWSER_BLOCKED_MARKERS = ('Local browser use is disabled', 'browser access host is unavailable')
 BROWSER_BLOCKED_NOTE = ('CUA Bar note: since Codex 26.1023, Codex refuses browser use in conversations it did not start '
                         'itself, which includes Claude Code conversations that use CUA through CUA Bar. This is not a '
-                        'setting the user turned off and not a refusal of this site or action; changing Work settings '
-                        'or resetting the Chrome extension will not help, and retrying the browser call will fail '
-                        'again. For web pages, use Playwright if it is available on this computer. If the page needs '
+                        'setting the user turned off and not a refusal of this site or action; changing Work settings, '
+                        'resetting the Chrome extension or releasing tabs will not help, and retrying the browser call '
+                        'will fail again. For web pages, use Playwright if it is available on this computer. If the page needs '
                         'the user\'s signed-in Chrome or a tab the user has open, or Playwright is not available, '
                         'operate Chrome as an ordinary desktop app through CUA (cua.getApp("Google Chrome")). Only if '
                         'neither can do it, tell the user to ask the Codex app directly.')
@@ -59,6 +91,19 @@ JS_TIMEOUT_MS = 30000           # how long cua_repl runs js when a call gives no
 LOCKED_MARKERS = ('The Mac is locked', 'screenLocked')
 # ...and when it is because its automatic unlock tried and failed, or has used up its tries in this lock (F8).
 UNLOCK_FAILED_MARKER = 'automatic unlock could not unlock it'
+# The service's lock refusals mostly say this already (all but "The Mac is locked. Unlock it before reading ...").
+ASK_TO_UNLOCK_MARKER = 'Ask the user to unlock the Mac'
+# F8: after an unlock failure CUA Bar restarts the service, so the next call tries the automatic unlock again.
+UNLOCK_FAILED_NOTE = ('CUA Bar note: CUA Bar restarts the computer-use service so that the next call tries the automatic '
+                      'unlock again, up to five times in one lock. Before asking the user, wait about 30 seconds and call '
+                      'again with a call that only looks, such as `await cua.getState();`, at most five times, and go on '
+                      'with the task once one works. If the last one still fails, stop and ask the user to unlock the '
+                      'Mac. Never try to unlock the Mac or restart the service yourself.')
+# Any other lock refusal (physical input paused the automatic unlock, no ChatGPT thread to tie the request to, or only
+# that the Mac is locked): nothing tries again, a person has to unlock.
+LOCKED_NOTE = ('CUA Bar note: stop and ask the user to unlock the Mac. Never try to unlock it or restart the computer-use '
+               'service yourself.')
+LOCKED_NOTE_SHORT = 'CUA Bar note: never try to unlock the Mac or restart the computer-use service yourself.'
 
 
 def utc_now():
@@ -96,6 +141,46 @@ def with_browser_note(name, answer):
             or not any(BROWSER_BLOCKED_MARKER in text for text in answer_texts({'content': content}))):
         return answer
     return {**answer, 'content': [*content, {'type': 'text', 'text': BROWSER_BLOCKED_NOTE}]}
+
+
+def lock_note(texts):
+    """The note for a refusal because of the Mac's lock, from what the answer says went wrong (error_texts), or None."""
+    if any(UNLOCK_FAILED_MARKER in text for text in texts):
+        return UNLOCK_FAILED_NOTE
+    if any(marker in text for text in texts for marker in LOCKED_MARKERS):
+        return LOCKED_NOTE_SHORT if any(ASK_TO_UNLOCK_MARKER in text for text in texts) else LOCKED_NOTE
+    return None
+
+
+def with_notes(name, answer):
+    """The answer of a tool call with the notes it is about at the end: the browser note (with_browser_note), and for
+    a failed call (isError) refused because of the Mac's lock, the lock note. A result that did not fail, or says
+    nothing of these, is returned as it is."""
+    answer = with_browser_note(name, answer)
+    content = answer.get('content') if isinstance(answer, dict) else None
+    if not isinstance(content, list) or answer.get('isError') is not True:
+        return answer
+    note = lock_note(error_texts(answer))
+    return {**answer, 'content': [*content, {'type': 'text', 'text': note}]} if note else answer
+
+
+def failure_note(message):
+    """The note for a call the bridge itself could not do (a BridgeFailure's fixed text), or None."""
+    if message in (LOST_BEFORE_SEND, LOST_DURING_CALL):
+        return LOST_NOTE
+    if message == TURN_ENDED_WITHOUT_HOST:
+        return TURN_ENDED_NOTE
+    if message == STOPPING:
+        return None
+    return HOST_NOTE
+
+
+def error_with_note(error, note):
+    """A JSON-RPC error with `note` after its message; the error itself is not changed. One without a text message, or
+    no note, is returned as it is."""
+    if not note or not isinstance(error, dict) or not isinstance(error.get('message'), str):
+        return error
+    return {**error, 'message': error['message'] + '\n\n' + note}
 
 
 def browser_refused(name, answer):
@@ -667,7 +752,7 @@ class HostMcp:
                 protocol_version = requested_protocol if requested_protocol in ('2025-06-18', '2025-11-25') else '2025-06-18'
                 self.reply(ident, {'protocolVersion': protocol_version, 'capabilities': {'tools': {}},
                     'serverInfo': {'name': 'cuabar', 'version': VERSION},
-                    'instructions': 'Tools execute on this connection\'s new Codex-hosted ephemeral thread. This adapter does not start a runtime or reuse another thread. Call turn_ended with an empty object; the adapter supplies only its owned lifecycle scope.'})
+                    'instructions': INSTRUCTIONS})
             elif method == 'ping':
                 self.reply(ident, {})
             elif not self.initialized:
@@ -677,7 +762,7 @@ class HostMcp:
                 self.reply(ident, {'tools': self.tools})
             elif method == 'tools/call':
                 if self.stopping:
-                    raise BridgeFailure('This owned CUA connection is stopping.')
+                    raise BridgeFailure(STOPPING)
                 name = params.get('name')
                 if not isinstance(name, str) or name not in self.tool_names:
                     self.reply(ident, error={'code': -32601, 'message': 'The tool is not advertised by the owned host CUA server.'})
@@ -701,14 +786,15 @@ class HostMcp:
                 answer = await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments))
                 if browser_refused(name, answer):
                     self.browser_blocked()
-                self.reply(ident, with_browser_note(name, answer))
+                self.reply(ident, with_notes(name, answer))
             else:
                 self.reply(ident, error={'code': -32601, 'message': 'Unsupported MCP method.'})
         except RpcFailure as error:
-            self.reply(ident, error=error.error)
+            # Codex's own error, with the lock note when the Mac's lock refused the call.
+            self.reply(ident, error=error_with_note(error.error, lock_note(error_texts(error.error))))
             self.log('original_codex_rpc_error_forwarded')
         except BridgeFailure as error:
-            self.reply(ident, error={'code': -32001, 'message': str(error)})
+            self.reply(ident, error=error_with_note({'code': -32001, 'message': str(error)}, failure_note(str(error))))
             self.log('connection_or_catalogue_unavailable')
         except Exception:
             self.reply(ident, error={'code': -32603, 'message': 'The Codex host CUA adapter could not complete this request.'})
@@ -721,7 +807,7 @@ class HostMcp:
             if self.connected:
                 return
             if self.stopping:
-                raise BridgeFailure('This owned CUA connection is stopping.')
+                raise BridgeFailure(STOPPING)
             await self.reconnect()
 
     async def reconnect(self):
@@ -794,7 +880,7 @@ class HostMcp:
         await self.turn_lock.acquire()
         try:
             if self.stopping:
-                raise BridgeFailure('This owned CUA connection is stopping.')
+                raise BridgeFailure(STOPPING)
             if not self.connected:
                 raise BridgeFailure(LOST_BEFORE_SEND)
             rpc, scope = self.rpc, self.current_scope()
@@ -859,7 +945,7 @@ class HostMcp:
         await self.turn_lock.acquire()
         try:
             if self.stopping:
-                raise BridgeFailure('This owned CUA connection is stopping.')
+                raise BridgeFailure(STOPPING)
             if not self.connected:
                 if not self.scopes:
                     # Nothing was opened, so there is nothing to confirm: not an error, like an empty turn on a host.

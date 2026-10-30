@@ -70,9 +70,10 @@ struct TempHome {
         try write(String(decoding: data, as: UTF8.self), to: claudeConfig)
     }
 
+    /// Where 0.8.1 to 0.8.9 put the `cuabar` skill; since 0.8.10 the app only tells of one it finds there.
     var skillFolder: URL { url.appendingPathComponent(".claude/skills/cuabar", isDirectory: true) }
 
-    /// `~/.claude/skills/cuabar/` with a skill in it, and the app's mark when `version` is given.
+    /// `~/.claude/skills/cuabar/` with a skill in it, and the app's mark when `version` is given (as 0.8.x left it).
     func addSkill(version: String?, body: String = "the skill\n") throws {
         try write(body, to: skillFolder.appendingPathComponent("SKILL.md"))
         if let version { try write(#"{"version": "\#(version)"}"#, to: skillFolder.appendingPathComponent(".cua-bar.json")) }

@@ -455,7 +455,6 @@ struct CheckTabSnapshotTests {
     private func states() async throws -> [(String, CUABarViewModel)] {
         var conflictClaude = CheckFixtures.claudeReady()
         conflictClaude.mcp = .conflict
-        conflictClaude.skill = .conflict
         conflictClaude.legacyPlugins = [LegacyPlugin.id]
         var brokenOnCard = try fine()
         brokenOnCard.engine.version = "0.6.0"
@@ -472,6 +471,7 @@ struct CheckTabSnapshotTests {
         var oldNames = CheckFixtures.claudeReady()
         oldNames.oldServer = true
         oldNames.oldSkill = true
+        oldNames.retiredSkill = true
         oldNames.legacyPlugins = LegacyPlugin.ids
         oldNames.permissions = PermissionReading(
             defaultMode: "auto", oldRuleFiles: ["~/dev/app/.claude/settings.local.json", "~/dev/web/.claude/settings.local.json", "~/dev/x/.claude/settings.json"],
@@ -527,8 +527,8 @@ struct CheckTabSnapshotTests {
     @Test func theTabIsInThePickerAndTheCheckLinesAreInTheTabArea() async throws {
         let model = try #require(try await states().first { $0.0 == "conflicts-and-old-plugin" }?.1)
         let content = model.checkContent
-        #expect(content.problemCount == 2 + 0, "the MCP line (conflict and old plugin) and the skill line")
-        #expect(content.lines.count == 10)
+        #expect(content.problemCount == 1, "the MCP line (conflict and old plugin)")
+        #expect(content.lines.count == 9)
         #expect(PopoverTab.allCases.map(\.title).contains("점검"))
     }
 }

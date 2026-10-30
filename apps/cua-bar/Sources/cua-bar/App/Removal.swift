@@ -5,21 +5,23 @@ enum RemovalMessages {
     /// The button at the bottom of 기록. It asks nothing: what it does is on hover.
     static let buttonTitle = "앱 지우기"
     /// What 앱 지우기 does, on hover before the press (R3, R15).
-    static let help = "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지운 뒤 앱이 꺼져요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜지고, 열린 Claude 대화의 CUA도 끊겨요. Codex가 연결과 함께 켜져 있으면 아무것도 바꾸지 않아요."
+    static let help = "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결을 지운 뒤 앱이 꺼져요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜지고, 열린 Claude 대화의 CUA도 끊겨요. Codex가 연결과 함께 켜져 있으면 아무것도 바꾸지 않아요."
     static let working = "되돌리는 중…"
     static let trashHint = "이 앱 파일은 이제 휴지통으로 옮겨도 돼요."
     /// Claude Code could not take the app's MCP server away (no `claude` command, it refused, or its file cannot be read).
     static let mcpStays = " Claude Code의 CUA 연결은 `claude mcp remove -s user cuabar`로 직접 지워 주세요."
     /// What was taken out of Claude Code, said when the rest did not go as the help promised.
-    static let claudeRemoved = " Claude Code에 깐 CUA 연결과 스킬은 지웠어요."
+    static let claudeRemoved = " Claude Code에 깐 CUA 연결은 지웠어요."
+    /// The `cuabar` skill 0.8.x put in is still there: the app does not remove it (F9), it hands over the command.
+    static let retiredSkillStays = " 0.8.9까지 깐 cuabar 스킬은 `\(RetiredSkill.removeCommand)`로 직접 지워 주세요."
     static let done = "연결 설정과 중계기를 되돌렸어요. " + trashHint
     static let nothingToUndo = "되돌릴 연결 설정이 없었어요. " + trashHint
     /// The remover refuses while a Codex host runs. Codex is never quit from here.
     static let hostRunning = "Codex를 정상 종료한 뒤 다시 해 주세요"
     static let failed = "앱을 지우지 못했어요 — 연결 설정은 그대로 남아 있을 수 있어요"
     /// The same two, after Claude Code's part had already been taken away.
-    static let hostRunningAfterClaude = "Codex를 정상 종료한 뒤 다시 해 주세요. Claude Code에 깐 CUA 연결과 스킬은 이미 지웠어요"
-    static let failedAfterClaude = "앱을 지우지 못했어요 — Claude Code에 깐 CUA 연결과 스킬은 지웠고, 나머지 연결 설정은 그대로 남아 있을 수 있어요"
+    static let hostRunningAfterClaude = "Codex를 정상 종료한 뒤 다시 해 주세요. Claude Code에 깐 CUA 연결은 이미 지웠어요"
+    static let failedAfterClaude = "앱을 지우지 못했어요 — Claude Code에 깐 CUA 연결은 지웠고, 나머지 연결 설정은 그대로 남아 있을 수 있어요"
     /// The engine could not be asked whether a Codex host runs, so nothing was changed.
     static let statusUnreadable = "Codex 상태를 읽지 못해 아무것도 바꾸지 않았어요. 잠시 뒤 다시 해 주세요"
     /// A setup (or an install or update) writes the same files; they do not run at the same time.
@@ -46,9 +48,9 @@ enum RemovalMessages {
 }
 
 /// 앱 지우기 at the bottom of 기록 (R3, once called 제거): runs at once, in this order: looks for a running
-/// Codex host (which keeps everything as it is), takes away the MCP server and the skill the app put into
-/// Claude Code (only its own), runs `codex-cua uninstall` (the bound engine copy's `setup.sh uninstall` when the
-/// command is missing or not ours), takes the login item away, shows the result and quits. The remover
+/// Codex host (which keeps everything as it is), takes away the MCP server the app put into Claude Code (only its
+/// own; the `cuabar` skill 0.8.x put in is left and its command said), runs `codex-cua uninstall` (the bound
+/// engine copy's `setup.sh uninstall` when the command is missing or not ours), takes the login item away, shows the result and quits. The remover
 /// refuses while a Codex host runs; it never quits Codex. The app file stays.
 ///
 /// Claude Code's part is taken away only when it is known that nothing is running: the status was read and
@@ -178,6 +180,7 @@ final class RemovalFlow: ObservableObject {
             (undone ? RemovalMessages.done : RemovalMessages.nothingToUndo)
                 + (!undone && removal.removedAnything ? RemovalMessages.claudeRemoved : "")
                 + (removal.mcpStays ? RemovalMessages.mcpStays : "")
+                + (removal.retiredSkillStays ? RemovalMessages.retiredSkillStays : "")
                 + (loginItemOff ? "" : RemovalMessages.loginItemStays))
         onRemoved()
         try? await sleep(readingTime)

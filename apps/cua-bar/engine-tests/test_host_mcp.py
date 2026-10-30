@@ -458,8 +458,8 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                                {'type': 'text', 'text': 'a console line'}], 'isError': True, '_meta': {'a': 1}}
         note = ('CUA Bar note: since Codex 26.1023, Codex refuses browser use in conversations it did not start itself, '
                 'which includes Claude Code conversations that use CUA through CUA Bar. This is not a setting the user '
-                'turned off and not a refusal of this site or action; changing Work settings or resetting the Chrome '
-                'extension will not help, and retrying the browser call will fail again. For web pages, use Playwright '
+                'turned off and not a refusal of this site or action; changing Work settings, resetting the Chrome '
+                'extension or releasing tabs will not help, and retrying the browser call will fail again. For web pages, use Playwright '
                 'if it is available on this computer. If the page needs the user\'s signed-in Chrome or a tab the user '
                 'has open, or Playwright is not available, operate Chrome as an ordinary desktop app through CUA '
                 '(cua.getApp("Google Chrome")). Only if neither can do it, tell the user to ask the Codex app directly.')
@@ -505,6 +505,93 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         await self.initialize(adapter)
         await adapter.handle(self.call())
         self.assertIn('result', output[-1], 'a note that cannot be written never fails the call')
+
+    async def test_initialize_tells_every_conversation_how_to_use_cua(self):
+        """Since 0.8.10 the bridge says what the cuabar skill said, in its initialize answer (in every conversation)."""
+        instructions = (
+            "CUA Bar: these tools operate the user's Mac apps through Codex computer use (CUA). Each connection runs in "
+            "its own new Codex thread and sees no Codex chat. On the first `js` call, or after `js_reset`, run one "
+            "documented entrypoint such as `await cua.getState();` and follow the documentation it returns. The REPL is "
+            "not Node.js or Playwright: it has no `process` global or file system, and screenshots come back through the "
+            "documented image output. For web pages, use Playwright when it is available on this computer, run on its "
+            "own and never inside `js`. When the task needs the user's signed-in Chrome or a tab the user has open, or "
+            "Playwright is not available, operate Chrome as an ordinary app with `cua.getApp(\"Google Chrome\")`; only a "
+            "window's active tab is readable that way, and leave the user's tabs as you found them. Report an "
+            "unsupported action or a blocked URL instead of retrying it another way, Playwright included; Codex refusing "
+            "the browser to this whole conversation is not such a refusal. When finished, call `turn_ended` with `{}`. "
+            "Never quit Codex, change permissions, or run `codex-cua` release, release-session, dismiss-session, stop, "
+            "restart-codex or unlock-reset yourself; the user does those through CUA Bar.")
+        adapter, _, output, _, _ = self.fixture()
+        await self.initialize(adapter)
+        self.assertEqual(output[-1]['result']['instructions'], instructions)
+        self.assertEqual(output[-1]['result']['serverInfo'], {'name': 'cuabar', 'version': bridge.VERSION})
+
+    async def test_a_refusal_because_of_the_macs_lock_gets_its_note_at_the_end_and_nothing_else_does(self):
+        """F8: what to do when the lock refused a call, as the computer-use service says it (its own texts)."""
+        failed = 'The Mac is locked and automatic unlock could not unlock it. Ask the user to unlock the Mac manually before continuing.'
+        paused = 'The Mac is locked and automatic unlock is paused because physical input was detected. Ask the user to unlock the Mac manually before continuing.'
+        no_thread = 'The Mac is locked and this Computer Use request cannot be associated with a ChatGPT thread. Ask the user to unlock the Mac manually before continuing.'
+        plain = 'The Mac is locked. Unlock it before reading accessibility text.'
+        for text, note in ((failed, bridge.UNLOCK_FAILED_NOTE), (paused, bridge.LOCKED_NOTE_SHORT),
+                           (no_thread, bridge.LOCKED_NOTE_SHORT), (plain, bridge.LOCKED_NOTE)):
+            with self.subTest(text=text):
+                result = {'content': [{'type': 'text', 'text': 'Error: ' + text}, {'type': 'text', 'text': 'a console line'}],
+                          'isError': True}
+                adapter, _, output, _, _ = self.fixture(result=result)
+                await self.initialize(adapter)
+                await adapter.handle(self.call())
+                self.assertEqual(output[-1]['result'], {**result, 'content': [*result['content'], {'type': 'text', 'text': note}]})
+                self.assertEqual(len(result['content']), 2, 'the answer itself is not changed')
+        # The same words in a result that did not fail, or only after the first text (a console line, a page read
+        # out), and other failures and results: as they came.
+        for result in ({'content': [{'type': 'text', 'text': failed}]},
+                       {'content': [{'type': 'text', 'text': failed}], 'isError': False},
+                       {'content': [{'type': 'text', 'text': 'TypeError: x'}, {'type': 'text', 'text': plain}], 'isError': True},
+                       {'content': [{'type': 'text', 'text': 'TypeError: x'}], 'isError': True},
+                       {'content': [{'type': 'text', 'text': 'ok'}]}):
+            with self.subTest(result=result):
+                adapter, _, output, _, _ = self.fixture(result=result)
+                await self.initialize(adapter)
+                await adapter.handle(self.call())
+                self.assertEqual(output[-1]['result'], result)
+        # Codex's own JSON-RPC error gets the note after its message, the rest of it as it is.
+        error = {'code': -32000, 'message': failed, 'data': {'original': 1}}
+        adapter, _, output, logs, _ = self.fixture()
+        await self.initialize(adapter)
+        with patch.object(adapter, 'call_tool', new=AsyncMock(side_effect=bridge.RpcFailure(error))):
+            await adapter.handle(self.call())
+        self.assertEqual(output[-1]['error'], {**error, 'message': failed + '\n\n' + bridge.UNLOCK_FAILED_NOTE})
+        self.assertEqual(error['message'], failed, 'the error itself is not changed')
+        adapter, _, output, _, _ = self.fixture(mode='rpc_error')
+        await self.initialize(adapter)
+        await adapter.handle(self.call())
+        self.assertEqual(output[-1]['error'], {'code': -32000, 'message': 'PRIVATE_NATIVE_ERROR', 'data': {'original': [1, 2]}})
+
+    async def test_a_call_the_bridge_could_not_do_gets_the_note_on_what_to_do_next(self):
+        self.assertEqual(bridge.failure_note(bridge.LOST_BEFORE_SEND), bridge.LOST_NOTE)
+        self.assertEqual(bridge.failure_note(bridge.LOST_DURING_CALL), bridge.LOST_NOTE)
+        self.assertEqual(bridge.failure_note(bridge.TURN_ENDED_WITHOUT_HOST), bridge.TURN_ENDED_NOTE)
+        self.assertIsNone(bridge.failure_note(bridge.STOPPING), 'a bridge that stops is no problem to act on')
+        self.assertEqual(bridge.failure_note('The registered Codex host process is no longer available.'), bridge.HOST_NOTE)
+        # No host to attach to: initialize fails with the host note after the bridge's own text.
+        adapter, _, output, _, _ = self.fixture(mode='disconnect')
+        await self.initialize(adapter)
+        message = output[-1]['error']['message']
+        self.assertTrue(message.endswith('\n\n' + bridge.HOST_NOTE))
+        self.assertNotIn('CUA Bar note', message[:-len(bridge.HOST_NOTE)])
+        # A tool call before the catalogue is there, and one of a bridge that stops.
+        adapter, _, output, _, _ = self.fixture()
+        await adapter.handle(self.call())
+        self.assertEqual(output[-1]['error']['message'],
+                         'The existing Codex host and original CUA catalogue are not connected.\n\n' + bridge.HOST_NOTE)
+        await self.initialize(adapter)
+        adapter.stopping = True
+        await adapter.handle(self.call())
+        self.assertEqual(output[-1]['error'], {'code': -32001, 'message': bridge.STOPPING})
+        # Every note is one of the bridge's fixed texts and says it is CUA Bar's.
+        for note in (bridge.LOST_NOTE, bridge.TURN_ENDED_NOTE, bridge.HOST_NOTE, bridge.UNLOCK_FAILED_NOTE,
+                     bridge.LOCKED_NOTE, bridge.LOCKED_NOTE_SHORT, bridge.BROWSER_BLOCKED_NOTE):
+            self.assertTrue(note.startswith('CUA Bar note: '))
 
     async def test_the_note_is_added_to_js_only(self):
         refusal = {'content': [{'type': 'text', 'text': 'Local browser use is disabled in Work settings'}], 'isError': True}

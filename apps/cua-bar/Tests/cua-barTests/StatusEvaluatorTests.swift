@@ -269,7 +269,7 @@ struct StatusEvaluatorTests {
     private func facts(causing kind: ProblemKind) -> LocalFacts {
         switch kind {
         case .developerToolsNeeded: LocalFacts(developerToolsNeeded: true)
-        case .claudeConflict: LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .conflict, skill: .ready))
+        case .claudeConflict: LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .conflict))
         default: LocalFacts()
         }
     }
@@ -302,7 +302,7 @@ struct StatusEvaluatorTests {
         status.host.state = .closed
         status.connections[0].state = .ended
         status.leases.maybeLeft = [LeftoverLease(sessionID: "019a-1", agent: .claude, connectionID: nil, cwd: nil, endedAt: nil, releasable: true)]
-        let facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .conflict, skill: .ready))
+        let facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .conflict))
 
         // codex_missing > setup_incomplete > codex_without_host > claude_conflict > ended_connections > leases_maybe_left
         // (the problems that have a button come first: a conflict someone left on purpose does not hide them)
@@ -417,20 +417,17 @@ struct StatusEvaluatorTests {
         }
     }
 
-    // MARK: Claude Code's MCP server and skill
+    // MARK: Claude Code's MCP server
 
-    private func claude(mcp: ClaudeSetupState.Part, skill: ClaudeSetupState.Part, found: Bool = true) -> LocalFacts {
-        LocalFacts(claude: ClaudeSetupState(claudeCodeFound: found, mcp: mcp, skill: skill))
+    private func claude(mcp: ClaudeSetupState.Part, found: Bool = true) -> LocalFacts {
+        LocalFacts(claude: ClaudeSetupState(claudeCodeFound: found, mcp: mcp))
     }
 
-    @Test func aMissingOrOutOfDateMCPServerOrSkillIsTheSetupProblemWithTheFixButton() throws {
+    @Test func aMissingOrOutOfDateMCPServerIsTheSetupProblemWithTheFixButton() throws {
         let status = try healthy()
         let cases: [(LocalFacts, String)] = [
-            (claude(mcp: .missing, skill: .ready), "Claude Code에 CUA가 연결되지 않았어요"),
-            (claude(mcp: .outdated, skill: .ready), "Claude Code의 CUA 연결이 옛 판이에요"),
-            (claude(mcp: .ready, skill: .missing), "Claude Code에 CUA 스킬이 없어요"),
-            (claude(mcp: .ready, skill: .outdated), "Claude Code의 CUA 스킬이 옛 판이에요"),
-            (claude(mcp: .missing, skill: .missing), "연결 설정에 문제가 있어요 — MCP · 스킬"),
+            (claude(mcp: .missing), "Claude Code에 CUA가 연결되지 않았어요"),
+            (claude(mcp: .outdated), "Claude Code의 CUA 연결이 옛 판이에요"),
         ]
         for (facts, title) in cases {
             let problem = try #require(evaluate(status, facts: facts).problem, "\(title)")
@@ -441,39 +438,39 @@ struct StatusEvaluatorTests {
         }
     }
 
-    @Test func withoutClaudeCodeNothingIsSaidAboutItsMCPServerOrSkill() throws {
+    @Test func withoutClaudeCodeNothingIsSaidAboutItsMCPServer() throws {
         // R12: the card carries no "Claude Code 없음", and what waits for Claude Code is no problem.
         for mcp in [ClaudeSetupState.Part.missing, .outdated, .conflict] {
-            #expect(evaluate(try healthy(), facts: claude(mcp: mcp, skill: .missing, found: false)).problem == nil)
+            #expect(evaluate(try healthy(), facts: claude(mcp: mcp, found: false)).problem == nil)
         }
     }
 
     @Test func anUnknownOrReadyPartIsNoProblem() throws {
         for part in [ClaudeSetupState.Part.unknown, .ready] {
-            #expect(evaluate(try healthy(), facts: claude(mcp: part, skill: part)).problem == nil)
+            #expect(evaluate(try healthy(), facts: claude(mcp: part)).problem == nil)
         }
     }
 
     @Test func aConflictHasNoButtonAndNamesWhatIsThere() throws {
-        let status = try healthy()
-        let titles: [(ClaudeSetupState.Part, ClaudeSetupState.Part, String)] = [
-            (.conflict, .ready, "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요"),
-            (.ready, .conflict, "Claude Code에 앱이 깔지 않은 cuabar 스킬이 있어요"),
-            (.conflict, .conflict, "Claude Code에 앱이 깔지 않은 cuabar MCP와 스킬이 있어요"),
-        ]
-        for (mcp, skill, title) in titles {
-            let summary = evaluate(status, facts: claude(mcp: mcp, skill: skill))
-            #expect(summary.problem?.kind == .claudeConflict)
-            #expect(summary.problem?.title == title)
-            #expect(summary.nextStep == "점검 탭에서 치우는 방법을 보세요")
-            #expect(summary.fix == nil)
-            #expect(summary.icon == .problem)
-        }
+        let summary = evaluate(try healthy(), facts: claude(mcp: .conflict))
+        #expect(summary.problem?.kind == .claudeConflict)
+        #expect(summary.problem?.title == "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요")
+        #expect(summary.nextStep == "점검 탭에서 치우는 방법을 보세요")
+        #expect(summary.fix == nil)
+        #expect(summary.icon == .problem)
+    }
+
+    @Test func theSkillOf08xIsNoProblemOfTheCard() throws {
+        // Since 0.8.10 the MCP server is Claude Code's whole side: a skill 0.8.x left is told on the 점검 tab only (F9).
+        var state = ClaudeSetupState(claudeCodeFound: true, mcp: .ready)
+        state.retiredSkill = true
+        state.oldSkill = true
+        #expect(evaluate(try healthy(), facts: LocalFacts(claude: state)).problem == nil)
     }
 
     @Test func theOldPluginIsNotOnTheCard() throws {
         // It is told in the check tab (the model keeps it in `claudeSetup`), not by the icon or the card.
-        let facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .ready, skill: .ready, legacyPlugins: [LegacyPlugin.id]))
+        let facts = LocalFacts(claude: ClaudeSetupState(claudeCodeFound: true, mcp: .ready, legacyPlugins: [LegacyPlugin.id]))
         #expect(evaluate(try healthy(), facts: facts).problem == nil)
     }
 

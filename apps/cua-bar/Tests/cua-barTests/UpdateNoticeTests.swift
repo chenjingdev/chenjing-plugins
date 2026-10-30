@@ -88,7 +88,7 @@ struct UpdateNoticeTests {
         #expect(await install(rig).message.isEmpty)
         #expect(rig.announcements.posted.count == 1, "the next run posts nothing")
         // And a later change is the routine's own line again, in the banner.
-        try FileManager.default.removeItem(at: rig.home.skillFolder)
+        try rig.home.writeClaudeConfig(["mcpServers": [String: Any]()])
         #expect(await install(rig) == installed)
         #expect(rig.announcements.posted.count == 1)
     }
@@ -197,7 +197,6 @@ struct UpdateNoticeTests {
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         rig.engine.setStatus(try LiveSystemActionsTests().currentEngine(rig.home).get())
-        try rig.home.addSkill(version: "0.7.0", body: rig.skillSourceBody)
         try rig.home.addMcp(command: "/Users/someone/.claude/plugins/cache/chenjing-plugins/cua/0.7.0/start-mcp.sh")
         try rig.notice.leave(version: seven)
         #expect(await install(rig) == ActionOutcome(kind: .warning, message: InstallMessages.conflict))

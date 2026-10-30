@@ -835,8 +835,9 @@ class ReconnectTests(RegisteredCase):
         self.assertTrue(self.record(control)['busy'])
         host1.finish()
         await task
-        # A fixed text, an error the AI can act on; the call is not sent again to anyone.
-        self.assertEqual(self.reply(flying['id'])['error'], {'code': -32001, 'message': host_mcp.LOST_DURING_CALL})
+        # A fixed text, an error the AI can act on, and the note on what to do next; the call is not sent again to anyone.
+        self.assertEqual(self.reply(flying['id'])['error'],
+                         {'code': -32001, 'message': host_mcp.LOST_DURING_CALL + '\n\n' + host_mcp.LOST_NOTE})
         # With the error text asked for, the call's line keeps that same text.
         self.assertEqual([(line['ok'], line.get('error_text')) for line in self.activity()],
                          [(True, None), (False, host_mcp.LOST_DURING_CALL)])
@@ -949,8 +950,9 @@ class ReconnectTests(RegisteredCase):
         self.reopen = lambda: write_registry(self.host_state, second_socket)
         with patch.object(mcp_stdio, 'ensure_host', side_effect=AssertionError('turn_ended must not look for a host')) as ensure:
             reply = await self.run_call(adapter, 'turn_ended')
-        # A fixed answer; the registry was not read, nothing was opened, nothing was connected.
-        self.assertEqual(reply['error'], {'code': -32001, 'message': host_mcp.TURN_ENDED_WITHOUT_HOST})
+        # A fixed answer and its note; the registry was not read, nothing was opened, nothing was connected.
+        self.assertEqual(reply['error'], {'code': -32001,
+                                          'message': host_mcp.TURN_ENDED_WITHOUT_HOST + '\n\n' + host_mcp.TURN_ENDED_NOTE})
         ensure.assert_not_called()
         self.assertEqual((self.commands, len(self.connects)), ([], 1))
         self.assertEqual(len(adapter.scopes), 1)

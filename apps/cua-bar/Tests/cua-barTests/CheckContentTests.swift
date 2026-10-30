@@ -12,7 +12,7 @@ enum CheckFixtures {
 
     static func claudeReady() -> ClaudeSetupState {
         ClaudeSetupState(
-            claudeCodeFound: true, claudeCodePath: claudePath, mcp: .ready, skill: .ready, permissions: PermissionReading(userRule: .allowed))
+            claudeCodeFound: true, claudeCodePath: claudePath, mcp: .ready, permissions: PermissionReading(userRule: .allowed))
     }
 
     /// `codexMissing`: what the model knows when the engine cannot be asked (the app looked and there is no Codex), which
@@ -65,13 +65,14 @@ struct CheckContentTests {
 
     // MARK: Everything is fine
 
-    @Test func everythingFineGivesTenReadyLinesInTheOrderOfTheSpec() throws {
+    @Test func everythingFineGivesNineReadyLinesInTheOrderOfTheSpec() throws {
+        // Since 0.8.10 Claude Code's side is the MCP server alone: there is no skill line.
         let content = CheckFixtures.content(try status { _ in })
-        #expect(content.lines.map(\.item) == [.claudeCode, .mcp, .skill, .permissions, .engine, .python, .wrapper, .relay, .loginItem, .host])
+        #expect(content.lines.map(\.item) == [.claudeCode, .mcp, .permissions, .engine, .python, .wrapper, .relay, .loginItem, .host])
         #expect(content.lines.map(\.title) == [
-            "Claude Code", "MCP", "스킬", "허락 규칙", "엔진", "파이썬 환경", "Codex 래퍼와 로그인 설정", "중계기", "앱 로그인 항목", "Codex 호스트와 연결 시험",
+            "Claude Code", "MCP", "허락 규칙", "엔진", "파이썬 환경", "Codex 래퍼와 로그인 설정", "중계기", "앱 로그인 항목", "Codex 호스트와 연결 시험",
         ])
-        #expect(content.lines.map(\.status) == Array(repeating: .ready, count: 10))
+        #expect(content.lines.map(\.status) == Array(repeating: .ready, count: 9))
         #expect(content.problemCount == 0)
         #expect(content.headline == "점검 결과")
         #expect(content.lines.allSatisfy { !$0.detail.isEmpty })
@@ -93,7 +94,6 @@ struct CheckContentTests {
     @Test func aBrokenLineTheCardCarriesSaysOnlyFixItOnTheCard() throws {
         var claude = CheckFixtures.claudeReady()
         claude.mcp = .missing
-        claude.skill = .outdated
         let broken = try status { status in
             status.engine.version = "0.6.0"
             status.setup.dependencies = "missing"
@@ -103,7 +103,7 @@ struct CheckContentTests {
         let input = CheckFixtures.input(broken, claude: claude)
         #expect(input.card?.kind == .setupIncomplete, "the card carries all of them: one 고치기")
         let content = CheckContent(input)
-        for item in [CheckItem.mcp, .skill, .engine, .python, .wrapper, .relay] {
+        for item in [CheckItem.mcp, .engine, .python, .wrapper, .relay] {
             let line = try #require(content.line(item))
             #expect(line.status == .problem, "\(item)")
             #expect(line.detail == "위 카드에서 고쳐요", "\(item)")
@@ -112,18 +112,18 @@ struct CheckContentTests {
         }
         #expect(content.line(.claudeCode)?.status == .ready)
         #expect(content.line(.loginItem)?.status == .ready)
-        #expect(content.problemCount == 6)
-        #expect(content.headline == "점검 결과 · 문제 6개")
+        #expect(content.problemCount == 5)
+        #expect(content.headline == "점검 결과 · 문제 5개")
     }
 
     @Test func theTabAndTheCardJudgeFromTheSameList() throws {
         // Each broken part the evaluator lists is exactly a line that says to fix it on the card.
         var claude = CheckFixtures.claudeReady()
-        claude.skill = .missing
+        claude.mcp = .missing
         let broken = try status { $0.setup.relay = "unavailable"; $0.setup.loginEnvironment = "stale" }
         let input = CheckFixtures.input(broken, claude: claude)
         let listed = Set((StatusEvaluator.setupIssues(in: broken.setup) + StatusEvaluator.claudeIssues(in: claude)).map(\.item))
-        #expect(listed == [.relay, .wrapper, .skill])
+        #expect(listed == [.relay, .wrapper, .mcp])
         let content = CheckContent(input)
         let carried = Set(content.lines.filter { $0.detail == "위 카드에서 고쳐요" }.map(\.item))
         #expect(carried == listed)
@@ -133,7 +133,6 @@ struct CheckContentTests {
     @Test func withoutTheCodexAppOnlyTheCodexLineIsAProblemAndWhatTheInstallWouldPutRightWaits() throws {
         var claude = CheckFixtures.claudeReady()
         claude.mcp = .missing
-        claude.skill = .missing
         let broken = try status {
             $0.codex.installed = false; $0.codex.running = false; $0.host.state = .missing
             $0.engine.version = "0.6.0"; $0.setup.dependencies = "missing"; $0.setup.relay = "unavailable"
@@ -144,7 +143,7 @@ struct CheckContentTests {
         let host = try #require(content.line(.host))
         #expect(host.status == .problem && host.detail == "위 카드에서 고쳐요" && host.facts == "Codex 앱이 없어요")
         // F1: the install is put off until there is a Codex, so no line promises a fix or shows a problem nobody can fix.
-        for item in [CheckItem.engine, .mcp, .skill, .python, .wrapper, .relay] {
+        for item in [CheckItem.engine, .mcp, .python, .wrapper, .relay] {
             let line = try #require(content.line(item))
             #expect(line.status == .waiting && line.detail == "Codex가 생기면 맞춰요", "\(item)")
             #expect(line.steps.isEmpty && line.commands.isEmpty && line.button == nil, "\(item)")
@@ -166,11 +165,11 @@ struct CheckContentTests {
             let host = try #require(content.line(.host))
             #expect(host.status == .problem && host.detail == "위 카드에서 고쳐요", "Codex's line, not 모름")
             #expect(host.facts == "Codex 앱이 없어요")
-            for item in [CheckItem.engine, .mcp, .skill, .python, .wrapper, .relay] {
+            for item in [CheckItem.engine, .mcp, .python, .wrapper, .relay] {
                 #expect(content.line(item)?.status == .waiting && content.line(item)?.detail == "Codex가 생기면 맞춰요", "\(item)")
             }
             #expect(content.problemCount == 1)
-            #expect(content.diagnosisLines.count == 10)
+            #expect(content.diagnosisLines.count == 9)
         }
     }
 
@@ -187,11 +186,10 @@ struct CheckContentTests {
     }
 
     @Test func withoutCodexACuaTheAppDidNotPutThereIsStillToldWithItsCommand() throws {
-        // F1: someone else's cuabar MCP server or skill is left as it is, Codex or not, so waiting for Codex would not put it
+        // F1: someone else's cuabar MCP server is left as it is, Codex or not, so waiting for Codex would not put it
         // right. The line says it, with the command, and what comes after the command is Codex, not the card's fix.
         var claude = CheckFixtures.claudeReady()
         claude.mcp = .conflict
-        claude.skill = .conflict
         let noCodex = try status { $0.codex.installed = false; $0.codex.running = false; $0.host.state = .missing }
         let inputs = [
             CheckFixtures.input(nil, error: .engineMissing, claude: claude, codexMissing: true),
@@ -204,19 +202,14 @@ struct CheckContentTests {
             #expect(mcp.status == .problem && mcp.detail == "앱이 깔지 않은 cuabar MCP가 있어요 — 그대로 뒀어요")
             #expect(mcp.commands.map(\.text) == [CheckContent.removeMCPCommand])
             #expect(mcp.steps.last == "지운 뒤 Codex를 깔면 앱이 연결해요")
-            let skill = try #require(content.line(.skill))
-            #expect(skill.status == .problem && skill.detail == "앱이 깔지 않은 cuabar 스킬이 있어요 — 그대로 뒀어요")
-            #expect(skill.commands.map(\.text) == [CheckContent.moveSkillCommand])
-            #expect(skill.steps.last == "옮긴 뒤 Codex를 깔면 앱이 스킬을 깔아요")
             for item in [CheckItem.engine, .python, .wrapper, .relay] {
                 #expect(content.line(item)?.status == .waiting && content.line(item)?.detail == "Codex가 생기면 맞춰요", "\(item)")
             }
-            #expect(content.problemCount == 3, "Codex, and the two of someone else")
+            #expect(content.problemCount == 2, "Codex, and the server of someone else")
         }
         // With Codex, what comes after the command is the card's fix, as before.
         let withCodex = CheckFixtures.content(try status { _ in }, claude: claude)
         #expect(withCodex.line(.mcp)?.steps.last == "지운 뒤 위 카드의 고치기를 누르면 앱이 연결해요")
-        #expect(withCodex.line(.skill)?.steps.last == "옮긴 뒤 위 카드의 고치기를 누르면 앱이 스킬을 깔아요")
     }
 
     // MARK: When there is no status, the card still carries what its button does
@@ -224,41 +217,39 @@ struct CheckContentTests {
     @Test func theLinesOfClaudeCodesPartsAreFixedOnTheCardWhenTheEngineIsMissingAndTheCardInstallsEverything() throws {
         var claude = CheckFixtures.claudeReady()
         claude.mcp = .missing
-        claude.skill = .outdated
         let input = CheckFixtures.input(nil, error: .engineMissing, claude: claude)
         #expect(input.card?.kind == .setupIncomplete && input.card?.fix == .runSetup)
         let content = CheckContent(input)
-        for item in [CheckItem.engine, .mcp, .skill] {
+        for item in [CheckItem.engine, .mcp] {
             let line = try #require(content.line(item))
             #expect(line.status == .problem && line.detail == "위 카드에서 고쳐요", "\(item)")
             #expect(line.commands.isEmpty && line.button == nil, "\(item)")
         }
         #expect(content.line(.python)?.status == .unknown, "what needs the engine's answer cannot be told")
         // A part that is fine is not claimed by the card.
-        claude.skill = .ready
-        let mcpOnly = CheckFixtures.content(nil, error: .engineMissing, claude: claude)
-        #expect(mcpOnly.line(.skill)?.status == .ready && mcpOnly.line(.mcp)?.detail == "위 카드에서 고쳐요")
+        claude.mcp = .ready
+        let engineOnly = CheckFixtures.content(nil, error: .engineMissing, claude: claude)
+        #expect(engineOnly.line(.mcp)?.status == .ready && engineOnly.line(.engine)?.detail == "위 카드에서 고쳐요")
     }
 
     @Test func theDeveloperToolsCardAlsoCarriesTheLinesOfWhatItInstalls() throws {
         var claude = CheckFixtures.claudeReady()
         claude.mcp = .missing
-        claude.skill = .missing
         let input = CheckFixtures.input(nil, error: .engineMissing, claude: claude, developerTools: true)
         #expect(input.card?.kind == .developerToolsNeeded && input.card?.fix == .installDeveloperTools)
         let content = CheckContent(input)
-        for item in [CheckItem.engine, .python, .mcp, .skill] {
+        for item in [CheckItem.engine, .python, .mcp] {
             let line = try #require(content.line(item))
             #expect(line.status == .problem && line.detail == "위 카드에서 고쳐요", "\(item)")
             #expect(line.button == nil, "\(item): the one button is the card's")
         }
-        #expect(StatusEvaluator.itemsOnCard(status: nil, error: .engineMissing, appVersion: "0.7.0", claude: claude, card: input.card) == [.engine, .python, .mcp, .skill])
+        #expect(StatusEvaluator.itemsOnCard(status: nil, error: .engineMissing, appVersion: "0.7.0", claude: claude, card: input.card) == [.engine, .python, .mcp])
     }
 
-    @Test func withoutClaudeCodeTheCardsInstallLeavesTheMcpAndSkillLinesWaiting() throws {
+    @Test func withoutClaudeCodeTheCardsInstallLeavesTheMcpLineWaiting() throws {
         let content = CheckFixtures.content(nil, error: .engineMissing, claude: .none)
         #expect(content.line(.engine)?.detail == "위 카드에서 고쳐요")
-        #expect(content.line(.mcp)?.status == .waiting && content.line(.skill)?.status == .waiting)
+        #expect(content.line(.mcp)?.status == .waiting)
     }
 
     @Test func aSlowEngineHasNoCardForTheLinesToPointAt() throws {
@@ -305,18 +296,39 @@ struct CheckContentTests {
         #expect(content.problemCount == 1)
     }
 
-    @Test func aCuaSkillTheAppDidNotPutThereIsToldWithTheWayToRemoveIt() throws {
+    @Test func theSkill08xPutInIsToldOnTheMcpLineWithTheCommandThatRemovesIt() throws {
+        // Since 0.8.10 the MCP server says how to use CUA; the cuabar skill 0.8.x put in (with the app's mark) is told like
+        // 0.8.0's `cua` skill (F9): a notice and the command to copy. The app never removes it.
         var claude = CheckFixtures.claudeReady()
-        claude.skill = .conflict
-        let line = try #require(CheckFixtures.content(try status { _ in }, claude: claude).line(.skill))
+        claude.retiredSkill = true
+        let content = CheckFixtures.content(try status { _ in }, claude: claude)
+        let line = try #require(content.line(.mcp))
         #expect(line.status == .problem)
-        #expect(line.detail == "앱이 깔지 않은 cuabar 스킬이 있어요 — 그대로 뒀어요")
-        // Moved out of the skills folder (another name in there would be read as a skill), never removed, and not by the app.
-        #expect(line.commands.map(\.text) == ["mv ~/.claude/skills/cuabar ~/cuabar-skill-backup"])
-        #expect(line.commands.first?.copy.action == .copyCommand("mv ~/.claude/skills/cuabar ~/cuabar-skill-backup", on: .skill))
-        #expect(line.steps.first?.contains("옮겨 두세요") == true)
-        #expect(!line.steps.joined().contains("지워 주세요") && !line.commands.map(\.text).joined().contains("rm "))
-        #expect(line.steps.joined().contains("앱은 옮기거나 지우지 않아요"))
+        #expect(line.detail == "0.8.9까지 깐 cuabar 스킬이 남아 있어요 — 이제 MCP가 안내해요")
+        #expect(line.commands.map(\.text) == ["rm -rf ~/.claude/skills/cuabar"])
+        #expect(line.commands.first?.copy.action == .copyCommand("rm -rf ~/.claude/skills/cuabar", on: .mcp))
+        #expect(line.commands.first?.copy.help == CheckCommand.commandHelp, "copied, never run by the app")
+        #expect(line.steps == ["아래 명령으로 지워 주세요. 앱은 지우지 않아요"])
+        #expect(line.facts == "0.8.x cuabar 스킬 있음")
+        #expect(content.problemCount == 1)
+        // Beside 0.8.0's `cua` skill and the old plugin: all of them, each with its command.
+        claude.oldSkill = true
+        claude.legacyPlugins = [LegacyPlugin.id]
+        let all = try #require(CheckFixtures.content(try status { _ in }, claude: claude).line(.mcp))
+        #expect(all.commands.map(\.text) == [LegacyPlugin.removeCommand, "rm -rf ~/.claude/skills/cua", "rm -rf ~/.claude/skills/cuabar"])
+        #expect(all.detail == LegacyPlugin.notice)
+        #expect(all.steps.contains("0.8.9까지 깐 cuabar 스킬이 남아 있어요 — 이제 MCP가 안내해요 — 아래 명령으로 지워 주세요. 앱은 지우지 않아요"))
+        // Not there: the line is the MCP server's own, as ever.
+        let none = try #require(CheckFixtures.content(try status { _ in }).line(.mcp))
+        #expect(none.status == .ready && none.commands.isEmpty)
+    }
+
+    @Test func theSkill08xPutInIsToldWhileTheLineWaitsForCodexOrClaudeCodeToo() throws {
+        var claude = CheckFixtures.claudeReady()
+        claude.retiredSkill = true
+        let noCodex = CheckFixtures.content(nil, error: .engineMissing, claude: claude, codexMissing: true)
+        #expect(noCodex.line(.mcp)?.detail == RetiredSkill.notice, "a leftover with its own fix on the line is still told")
+        #expect(noCodex.line(.mcp)?.commands.map(\.text) == [RetiredSkill.removeCommand])
     }
 
     @Test func theOldPluginIsTwoCuasAndTheLineGivesTheCommandThatRemovesIt() throws {
@@ -343,7 +355,7 @@ struct CheckContentTests {
         #expect(line.status == .waiting && line.detail == "찾지 못했어요")
         #expect(line.commands.map(\.text) == ["curl -fsSL https://claude.ai/install.sh | bash"])
         #expect(line.steps.count == 1, "how to get it, in one line")
-        #expect(content.line(.mcp)?.status == .waiting && content.line(.skill)?.status == .waiting)
+        #expect(content.line(.mcp)?.status == .waiting)
         #expect(content.line(.mcp)?.detail == "Claude Code가 생기면 연결해요")
         // R12: no problem on the card or the icon for this.
         let summary = StatusEvaluator.evaluate(ready, appVersion: "0.7.0", facts: LocalFacts(claude: claude))
@@ -354,7 +366,6 @@ struct CheckContentTests {
         var claude = CheckFixtures.claudeReady()
         claude.claudeCodeUnusable = true
         claude.mcp = .unknown
-        claude.skill = .unknown
         let content = CheckFixtures.content(try status { _ in }, claude: claude)
         let line = try #require(content.line(.claudeCode))
         #expect(line.status == .problem && line.detail == "찾았지만 시작하지 못했어요")
@@ -599,7 +610,7 @@ struct CheckContentTests {
         #expect(slow.line(.engine)?.detail == "응답이 없어 확인하지 못했어요")
 
         let loading = CheckFixtures.content(nil)
-        #expect(loading.lines.filter { $0.item != .claudeCode && $0.item != .loginItem && $0.item != .mcp && $0.item != .skill && $0.item != .permissions }.allSatisfy { $0.status == .unknown && $0.detail == "확인하는 중이에요" })
+        #expect(loading.lines.filter { $0.item != .claudeCode && $0.item != .loginItem && $0.item != .mcp && $0.item != .permissions }.allSatisfy { $0.status == .unknown && $0.detail == "확인하는 중이에요" })
     }
 
     @Test func anEngineOfAnotherVersionNamesBothVersionsInTheDiagnosis() throws {
@@ -618,13 +629,13 @@ struct CheckContentTests {
             login: LoginEnvironmentReading(agentLabel: nil, launchdValue: "/opt/other/codex-wrapper.sh"),
             probe: ProbeRecord(outcome: .timeout, at: Fixtures.now))
         let lines = content.diagnosisLines
-        #expect(lines.count == 10)
+        #expect(lines.count == 9)
         #expect(lines.map { $0.components(separatedBy: ":").first } == CheckItem.allCases.map { "점검 \($0.title)" })
         #expect(lines.allSatisfy { !$0.contains("\n") })
         #expect(lines[0] == "점검 Claude Code: 정상 — 경로 /Users/x/.local/bin/claude")
         #expect(lines[1].hasPrefix("점검 MCP: 문제"))
-        #expect(lines[6].contains("CODEX_CLI_PATH=/opt/other/codex-wrapper.sh"))
-        #expect(lines[9] == "점검 Codex 호스트와 연결 시험: 문제 — 켜져 있음, 연결 시험 timeout 12:00")
+        #expect(lines[5].contains("CODEX_CLI_PATH=/opt/other/codex-wrapper.sh"))
+        #expect(lines[8] == "점검 Codex 호스트와 연결 시험: 문제 — 켜져 있음, 연결 시험 timeout 12:00")
     }
 
     @Test func aValueThatIsNotOnePlainPathStaysOutOfTheDiagnosis() throws {

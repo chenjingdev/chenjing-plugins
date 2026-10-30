@@ -75,6 +75,19 @@ Codex 래퍼(`desktop_cli_wrapper.py`)는 호스트를 켤 때 상태 폴더(`~/
 - **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** CUA Bar는 이런 Codex를 끄지 않고 알림으로 다시 켤지 묻고, **다시 켜기**를 누르면 정상 종료한 뒤 다시 켭니다. 직접 하려면 진행 중인 작업을 마치고 Codex를 정상 종료(⌘Q)한 뒤 다시 엽니다. 어느 쪽도 강제로 종료하지 않지만, 다시 켜면 하던 Codex 작업은 끊깁니다. 다시 켠 뒤에도 Claude Code에서 cuabar가 연결되지 않은 것으로 보이면 `/mcp`로 다시 연결합니다.
 - **Codex가 꺼졌다 켜져도(앱 갱신 포함) 열려 있던 Claude 대화는 이어집니다.** 다음 CUA 호출 때 새 호스트에 다시 붙습니다. 연결이 끊길 때 하던 조작은 다시 보내지 않으므로 그 조작이 실제로 됐는지는 알 수 없습니다. 화면을 확인한 뒤에 이어 갑니다.
 - Codex가 뒤에서 열리는 동안 로그인·권한·업데이트 창이 떠 있으면, 기다리다가 Codex를 앞으로 띄우고 안내합니다.
+
+### Claude에게 주는 안내
+
+0.8.10부터 Claude가 CUA를 쓰는 법은 브리지(`cuabar` MCP 서버)가 직접 말합니다. 0.8.9까지는 CUA Bar가 `~/.claude/skills/cuabar/`에 스킬을 깔았는데, 앱이 디스크에 바로 쓰는 스킬은 곧 새 판이 되고 이미 떠 있는 브리지는 `/mcp` 다시 연결 전까지 옛 판이라 한 대화에서 두 안내가 다른 말을 했습니다. 이제 안내는 한 곳에만 있습니다.
+
+- **연결할 때**: `initialize` 응답의 `instructions`. 모든 Claude 대화에 늘 실리는 글이라 짧게 둡니다. 연결마다 새 Codex 스레드에서 돌고 Codex 대화는 보이지 않는다는 것, 첫 `js` 호출(또는 `js_reset` 뒤)에 `await cua.getState();` 같은 문서화된 입구 하나를 부르고 돌아온 문서를 따를 것, REPL은 Node.js나 Playwright가 아니라 `process`와 파일 시스템이 없다는 것, 웹 페이지는 Playwright가 있으면 따로(`js` 안이 아니라) 쓰고 로그인된 Chrome이나 사용자가 연 탭이 필요하거나 Playwright가 없으면 Chrome을 일반 앱처럼(`cua.getApp("Google Chrome")`) 다룰 것, 막힌 URL이나 지원하지 않는 동작은 다른 길(Playwright 포함)로 다시 하지 말고 알릴 것(Codex가 이 대화의 브라우저를 막은 것은 그런 거절이 아님), 끝나면 `turn_ended`를 `{}`로 부를 것, Codex를 끄거나 권한을 바꾸거나 `codex-cua`의 `release`·`release-session`·`dismiss-session`·`stop`·`restart-codex`·`unlock-reset`을 직접 돌리지 말 것.
+- **그 오류가 났을 때만**: 브리지가 돌려주는 오류의 끝에 `CUA Bar note: `로 시작하는 영어 안내를 붙입니다(결과면 내용 끝에 글 하나, JSON-RPC 오류면 메시지 뒤). 오류 글이 이미 하는 말은 되풀이하지 않습니다. 기록(`activity.jsonl`의 오류 문구)에는 붙이지 않습니다.
+  - 호스트 연결이 끊겨 호출이 실패: 다음 호출이 Codex를 뒤에서 열 수 있다는 것, 클릭·제출·전송을 다시 하지 말고 지금 상태를 먼저 볼 것, 다시 붙은 뒤 첫 `js`는 첫 호출처럼 다룰 것.
+  - 연결이 없어 `turn_ended`가 끝내지 못함: 다시 부르지 말 것.
+  - 그 밖에 브리지가 할 수 없었던 일(호스트를 찾지 못함, Codex가 호스트 없이 켜져 있음, 설정 고장 등): `~/.local/bin/codex-cua doctor --probe --json`을 돌려 어디서 실패했는지 말할 것(요청 내용·화면·시크릿은 빼고), 설정 고장은 CUA Bar의 고치기나 `codex-cua setup`, 호스트 없는 Codex는 사용자가 한 번 다시 켤 것, Codex를 직접 끄거나 다른 엔진·프록시·권한 변경·자동 승인으로 대신하지 말 것. 연결이 멈추는 중이라는 오류에는 붙이지 않습니다.
+  - 잠금 해제 실패("automatic unlock could not unlock it"): CUA Bar가 서비스를 다시 켜니 30초쯤 뒤 보기만 하는 호출로 다섯 번까지 다시 부르고, 그래도 안 되면 사용자에게 잠금을 풀어 달라고 할 것(F8). 그 밖의 잠금 거절("The Mac is locked"가 든 것): 사용자에게 풀어 달라고 할 것(오류 글이 이미 그렇게 말하면 그 말은 빼고), 잠금을 직접 풀거나 서비스를 다시 켜지 말 것. 실패한 결과(`isError`)의 첫 글이나 오류 메시지에서만 알아보고, 성공한 결과나 콘솔 줄에 같은 글이 있어도 붙이지 않습니다.
+  - Codex의 브라우저 거절: 위 [알아둘 점](#알아둘-점)의 안내(0.8.7부터).
+- 브리지가 아예 뜨지 못하면 Claude가 볼 안내가 없습니다. 그때는 Claude Code의 `/mcp`와 CUA Bar 점검 탭이 보여 줍니다.
 - **엔진에 문제가 있어도 Codex는 켜집니다.** 연결용 파이썬 환경이나 `command.py`가 없을 때, 환경이 아직 준비되지 않았을 때(Codex를 켜는 동안에는 복구하지도 기다리지도 않습니다), 묶인 엔진 사본(`source.json`)이 없거나 필요한 파일이 빠졌거나 손상됐을 때, 연결을 시작하기 전에 상태 폴더·점유 같은 설정이 막혔을 때 Codex는 연결 없이 원래대로 켜집니다. CUA 연결만 빠지므로 CUA Bar의 **고치기**로 복구합니다(손으로는 사본 폴더의 `setup.sh install-engine`).
 - 다음은 이 보호 밖입니다. `~/.local/share/codex-cua` 폴더 전체를 `codex-cua uninstall` 없이 지운 경우, `command.py` 자체에 문법 오류가 있는 경우, 설정 때 Codex 실행 파일 경로를 기록하지 못했거나 기록한 경로가 앱 업데이트로 바뀐 경우(CUA Bar의 **고치기**나 `codex-cua setup`으로 다시 기록), 연결 가능한 방식으로 시작한 뒤에 생긴 오류입니다.
 
@@ -100,7 +113,7 @@ CUA Bar의 **앱 지우기…**가 이 엔진의 제거까지 합니다([앱 REA
 ~/.local/bin/codex-cua uninstall
 ```
 
-로그인 항목, 등록한 설정값, 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 연결 기록 폴더(`~/Library/Caches/codex-cua`)와 호스트 상태 폴더(`~/Library/Caches/codex-host-cua`)는 지우지 않으니 필요 없으면 직접 지웁니다. 앱이 Claude Code에 깐 `cuabar` MCP와 스킬은 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
+로그인 항목, 등록한 설정값, 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 연결 기록 폴더(`~/Library/Caches/codex-cua`)와 호스트 상태 폴더(`~/Library/Caches/codex-host-cua`)는 지우지 않으니 필요 없으면 직접 지웁니다. 앱이 Claude Code에 깐 `cuabar` MCP는 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
 
 ## 업데이트와 옛 플러그인
 
@@ -140,7 +153,7 @@ CUA Bar가 쓰는 명령을 직접 부를 수도 있습니다. 모두 `~/.local/
 
 - Codex의 원본 CUA를 호출합니다. Codex 앱 파일과 모델 설정은 수정하지 않으며, Claude 연결마다 별도의 임시 대화를 사용합니다.
 - 원본 CUA의 접근 권한·브라우저 정책·파일 제한이 적용됩니다. 표준 form 승인만 전달하며, 지원하지 않는 승인 흐름은 실패를 알립니다.
-- Codex 26.1023부터 Codex는 브라우저를 부를 때마다 데스크톱 앱에 허락을 묻고(`browser/access`), 앱은 자기가 시작하거나 재개한 대화만 허락합니다. 이 엔진이 연 대화(Claude 연결의 대화, `release-session`이 일하는 대화)는 늘 거절되어 js 호출이 "Local browser use is disabled in Work settings"(앱에 물을 수 없으면 "The browser access host is unavailable")로 끝납니다. 사용자가 끈 설정이 아니라 Codex의 접근 통제라서 엔진은 돌아가지 않습니다(허락에 쓰는 환경값을 넣지 않고 허락 통로에 말하지도 않습니다). 데스크톱 앱 조작은 그대로 됩니다. 브리지는 이 오류를 담은 js 결과 끝에 안내 글(영어) 하나를 덧붙이고, 다른 결과는 그대로 둡니다. 안내는 (0.8.9부터) 웹 페이지는 이 컴퓨터에 Playwright가 있으면 그것으로 하고, 사용자의 로그인된 Chrome이나 사용자가 연 탭이 필요하거나 Playwright가 없으면 Chrome을 일반 데스크톱 앱처럼 CUA로 다루라(`cua.getApp("Google Chrome")`)고 하고, 둘 다 안 될 때만 사용자에게 Codex 앱에 직접 시키라고 하게 합니다. 사용자가 끈 설정도, 그 사이트나 동작의 거절도 아니며 같은 브라우저 호출을 다시 불러도 같은 거절이라는 말도 들어 있습니다. `cuabar` 스킬도 같은 순서를 적습니다. `release-session`은 이때 `browser_blocked`로 답합니다(0.8.7부터).
+- Codex 26.1023부터 Codex는 브라우저를 부를 때마다 데스크톱 앱에 허락을 묻고(`browser/access`), 앱은 자기가 시작하거나 재개한 대화만 허락합니다. 이 엔진이 연 대화(Claude 연결의 대화, `release-session`이 일하는 대화)는 늘 거절되어 js 호출이 "Local browser use is disabled in Work settings"(앱에 물을 수 없으면 "The browser access host is unavailable")로 끝납니다. 사용자가 끈 설정이 아니라 Codex의 접근 통제라서 엔진은 돌아가지 않습니다(허락에 쓰는 환경값을 넣지 않고 허락 통로에 말하지도 않습니다). 데스크톱 앱 조작은 그대로 됩니다. 브리지는 이 오류를 담은 js 결과 끝에 안내 글(영어) 하나를 덧붙이고, 다른 결과는 그대로 둡니다. 안내는 (0.8.9부터) 웹 페이지는 이 컴퓨터에 Playwright가 있으면 그것으로 하고, 사용자의 로그인된 Chrome이나 사용자가 연 탭이 필요하거나 Playwright가 없으면 Chrome을 일반 데스크톱 앱처럼 CUA로 다루라(`cua.getApp("Google Chrome")`)고 하고, 둘 다 안 될 때만 사용자에게 Codex 앱에 직접 시키라고 하게 합니다. 사용자가 끈 설정도, 그 사이트나 동작의 거절도 아니며 같은 브라우저 호출을 다시 불러도 같은 거절이라는 말도 들어 있습니다. 0.8.10부터 `cuabar` 스킬은 없고, 브리지가 연결할 때 보내는 안내(`instructions`, 아래 [Claude에게 주는 안내](#claude에게-주는-안내))가 같은 순서를 적습니다. `release-session`은 이때 `browser_blocked`로 답합니다(0.8.7부터).
 - 엔진이 여는 대화에서는 다른 MCP 서버를 끕니다. 원격 큐레이트 플러그인(예: `chatgpt-meetings`)은 `plugins.<id>.enabled=false`만으로는 로컬 서버(약 50MB)가 뜨므로 `plugins.<id>.mcp_servers.<서버 이름>.enabled=false`도 함께 줍니다(0.8.7부터. 원격 플러그인의 서버 이름은 플러그인 이름입니다).
 - 내부 Codex 인터페이스를 사용하므로 Codex 앱 업데이트 뒤에 엔진 업데이트(CUA Bar의 새 판)나 재연결이 필요할 수 있습니다. Claude 매 턴 자동 종료와 MCP cancellation 중계는 지원하지 않습니다.
 - Codex가 `cua_repl` 서버를 Codex의 번들 CUA 플러그인으로도, 이 엔진의 중계기로도 식별하지 못하면(설정으로 바꾼 다른 중계기 등) 연결하지 않고 오류를 알립니다.

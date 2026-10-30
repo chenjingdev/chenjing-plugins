@@ -101,8 +101,8 @@ final class CUABarViewModel: ObservableObject {
     /// card and the line then say there is nothing more to do, and only for these (never a guess).
     private var tabsReleasedIDs: Set<String> = []
 
-    /// What Claude Code has of CUA as of the last read: the MCP server, the skill, the old plugin if one is
-    /// still recorded. Read from files only; the 점검 tab and the card both show from it.
+    /// What Claude Code has of CUA as of the last read: the MCP server, the old plugin and the skill 0.8.x
+    /// put in if they are still there. Read from files only; the 점검 tab and the card both show from it.
     @Published private(set) var claudeSetup: ClaudeSetupState = .none
 
     /// The login environment as read from launchd and the agent file, while the engine calls it a conflict or stale.

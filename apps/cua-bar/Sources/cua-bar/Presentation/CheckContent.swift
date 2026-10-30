@@ -2,13 +2,12 @@ import Foundation
 
 /// The lines of the 점검 tab, in the order the spec lists them (F3).
 enum CheckItem: String, CaseIterable, Hashable, Sendable {
-    case claudeCode, mcp, skill, permissions, engine, python, wrapper, relay, loginItem, host
+    case claudeCode, mcp, permissions, engine, python, wrapper, relay, loginItem, host
 
     var title: String {
         switch self {
         case .claudeCode: "Claude Code"
         case .mcp: "MCP"
-        case .skill: "스킬"
         case .permissions: "허락 규칙"
         case .engine: "엔진"
         case .python: "파이썬 환경"
@@ -116,8 +115,6 @@ struct CheckContent: Equatable, Sendable {
     /// which is the first place the app looks.
     static let installCommand = "curl -fsSL https://claude.ai/install.sh | bash"
     static let removeMCPCommand = "claude mcp remove -s user cuabar"
-    /// Out of the skills folder, not beside it: another name in there is read as a skill of its own.
-    static let moveSkillCommand = "mv ~/.claude/skills/cuabar ~/cuabar-skill-backup"
     static let unsetLauncherCommand = "launchctl unsetenv CODEX_CLI_PATH"
     static let agentFile = "~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist"
     /// Where the one rule goes (R26): the user settings, so it holds in every folder.
@@ -165,16 +162,11 @@ private struct Judge {
 
     func line(for item: CheckItem) -> CheckLine {
         if codexMissing, !showsConflict(item), let waiting = codexWaiting(item) {
-            return switch item {
-            case .mcp: withOldServers(waiting)
-            case .skill: withOldSkill(waiting)
-            default: waiting
-            }
+            return item == .mcp ? withLeftovers(waiting) : waiting
         }
         return switch item {
         case .claudeCode: claudeCodeLine()
         case .mcp: mcpLine()
-        case .skill: skillLine()
         case .permissions: permissionsLine()
         case .engine: engineLine()
         case .python: pythonLine()
@@ -189,22 +181,18 @@ private struct Judge {
     /// thing that is wrong. The lines that do not depend on Codex say what they have to say.
     private func codexWaiting(_ item: CheckItem) -> CheckLine? {
         switch item {
-        case .engine, .mcp, .skill, .python, .wrapper, .relay:
+        case .engine, .mcp, .python, .wrapper, .relay:
             return CheckLine(item: item, status: .waiting, detail: "Codex가 생기면 맞춰요", facts: "Codex 없음")
         case .claudeCode, .permissions, .loginItem, .host:
             return nil
         }
     }
 
-    /// A cuabar MCP server or skill the app did not put there is told, Codex or not (F1): the install leaves it as it is
+    /// A cuabar MCP server the app did not put there is told, Codex or not (F1): the install leaves it as it is
     /// either way, so waiting for Codex would not put it right, and the line has the command that does.
     private func showsConflict(_ item: CheckItem) -> Bool {
         guard claudeWaiting(item) == nil else { return false }
-        switch item {
-        case .mcp: return claude.mcp == .conflict
-        case .skill: return claude.skill == .conflict
-        default: return false
-        }
+        return item == .mcp && claude.mcp == .conflict
     }
 
     /// What follows the command on a conflict line: the card's fix, or, while the card is the one that says there is
@@ -246,7 +234,7 @@ private struct Judge {
         return CheckLine(item: item, status: .ready, detail: path.map { "찾았어요 · \($0)" } ?? "찾았어요", facts: path.map { "경로 \($0)" } ?? "찾음")
     }
 
-    // MARK: MCP and skill
+    // MARK: MCP
 
     private func claudeWaiting(_ item: CheckItem) -> CheckLine? {
         if !claude.claudeCodeFound {
@@ -279,12 +267,14 @@ private struct Judge {
             case .unknown: line = undecided(item, "~/.claude.json을 읽지 못했어요")
             }
         }
-        return withOldServers(line)
+        return withLeftovers(line)
     }
 
-    /// The old plugins and 0.8.0's `cua` server are a second CUA in a new Claude conversation: told on the MCP line, with
-    /// the commands that remove them.
-    private func withOldServers(_ line: CheckLine) -> CheckLine {
+    /// What is left in Claude Code of CUA before, told on the MCP line (Claude Code's side is the MCP server alone), with
+    /// the commands that remove them (F9): the old plugins and 0.8.0's `cua` server (a second CUA in a new Claude
+    /// conversation), 0.8.0's `cua` skill, and the `cuabar` skill 0.8.x put in (the server says the same now). A skill
+    /// folder without the app's mark is the person's own and is not told.
+    private func withLeftovers(_ line: CheckLine) -> CheckLine {
         var told: [Leftover] = []
         var commands: [CheckCommand] = []
         if claude.legacyPlugin {
@@ -295,15 +285,15 @@ private struct Judge {
             told.append(Leftover(notice: OldName.serverNotice, fact: "옛 이름 cua MCP 있음"))
             commands.append(CheckCommand(OldName.removeServerCommand, on: .mcp))
         }
+        if claude.oldSkill {
+            told.append(Leftover(notice: OldName.skillNotice, fact: "옛 이름 cua 스킬 있음"))
+            commands.append(CheckCommand(OldName.removeSkillCommand, on: .mcp))
+        }
+        if claude.retiredSkill {
+            told.append(Leftover(notice: RetiredSkill.notice, fact: "0.8.x cuabar 스킬 있음"))
+            commands.append(CheckCommand(RetiredSkill.removeCommand, on: .mcp))
+        }
         return with(told, commands, on: line)
-    }
-
-    /// 0.8.0's `cua` skill: told on the skill line, with the command that removes it.
-    private func withOldSkill(_ line: CheckLine) -> CheckLine {
-        guard claude.oldSkill else { return line }
-        return with(
-            [Leftover(notice: OldName.skillNotice, fact: "옛 이름 cua 스킬 있음")],
-            [CheckCommand(OldName.removeSkillCommand, on: .skill)], on: line)
     }
 
     private struct Leftover {
@@ -331,29 +321,6 @@ private struct Judge {
         changed.facts = facts.joined(separator: ", ")
         changed.commands += commands
         return changed
-    }
-
-    private func skillLine() -> CheckLine {
-        withOldSkill(appsSkillLine())
-    }
-
-    private func appsSkillLine() -> CheckLine {
-        let item = CheckItem.skill
-        if let waiting = claudeWaiting(item) { return waiting }
-        switch claude.skill {
-        case .ready: return CheckLine(item: item, status: .ready, detail: "앱이 깐 스킬이 최신이에요", facts: "앱이 깐 스킬, 최신")
-        case .missing: return broken(item, "Claude Code에 CUA 스킬이 없어요")
-        case .outdated: return broken(item, "Claude Code의 CUA 스킬이 옛 판이에요")
-        case .conflict:
-            return CheckLine(
-                item: item, status: .problem, detail: "앱이 깔지 않은 cuabar 스킬이 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cuabar 스킬",
-                steps: [
-                    "~/.claude/skills/cuabar는 앱이 깐 것이 아니에요. 아래 명령으로 skills 폴더 밖으로 옮겨 두세요. 앱은 옮기거나 지우지 않아요",
-                    afterConflict("옮긴 뒤", "앱이 스킬을 깔아요"),
-                ],
-                commands: [CheckCommand(CheckContent.moveSkillCommand, on: item)])
-        case .unknown: return undecided(item, "스킬 폴더를 읽지 못했어요")
-        }
     }
 
     // MARK: Permission rules
@@ -659,7 +626,7 @@ extension StatusEvaluator {
                 if let error, error.needsEngineInstall { items = [.engine] }
                 // With no status to list the broken parts from, the card's button is still the whole install (고치기, or
                 // 설치 for the developer tools, which runs it once the tools are there): it puts Claude Code's MCP server
-                // and skill in too, so the lines of those say to fix them on the card.
+                // in too, so its line says to fix it on the card.
                 if card.fix == .runSetup || card.fix == .installDeveloperTools {
                     items.formUnion(claudeIssues(in: claude).map(\.item))
                 }

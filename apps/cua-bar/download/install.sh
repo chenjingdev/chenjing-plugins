@@ -2,7 +2,7 @@
 # CUA Bar 설치 (맥): curl -fsSL https://cua.chenjing.org/install.sh | sh
 # 받는 곳의 /version에서 최신 판과 dmg의 SHA-256을 읽고, dmg를 받아 확인한 뒤 CUABar.app을 /Applications에
 # 깐다(쓸 수 없으면 ~/Applications). 이미 같거나 새 판이 깔려 있으면 받지 않는다. 끝에 앱을 켠다.
-# 깔 것은 앱 하나뿐이다: 켜진 앱이 스스로 Claude Code에 cuabar MCP·스킬을 깔고 엔진을 준비한다. Claude 플러그인은 필요 없다.
+# 깔 것은 앱 하나뿐이다: 켜진 앱이 스스로 Claude Code에 cuabar MCP를 깔고 엔진을 준비한다. Claude 플러그인은 필요 없다.
 # 서명은 codesign의 요구 사항(-R)으로 두 번 검증한다. 서명에 적힌 글자를 읽는 것이 아니라 인증서 사슬을 시스템이 확인하므로,
 # 받는 곳이 바뀌어도 다른 사람의 앱이나 ad hoc 서명 앱은 깔지 않는다. 앱 자신이 업데이트 때 쓰는 요구 사항과 같다.
 #   1. dmg: SHA-256을 확인한 뒤 열기(attach) 전에, 팀 S3KC8R8VDL의 Developer ID로 서명한 것인지 본다. 낯선 이미지는 열지 않는다.
@@ -141,7 +141,7 @@ main() {
   fi
   open "$APP" || fail "앱을 켜지 못했습니다($APP)."
   echo "CUA Bar를 켰습니다. 메뉴 막대에 아이콘이 생깁니다."
-  echo "켜진 앱이 Claude Code에 cuabar MCP와 스킬을 저절로 깝니다. 새 Claude 대화부터 CUA가 붙습니다."
+  echo "켜진 앱이 Claude Code에 cuabar MCP를 저절로 깝니다. 새 Claude 대화부터 CUA가 붙고, 쓰는 법은 MCP가 알려 줍니다."
   echo "잘 깔렸는지는 메뉴 막대 창의 '점검' 탭에서 항목마다 볼 수 있습니다."
 }
 

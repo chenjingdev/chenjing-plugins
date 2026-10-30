@@ -26,8 +26,7 @@ enum InstallMessages {
     static let nothingToSay = ActionOutcome(kind: .info, message: "")
     static let engineFailed = "연결 엔진을 설치하지 못했어요"
     static let mcpFailed = "Claude Code에 CUA를 연결하지 못했어요"
-    static let skillFailed = "Claude Code에 CUA 스킬을 깔지 못했어요"
-    /// An MCP server or a skill named cuabar that the app did not put there: left as it is.
+    /// An MCP server named cuabar that the app did not put there: left as it is.
     static let conflict = "Claude Code에 앱이 깔지 않은 cuabar가 있어서 그대로 뒀어요 — 점검 탭에서 치우는 방법을 보세요"
     /// A new Claude conversation is where the connection shows up.
     static let installed = "새 Claude 대화부터 CUA가 붙어요"
@@ -41,7 +40,7 @@ enum InstallMessages {
 
 /// The fixes that reach outside the engine: opening a download page, the developer tools' installer, and the
 /// install itself (F1, R1): the engine in the app's bundle is unpacked by its own `setup.sh install-engine`,
-/// then the `cuabar` MCP server and skill are put into Claude Code.
+/// then the `cuabar` MCP server is put into Claude Code (the server itself tells Claude how to use CUA).
 ///
 /// Every step runs only because the app was started or a button was pressed; a status read never reaches
 /// here. The install takes the shared setup slot (`SetupActivity`), so two never run at once. It looks
@@ -54,7 +53,7 @@ enum InstallMessages {
 ///    calls a part of the setup broken: `install-engine` from the bundle (a whole copy of the same version stays as it
 ///    is; the setup runs again). A status that cannot be had in time puts only this step off, to the first read that
 ///    works; the MCP server then goes in only when the launcher is already there
-/// 4. Claude Code there: the MCP server and the skill, put in or replaced when the app's own, never over another's.
+/// 4. Claude Code there: the MCP server, put in or replaced when the app's own, never over another's.
 ///    A `claude` that cannot start (exit 127) is treated like no Claude Code for this run
 ///
 /// A build that does not run from an app bundle (no engine inside) installs nothing.
@@ -149,7 +148,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         var waiting: Set<SetupWait> = []
         var developerToolsNeeded = false
         var claudeCodeUnusable = false
-        /// The run changed something: put the engine in, repaired its setup, or changed Claude Code's MCP server or skill.
+        /// The run changed something: put the engine in, repaired its setup, or changed Claude Code's MCP server.
         var changed = false
 
         static func failure(_ message: String, waiting: Set<SetupWait> = [], changed: Bool = false) -> Run {
@@ -245,7 +244,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
             changed = true
         case .unknown:
             // It could not be asked in time, and the engine may be fine. The engine step waits for the first read
-            // that works; the MCP server and the skill do not depend on it (the launcher is one path).
+            // that works; the MCP server does not depend on it (the launcher is one path).
             launcher = nil
             waiting.insert(.status)
         }
@@ -280,18 +279,6 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
             case .failed:
                 return .failure(InstallMessages.mcpFailed, waiting: waiting, changed: changed || repaired)
             }
-        case .conflict:
-            conflict = true
-        case .ready, .unknown:
-            break
-        }
-
-        switch claude.skillState(source: bundle.skillSource, appVersion: appVersion) {
-        case .missing, .outdated:
-            guard claude.installSkill(from: bundle.skillSource, version: appVersion ?? "dev") else {
-                return .failure(InstallMessages.skillFailed, waiting: waiting, changed: changed || repaired)
-            }
-            changed = true
         case .conflict:
             conflict = true
         case .ready, .unknown:

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The real app, assembled: the engine client, the install (engine, Claude Code's MCP server and skill),
+/// The real app, assembled: the engine client, the install (engine, Claude Code's MCP server),
 /// the updater (it looks for a newer version at start and once a day, and replaces the app by itself), the login
 /// item, the remove action. Everything the tests replace with a fake is created here with the real thing, and
 /// nowhere else.
@@ -58,7 +58,7 @@ final class LiveApp {
         let model = CUABarViewModel(
             engine: engine, appVersion: appVersion, systemActions: actions, pasteboard: pasteboard,
             notifier: notifier, setupActivity: setup,
-            claudeInspector: { claude.inspect(launcher: $0, skillSource: bundle?.skillSource, appVersion: appVersion) },
+            claudeInspector: { claude.inspect(launcher: $0) },
             codexInstalled: { codex.isInstalled() },
             loginItemReading: { loginItem.reading },
             loginEnvironmentReader: { await loginEnvironment.read() },

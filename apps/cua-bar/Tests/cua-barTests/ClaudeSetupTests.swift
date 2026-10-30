@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import cua_bar
 
-/// What the app reads of Claude Code (`~/.claude.json`, `~/.claude/skills/cuabar/`) and what it changes there.
+/// What the app reads of Claude Code (`~/.claude.json`, and the skill folders 0.8.x left) and what it changes there.
 /// Everything runs over a throwaway home, and `claude` is a stand-in that is never run for real.
 struct ClaudeSetupTests {
     private func make(
@@ -97,7 +97,7 @@ struct ClaudeSetupTests {
         defer { home.remove() }
         #expect(make(home, found: true).claude.claudeCodeFound)
         #expect(!make(home, found: false).claude.claudeCodeFound)
-        let state = make(home, found: false).claude.inspect(launcher: nil, skillSource: nil, appVersion: "0.7.0")
+        let state = make(home, found: false).claude.inspect(launcher: nil)
         #expect(!state.claudeCodeFound)
         #expect(state.mcp == .missing)
     }
@@ -151,85 +151,53 @@ struct ClaudeSetupTests {
         #expect(claude.configParseCount == 1)
     }
 
-    // MARK: The skill folder
+    // MARK: The skill folder 0.8.x put in
 
-    private func source(_ home: TempHome, body: String = "the bundled skill\n") throws -> URL {
-        let url = home.url.appendingPathComponent("bundle/SKILL.md")
-        try home.write(body, to: url)
-        return url
-    }
-
-    @Test func aSkillThatIsNotThereIsMissing() throws {
-        let home = try TempHome()
-        defer { home.remove() }
-        #expect(make(home).claude.skillState(source: try source(home), appVersion: "0.7.0") == .missing)
-    }
-
-    @Test func aFolderWithoutTheAppsMarkIsSomebodyElsesWhateverItHolds() throws {
+    @Test func onlyAMarkedRealFolderIsTheSkill08xLeft() throws {
+        // Since 0.8.10 the app installs no skill; the one 0.8.x put in is told (F9). Without the mark it is the person's.
         let home = try TempHome()
         defer { home.remove() }
         let (claude, _) = make(home)
+        #expect(!claude.retiredSkillPresent(), "nothing there")
         try home.addSkill(version: nil, body: "the user's own cuabar skill\n")
-        #expect(claude.skillState(source: try source(home), appVersion: "0.7.0") == .conflict)
-        // A link named cuabar, or a file, is not the app's folder either.
+        #expect(!claude.retiredSkillPresent(), "no mark: the person's own")
+        #expect(!claude.leftovers().retiredSkill)
+        try home.addSkill(version: "0.8.9")
+        #expect(claude.retiredSkillPresent())
+        #expect(claude.leftovers().retiredSkill)
+        #expect(claude.inspect(launcher: nil).retiredSkill)
+        try home.write("not json", to: home.skillFolder.appendingPathComponent(".cua-bar.json"))
+        #expect(claude.retiredSkillPresent(), "a mark nobody can read is still the app's file")
+        // A link named cuabar, even to a marked folder, or a file, is not the app's folder.
         try FileManager.default.removeItem(at: home.skillFolder)
         let target = home.url.appendingPathComponent("my-skills/cuabar", isDirectory: true)
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
-        try home.write(#"{"version": "0.7.0"}"#, to: target.appendingPathComponent(".cua-bar.json"))
+        try home.write(#"{"version": "0.8.9"}"#, to: target.appendingPathComponent(".cua-bar.json"))
         try FileManager.default.createSymbolicLink(at: home.skillFolder, withDestinationURL: target)
-        #expect(claude.skillState(source: nil, appVersion: "0.7.0") == .conflict, "a link, even to a marked folder")
+        #expect(!claude.retiredSkillPresent(), "a link")
         try FileManager.default.removeItem(at: home.skillFolder)
         try home.write("a file", to: home.skillFolder)
-        #expect(claude.skillState(source: nil, appVersion: "0.7.0") == .conflict)
-    }
-
-    @Test func aMarkedFolderIsReadyOnlyForThisVersionWithTheBundledSkill() throws {
-        let home = try TempHome()
-        defer { home.remove() }
-        let (claude, _) = make(home)
-        let bundled = try source(home)
-        try home.addSkill(version: "0.7.0", body: "the bundled skill\n")
-        #expect(claude.skillState(source: bundled, appVersion: "0.7.0") == .ready)
-        #expect(claude.skillState(source: bundled, appVersion: "0.8.0") == .outdated, "another version")
-        try home.addSkill(version: "0.7.0", body: "edited by hand\n")
-        #expect(claude.skillState(source: bundled, appVersion: "0.7.0") == .outdated, "not the bundled skill")
-        try FileManager.default.removeItem(at: home.skillFolder.appendingPathComponent("SKILL.md"))
-        #expect(claude.skillState(source: bundled, appVersion: "0.7.0") == .outdated, "the skill itself is gone")
-        try home.write("not json", to: home.skillFolder.appendingPathComponent(".cua-bar.json"))
-        try home.write("the bundled skill\n", to: home.skillFolder.appendingPathComponent("SKILL.md"))
-        #expect(claude.skillState(source: bundled, appVersion: "0.7.0") == .outdated, "a mark nobody can read is still the app's file")
-    }
-
-    @Test func theSkillIsWrittenWithItsMarkAndAgainWithoutHarm() throws {
-        let home = try TempHome()
-        defer { home.remove() }
-        let (claude, _) = make(home)
-        let bundled = try source(home)
-        #expect(claude.installSkill(from: bundled, version: "0.7.0"))
-        #expect(claude.installSkill(from: bundled, version: "0.7.0"))
-        #expect(claude.skillState(source: bundled, appVersion: "0.7.0") == .ready)
-        let mark = try Data(contentsOf: home.skillFolder.appendingPathComponent(".cua-bar.json"))
-        #expect(try JSONSerialization.jsonObject(with: mark) as? [String: String] == ["version": "0.7.0"])
-        #expect(!claude.installSkill(from: home.url.appendingPathComponent("nothing/SKILL.md"), version: "0.7.0"), "a source that is not there")
+        #expect(!claude.retiredSkillPresent(), "a file")
     }
 
     // MARK: Taking away what is the app's, and nothing else
 
-    @Test func removalTakesTheAppsServerThroughClaudeCodeAndTheMarkedSkillFolder() async throws {
+    @Test func removalTakesTheAppsServerThroughClaudeCodeAndLeavesTheSkill08xPutIn() async throws {
         let home = try TempHome()
         defer { home.remove() }
         try home.addMcp(command: home.launcher, others: ["other": ["command": "/usr/bin/other"]])
-        try home.addSkill(version: "0.7.0")
+        try home.addSkill(version: "0.8.9")
         let (claude, runner) = make(home) { call in
             // `claude mcp remove` takes only cuabar out of the file.
             try home.writeClaudeConfig(["mcpServers": ["other": ["command": "/usr/bin/other"]]])
             return StepRunner.ok()
         }
         let removal = await claude.removeAppOwned()
-        #expect(removal == ClaudeIntegration.Removal(mcpStays: false, removedAnything: true))
+        #expect(removal == ClaudeIntegration.Removal(mcpStays: false, removedAnything: true, retiredSkillStays: true))
         #expect(runner.calls.map(\.arguments) == [["mcp", "remove", "-s", "user", "cuabar"]])
         #expect(runner.calls.first?.executable == home.claudeCLI.path)
-        #expect(!FileManager.default.fileExists(atPath: home.skillFolder.path))
+        #expect(FileManager.default.fileExists(atPath: home.skillFolder.appendingPathComponent("SKILL.md").path),
+                "the app does not remove it (F9): the result gives the command")
         #expect(claude.mcpState(launcher: home.launcher) == .missing)
     }
 
@@ -241,7 +209,7 @@ struct ClaudeSetupTests {
         let before = try Data(contentsOf: home.claudeConfig)
         let (claude, runner) = make(home)
         let removal = await claude.removeAppOwned()
-        #expect(removal == ClaudeIntegration.Removal(mcpStays: false), "nothing of the app's was there")
+        #expect(removal == ClaudeIntegration.Removal(mcpStays: false), "nothing of the app's was there, and no mark on the skill")
         #expect(runner.calls.isEmpty)
         #expect(try Data(contentsOf: home.claudeConfig) == before)
         #expect(try String(contentsOf: home.skillFolder.appendingPathComponent("SKILL.md"), encoding: .utf8) == "the user's own\n")
@@ -252,11 +220,9 @@ struct ClaudeSetupTests {
             let home = try TempHome()
             defer { home.remove() }
             try home.addMcp(command: home.launcher)
-            try home.addSkill(version: "0.7.0")
             let (claude, _) = make(home, found: found) { _ in StepRunner.failed() }
             let removal = await claude.removeAppOwned()
-            #expect(removal == ClaudeIntegration.Removal(mcpStays: true, removedAnything: true), "claude found: \(found); the skill went all the same")
-            #expect(!FileManager.default.fileExists(atPath: home.skillFolder.path), "the skill goes all the same")
+            #expect(removal == ClaudeIntegration.Removal(mcpStays: true), "claude found: \(found)")
         }
     }
 
@@ -264,10 +230,9 @@ struct ClaudeSetupTests {
         let home = try TempHome()
         defer { home.remove() }
         try home.write("{not json", to: home.claudeConfig)
-        try home.addSkill(version: "0.7.0")
         let (claude, runner) = make(home)
         let removal = await claude.removeAppOwned()
-        #expect(removal == ClaudeIntegration.Removal(mcpStays: true, removedAnything: true), "the skill is marked, so it went")
+        #expect(removal == ClaudeIntegration.Removal(mcpStays: true))
         #expect(runner.calls.isEmpty, "nothing is asked of Claude Code about a file nobody can read")
         #expect(try String(contentsOf: home.claudeConfig, encoding: .utf8) == "{not json", "and the file is left as it is")
     }
@@ -292,7 +257,6 @@ struct ClaudeSetupTests {
         try home.write("#!/bin/sh\n", to: resources.appendingPathComponent("engine/setup.sh"))
         let found = try #require(BundledEngine.locate(in: bundle))
         #expect(found.setupScript.lastPathComponent == "setup.sh")
-        #expect(found.skillSource.path.hasSuffix("engine/skills/cuabar/SKILL.md"))
     }
 
     @Test func codexIsFoundInTheEnginesPlacesAndByItsBundleId() throws {

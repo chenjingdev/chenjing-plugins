@@ -294,25 +294,28 @@ struct OldNameTests {
         #expect(noCodex.line(.mcp)?.diagnosisLine == "점검 MCP: 문제 — 옛 이름 cua MCP 있음")
     }
 
-    @Test func theOldSkillIsToldOnTheSkillLineAndAfterAProblemThatIsAlreadyThere() throws {
+    @Test func theOldSkillIsToldOnTheMcpLineAndAfterAProblemThatIsAlreadyThere() throws {
+        // Since 0.8.10 there is no skill line: Claude Code's side is the MCP server, and the skills left are told there.
         var state = CheckFixtures.claudeReady()
         state.oldSkill = true
-        let skill = try line(state, .skill)
+        let skill = try line(state, .mcp)
         #expect(skill.status == .problem && skill.detail == OldName.skillNotice)
+        #expect(OldName.skillNotice == "0.8.0이 깐 옛 이름 cua 스킬이 남아 있어요 — 이제 MCP가 안내해요")
         #expect(skill.commands.map(\.text) == ["rm -rf ~/.claude/skills/cua"])
-        #expect(skill.commands.first?.copy.action == .copyCommand("rm -rf ~/.claude/skills/cua", on: .skill))
-        state.skill = .conflict
-        let both = try line(state, .skill)
-        #expect(both.detail == "앱이 깔지 않은 cuabar 스킬이 있어요 — 그대로 뒀어요", "the line's own problem stays first")
+        #expect(skill.commands.first?.copy.action == .copyCommand("rm -rf ~/.claude/skills/cua", on: .mcp))
+        state.mcp = .conflict
+        let both = try line(state, .mcp)
+        #expect(both.detail == "앱이 깔지 않은 cuabar MCP가 있어요 — 그대로 뒀어요", "the line's own problem stays first")
         #expect(both.steps.last == OldName.skillNotice + " — 아래 명령으로 지워 주세요. 앱은 지우지 않아요")
-        #expect(both.commands.map(\.text) == ["mv ~/.claude/skills/cuabar ~/cuabar-skill-backup", "rm -rf ~/.claude/skills/cua"])
-        #expect(both.diagnosisLine == "점검 스킬: 문제 — 앱이 깔지 않은 cuabar 스킬, 옛 이름 cua 스킬 있음")
+        #expect(both.commands.map(\.text) == ["claude mcp remove -s user cuabar", "rm -rf ~/.claude/skills/cua"])
+        #expect(both.diagnosisLine == "점검 MCP: 문제 — 앱이 깔지 않은 cuabar MCP, 옛 이름 cua 스킬 있음")
     }
 
     @Test func theOldNamesAreNotOnTheCardOrTheIcon() throws {
         var state = CheckFixtures.claudeReady()
         state.oldServer = true
         state.oldSkill = true
+        state.retiredSkill = true
         state.permissions = PermissionReading(oldHookFiles: ["~/.claude/settings.json"])
         let summary = StatusEvaluator.evaluate(try status(), appVersion: CheckFixtures.appVersion, facts: LocalFacts(claude: state))
         #expect(summary.problem == nil)
@@ -330,7 +333,11 @@ struct OldNameTests {
         #expect(UpdateAdvice.line(for: ClaudeSetupState(oldSkill: true, permissions: PermissionReading(defaultMode: "auto"))) == UpdateAdvice.oldNames)
         #expect(UpdateAdvice.line(for: ClaudeSetupState(legacyPlugins: ["cua@ubion"])) == UpdateAdvice.oldNames)
         #expect(UpdateAdvice.line(for: ClaudeSetupState(permissions: PermissionReading(oldRuleFiles: ["a"]))) == UpdateAdvice.oldNames)
+        #expect(UpdateAdvice.line(for: ClaudeSetupState(retiredSkill: true, permissions: PermissionReading(defaultMode: "auto"))) == UpdateAdvice.retiredSkill,
+                "the skill 0.8.x put in, before the rule")
+        #expect(UpdateAdvice.line(for: ClaudeSetupState(oldServer: true, retiredSkill: true)) == UpdateAdvice.oldNames, "the old names first")
         #expect(UpdateAdvice.oldNames == "Claude Code에 CUA의 옛 이름이 남아 있어요 — 점검 탭을 보세요")
+        #expect(UpdateAdvice.retiredSkill == "0.8.9까지 깐 cuabar 스킬이 남아 있어요 — 점검 탭을 보세요")
         #expect(UpdateAdvice.allowRule == "auto 모드에서도 묻지 않게 하는 규칙 한 줄이 점검 탭에 있어요")
     }
 
@@ -358,6 +365,22 @@ struct OldNameTests {
         #expect(await rig.actions.setUp() == InstallMessages.nothingToSay)
         #expect(rig.announcements.posted == [AppNotification.updated(seven, advice: UpdateAdvice.oldNames)])
         #expect(FileManager.default.fileExists(atPath: rig.home.url.appendingPathComponent(".claude/skills/cua/SKILL.md").path), "the app removes nothing")
+    }
+
+    @MainActor @Test func theInstallAfterAnUpdateAddsTheLineWhenTheSkill08xPutInIsLeft() async throws {
+        // 0.8.10 installs no skill: the update that brings it tells of the cuabar skill 0.8.x put in, and removes nothing.
+        for marked in [true, false] {
+            let rig = try LiveSystemActionsTests().rig()
+            defer { rig.home.remove() }
+            try rig.home.installClaudeCode()
+            try rig.home.addSkill(version: marked ? "0.8.9" : nil)
+            let seven = VersionNumber(0, 7, 0)
+            try rig.notice.leave(version: seven)
+            #expect(await rig.actions.setUp() == InstallMessages.nothingToSay)
+            // Without the mark the folder is the person's own, and nothing is said of it.
+            #expect(rig.announcements.posted == [AppNotification.updated(seven, advice: marked ? UpdateAdvice.retiredSkill : nil)])
+            #expect(FileManager.default.fileExists(atPath: rig.home.skillFolder.appendingPathComponent("SKILL.md").path), "the app removes nothing")
+        }
     }
 
     @MainActor @Test func whereNotificationsAreOffTheBannerSaysTheRuleInAutoMode() async throws {

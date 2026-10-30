@@ -14,21 +14,23 @@ struct ClaudeSetupState: Equatable, Sendable {
         case conflict
     }
 
-    /// The `claude` command was found. Without it MCP and skill are put off, and nothing is said about them.
+    /// The `claude` command was found. Without it the MCP server is put off, and nothing is said about it.
     var claudeCodeFound = false
     /// Where it was found (the check tab names it when it cannot start).
     var claudeCodePath: String?
     /// The `claude` that was found could not start (exit 127: an npm-installed one with no `node` it can find). The
-    /// card says nothing about MCP and skill then, the same as without Claude Code; the check tab says why.
+    /// card says nothing about the MCP server then, the same as without Claude Code; the check tab says why.
     var claudeCodeUnusable = false
     var mcp: Part = .unknown
-    var skill: Part = .unknown
     /// The old plugins (`LegacyPlugin.ids`) still recorded: two CUAs would attach to a new conversation.
     var legacyPlugins: [String] = []
     /// What 0.8.0 installed under the old name `cua` is still there: its MCP server (it runs the app's engine) and its
     /// skill (with the app's mark) (F9).
     var oldServer = false
     var oldSkill = false
+    /// The `cuabar` skill 0.8.x put in (a real folder with the app's mark) is still there. Since 0.8.10 the MCP server
+    /// itself says how to use CUA, so the skill is told and its removal handed over; the app does not remove it (F9).
+    var retiredSkill = false
     /// What Claude Code's settings say of CUA's tools; nil when not looked at (F9).
     var permissions: PermissionReading?
 
@@ -57,17 +59,23 @@ enum OldName {
     static let serverKey = "cua"
     static let serverNotice = "0.8.0이 깐 옛 이름 cua MCP가 남아 있어요 — CUA가 둘 붙어요"
     static let removeServerCommand = "claude mcp remove -s user cua"
-    static let skillNotice = "0.8.0이 깐 옛 이름 cua 스킬이 남아 있어요 — 스킬이 둘 보여요"
+    static let skillNotice = "0.8.0이 깐 옛 이름 cua 스킬이 남아 있어요 — 이제 MCP가 안내해요"
     static let removeSkillCommand = "rm -rf ~/.claude/skills/cua"
 }
 
-/// The app's way into Claude Code: the `cuabar` MCP server in `~/.claude.json` and the `cuabar` skill in
-/// `~/.claude/skills/cuabar/`.
+/// The `cuabar` skill 0.8.x installed. Since 0.8.10 the MCP server gives the guidance (its `instructions`, and a note at
+/// the end of the errors it is about), so the skill is no longer installed. The app never removes it (F9).
+enum RetiredSkill {
+    static let notice = "0.8.9까지 깐 cuabar 스킬이 남아 있어요 — 이제 MCP가 안내해요"
+    static let removeCommand = "rm -rf ~/.claude/skills/cuabar"
+}
+
+/// The app's way into Claude Code: the `cuabar` MCP server in `~/.claude.json`. The server itself tells Claude how to
+/// use CUA (since 0.8.10; 0.8.x also put a `cuabar` skill in `~/.claude/skills/cuabar/`, which is only told now).
 ///
 /// The MCP server is changed only with `claude mcp add -s user` and `claude mcp remove -s user`, and read
-/// from the file (`claude mcp list` and `get` start the servers). The skill is two files the app writes: the
-/// skill itself and `.cua-bar.json`, the mark that says the app put it there. What the app did not put there
-/// is never changed or removed.
+/// from the file (`claude mcp list` and `get` start the servers). `.cua-bar.json` is the mark 0.8.x left in the skill
+/// folders it put there. What the app did not put there is never changed or removed.
 struct ClaudeIntegration: Sendable, ClaudeRemoving {
     static let serverName = "cuabar"
     static let markerName = ".cua-bar.json"
@@ -100,7 +108,8 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     var claudeCodeFound: Bool { claude.locate() != nil }
 
     var configURL: URL { home.appendingPathComponent(".claude.json") }
-    var skillFolder: URL { home.appendingPathComponent(".claude/skills/cuabar", isDirectory: true) }
+    /// Where 0.8.1 to 0.8.9 put the `cuabar` skill.
+    var retiredSkillFolder: URL { home.appendingPathComponent(".claude/skills/cuabar", isDirectory: true) }
     /// Where 0.8.0 put the skill, under the old name.
     var oldSkillFolder: URL { home.appendingPathComponent(".claude/skills/cua", isDirectory: true) }
     var legacyRegistryURL: URL { home.appendingPathComponent(".claude/plugins/installed_plugins.json") }
@@ -113,13 +122,12 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
 
     /// Everything the card and the check need, from files only. `launcher` is the one the engine reported
     /// (status or install result); the MCP command is compared with it.
-    func inspect(launcher: String?, skillSource: URL?, appVersion: String?) -> ClaudeSetupState {
+    func inspect(launcher: String?) -> ClaudeSetupState {
         let found = claude.locate()
         var state = leftovers()
         state.claudeCodeFound = found != nil
         state.claudeCodePath = found?.path
         state.mcp = mcpState(launcher: launcher)
-        state.skill = skillState(source: skillSource, appVersion: appVersion)
         return state
     }
 
@@ -129,6 +137,7 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         state.legacyPlugins = recordedLegacyPlugins()
         state.oldServer = config().oldServer
         state.oldSkill = oldSkillPresent()
+        state.retiredSkill = retiredSkillPresent()
         state.permissions = permissionReading(now: now)
         return state
     }
@@ -262,31 +271,19 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         return command.hasPrefix(literal) || command.hasPrefix(resolved)
     }
 
-    /// The skill folder: ours when it is a real folder with the app's mark; ready when the mark names this
-    /// app's version and the skill is the bundled one.
-    func skillState(source: URL?, appVersion: String?) -> ClaudeSetupState.Part {
-        var info = stat()
-        guard lstat(skillFolder.path, &info) == 0 else { return .missing }
-        // A link or a file named like the folder is somebody else's.
-        guard (info.st_mode & S_IFMT) == S_IFDIR else { return .conflict }
-        let marker = skillFolder.appendingPathComponent(Self.markerName)
-        guard FileManager.default.fileExists(atPath: marker.path) else { return .conflict }
-        let markedVersion = (try? Data(contentsOf: marker))
-            .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
-            .flatMap { $0["version"] as? String }
-        let skill = skillFolder.appendingPathComponent("SKILL.md")
-        guard let installed = try? Data(contentsOf: skill) else { return .outdated }
-        if let appVersion, markedVersion != appVersion { return .outdated }
-        if let source, (try? Data(contentsOf: source)) != installed { return .outdated }
-        return .ready
-    }
-
     /// 0.8.0's skill is still there: a real folder with the app's mark. Somebody else's `cua` skill is not the app's to
     /// tell about.
-    func oldSkillPresent() -> Bool {
+    func oldSkillPresent() -> Bool { Self.isMarkedFolder(oldSkillFolder) }
+
+    /// The `cuabar` skill 0.8.x put in is still there: a real folder with the app's mark. A `cuabar` skill without the
+    /// mark is the person's own and is not told about.
+    func retiredSkillPresent() -> Bool { Self.isMarkedFolder(retiredSkillFolder) }
+
+    /// A real folder (not a link) with `.cua-bar.json` in it.
+    private static func isMarkedFolder(_ folder: URL) -> Bool {
         var info = stat()
-        guard lstat(oldSkillFolder.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR else { return false }
-        return FileManager.default.fileExists(atPath: oldSkillFolder.appendingPathComponent(Self.markerName).path)
+        guard lstat(folder.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR else { return false }
+        return FileManager.default.fileExists(atPath: folder.appendingPathComponent(markerName).path)
     }
 
     /// The old plugins Claude Code still records, whatever the scope: two CUAs attach either way.
@@ -435,30 +432,18 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         }
     }
 
-    /// The mark first, then the skill: a stop halfway leaves a marked folder the next run repairs, never an
-    /// unmarked one that would read as somebody else's.
-    func installSkill(from source: URL, version: String) -> Bool {
-        do {
-            try FileManager.default.createDirectory(at: skillFolder, withIntermediateDirectories: true)
-            let mark = try JSONSerialization.data(withJSONObject: ["version": version], options: [.sortedKeys])
-            try mark.write(to: skillFolder.appendingPathComponent(Self.markerName), options: .atomic)
-            try Data(contentsOf: source).write(to: skillFolder.appendingPathComponent("SKILL.md"), options: .atomic)
-            return true
-        } catch {
-            return false
-        }
-    }
-
     struct Removal: Equatable, Sendable {
         /// The app's MCP entry may still be there: Claude Code could not take it away, or its file cannot be
         /// read, so nobody can tell. The person is given Claude Code's own command.
         var mcpStays = false
         /// Something of the app's was taken out of Claude Code.
         var removedAnything = false
+        /// The `cuabar` skill 0.8.x put in is still there: it is not removed (F9), and the result gives the command.
+        var retiredSkillStays = false
     }
 
-    /// Takes away what the app put into Claude Code, in this order: the MCP server (only when its command is
-    /// the app's), then the skill folder (only with the app's mark). Anything else is left as it is.
+    /// Takes away what the app put into Claude Code: the MCP server, only when its command is the app's. Anything else
+    /// is left as it is, the skill 0.8.x put in too (its command goes into the result).
     func removeAppOwned() async -> Removal {
         var removal = Removal()
         switch config().entry {
@@ -474,13 +459,7 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         case .server, .absent:
             break
         }
-        // Marked folders only: `missing` has nothing to take away and `conflict` is somebody else's.
-        switch skillState(source: nil, appVersion: nil) {
-        case .ready, .outdated:
-            if (try? FileManager.default.removeItem(at: skillFolder)) != nil { removal.removedAnything = true }
-        case .missing, .conflict, .unknown:
-            break
-        }
+        removal.retiredSkillStays = retiredSkillPresent()
         return removal
     }
 }

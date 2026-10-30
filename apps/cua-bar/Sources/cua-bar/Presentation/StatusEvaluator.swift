@@ -18,10 +18,10 @@ enum ProblemKind: String, CaseIterable, Sendable {
     case codexMissing = "codex_missing"
     /// The Mac has no developer tools, which the engine's launcher needs: asked for on the card, never opened by itself.
     case developerToolsNeeded = "developer_tools_needed"
-    /// The engine, its Python environment, the wrapper, the relay, or Claude Code's MCP server or skill is
+    /// The engine, its Python environment, the wrapper, the relay, or Claude Code's MCP server is
     /// missing, broken or of another version: the card's 고치기 installs it all again.
     case setupIncomplete = "setup_incomplete"
-    /// An MCP server or a skill named cuabar that the app did not put into Claude Code: left alone, told.
+    /// An MCP server named cuabar that the app did not put into Claude Code: left alone, told.
     case claudeConflict = "claude_conflict"
     case codexWithoutHost = "codex_without_host"
     /// The login environment value the wrapper needs is set to somebody else's: the setup leaves it alone, so only
@@ -273,7 +273,7 @@ enum StatusEvaluator {
         return [SetupIssue(name: "엔진", sentence: "연결 엔진이 앱과 판이 달라요", item: .engine)]
     }
 
-    /// The MCP server or the skill is missing or the app's own and out of date. Nothing is said without
+    /// The MCP server is missing or the app's own and out of date (Claude Code's side is the MCP server alone). Nothing is said without
     /// Claude Code: it is not a problem of the Mac, and it is put off until Claude Code is there.
     static func claudeIssues(in claude: ClaudeSetupState) -> [SetupIssue] {
         guard claude.claudeCodeFound, !claude.claudeCodeUnusable else { return [] }
@@ -283,26 +283,14 @@ enum StatusEvaluator {
         case .outdated: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code의 CUA 연결이 옛 판이에요", item: .mcp))
         case .ready, .conflict, .unknown: break
         }
-        switch claude.skill {
-        case .missing: issues.append(SetupIssue(name: "스킬", sentence: "Claude Code에 CUA 스킬이 없어요", item: .skill))
-        case .outdated: issues.append(SetupIssue(name: "스킬", sentence: "Claude Code의 CUA 스킬이 옛 판이에요", item: .skill))
-        case .ready, .conflict, .unknown: break
-        }
         return issues
     }
 
-    /// An MCP server or a skill named cuabar that is not the app's.
+    /// An MCP server named cuabar that is not the app's.
     static func conflictProblem(in claude: ClaudeSetupState) -> Problem? {
-        guard claude.claudeCodeFound, !claude.claudeCodeUnusable else { return nil }
-        let title: String
-        switch (claude.mcp == .conflict, claude.skill == .conflict) {
-        case (true, true): title = "Claude Code에 앱이 깔지 않은 cuabar MCP와 스킬이 있어요"
-        case (true, false): title = "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요"
-        case (false, true): title = "Claude Code에 앱이 깔지 않은 cuabar 스킬이 있어요"
-        case (false, false): return nil
-        }
+        guard claude.claudeCodeFound, !claude.claudeCodeUnusable, claude.mcp == .conflict else { return nil }
         return Problem(
-            kind: .claudeConflict, title: title, nextStep: "점검 탭에서 치우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
+            kind: .claudeConflict, title: "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요", nextStep: "점검 탭에서 치우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
     }
 
     /// The setup leaves a launchd value somebody else set as it is (`login_environment: conflict`), so 고치기 could not

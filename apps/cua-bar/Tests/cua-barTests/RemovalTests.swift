@@ -93,7 +93,7 @@ struct RemovalTests {
         #expect(rig.log.events.isEmpty)
         #expect(rig.engine.calls.isEmpty)
         #expect(RemovalMessages.buttonTitle == "앱 지우기")
-        #expect(RemovalMessages.help == "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결과 스킬을 지운 뒤 앱이 꺼져요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜지고, 열린 Claude 대화의 CUA도 끊겨요. Codex가 연결과 함께 켜져 있으면 아무것도 바꾸지 않아요.")
+        #expect(RemovalMessages.help == "연결 설정과 중계기를 되돌리고, Claude Code에 깐 CUA 연결을 지운 뒤 앱이 꺼져요. Codex는 다음에 켤 때부터 연결 없이 원래대로 켜지고, 열린 Claude 대화의 CUA도 끊겨요. Codex가 연결과 함께 켜져 있으면 아무것도 바꾸지 않아요.")
         #expect(RemovalMessages.help.contains("열린 Claude 대화의 CUA도 끊겨요"))
     }
 
@@ -147,7 +147,7 @@ struct RemovalTests {
         defer { rig.suite.remove() }
         await rig.flow.remove()
         #expect(rig.flow.phase == .refused(RemovalMessages.hostRunning))
-        #expect(rig.log.events.isEmpty, "no MCP server or skill taken away, nothing uninstalled, the login item stays")
+        #expect(rig.log.events.isEmpty, "no MCP server taken away, nothing uninstalled, the login item stays")
         #expect(rig.engine.calls == [.status])
     }
 
@@ -158,6 +158,18 @@ struct RemovalTests {
         #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
         #expect(rig.flow.phase == .finished(RemovalMessages.done + RemovalMessages.mcpStays))
         #expect(RemovalMessages.mcpStays.contains("claude mcp remove -s user cuabar"))
+        rig.sleeper.releaseAll()
+        await removal.value
+    }
+
+    @Test func theSkill08xPutInStaysAndTheResultGivesItsCommand() async {
+        // F9: the app does not remove the cuabar skill 0.8.x put in, not even here; it hands over the command.
+        let rig = rig(claude: ClaudeIntegration.Removal(removedAnything: true, retiredSkillStays: true))
+        defer { rig.suite.remove() }
+        let removal = Task { await rig.flow.remove() }
+        #expect(await waitUntil { rig.sleeper.requestedDurations.count == 1 })
+        #expect(rig.flow.phase == .finished(RemovalMessages.done + RemovalMessages.retiredSkillStays))
+        #expect(RemovalMessages.retiredSkillStays == " 0.8.9까지 깐 cuabar 스킬은 `rm -rf ~/.claude/skills/cuabar`로 직접 지워 주세요.")
         rig.sleeper.releaseAll()
         await removal.value
     }
@@ -425,7 +437,7 @@ struct RemovalTests {
         rig.engine.setStatusError(error)
         await rig.flow.remove()
         #expect(rig.flow.phase == .refused(RemovalMessages.statusUnreadable))
-        #expect(rig.log.events.isEmpty, "no MCP server or skill taken away, nothing uninstalled, the login item stays: \(error)")
+        #expect(rig.log.events.isEmpty, "no MCP server taken away, nothing uninstalled, the login item stays: \(error)")
         #expect(rig.engine.calls == [.status])
         #expect(rig.sleeper.requestedDurations.isEmpty)
         #expect(!RemovalMessages.statusUnreadable.contains("SECRET"))
@@ -510,7 +522,7 @@ struct RemovalTests {
     }
 
     @Test func aRemoverThatRefusesAfterClaudeCodeWasClearedSaysThatItWasDone() async {
-        // The host came up between the look and the remover: the MCP server and the skill are already gone.
+        // The host came up between the look and the remover: the MCP server is already gone.
         for hostCameUp in [true, false] {
             let log = EventLog()
             let engine = FakeEngineClient()

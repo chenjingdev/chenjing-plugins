@@ -49,7 +49,7 @@ enum CUAAction: Hashable, Sendable {
     case copyDiagnosis
 
     // Fix buttons that are more than one engine call, or not an engine call at all.
-    /// 고치기: the whole install again (engine, then Claude Code's MCP server and skill).
+    /// 고치기: the whole install again (engine, then Claude Code's MCP server).
     case runSetup
     /// Codex 열기, after a restart whose relaunch failed. Opens the app the person just chose to open.
     case openCodex

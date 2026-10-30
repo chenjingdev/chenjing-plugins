@@ -4,7 +4,7 @@ import AppKit
 /// itself. `LiveSystemActions` does them in the real app; tests and previews pass their own.
 protocol SystemActions: Sendable {
     func openCodexDownload() async -> ActionOutcome
-    /// The whole install: the engine, then Claude Code's MCP server and skill. Looks first and changes only
+    /// The whole install: the engine, then Claude Code's MCP server. Looks first and changes only
     /// what is missing or out of date, so it is the same call at start-up and behind 고치기.
     func setUp() async -> ActionOutcome
     /// `xcode-select --install`, only because the person pressed the button.
