@@ -33,7 +33,7 @@ struct PopoverView: View {
             tabContent
                 .frame(height: Theme.listHeight)
 
-            FooterView(updatedText: model.updatedText, maintenance: maintenance, quit: quit)
+            FooterView(updatedText: model.updatedText, maintenance: maintenance, appVersion: model.appVersion, quit: quit)
         }
         .padding(Theme.padding)
         .frame(width: Theme.popoverWidth)

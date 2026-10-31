@@ -130,7 +130,7 @@ final class CUABarViewModel: ObservableObject {
     private(set) var unlockResetTask: Task<Void, Never>?
 
     private let engine: any EngineClient
-    private let appVersion: String?
+    let appVersion: String?
     private let systemActions: any SystemActions
     private let pasteboard: any PasteboardWriting
     private let appOpener: any AppOpening

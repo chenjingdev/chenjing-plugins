@@ -42,9 +42,9 @@ struct FooterTests {
             updater: updater, removal: removal, opener: opener, suite: suite, log: log)
     }
 
-    private func model() async throws -> CUABarViewModel {
+    private func model(appVersion: String = "0.7.0") async throws -> CUABarViewModel {
         let model = CUABarViewModel(
-            engine: FakeEngineClient(status: try Fixtures.status("status-ready")), appVersion: "0.7.0",
+            engine: FakeEngineClient(status: try Fixtures.status("status-ready")), appVersion: appVersion,
             clock: { Fixtures.now }, calendar: Fixtures.utc, sleep: ManualSleeper().sleep)
         await model.refresh()
         return model
@@ -109,6 +109,21 @@ struct FooterTests {
         let full = fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}))
         #expect(full.width <= row, "everything fits the line side by side")
         #expect(fittingSize(FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, quit: {}).frame(width: row)).height < 30, "one line")
+    }
+
+    @Test func theBottomLineShowsThisAppsVersionFromItsBundle() async {
+        #expect(FooterView.versionText("0.8.11") == "v0.8.11")
+        #expect(FooterView.versionText(nil) == nil, "run unbundled: no version, no empty label")
+        let kit = kit()
+        defer { kit.suite.remove() }
+        await kit.updater.check() // with the new-version button too: the fullest line
+        let row = Theme.popoverWidth - 2 * Theme.padding
+        func footer(_ version: String?) -> FooterView {
+            FooterView(updatedText: "갱신 12:34:56", maintenance: kit.maintenance, appVersion: version, quit: {})
+        }
+        #expect(fittingSize(footer("0.8.11")).width > fittingSize(footer(nil)).width + 20, "the version takes its place")
+        #expect(fittingSize(footer("10.10.10")).width <= row, "a long version still fits the line")
+        #expect(fittingSize(footer("10.10.10").frame(width: row)).height < 30, "one line")
     }
 
     @Test func aRefusedRemovalPutsNothingOnTheBottomLine() async {
@@ -283,7 +298,7 @@ struct FooterTests {
         let kit = kit()
         defer { kit.suite.remove() }
         await kit.updater.check()
-        let model = try await model()
+        let model = try await model(appVersion: "0.8.11") // the bottom line shows it beside 끝내기
         let directory = ProcessInfo.processInfo.environment["CUABAR_SNAPSHOT_DIR"]
         func picture(_ name: String, dark: Bool = false) throws {
             _ = NSApplication.shared
