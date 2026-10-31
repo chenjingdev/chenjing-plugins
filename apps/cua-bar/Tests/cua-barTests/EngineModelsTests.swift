@@ -24,6 +24,8 @@ struct EngineModelsTests {
         #expect(status.setup.command == "ready")
         #expect(status.setup.dependencies == "ready")
         #expect(status.setup.loginEnvironment == "ready")
+        #expect(status.setup.shellEnvironment == "ready")
+        #expect(status.setup.shellFile == "/Users/chenjing/.zshenv")
         #expect(status.setup.wrapper == "ready")
         #expect(status.setup.relay == "active")
 

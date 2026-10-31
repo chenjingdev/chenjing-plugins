@@ -135,6 +135,10 @@ struct SetupInfo: Equatable, Sendable {
     var command: String?
     var dependencies: String?
     var loginEnvironment: String?
+    /// The block in the login shell's startup file, part of the login environment (an engine from before 0.8.11
+    /// names none), and that file.
+    var shellEnvironment: String?
+    var shellFile: String?
     var wrapper: String?
     var relay: String?
 }
@@ -330,12 +334,15 @@ extension HostInfo: Decodable {
 extension SetupInfo: Decodable {
     private enum CodingKeys: String, CodingKey {
         case command, dependencies, loginEnvironment = "login_environment", wrapper, relay
+        case shellEnvironment = "shell_environment", shellFile = "shell_file"
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         command = c.lenientString(.command)
         dependencies = c.lenientString(.dependencies)
         loginEnvironment = c.lenientString(.loginEnvironment)
+        shellEnvironment = c.lenientString(.shellEnvironment)
+        shellFile = c.lenientString(.shellFile)
         wrapper = c.lenientString(.wrapper)
         relay = c.lenientString(.relay)
     }

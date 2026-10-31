@@ -222,7 +222,8 @@ class DiagnoseTests(CliCase):
         self.assertTrue(any(line.startswith('macos: ') for line in lines))
         self.assertIn('codex app: ~/Applications/Codex.app %s, running (1 process)' % APP_VERSION, lines)
         self.assertIn('host: ready since '+iso(NOW-300), lines)
-        self.assertIn('setup: command=ready, dependencies=ready, login_environment=ready, wrapper=ready, relay=inactive', lines)
+        self.assertIn('setup: command=ready, dependencies=ready, login_environment=ready, shell_environment=ready, '
+                      'wrapper=ready, relay=inactive', lines)
         self.assertIn('relay left out at the last Codex start: unknown_field', lines)
         self.assertIn('connections: 2 (claude 1, codex 1); active 1, idle 1, ended 0', lines)
         self.assertIn('leases: the list cannot be read; may be left behind: 1 (releasable now: 1)', lines)

@@ -2,7 +2,9 @@
 
 Names are not enough: an overwrite inside a file that already exists changes no name. Every entry is described by
 its type, size, modification time in nanoseconds and inode, so a rewritten file, a new or removed entry and a
-changed directory all show. This module only ever looks (lstat, scandir); it never follows a link and never writes.
+changed directory all show. This module only ever looks (lstat, stat, scandir) and never writes. It follows no link in
+the support folders; the shell startup files are looked at as a link and as the file it points to, since setup changes
+the file a link points to.
 """
 from collections import namedtuple
 from datetime import datetime
@@ -15,6 +17,8 @@ WATCHED = ('.local/share/codex-cua', '.local/bin/codex-cua', 'Library/Caches/cod
 # Shared folders, of which only the entries with our own prefix count: other tools change their own entries all the
 # time (the login agents of this plugin are com.chenjingdev.codex-cua.*).
 PREFIXED = (('Library/LaunchAgents', 'com.chenjingdev.'),)
+# The startup files of zsh and bash in the home folder, where setup puts its block (shell_startup.py).
+SHELL_FILES = ('.zshenv', '.zprofile', '.zshrc', '.bash_profile', '.bash_login', '.profile')
 
 Entry = namedtuple('Entry', 'kind size mtime_ns inode')
 
@@ -25,9 +29,19 @@ def real_home():
     return Path(pwd.getpwuid(os.getuid()).pw_dir)
 
 
-def fingerprint(home, watched=WATCHED, prefixed=PREFIXED):
+def _entry(info):
+    return Entry(stat.S_IFMT(info.st_mode), info.st_size, info.st_mtime_ns, info.st_ino)
+
+
+def fingerprint(home, watched=WATCHED, prefixed=PREFIXED, shell_files=SHELL_FILES):
     seen = {}
     home = Path(home)
+    for name in shell_files:
+        for key, look in ((name, os.lstat), (name+' (target)', os.stat)):
+            try:
+                seen[key] = _entry(look(home/name))
+            except OSError:
+                seen[key] = None
     starts = [home/name for name in watched]
     for name, prefix in prefixed:
         try:
@@ -45,7 +59,7 @@ def fingerprint(home, watched=WATCHED, prefixed=PREFIXED):
             except OSError:
                 seen[key] = None                      # absent, or not for us to look at
                 continue
-            seen[key] = Entry(stat.S_IFMT(info.st_mode), info.st_size, info.st_mtime_ns, info.st_ino)
+            seen[key] = _entry(info)
             if stat.S_ISDIR(info.st_mode):
                 try:
                     with os.scandir(path) as entries:

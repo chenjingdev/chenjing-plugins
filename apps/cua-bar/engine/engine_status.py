@@ -729,6 +729,7 @@ class View:
             relay = 'inactive'
         return {'command': checks.get('command', 'missing'), 'dependencies': checks.get('dependencies', 'missing'),
                 'login_environment': checks.get('login_environment', 'unknown'),
+                'shell_environment': checks.get('shell_environment', 'unknown'), 'shell_file': checks.get('shell_file'),
                 'wrapper': checks.get('wrapper', 'broken'), 'relay': relay}
 
     def _other_tools(self):

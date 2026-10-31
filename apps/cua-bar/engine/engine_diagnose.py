@@ -65,7 +65,8 @@ def diagnose_text(ctx, view=None):
     lines.append('host: %s%s%s' % (host['state'], ' since %s' % host['since'] if host['since'] else '',
                                  ', started before this setup' if host['started_before_setup'] else ''))
     lines.append('setup: ' + ', '.join('%s=%s' % (key, setup[key]) for key in
-                                       ('command', 'dependencies', 'login_environment', 'wrapper', 'relay')))
+                                       ('command', 'dependencies', 'login_environment', 'shell_environment', 'wrapper',
+                                        'relay')))
     reason = view.inv.host.relay_reason
     if reason and REASON.match(reason):
         lines.append('relay left out at the last Codex start: %s' % reason)

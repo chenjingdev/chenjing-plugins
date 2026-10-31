@@ -37,10 +37,10 @@ CUA Bar에 담겨 다니는 연결 엔진입니다. Claude Code가 Mac의 앱과
 
 `setup.sh <명령>`(원본이나 사본의 `setup.sh`)으로 부르고, 설정이 끝난 뒤에는 `~/.local/bin/codex-cua <명령>`이 같은 일을 합니다. `codex-cua`는 `source.json`이 가리키는 엔진 사본의 `setup.py`로 넘기므로 늘 묶인 사본의 코드를 실행합니다. 놓아주기·끄기·다시 켜기는 사람이 직접 부르거나 CUA Bar에서 누르는 명령이고, AI는 `doctor`·`status --json`·`diagnose`만 씁니다.
 
-- `install-engine [--json]`: 위의 일을 하고, 사본 위에서 `setup`을 돌리고, `current`를 옮기고, 옛 판을 정리합니다. 앱이 켜질 때 부르는 설치입니다. 성공하면 결과를 한 덩어리로 냅니다(`--json`이면 JSON 객체 한 줄): `version`, `root`(사본 폴더), `launcher`(`engine/current/start-mcp.sh`), `removed`(지운 옛 판 이름 배열), `setup`(`command`는 `status`의 `setup.command`와 같은 낱말, `login_environment`는 `ready`·`conflict`·`failed`, `relay`는 중계기 파일 상태 `ready`·`missing`·`invalid`). 실패하면 0이 아닌 종료 코드와 stderr 한 줄이고, pip·venv가 낸 말은 싣지 않습니다.
+- `install-engine [--json]`: 위의 일을 하고, 사본 위에서 `setup`을 돌리고, `current`를 옮기고, 옛 판을 정리합니다. 앱이 켜질 때 부르는 설치입니다. 성공하면 결과를 한 덩어리로 냅니다(`--json`이면 JSON 객체 한 줄): `version`, `root`(사본 폴더), `launcher`(`engine/current/start-mcp.sh`), `removed`(지운 옛 판 이름 배열), `setup`(`command`는 `status`의 `setup.command`와 같은 낱말, `login_environment`는 `ready`·`conflict`·`failed`(로그인 에이전트는 됐어도 셸 시작 파일에 블록을 넣지 못하면 `failed`), `shell_environment`와 `shell_file`은 아래 `status`의 같은 칸(`conflict`이면 셸 파일을 건드리지 않고 지금 상태만 냅니다), `relay`는 중계기 파일 상태 `ready`·`missing`·`invalid`). 실패하면 0이 아닌 종료 코드와 stderr 한 줄이고, pip·venv가 낸 말은 싣지 않습니다.
 - `status --json`: 지금 상태를 JSON 한 덩어리로 냅니다(아래 [고급 명령](#고급-명령)). 앱이 읽는 계약입니다. 엔진 판과 관련된 칸은 아래에 있습니다.
 - `doctor [--probe] [--json] [--timeout 초]`: 설치 상태를 보고하고, `--probe`를 주면 연결 시험을 합니다(아래).
-- `setup`(`install`): 이 폴더의 엔진으로 `codex-cua` 명령, Codex 래퍼 스크립트, 로그인 항목, 중계기 사본을 설정합니다. `install-engine`이 사본 위에서 부르므로 직접 부를 일은 개발 때뿐입니다.
+- `setup`(`install`): 이 폴더의 엔진으로 `codex-cua` 명령, Codex 래퍼 스크립트, 로그인 항목과 셸 시작 파일의 블록, 중계기 사본을 설정합니다(블록은 `Shell startup file: ready (/Users/…/.zshenv)` 같은 줄로 말합니다). `install-engine`이 사본 위에서 부르므로 직접 부를 일은 개발 때뿐입니다.
 - `start`: 연결 가능한 방식으로 Codex를 실행합니다(보통은 필요 없습니다).
 - `uninstall`: 아래 [제거](#제거).
 
@@ -49,7 +49,7 @@ CUA Bar에 담겨 다니는 연결 엔진입니다. Claude Code가 Mac의 앱과
 - `engine`: `version`(이 엔진의 매니페스트 판), `root`(이 엔진이 도는 폴더), `launcher`(MCP를 등록하는 경로). `plugin.version`은 `engine.version`과 같은 값을 이전 이름으로 한 번 더 냅니다.
 - `host.engine_version`, `host.started_before_setup`: 아래 [host.json의 engine_version](#hostjson의-engine_version).
 - `host.relay_reason`, `host.restart_adds_relay`: 준비된 호스트가 중계기 없이 켜졌을 때 래퍼가 적은 까닭 낱말(`plugin_entry` 등, 아니면 `null`)과, 다시 켜면 중계기가 붙는지(`true`·`false`). 아래 [중계기](#중계기)의 마지막 문단.
-- `setup`: `command`, `dependencies`, `login_environment`, `wrapper`, `relay`.
+- `setup`: `command`, `dependencies`, `login_environment`, `shell_environment`, `shell_file`, `wrapper`, `relay`. `login_environment`는 로그인 에이전트와 launchd 값, 셸 시작 파일의 블록이 모두 맞아야 `ready`이고(로그인 셸이 블록을 받지 않는 셸이면 앞의 둘로 충분합니다), 블록이 없거나 그 파일에 쓸 수 없으면 `missing`, 옛 블록이면 `stale`입니다(0.8.11부터). `shell_environment`는 블록 상태 `ready`·`missing`·`outdated`(다른 블록이나 둘 이상)·`unwritable`(준비가 아니고 그 파일을 읽거나 바꿀 수 없음)·`unsupported_shell`(zsh·bash가 아닌 로그인 셸)·`unknown`이고, `shell_file`은 그 파일의 경로(`unsupported_shell`이면 `null`)입니다.
 
 ### host.json의 engine_version
 
@@ -59,7 +59,7 @@ Codex 래퍼(`desktop_cli_wrapper.py`)는 호스트를 켤 때 상태 폴더(`~/
 
 ### 연결 시험 (doctor --probe)
 
-`doctor`는 `installation`, `dependencies`, `login_environment`, `relay`, `host`를 보고합니다. `--probe`를 주면 연결 시험을 하고, 결과가 `probe.status`와 최상위 `status`에 같은 낱말로 나옵니다: `checked`(성공), `failed`, `timeout`, `approval_required`(Codex의 승인이 필요합니다), `cleanup_unconfirmed`(됐지만 정리를 확인하지 못했습니다), `host_unavailable`, `dependencies_missing`. `--timeout`은 기본 15초, 최대 60초이고, 시험이 끝난 뒤 정리에 몇 초 더 걸릴 수 있습니다. 종료 코드는 `registered` 또는 `checked`일 때만 0입니다.
+`doctor`는 `installation`, `dependencies`, `login_environment`, `shell_environment`(상태 낱말만, 파일 경로는 싣지 않습니다), `relay`, `host`를 보고합니다. `--probe`를 주면 연결 시험을 하고, 결과가 `probe.status`와 최상위 `status`에 같은 낱말로 나옵니다: `checked`(성공), `failed`, `timeout`, `approval_required`(Codex의 승인이 필요합니다), `cleanup_unconfirmed`(됐지만 정리를 확인하지 못했습니다), `host_unavailable`, `dependencies_missing`. `--timeout`은 기본 15초, 최대 60초이고, 시험이 끝난 뒤 정리에 몇 초 더 걸릴 수 있습니다. 종료 코드는 `registered` 또는 `checked`일 때만 0입니다.
 
 - 호스트가 준비 상태가 아니면(기록 없음·시작 중·종료 중·닫힘·프로세스 없음) 아무것도 켜거나 끄거나 묻지 않고 파일도 만들지 않은 채 `host_unavailable`로 곧장 끝납니다. Codex가 꺼져 있어도 켜지 않습니다.
 - 준비된 호스트에는 `await cua.getState();` 한 번을 임시 스레드로 부릅니다. 이 스레드는 새 비공개 폴더(0700)에서 일하고, 폴더 이름이 시험의 유일한 표시입니다. 이름은 `codex-cua-probe-` 뒤에 무작위 6~32자(영문·숫자·밑줄)입니다.
@@ -70,7 +70,7 @@ Codex 래퍼(`desktop_cli_wrapper.py`)는 호스트를 켤 때 상태 폴더(`~/
 
 설정이 끝나면 Codex를 따로 준비하지 않아도 됩니다.
 
-- **Codex를 평소처럼 켜도 됩니다.** 설정 때 로그인 항목(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`)이 등록돼, Dock이나 Spotlight로 연 Codex도 연결 가능한 방식으로 켜집니다. 시스템 설정의 로그인 항목에는 이 항목이 실행하는 스크립트 이름 `codex-cua-login-env`로 보입니다.
+- **Codex를 평소처럼 켜도 됩니다.** 설정 때 로그인 항목(`~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist`)이 등록돼, Dock이나 Spotlight로 연 Codex도 연결 가능한 방식으로 켜집니다. 시스템 설정의 로그인 항목에는 이 항목이 실행하는 스크립트 이름 `codex-cua-login-env`로 보입니다. 재부팅 뒤 macOS가 다시 여는 Codex는 이 항목보다 먼저 뜨므로(2026-10-30에는 19초 먼저), 설정은 로그인 셸의 시작 파일(zsh는 `$ZDOTDIR` 또는 홈의 `.zshenv`, bash는 `~/.bash_profile`·`~/.bash_login`·`~/.profile` 중 먼저 있는 것, 없으면 `~/.bash_profile`)에도 `# >>> codex-cua (CUA Bar) >>>`와 `# <<< codex-cua (CUA Bar) <<<` 사이의 블록을 넣습니다(0.8.11부터, `shell_startup.py`). Codex는 켜질 때 로그인 셸을 `-ilc`로 돌려(`CODEX_SHELL=1`) 그 환경을 받아 들이므로, 블록이 그때 같은 두 값(`CODEX_CLI_PATH`, `CODEX_HOST_CUA_STATE_DIR`)을 내보냅니다. 블록은 `CODEX_SHELL`이 있거나 `__CFBundleIdentifier`가 `com.openai.codex`이고 래퍼가 실행 파일로 있을 때만 값을 내므로 터미널에서는 아무 일도 하지 않습니다. 블록 밖은 바꾸지 않고, 같은 블록이 있으면 파일을 쓰지 않으며, 링크는 그대로 두고 가리키는 파일을 고칩니다. 다른 로그인 셸은 블록 없이 로그인 항목만 씁니다.
 - **Codex가 꺼져 있어도 됩니다.** Claude가 CUA에 연결할 때 Codex를 뒤에서 열고, 앞에 있던 앱으로 포커스를 돌려줍니다. Codex를 켜는 것은 새 Claude 대화가 CUA에 연결할 때와, 연결이 끊긴 뒤의 다음 CUA 호출뿐입니다. 대화 끝 정리(`turn_ended`)는 켜지 않습니다.
 - **설정 전부터 켜져 있던 Codex는 한 번 다시 켜야 합니다.** CUA Bar는 이런 Codex를 끄지 않고 알림으로 다시 켤지 묻고, **다시 켜기**를 누르면 정상 종료한 뒤 다시 켭니다. 직접 하려면 진행 중인 작업을 마치고 Codex를 정상 종료(⌘Q)한 뒤 다시 엽니다. 어느 쪽도 강제로 종료하지 않지만, 다시 켜면 하던 Codex 작업은 끊깁니다. 다시 켠 뒤에도 Claude Code에서 cuabar가 연결되지 않은 것으로 보이면 `/mcp`로 다시 연결합니다.
 - **Codex가 꺼졌다 켜져도(앱 갱신 포함) 열려 있던 Claude 대화는 이어집니다.** 다음 CUA 호출 때 새 호스트에 다시 붙습니다. 연결이 끊길 때 하던 조작은 다시 보내지 않으므로 그 조작이 실제로 됐는지는 알 수 없습니다. 화면을 확인한 뒤에 이어 갑니다.
@@ -113,7 +113,7 @@ CUA Bar의 **앱 지우기…**가 이 엔진의 제거까지 합니다([앱 REA
 ~/.local/bin/codex-cua uninstall
 ```
 
-로그인 항목, 등록한 설정값, 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 연결 기록 폴더(`~/Library/Caches/codex-cua`)와 호스트 상태 폴더(`~/Library/Caches/codex-host-cua`)는 지우지 않으니 필요 없으면 직접 지웁니다. 앱이 Claude Code에 깐 `cuabar` MCP는 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
+로그인 항목, 등록한 설정값, 셸 시작 파일의 블록(설정이 넣었을 수 있는 파일 모두에서 블록만 빼고, 남은 것이 빈 줄뿐이면 파일을 지웁니다. 쓸 수 없는 파일은 그대로 두며, 래퍼가 없어진 뒤의 블록은 아무 일도 하지 않습니다), 중계기 사본, 설치한 명령, 엔진 사본과 파이썬 환경(`~/.local/share/codex-cua` 전체)을 함께 지웁니다. 연결 기록 폴더(`~/Library/Caches/codex-cua`)와 호스트 상태 폴더(`~/Library/Caches/codex-host-cua`)는 지우지 않으니 필요 없으면 직접 지웁니다. 앱이 Claude Code에 깐 `cuabar` MCP는 이 명령이 건드리지 않아서, 앱 지우기가 따로 지웁니다.
 
 ## 업데이트와 옛 플러그인
 

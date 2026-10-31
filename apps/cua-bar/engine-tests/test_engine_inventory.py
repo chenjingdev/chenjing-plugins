@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import engine_inventory as inventory
 import setup
+import shell_startup
 from engine_core import iso
 from engine_support import APP_VERSION, ENGINE_PID, NOW, UID, EngineCase, lstart
 
@@ -354,7 +355,8 @@ class SetupChecksTests(EngineCase):
         self.launchd = {}
         self.venv = True
         for patcher in (patch.object(setup, 'venv_ready', side_effect=lambda root: self.venv),
-                        patch.object(setup, 'launchd_value', side_effect=lambda key: self.launchd.get(key, ''))):
+                        patch.object(setup, 'launchd_value', side_effect=lambda key: self.launchd.get(key, '')),
+                        patch.object(shell_startup, 'login_shell', return_value='/bin/zsh')):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -378,6 +380,7 @@ class SetupChecksTests(EngineCase):
     def test_nothing_installed(self):
         self.venv = False
         self.assertEqual(self.checks(), {'command': 'missing', 'dependencies': 'missing', 'login_environment': 'missing',
+                                         'shell_environment': 'missing', 'shell_file': str(self.home/'.zshenv'),
                                          'wrapper': 'missing', 'relay_files': 'missing'})
 
     def test_everything_installed(self):
@@ -388,7 +391,9 @@ class SetupChecksTests(EngineCase):
         agent.parent.mkdir(parents=True)
         agent.write_bytes(plistlib.dumps({'Label': setup.LOGIN_LABEL}))
         self.launchd.update(setup.login_values(self.home, self.context().environment))
+        setup.install_shell_environment(self.home, self.context().environment)
         self.assertEqual(self.checks(), {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready',
+                                         'shell_environment': 'ready', 'shell_file': str(self.home/'.zshenv'),
                                          'wrapper': 'ready', 'relay_files': 'ready'})
 
     def relay_file(self, name, marker, mode=None):
@@ -418,7 +423,15 @@ class SetupChecksTests(EngineCase):
         agent.write_bytes(plistlib.dumps({'Label': setup.LOGIN_LABEL}))
         self.assertEqual(self.checks()['login_environment'], 'stale')
         self.launchd.update(setup.login_values(self.home, self.context().environment))
+        self.assertEqual(self.checks()['login_environment'], 'missing', 'the agent alone is too late for a reopened Codex')
+        setup.install_shell_environment(self.home, self.context().environment)
         self.assertEqual(self.checks()['login_environment'], 'ready')
+        (self.home/'.zshenv').write_bytes((self.home/'.zshenv').read_bytes().replace(b'export', b'export  '))
+        self.assertEqual(self.checks()['login_environment'], 'stale', 'an old block')
+        with patch.object(shell_startup, 'login_shell', return_value='/bin/tcsh'):
+            self.assertEqual(self.checks()['login_environment'], 'ready', 'a shell that gets no block')
+            self.assertEqual(self.checks()['shell_environment'], 'unsupported_shell')
+            self.assertIsNone(self.checks()['shell_file'])
         agent.write_bytes(plistlib.dumps({'Label': 'unrelated'}))
         self.assertEqual(self.checks()['login_environment'], 'conflict')
         agent.write_text('not a plist')

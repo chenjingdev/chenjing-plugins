@@ -283,6 +283,16 @@ def login_environment_state(ctx):
         return 'unknown'
 
 
+def shell_environment_state(ctx):
+    """The block in the login shell's startup file and that file (setup.shell_environment_status); unknown when it
+    could not be looked at."""
+    try:
+        state, path = ctx.setup.shell_environment_status(ctx.home, ctx.environment)
+    except Exception:
+        return 'unknown', None
+    return state, str(path) if path is not None else None
+
+
 def _owned_safe(info, uid):
     return info.st_uid == uid and not stat.S_IMODE(info.st_mode) & 0o022
 
@@ -351,9 +361,11 @@ def setup_checks(ctx):
     # Once the relay is part of this plugin, setup.relay_status is the one source of truth that doctor uses too.
     relay_status = getattr(setup, 'relay_status', None)
     relay = (lambda: relay_status(ctx.home)) if callable(relay_status) else (lambda: relay_files_state(support, ctx.uid))
+    shell, shell_file = shell_environment_state(ctx)
     return {'command': _guard(lambda: command_state(ctx, support), 'missing'),
             'dependencies': 'ready' if _guard(lambda: setup.venv_ready(support), False) else 'missing',
             'login_environment': login_environment_state(ctx),
+            'shell_environment': shell, 'shell_file': shell_file,
             'wrapper': _guard(lambda: wrapper_state(ctx, support), 'broken'),
             'relay_files': _guard(relay, 'invalid')}
 
@@ -382,7 +394,7 @@ def working_folders(ctx, pids):
 # --- the inventory ----------------------------------------------------------------------------------------
 
 UNCHECKED = {'command': 'missing', 'dependencies': 'missing', 'login_environment': 'unknown',
-             'wrapper': 'broken', 'relay_files': 'invalid'}
+             'shell_environment': 'unknown', 'shell_file': None, 'wrapper': 'broken', 'relay_files': 'invalid'}
 
 
 class Inventory:

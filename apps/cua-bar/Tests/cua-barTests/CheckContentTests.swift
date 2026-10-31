@@ -580,6 +580,32 @@ struct CheckContentTests {
         #expect(line.commands.map(\.text) == ["launchctl unsetenv CODEX_CLI_PATH"])
     }
 
+    @Test func aShellStartupFileWithoutTheBlockIsTheLoginEnvironmentLineFixedOnTheCard() throws {
+        // An engine from 0.8.11 calls the login environment missing or stale while the block is: the same line and card.
+        for (login, shell, sentence) in [("missing", "missing", "로그인 환경이 설정되지 않았어요"), ("stale", "outdated", "로그인 환경이 옛 설정이에요")] {
+            let broken = try status { $0.setup.loginEnvironment = login; $0.setup.shellEnvironment = shell; $0.setup.shellFile = "/Users/x/.zshenv" }
+            let line = try #require(CheckFixtures.content(broken).line(.wrapper))
+            #expect(line.status == .problem && line.detail == "위 카드에서 고쳐요" && line.steps.isEmpty, "\(shell)")
+            #expect(line.diagnosisLine.contains(sentence))
+            let card = StatusEvaluator.problem(in: broken, appVersion: "0.8.11", facts: LocalFacts(claude: CheckFixtures.claudeReady()))
+            #expect(card?.fix != nil, "고치기 writes the block again: \(shell)")
+        }
+    }
+
+    @Test func aShellStartupFileTheSetupCannotWriteIsNamedWithWhatToDo() throws {
+        let unwritable = try status { $0.setup.loginEnvironment = "missing"; $0.setup.shellEnvironment = "unwritable"; $0.setup.shellFile = "/Users/x/.zshenv" }
+        let line = try #require(CheckFixtures.content(unwritable).line(.wrapper))
+        #expect(line.status == .problem)
+        #expect(line.steps == ["셸 시작 파일에 쓸 수 없어요: /Users/x/.zshenv", "그 파일을 쓸 수 있게 고친 뒤 위 카드의 고치기를 눌러 주세요"])
+        #expect(line.diagnosisLine.contains("로그인 환경이 설정되지 않았어요, 셸 시작 파일에 쓸 수 없음"))
+        #expect(!line.diagnosisLine.contains("/Users/x"), "the file is not in the diagnosis")
+        // Settled, or a login shell that gets no block: nothing is said about the file.
+        for shell in ["ready", "unsupported_shell"] {
+            let ready = try status { $0.setup.shellEnvironment = shell }
+            #expect(CheckFixtures.content(ready).line(.wrapper)?.status == .ready, "\(shell)")
+        }
+    }
+
     // MARK: The login item and the unreadable engine
 
     @Test func theLoginItemLineFollowsWhatBecameOfIt() throws {

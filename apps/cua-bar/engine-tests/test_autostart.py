@@ -15,6 +15,7 @@ import unittest
 from unittest.mock import call, MagicMock, patch
 import host_autostart
 import setup
+import shell_startup
 from test_runtime_paths import fake_app
 
 CODEX = 'com.openai.codex'
@@ -615,6 +616,9 @@ class LoginEnvironmentTests(unittest.TestCase):
         self.home = Path(self.temp.name).resolve()
         self.launchd = {}
         self.environment = {'CODEX_HOST_CUA_STATE_DIR': str(self.home/'state')}
+        patcher = patch.object(shell_startup, 'login_shell', return_value='/bin/zsh')
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -636,6 +640,9 @@ class LoginEnvironmentTests(unittest.TestCase):
         with self.fake_launchctl():
             self.assertEqual(setup.login_environment_status(self.home, self.environment), 'missing')
             self.assertEqual(setup.install_login_environment(self.home, self.environment), 'ready')
+            # launchd alone is too late for a Codex that macOS reopens at login: the shell startup file is missing.
+            self.assertEqual(setup.login_environment_status(self.home, self.environment), 'missing')
+            self.assertEqual(setup.install_login(self.home, self.environment), ('ready', ('ready', self.home/'.zshenv')))
             self.assertEqual(setup.login_environment_status(self.home, self.environment), 'ready')
         launcher = str(self.home/'.local/share/codex-cua/start-desktop-cli.sh')
         self.assertEqual(self.launchd, {'CODEX_CLI_PATH': launcher,
@@ -662,9 +669,11 @@ class LoginEnvironmentTests(unittest.TestCase):
 
     def test_remove_clears_only_owned_values(self):
         with self.fake_launchctl():
-            setup.install_login_environment(self.home, self.environment)
+            setup.install_login(self.home, self.environment)
+            self.assertTrue((self.home/'.zshenv').is_file())
             self.launchd['CODEX_HOST_CUA_STATE_DIR'] = '/changed/by/user'
             setup.remove_login_environment(self.home, self.environment)
+        self.assertFalse((self.home/'.zshenv').exists(), 'a file that held only the block goes with it')
         self.assertFalse(setup.login_agent_path(self.home).exists())
         self.assertFalse(setup.login_script_path(self.home).exists())
         self.assertEqual(self.launchd, {'CODEX_HOST_CUA_STATE_DIR': '/changed/by/user'})

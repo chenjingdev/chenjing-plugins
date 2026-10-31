@@ -91,6 +91,21 @@ class GuardTests(unittest.TestCase):
         self.assertIn('.local/share/codex-cua/link', after)
         self.assertNotIn('.local/share/codex-cua/link/file', after)
 
+    def test_the_shell_startup_files_are_watched_and_so_is_the_file_a_link_points_to(self):
+        (self.home/'.zshrc').write_text('# mine\n')
+        elsewhere = self.home/'dotfiles'
+        elsewhere.mkdir()
+        (elsewhere/'zshenv').write_text('# one\n')
+        (self.home/'.zshenv').symlink_to(elsewhere/'zshenv')
+        before = guard.fingerprint(self.home)
+        self.assertIsNone(before['.profile'], 'an absent startup file is part of the picture')
+        time.sleep(0.01)
+        (elsewhere/'zshenv').write_text('# two\n')                  # through the link, which stays as it is
+        (self.home/'.zshrc').write_text('# mine, changed\n')
+        (self.home/'.bash_profile').write_text('')
+        self.assertEqual(guard.changes(before, guard.fingerprint(self.home)),
+                         ['.bash_profile', '.bash_profile (target)', '.zshenv (target)', '.zshrc', '.zshrc (target)'])
+
     def test_the_real_home_comes_from_the_account_database(self):
         with patch.dict(os.environ, {'HOME': '/nonexistent'}):
             self.assertNotEqual(str(guard.real_home()), '/nonexistent')

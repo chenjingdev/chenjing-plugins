@@ -56,6 +56,8 @@ def main(argv=None):
     before = guard.fingerprint(real_home)
     with tempfile.TemporaryDirectory(prefix='cua-tests-home-') as home:
         os.environ['HOME'] = home
+        # zsh finds its startup files in $ZDOTDIR, which may be a real folder of this account: setup would write there.
+        os.environ.pop('ZDOTDIR', None)
         suite = unittest.defaultTestLoader.discover(str(args.tests), pattern='test_*.py')
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         # The interpreter's own bytecode cache lives under the home on this Mac; it is not ours.

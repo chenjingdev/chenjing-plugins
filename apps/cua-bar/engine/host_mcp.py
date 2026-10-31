@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.10'
+VERSION = '0.8.11'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0

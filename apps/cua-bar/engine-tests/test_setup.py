@@ -272,8 +272,10 @@ class SetupTests(unittest.TestCase):
         output = io.StringIO()
         with patch.object(setup, 'install_command', return_value=Path('/fixture/codex-cua')), \
              patch.object(setup, 'install_login_environment', return_value='ready'), \
+             patch.object(setup, 'install_shell_environment', return_value=('ready', Path('/fixture/.zshenv'))), \
              patch.object(setup, 'relay_status', return_value='ready'), contextlib.redirect_stdout(output):
             self.assertEqual(setup.main(['setup']), 0)
+        self.assertIn('Shell startup file: ready (/fixture/.zshenv)', output.getvalue().splitlines())
         self.assertIn('Relay files: ready', output.getvalue().splitlines())
 
     def test_doctor_reports_the_relay_files(self):

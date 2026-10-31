@@ -17,6 +17,8 @@
     "command": "ready",
     "dependencies": "ready",
     "login_environment": "ready",
+    "shell_environment": "ready",
+    "shell_file": "/Users/chenjing/.zshenv",
     "wrapper": "ready",
     "relay": "active",
     "telemetry": "off"

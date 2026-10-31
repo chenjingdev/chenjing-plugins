@@ -23,7 +23,7 @@ from engine_support import NOW, EngineCase
 ENGINE = Path(setup.__file__).resolve().parent
 REAL_ENSURE = setup.ensure_dependencies                  # before any test replaces it
 KEYS = ['version', 'root', 'launcher', 'removed', 'setup']
-SETUP_KEYS = ['command', 'login_environment', 'relay']
+SETUP_KEYS = ['command', 'login_environment', 'shell_environment', 'shell_file', 'relay']
 
 
 class FastClock:
@@ -62,6 +62,10 @@ class InstallCase(EngineCase):
         self.addCleanup(patcher.stop)
         patcher = patch.object(setup, 'install_login_environment', return_value='ready')
         self.login = patcher.start()
+        self.addCleanup(patcher.stop)
+        self.shell_file = self.home/'.zshenv'
+        patcher = patch.object(setup, 'install_shell_environment', return_value=('ready', self.shell_file))
+        self.shell = patcher.start()
         self.addCleanup(patcher.stop)
 
     def install(self, root=None, as_json=True, **context):
@@ -298,7 +302,9 @@ class OutputTests(InstallCase):
         self.assertEqual(list(result['setup']), SETUP_KEYS)
         self.assertEqual(result, {'version': '0.8.0', 'root': str(self.copy), 'launcher': self.launcher,
                                   'removed': ['0.7.0'],
-                                  'setup': {'command': 'ready', 'login_environment': 'ready', 'relay': 'ready'}})
+                                  'setup': {'command': 'ready', 'login_environment': 'ready',
+                                            'shell_environment': 'ready', 'shell_file': str(self.shell_file),
+                                            'relay': 'ready'}})
         self.assertEqual(result['launcher'], str(self.support/'engine/current/start-mcp.sh'))
 
     def test_without_json_it_says_in_words_what_was_done(self):
@@ -310,6 +316,7 @@ class OutputTests(InstallCase):
                                             'Removed older engines: 0.7.0',
                                             'Authored command: ready',
                                             'Ordinary app launch as host: ready',
+                                            'Shell startup file: ready (%s)' % self.shell_file,
                                             'Relay files: ready'])
 
     def test_a_login_session_that_cannot_be_set_up_is_reported_and_is_no_failure(self):
@@ -319,6 +326,21 @@ class OutputTests(InstallCase):
         result = self.installed()
         self.assertEqual(result['setup']['login_environment'], 'failed')
         self.assertNotIn('PRIVATE', json.dumps(result))
+
+    def test_a_shell_startup_file_that_cannot_be_written_is_reported_and_is_no_failure(self):
+        self.shell.return_value = ('unwritable', self.shell_file)
+        status, out, err = self.install(as_json=False)
+        self.assertEqual((status, err), (0, ''))
+        self.assertIn('Ordinary app launch as host: failed', out.splitlines())
+        self.assertIn('Shell startup file: unwritable (%s)' % self.shell_file, out.splitlines())
+        self.shell.return_value = ('unsupported_shell', None)
+        self.assertEqual(self.installed()['setup'], {'command': 'ready', 'login_environment': 'ready',
+                                                     'shell_environment': 'unsupported_shell', 'shell_file': None,
+                                                     'relay': 'ready'})
+        self.shell.reset_mock()
+        self.login.return_value = 'conflict'
+        self.assertEqual(self.installed()['setup']['login_environment'], 'conflict')
+        self.shell.assert_not_called()
 
     def test_the_relay_files_are_reported_as_the_setup_finds_them(self):
         shutil.rmtree(self.bundle/'relay')
@@ -411,7 +433,7 @@ class CurrentLinkTests(InstallCase):
         self.installed()
         order = []
         with patch.object(setup, 'run_setup', side_effect=lambda *a, **k: order.append('setup') or
-                          ('/x', 'ready', 'ready')), \
+                          ('/x', 'ready', 'ready', ('ready', None))), \
              patch.object(engine_install, 'point_current', side_effect=lambda *a, **k: order.append('current')):
             self.installed(root=self.newer())
         self.assertEqual(order, ['setup', 'current'])

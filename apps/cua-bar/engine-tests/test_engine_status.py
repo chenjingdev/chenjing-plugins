@@ -45,7 +45,8 @@ class ShapeTests(StatusCase):
                                            'pids': []})
         self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False,
                                           'engine_version': None, 'relay_reason': None, 'restart_adds_relay': False})
-        self.assertEqual(list(status['setup']), ['command', 'dependencies', 'login_environment', 'wrapper', 'relay'])
+        self.assertEqual(list(status['setup']), ['command', 'dependencies', 'login_environment', 'shell_environment',
+                                                 'shell_file', 'wrapper', 'relay'])
         self.assertEqual(status['connections'], [])
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': [], 'release_blocked': False})
         self.assertEqual(status['other_tools'], [])
@@ -68,6 +69,7 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['host'], {'state': 'ready', 'since': iso(NOW-300), 'started_before_setup': False,
                                           'engine_version': self.engine_version(), 'relay_reason': None, 'restart_adds_relay': False})
         self.assertEqual(status['setup'], {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready',
+                                           'shell_environment': 'ready', 'shell_file': str(self.home/'.zshenv'),
                                            'wrapper': 'ready', 'relay': 'active'})
         for connection in status['connections']:
             self.assertEqual(list(connection), CONNECTION_KEYS)
@@ -97,7 +99,8 @@ class ShapeTests(StatusCase):
         self.machine.add(5, 1, '/bin/x')
         setup_section = self.status(checks=broken)['setup']
         self.assertEqual(setup_section, {'command': 'missing', 'dependencies': 'missing', 'login_environment': 'unknown',
-                                         'wrapper': 'broken', 'relay': 'unavailable'})
+                                         'shell_environment': 'unknown', 'shell_file': None, 'wrapper': 'broken',
+                                         'relay': 'unavailable'})
 
     def test_the_actions_do_not_run_the_setup_checks(self):
         import engine_actions

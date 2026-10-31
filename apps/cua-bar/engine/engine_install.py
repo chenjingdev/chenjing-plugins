@@ -252,10 +252,11 @@ def install_engine(ctx, source_root):
         folder = place(setup, engines, source, items, version, ctx.uid)
         setup.private_directory(folder)
         root = setup.validated_plugin_root(folder, version)
-        _, login, relay = setup.run_setup(root, ctx.home, ctx.environment)
+        _, login, relay, (shell, shell_file) = setup.run_setup(root, ctx.home, ctx.environment)
         previous = linked_version(engines)
         point_current(engines, version)
-        state = {'command': command_state(ctx, support), 'login_environment': login, 'relay': relay}
+        state = {'command': command_state(ctx, support), 'login_environment': login, 'shell_environment': shell,
+                 'shell_file': str(shell_file) if shell_file is not None else None, 'relay': relay}
         removed = prune(ctx, engines, version, previous)
     return {'version': version, 'root': str(root), 'launcher': ctx.engine_launcher(), 'removed': removed,
             'setup': state}
@@ -291,6 +292,7 @@ def run_install_engine(args, plugin_root, setup_module=None, context=None, stdou
         state = result['setup']
         lines += ['Authored command: ' + state['command'],
                   'Ordinary app launch as host: ' + state['login_environment'],
+                  'Shell startup file: ' + ctx.setup.shell_line(state['shell_environment'], state['shell_file']),
                   'Relay files: ' + state['relay']]
         out.write('\n'.join(lines)+'\n')
     out.flush()

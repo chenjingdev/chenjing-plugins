@@ -459,8 +459,8 @@ class EngineCase(unittest.TestCase):
 
     @staticmethod
     def default_checks(ctx):
-        return {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready', 'wrapper': 'ready',
-                'relay_files': 'ready'}
+        return {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready', 'shell_environment': 'ready',
+                'shell_file': str(ctx.home/'.zshenv'), 'wrapper': 'ready', 'relay_files': 'ready'}
 
     def stable_launcher(self):
         """Where the stable copy of the relay launcher lives for this temporary home."""

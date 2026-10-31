@@ -445,8 +445,9 @@ private struct Judge {
         }
         if let issue = issues(of: item).first {
             let extra = issues(of: item).dropFirst().map(\.sentence)
-            var line = broken(item, issue.sentence)
+            var line = broken(item, issue.sentence, steps: unwritableShellFileSteps())
             if !extra.isEmpty { line.facts = ([issue.sentence] + extra).joined(separator: ", ") }
+            if !line.steps.isEmpty { line.facts = (line.facts ?? line.detail) + ", 셸 시작 파일에 쓸 수 없음" }
             return line
         }
         if setup.wrapper == "ready", setup.loginEnvironment == "ready" {
@@ -466,6 +467,17 @@ private struct Judge {
             changed.facts = (changed.facts ?? changed.detail) + ", " + issue.sentence
         }
         return changed
+    }
+
+    /// The login shell's startup file that the setup cannot write its block into: 고치기 cannot help until the person
+    /// makes it writable. The file is named only in the steps, never in the diagnosis.
+    private func unwritableShellFileSteps() -> [String] {
+        guard let setup = input.status?.setup, setup.shellEnvironment == "unwritable",
+              ["missing", "stale"].contains(setup.loginEnvironment) else { return [] }
+        return [
+            "셸 시작 파일에 쓸 수 없어요" + (setup.shellFile.map { ": \($0)" } ?? ""),
+            "그 파일을 쓸 수 있게 고친 뒤 위 카드의 고치기를 눌러 주세요",
+        ]
     }
 
     /// A value in launchd's `CODEX_CLI_PATH` that is not the app's (a setup does not overwrite it).

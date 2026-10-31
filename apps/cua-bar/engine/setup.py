@@ -27,6 +27,9 @@ LOGIN_LABEL = 'com.chenjingdev.codex-cua.env'
 # What the login agent runs. macOS lists the agent under Login Items by this name; with `/bin/sh -c`
 # it said only `sh`.
 LOGIN_SCRIPT = 'codex-cua-login-env'
+# The states of the block in the login shell's startup file (shell_startup.py) with which the login environment is
+# ready: the block is in place, or the login shell gets none and the login agent alone serves it.
+SHELL_SETTLED = ('ready', 'unsupported_shell')
 FALLBACK_ENV = 'CODEX_CUA_FALLBACK_NATIVE'
 ROOT_RESOLVED_FLAG = '--root-resolved'
 # Commands of the menu bar app's engine (engine_cli.py): one JSON object on stdout.
@@ -273,13 +276,33 @@ def relay_status(home=None):
 def run_setup(plugin_root, home=None, environment=None):
     """The usual `setup` for the engine folder `plugin_root`: its command, the login environment and the relay files.
 
-    Returns the command path, the login environment (ready, conflict or failed) and the relay files state."""
+    Returns the command path, the login environment (ready, conflict or failed), the relay files state and the block in
+    the login shell's startup file (state and file, as shell_environment_status says them)."""
     target = install_command(plugin_root, home, environment)
+    login, shell = install_login(home, environment)
+    return target, login, relay_status(home), shell
+
+
+def install_login(home=None, environment=None):
+    """The login agent, then the block in the login shell's startup file; never raises. Returns the login environment
+    (ready, conflict or failed) and the block's state and file.
+
+    The login environment is ready only with the block in place (or a login shell that gets none). With somebody else's
+    value in launchd (conflict) the shell file is left as it is too: the block would put the launcher over that value
+    for Codex."""
     try:
         login = install_login_environment(home, environment)
     except Exception:
         login = 'failed'
-    return target, login, relay_status(home)
+    if login == 'conflict':
+        try:
+            return login, shell_environment_status(home, environment)
+        except Exception:
+            return login, ('unknown', None)
+    shell = install_shell_environment(home, environment)
+    if login == 'ready' and shell[0] not in SHELL_SETTLED:
+        login = 'failed'
+    return login, shell
 
 
 def app_processes(executable):
@@ -311,7 +334,61 @@ def login_environment_status(home=None, environment=None):
     if not login_agent_path(home).is_file():
         return 'missing'
     values = login_values(home, environment)
-    return 'ready' if all(launchd_value(key) == value for key, value in values.items()) else 'stale'
+    if not all(launchd_value(key) == value for key, value in values.items()):
+        return 'stale'
+    # launchd gets the values too late for a Codex that macOS reopens at login: that one takes them from the shell.
+    shell, _ = shell_environment_status(home, environment)
+    return 'ready' if shell in SHELL_SETTLED else 'stale' if shell == 'outdated' else 'missing'
+
+
+def shell_environment_status(home=None, environment=None):
+    """The block in the login shell's startup file (shell_startup.py) as it is, and that file; nothing is written.
+
+    The state is ready, missing, outdated, unwritable (not ready, and the file cannot be read or replaced) or
+    unsupported_shell (a login shell that gets no block, and no file)."""
+    import shell_startup
+    environment = os.environ if environment is None else environment
+    path = shell_startup.startup_file(Path.home() if home is None else Path(home), environment)
+    if path is None:
+        return 'unsupported_shell', None
+    return shell_startup.block_state(path, login_values(home, environment)), path
+
+
+def install_shell_environment(home=None, environment=None):
+    """Put the block into the login shell's startup file, or leave the file as it is when it holds the same block.
+    Returns the state and the file like shell_environment_status; a file that cannot be written is `unwritable`, and
+    nothing else fails for it."""
+    path = None
+    try:
+        import shell_startup
+        environment = os.environ if environment is None else environment
+        path = shell_startup.startup_file(Path.home() if home is None else Path(home), environment)
+        if path is None:
+            return 'unsupported_shell', None
+        return shell_startup.install_block(path, login_values(home, environment)), path
+    except Exception:
+        return 'unwritable', path
+
+
+def shell_line(state, path):
+    """How setup says what became of the block: `ready (/Users/x/.zshenv)`, or the state alone without a file."""
+    return state+(' (%s)' % path if path is not None else '')
+
+
+def remove_shell_environment(home=None, environment=None):
+    """Take the block out of every startup file a setup may have put it in, whatever the login shell is now. A file that
+    cannot be changed keeps it: without the launcher the block does nothing."""
+    try:
+        import shell_startup
+        environment = os.environ if environment is None else environment
+        files = shell_startup.candidate_files(Path.home() if home is None else Path(home), environment)
+    except Exception:
+        return
+    for path in files:
+        try:
+            shell_startup.remove_block(path)
+        except Exception:
+            pass
 
 
 def install_login_environment(home=None, environment=None):
@@ -348,6 +425,7 @@ def remove_login_environment(home=None, environment=None):
             script.unlink()
     except (OSError, UnicodeError):
         pass
+    remove_shell_environment(home, environment)
     for key, value in login_values(home, environment).items():
         if launchd_value(key) == value:
             subprocess.run(['/bin/launchctl', 'unsetenv', key], check=True,
@@ -378,10 +456,7 @@ def start_host(plugin_root, environment=None, home=None):
         print('Finish your Codex work, quit the app normally, then run codex-cua start. This command does not quit the app.', file=sys.stderr)
         return 1
     install_command(plugin_root, home, environment)
-    try:
-        install_login_environment(home, environment)
-    except Exception:
-        pass
+    install_login(home, environment)
     command = ['/usr/bin/open', '-a', str(installation.app_path)]
     for key, value in launch_environment(state, installation, home).items():
         command += ['--env', key+'='+value]
@@ -570,7 +645,7 @@ def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None, co
     environment = os.environ if environment is None else environment
     report = {'schema_version': 1, 'plugin_id': PLUGIN_ID, 'status': 'unavailable',
               'installation': 'not_checked', 'dependencies': 'missing', 'host': 'unavailable',
-              'login_environment': 'not_checked', 'relay': 'missing',
+              'login_environment': 'not_checked', 'shell_environment': 'not_checked', 'relay': 'missing',
               'cua': 'not_checked', 'browser': 'not_checked', 'computer': 'not_checked',
               'operational_readiness': 'not_checked'}
     try:
@@ -586,6 +661,11 @@ def doctor(plugin_root, probe=False, timeout=15, home=None, environment=None, co
         report['login_environment'] = login_environment_status(home, environment)
     except Exception:
         report['login_environment'] = 'unknown'
+    try:
+        # The state only: the report names no file of the home folder.
+        report['shell_environment'] = shell_environment_status(home, environment)[0]
+    except Exception:
+        report['shell_environment'] = 'unknown'
     report['relay'] = relay_status(home)
     if venv_ready(support_root(home)):
         report['dependencies'] = 'ready'
@@ -767,9 +847,10 @@ def main(arguments=None):
             exec_native_fallback(forwarded)
         raise
     if args.command in ('install', 'setup'):
-        target, status, relay = run_setup(plugin_root)
+        target, status, relay, shell = run_setup(plugin_root)
         print('Installed authored command: '+str(target))
         print('Ordinary app launch as host: '+status)
+        print('Shell startup file: '+shell_line(*shell))
         print('Relay files: '+relay)
         return 0
     if remainder:

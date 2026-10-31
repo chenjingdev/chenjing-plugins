@@ -6,6 +6,7 @@ import plistlib
 
 PUBLIC_PLUGIN_ID = 'cua@chenjing-plugins'
 APP_ENV = 'CODEX_CUA_APP_PATH'
+CODEX_BUNDLE_ID = 'com.openai.codex'
 
 
 class InstallationError(RuntimeError):
@@ -39,7 +40,7 @@ def _app_installation(app):
             info = plistlib.load(source)
     except (OSError, ValueError, plistlib.InvalidFileException):
         raise InstallationError('The selected app has no valid bundle metadata.') from None
-    if info.get('CFBundleIdentifier') != 'com.openai.codex':
+    if info.get('CFBundleIdentifier') != CODEX_BUNDLE_ID:
         raise InstallationError('The selected app is not the original Codex Desktop bundle.')
     executable_name = info.get('CFBundleExecutable')
     if (not isinstance(executable_name, str) or not executable_name
