@@ -1,0 +1,10 @@
+# pact: 작업 중 임시 것만 뺀다. 명세·승인 기록·검수 기록·보고서·스크린샷은 git에 들어간다.
+*/wt/
+*/scratch/
+# 0.7.0 전 판이 임시 파일을 두던 곳. 작업 보고(tasks/<n>-report.md)는 남긴다.
+*/tasks/*
+!*/tasks/*.md
+*/leftover/
+*/verify-*/
+node_modules/
+.DS_Store
