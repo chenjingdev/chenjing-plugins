@@ -325,7 +325,9 @@ test('요청 하나가 시간 안에 못 오면 그 요청만 버리고 나머�
   const handler = (rec) => ({ user: { delay: 1500, json: [msg({ content: 'pact 느린 사용자 말' })] }, complaint: { json: [msg({ content: 'pact 불만 말' })] }, report: {} })[kindOf(rec)];
   await withServer(handler, async (server) => {
     const started = Date.now();
-    assert.deepEqual(textsOf(await get(server, { RECALL_REQUEST_MS: '150' })), ['pact 불만 말']);
+    const partial = await get(server, { RECALL_REQUEST_MS: '150' });
+    assert.deepEqual(textsOf(partial), ['pact 불만 말']);
+    assert.match(partial.note, /^3번 중 1번 .*안에 응답 없음$/);
     assert.ok(Date.now() - started < 1200, '느린 요청을 기다리지 않는다');
   });
 });

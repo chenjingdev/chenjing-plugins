@@ -167,6 +167,8 @@ export async function collect({ topicWords, project, env }) {
   ];
   const settled = await Promise.allSettled(plans.map((p) => search(config, p.body, limit)));
   if (settled.every((r) => r.status === 'rejected')) throw settled[0].reason;
+  const failed = settled.filter((r) => r.status === 'rejected');
+  const note = failed.length ? `${plans.length}번 중 ${failed.length}번 ${String(failed[0].reason?.message ?? failed[0].reason).split('\n')[0]}` : null;
 
   // 사용자 말과 AI 보고를 따로 센다: 겹침이 큰 AI 보고가 같은 세션의 사용자 말을 밀어내지 않게
   const bySession = new Map();
@@ -191,5 +193,5 @@ export async function collect({ topicWords, project, env }) {
     text: gist(m.content),
     path: m.metadata?.transcript_path ?? m.metadata?.codex_rollout_path ?? null,
   }));
-  return { items };
+  return { items, note };
 }

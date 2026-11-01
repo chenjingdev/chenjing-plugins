@@ -227,3 +227,8 @@ test('줄 가운데의 위험 표시도 위험으로 센다 (delegate의 riskIte
   assert.match(html, /위험 2개/);
   assert.match(html, /<strong>F1<\/strong> 지난 자료 비우기 \[위험: 지우기\] 가운데<span class="chip risk">위험<\/span>/);
 });
+
+test('결정 기록에 인용된 [위험: …] 글은 위험으로 세지 않는다', () => {
+  const html = renderSpecHtml(SPEC.replace('- Ruling: 가 — 나 — 다', '- Ruling: `[위험: 지우기]` 표시를 뺐다 — 나 — 다'));
+  assert.match(html, /위험 1개/);
+});

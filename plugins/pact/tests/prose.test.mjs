@@ -827,6 +827,7 @@ test('0.8.0: probe 5 teaches the source tags, failures as acceptance items, the 
   assert.ok(probe.includes('`- 기록에서 뺌: <요지> (M/D)`'));
   assert.match(probe, /"실패와 원인" 묶음에서 같은 주제·기능의 실패는 하나마다 `## 검수 기준`의 A 항목 하나로 적는다/);
   assert.match(probe, /"지키라는 규칙" 묶음에서 만들 결과물에 닿는 것은 묻지 않고 여기에 넣는다\. 답장 말투 같은 AI 쪽 규칙은 넣지 않는다/);
+  assert.match(probe, /"실패와 원인" 묶음 가운데 사용자가 직접 한 말\(출처 `사용자 말`\)로 된 불만은 결과물이 지킬 규칙으로 고쳐 써서 여기에 넣는다/);
   // 6: spec-checker에 넘기는 요구 출처와 예전 실패, 알림 받기
   assert.ok(probe.includes('`(기록 M/D 사용자 원문)`·`(기록 M/D AI 보고)`'));
   assert.match(probe, /"실패와 원인" 묶음은 날짜와 저장소 이름이 붙은 채로 `예전 실패` 목록으로 같이 넘긴다/);

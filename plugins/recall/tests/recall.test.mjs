@@ -270,3 +270,14 @@ test('CLI: 주제 낱말이 없어도 종료 0이다', () => {
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^recall: \(주제 없음\)/);
 });
+
+test('run·render: 출처가 일부만 읽었다고 note를 주면 sources에 남고 머리줄 아래 "일부만 읽음" 한 줄이 나온다', async () => {
+  const partial = { name: '기억 서버', collect: async () => ({ items: [], note: '3번 중 1번 2.5초 안에 응답 없음' }) };
+  const r = await run({ words: ['주제'], project: '/me', env: {}, sources: [partial, fake('멀쩡', [])] });
+  assert.deepEqual(r.sources, [
+    { name: '기억 서버', ok: true, reason: null, note: '3번 중 1번 2.5초 안에 응답 없음' },
+    { name: '멀쩡', ok: true, reason: null },
+  ]);
+  const lines = render(r, new Date('2026-11-01T00:00:00Z')).split('\n');
+  assert.equal(lines[1], '- 일부만 읽음: 기억 서버 (3번 중 1번 2.5초 안에 응답 없음)');
+});

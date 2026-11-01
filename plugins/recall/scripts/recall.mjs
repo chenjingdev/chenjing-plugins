@@ -56,14 +56,14 @@ export async function run({ words, project, env = process.env, sources = SOURCES
   const started = Date.now();
   const settled = await Promise.allSettled(
     sources.map(async (s) => {
-      const { items, excluded = [] } = await s.collect({ topicWords: words, project, env });
-      return { items: [...items], excluded };
+      const { items, excluded = [], note = null } = await s.collect({ topicWords: words, project, env });
+      return { items: [...items], excluded, note };
     }),
   );
   const report = settled.map((r, i) =>
     r.status === 'rejected'
       ? { name: sources[i].name, ok: false, reason: String(r.reason?.message ?? r.reason).split('\n')[0] }
-      : { name: sources[i].name, ok: true, reason: null },
+      : { name: sources[i].name, ok: true, reason: null, ...(r.value.note ? { note: r.value.note } : {}) },
   );
   const read = settled.filter((r) => r.status === 'fulfilled').map((r) => r.value);
   const cuts = read.flatMap((v) => v.excluded.map((e) => keyOf(e.text))).filter(Boolean);
@@ -98,6 +98,7 @@ export function render(result, now = new Date()) {
   const lines = [`recall: ${result.topic || '(주제 없음)'} — 출처 ${readable}/${result.sources.length} · ${result.elapsed_ms}ms`];
   if (result.excluded.length) lines.push(`- 뺀 것: ${result.excluded.length}줄 (기록에서 뺌)`);
   for (const s of result.sources) if (!s.ok) lines.push(`- 못 읽음: ${s.name} (${s.reason})`);
+  for (const s of result.sources) if (s.ok && s.note) lines.push(`- 일부만 읽음: ${s.name} (${s.note})`);
   for (const [key, title] of BUCKETS) {
     lines.push('', `## ${title}`);
     if (!result.buckets[key].length) lines.push('- 없음');

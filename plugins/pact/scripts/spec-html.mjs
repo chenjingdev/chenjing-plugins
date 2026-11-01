@@ -136,7 +136,9 @@ export function renderSpecHtml(text, { title } = {}) {
   const found = { user: 0, ai: 0, record: 0, other: [], risk: [] };
   const rulings = decisionRulings(text).length;
   const sections = Object.entries(spec.sections).map(([name, body]) => {
-    const html = renderBlocks(parseBlocks(body.split('\n'), ITEM_SECTIONS.includes(name)), found);
+    // 결정 기록은 지난 판단을 적은 글이라 그 안에 인용된 태그·위험 표시는 요약에 세지 않는다
+    const tally = name === '결정 기록' ? { user: 0, ai: 0, record: 0, other: [], risk: [] } : found;
+    const html = renderBlocks(parseBlocks(body.split('\n'), ITEM_SECTIONS.includes(name)), tally);
     if (name === '결정 기록') return `<details class="log"><summary>${esc(name)} — Ruling ${rulings}개</summary>\n${html}</details>`;
     return `<h2>${esc(name)}</h2>\n${html || (name === '확인 필요' ? '<p class="none">없음</p>' : '')}`;
   });
