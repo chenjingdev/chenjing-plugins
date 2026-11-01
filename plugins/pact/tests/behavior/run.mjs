@@ -190,7 +190,7 @@ async function runOnce(scenario, variant, n, bin, resume) {
     transcript.push(events);
     sessionId = events.find((e) => e.session_id)?.session_id ?? sessionId;
     const result = events.find((e) => e.type === 'result');
-    if (/\/login|Invalid API key|Not logged in/i.test(`${result?.result ?? ''}${err}`)) throw Object.assign(new Error('login'), { login: true });
+    if (/\/login|Invalid API key|Not logged in|Failed to authenticate|OAuth session expired/i.test(`${result?.result ?? ''}${err}`)) throw Object.assign(new Error('login'), { login: true });
     if (hitLimit(transcript)) {
       limited = true;
       break;

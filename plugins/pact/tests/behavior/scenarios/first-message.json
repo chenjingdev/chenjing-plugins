@@ -26,6 +26,11 @@
       "kind": "replyMatch",
       "turn": 0,
       "pattern": "기록 없음"
+    },
+    {
+      "kind": "replyNotMatch",
+      "turn": 0,
+      "pattern": "\\(기록 \\d{1,2}/\\d{1,2}"
     }
   ]
 }

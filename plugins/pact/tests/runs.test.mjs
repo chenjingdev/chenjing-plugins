@@ -352,11 +352,13 @@ test('fixture ordering is stable and judgment-code changes only change verdict p
   assert.notEqual(judgmentFingerprint(a.pact), judgmentBefore);
 });
 
-test('recall SKILL.md and scripts are part of the pact variant fingerprint and the guideline hash, not the control one', () => {
+test('recall plugin.json, SKILL.md and scripts are part of the pact variant fingerprint and the guideline hash, not the control one', () => {
   const w = executionWorld();
   const recall = path.join(path.dirname(w.pact), 'recall');
   mkdirSync(path.join(recall, 'skills', 'recall'), { recursive: true });
   mkdirSync(path.join(recall, 'scripts', 'sources'), { recursive: true });
+  mkdirSync(path.join(recall, '.claude-plugin'));
+  writeFileSync(path.join(recall, '.claude-plugin', 'plugin.json'), '{"version":"1"}');
   writeFileSync(path.join(recall, 'skills', 'recall', 'SKILL.md'), 'recall v1');
   writeFileSync(path.join(recall, 'scripts', 'recall.mjs'), 'export const a = 1;');
   writeFileSync(path.join(recall, 'scripts', 'sources', 'honcho.mjs'), 'export const b = 1;');
@@ -364,6 +366,7 @@ test('recall SKILL.md and scripts are part of the pact variant fingerprint and t
   const before = { pact: fp('pact'), control: fp('control'), guideline: guidelineHash(w.pact) };
 
   for (const [file, text] of [
+    [path.join(recall, '.claude-plugin', 'plugin.json'), '{"version":"2"}'],
     [path.join(recall, 'skills', 'recall', 'SKILL.md'), 'recall v2'],
     [path.join(recall, 'scripts', 'recall.mjs'), 'export const a = 2;'],
     [path.join(recall, 'scripts', 'sources', 'honcho.mjs'), 'export const b = 2;'],

@@ -231,3 +231,23 @@ test('the control variant loads no plugin, and a missing recall folder is not pa
   assert.match(pact.stderr, /판 저장/); // 가짜 답이라 검사는 실패하지만 끝까지 돈다
   assert.deepEqual(pluginDirs(callsOf(dir).at(-1).args), [realpathSync(lonely)]);
 });
+
+test('an expired login ends the run with exit 2 and saves neither a record nor a round', () => {
+  for (const text of ['Failed to authenticate: OAuth session expired and could not be refreshed', 'OAuth session expired', 'Failed to authenticate']) {
+    const { dir, out, env } = world();
+    const bin = path.join(dir, 'expired-claude.mjs');
+    writeFileSync(
+      bin,
+      `#!/usr/bin/env node
+console.log(JSON.stringify({ type: 'assistant', session_id: 's', message: { content: [{ type: 'text', text: ${JSON.stringify(text)} }] } }));
+console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, session_id: 's', result: ${JSON.stringify(text)} }));
+`,
+    );
+    chmodSync(bin, 0o755);
+    const res = spawnSync('node', [run, 'confirm-only', '--runs', '1', '--variant', 'control', '--concurrency', '1'], { encoding: 'utf8', env: { ...env, PACT_TEST_CLAUDE: bin } });
+    assert.equal(res.status, 2, `${text}: ${res.stderr}`);
+    assert.match(res.stderr, /\/login 하세요/);
+    assert.deepEqual(listRounds(out), [], `${text}: 판이 저장되지 않는다`);
+    assert.equal(existsSync(path.join(out, 'confirm-only', 'control-1.jsonl')), false, `${text}: 다시 쓸 transcript가 남지 않는다`);
+  }
+});
