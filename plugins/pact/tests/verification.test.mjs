@@ -47,7 +47,7 @@ function seedApproval(project, runId, spec, text, { kind = 'approve', checker = 
 
 function fixture({ specText = SPEC, surface = 'command', repo = true, approved = false, approvedText = specText, checker = true, checkerMessage } = {}) {
   const project = mkdtempSync(path.join(tmpdir(), 'pact-verification-'));
-  const spec = path.join(project, 'docs/pact/2026-10-25-list.md');
+  const spec = path.join(project, '.pact/2026-10-25-list/spec.md');
   mkdirSync(path.dirname(spec), { recursive: true });
   writeFileSync(spec, specText);
   if (approved) seedApproval(project, '2026-10-25-list', spec, approvedText, { checker, checkerMessage });
@@ -56,7 +56,7 @@ function fixture({ specText = SPEC, surface = 'command', repo = true, approved =
     git(project, 'init', '-q');
     git(project, 'config', 'user.name', 'Pact Test');
     git(project, 'config', 'user.email', 'pact@example.test');
-    writeFileSync(path.join(project, '.gitignore'), '.pact/\ndocs/pact/\nignored.txt\n');
+    writeFileSync(path.join(project, '.gitignore'), 'ignored.txt\n');
     git(project, 'add', '.');
     git(project, 'commit', '-qm', 'initial');
   }
@@ -292,7 +292,7 @@ test('snapshot spec identity and all specCheck arrays are mandatory', () => {
   const f = fixture();
   const file = path.join(f.capture.runDir, 'verification.json');
   const snapshot = JSON.parse(readFileSync(file, 'utf8'));
-  snapshot.spec = path.join(f.project, 'docs/pact/another-spec.md');
+  snapshot.spec = path.join(f.project, '.pact/another-spec/spec.md');
   delete snapshot.head;
   writeFileSync(file, JSON.stringify(snapshot));
   delete f.results.specCheck;
@@ -369,7 +369,6 @@ test('a non-zero exit code is evidence when the case expects an error', () => {
 function repoWorld(options) {
   const w = makeWorld(options);
   writeFileSync(path.join(w.project, 'app.js'), 'export const answer = 1;\n');
-  writeFileSync(path.join(w.project, '.gitignore'), '.pact/\ndocs/pact/\n');
   git(w.project, 'init', '-q');
   git(w.project, 'config', 'user.name', 'Pact Test');
   git(w.project, 'config', 'user.email', 'pact@example.test');
@@ -1055,4 +1054,38 @@ test('(c) the completion check line in report.mjs says which of the two top prob
   const top = html.slice(html.indexOf('<section class="top">'), html.indexOf('</section>'));
   assert.match(top, /가장 최근 승인 기록에 \[사용자\] 줄이 없어 승인 뒤 바뀐 줄이 있는지 확인하지 못했습니다/);
   assert.doesNotMatch(top, /아직 다시 승인되지 않았습니다/);
+});
+
+// ---------- 0.7.0: 검수 기준(A<n>)마다 acceptance 시나리오가 있어야 완료한다 ----------
+
+const SPEC_A = `${SPEC}## 검수 기준
+- A1 목록이 1초 안에 열린다 [사용자]
+- A2 자료 100건에서도 다음 쪽이 보인다 [AI 가정]
+`;
+
+test('every 검수 기준 needs an acceptance scenario that names it; a spec scenario naming A1 or an acceptance scenario with no items does not count', () => {
+  const f = fixture({ specText: SPEC_A, repo: true });
+  let checked = checkVerification(f.spec, f.project);
+  assert.equal(checked.ok, false);
+  assert.ok(checked.issues.includes('A1: 검수 기준을 확인한 시나리오(kind: acceptance)가 없습니다'), checked.issues.join('\n'));
+  assert.ok(checked.issues.includes('A2: 검수 기준을 확인한 시나리오(kind: acceptance)가 없습니다'));
+  const scenario = (id, kind, items) => ({ ...f.results.scenarios[0], id, kind, items });
+  f.results.scenarios.push(scenario('V1', 'acceptance', ['A1']), scenario('V2', 'acceptance', ['A2', 'F1']));
+  f.save();
+  checked = checkVerification(f.spec, f.project);
+  assert.equal(checked.ok, true, checked.issues.join('\n'));
+  // 정상 흐름 시나리오가 A1을 들어도 검수 기준을 확인한 것은 아니다
+  f.results.scenarios[f.results.scenarios.length - 2] = scenario('V1', 'spec', ['A1']);
+  f.save();
+  checked = checkVerification(f.spec, f.project);
+  assert.ok(checked.issues.includes('A1: 검수 기준을 확인한 시나리오(kind: acceptance)가 없습니다'), checked.issues.join('\n'));
+  // 항목 없는 acceptance는 비어 있다고 막힌다
+  f.results.scenarios[f.results.scenarios.length - 2] = scenario('V1', 'acceptance', []);
+  f.save();
+  checked = checkVerification(f.spec, f.project);
+  assert.ok(checked.issues.includes('V1: 명세 items가 비어 있습니다'), checked.issues.join('\n'));
+  // 검수 기준이 없는 명세는 전처럼 완료한다
+  assert.equal(checkVerification(fixture({ repo: true }).spec, f.project).ok, false, '다른 프로젝트의 명세는 이 프로젝트와 맞지 않는다');
+  const plain = fixture({ repo: true });
+  assert.equal(checkVerification(plain.spec, plain.project).ok, true);
 });

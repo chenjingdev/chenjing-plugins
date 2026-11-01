@@ -21,7 +21,7 @@
 // 거절은 { ok: false, reason, instead }다(R6: 까닭과 대신 할 일). 확인을 못 하면 거절한다(R7).
 import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { parseSpec, reviewMarks, riskUnits, setStatus, userLinesOf } from './spec.mjs';
+import { SPEC_NAME, parseSpec, reviewMarks, riskUnits, setStatus, specLocation, userLinesOf } from './spec.mjs';
 import { ensureRunDir } from './paths.mjs';
 import { latestSpecCheckerReply, logFile } from './run-log.mjs';
 import { SHORT_MAX, humanMessages, normalizeQuote, quoteMatches, transcriptFiles } from './transcript.mjs';
@@ -54,33 +54,28 @@ export function readApprovals(runDir) {
   return entries;
 }
 
-// 명세 파일에서 판의 위치. scripts/spec.mjs run-dir과 같다: 프로젝트는 명세 폴더의 두 단계 위, run-id는 파일 이름에서 확장자를 뺀 것. 만들지 않는다.
-export function runDirOfSpec(specFile) {
-  const spec = path.resolve(specFile);
-  const project = path.resolve(path.dirname(spec), '..', '..');
-  const runId = path.basename(spec, '.md');
-  return { spec, project, runId, runDir: path.join(project, '.pact', runId) };
-}
+// 명세 파일에서 판의 위치. scripts/spec.mjs run-dir과 같다: 명세가 든 폴더가 실행 폴더이고 그 이름이 run-id, 프로젝트는 .pact/의 위다. 만들지 않는다.
+export const runDirOfSpec = (specFile) => specLocation(specFile);
 
-// 프로젝트에서 그 판의 명세 파일. 날짜 없는 옛 실행 폴더(`.pact/<주제>`)의 명세는 날짜가 붙은 이름(`<날짜>-<주제>.md`)이다. 없으면 null.
+// 프로젝트에서 그 판의 명세 파일(`.pact/<run-id>/spec.md`). 날짜 없는 옛 실행 폴더(`.pact/<주제>`)의 명세는 날짜가 붙은 판(`.pact/<날짜>-<주제>/spec.md`)에 있다. 없으면 null.
 export function findSpecForRun(project, runId) {
-  const dir = path.join(project, 'docs', 'pact');
-  const exact = path.join(dir, `${runId}.md`);
+  const root = path.join(project, '.pact');
+  const exact = path.join(root, runId, SPEC_NAME);
   try {
     if (statSync(exact).isFile()) return exact;
-  } catch { /* 날짜 붙은 이름을 본다 */ }
+  } catch { /* 날짜 붙은 판을 본다 */ }
   let names;
-  try { names = readdirSync(dir); } catch { return null; }
+  try { names = readdirSync(root); } catch { return null; }
   const dated = names
-    .filter((name) => name.endsWith('.md') && /^\d{4}-\d{2}-\d{2}-/.test(name) && name.slice('0000-00-00-'.length, -'.md'.length) === runId)
-    .map((name) => path.join(dir, name));
+    .filter((name) => /^\d{4}-\d{2}-\d{2}-/.test(name) && name.slice('0000-00-00-'.length) === runId)
+    .map((name) => path.join(root, name, SPEC_NAME));
   let best = null;
   let bestTime = -1;
   for (const file of dated) {
     try {
-      const mtime = statSync(file).mtimeMs;
-      if (mtime > bestTime) { best = file; bestTime = mtime; }
-    } catch { /* 사라진 파일 */ }
+      const stat = statSync(file);
+      if (stat.isFile() && stat.mtimeMs > bestTime) { best = file; bestTime = stat.mtimeMs; }
+    } catch { /* 명세 없는 폴더 */ }
   }
   return best;
 }

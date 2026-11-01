@@ -5,7 +5,7 @@
 //   approvals.jsonl, log/ 밑             승인 기록과 하위 에이전트 기록. 훅과 pact 스크립트만 쓴다(누가 직접 써도 막는다).
 //
 // 막지 않는 것: 읽기, `<run-dir>/wt/` 밑(worker의 작업 공간), summary.json·report.html·shots/·plan.md·tasks/ 같은 나머지 파일,
-// 그리고 명세(`<프로젝트>/docs/pact/<run-id>.md`)가 실제로 없는 폴더(시험이나 개발 중 임시 `.pact/`). 옛 판(R5)도 똑같이 건다.
+// 그리고 명세(`<프로젝트>/.pact/<run-id>/spec.md`)가 실제로 없는 폴더(시험이나 개발 중 임시 `.pact/`). 옛 판(R5)도 똑같이 건다.
 //
 // 보는 곳은 Edit·Write·MultiEdit·NotebookEdit의 경로와 Bash의 "쓰기 꼴"이다. Bash는 셸 명령을 낱말로 나눠(shell.mjs)
 //   - 리다이렉트(`>`·`>>`·`&>` …)의 대상,

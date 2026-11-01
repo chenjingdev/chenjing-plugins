@@ -57,9 +57,9 @@ export function makeWorld({ pact = 2, status = 'draft', features, rules, confirm
   const root = tmp();
   const project = path.join(root, 'project');
   const home = path.join(root, 'home');
-  mkdirSync(path.join(project, 'docs', 'pact'), { recursive: true });
+  mkdirSync(path.join(project, '.pact', id), { recursive: true });
   mkdirSync(home, { recursive: true });
-  const spec = path.join(project, 'docs', 'pact', `${id}.md`);
+  const spec = path.join(project, '.pact', id, 'spec.md');
   writeFileSync(spec, specBody ?? specText({ pact, status, features, rules, confirm, log }));
   return {
     root, project, home, spec, id, sessionId,

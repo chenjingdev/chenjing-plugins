@@ -29,7 +29,7 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
  │   4. 구조 고르기   화면이 있으면 스케치 2~3장 → 판정 하나, 최대 2라운드
  │                  ("알아서"로 맡기면 3·4는 AI가 정하고 채팅에 알림)
  │   5. 명세 작성
- │   6. 명세 검수    다른 에이전트가 빌더 입장 + 요구 대조 → 사용자 몫만 한 번에 질문
+ │   6. 명세 검수    다른 에이전트가 수행사 기획자 입장 + 요구 대조 + 구현 섞임·검수 기준 판정 → 사용자 몫만 한 번에 질문
  │   ── 사용자 승인 (유일한 승인) → spec.mjs approve로 기록. 기록이 없으면 build가 시작되지 않는다 ──
  ├─ build    worker 구현 → reviewer 대조(worker 걱정은 훅이 reviewer 지시에 붙인다), 결정은 Ruling으로 기록
  └─ verify   시나리오 → 브라우저 실행 + 스크린샷 → 보고서. 실패하면 build로 되돌림
@@ -38,6 +38,17 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
 ```
 
 중간에 멈춰도 명세의 `status`(draft → approved → building → verifying → done)를 보고 이어 한다.
+
+## 0.7.0에서 바뀐 것
+
+명세가 RFP 틀을 벗어나 구현 설명서가 되고, 산출물이 `docs/`와 `.pact/` 두 곳에 흩어지던 것을 고쳤다.
+
+- 한 폴더: 명세가 `docs/pact/<run-id>.md`에서 `.pact/<run-id>/spec.md`로 옮겨 와 판 하나의 모든 것이 `.pact/<run-id>/` 한 곳에 있다. 옛 자리의 명세는 `spec.mjs migrate <프로젝트>`가 옮긴다.
+- git에 남는 기록: `.pact/`가 git에 들어간다. `.pact/.gitignore`는 `wt/`(worktree)와 `scratch/`(임시 파일)만 빼고(0.7.0 전 판이 임시 파일을 두던 `tasks/`의 보고서 아닌 파일·`leftover/`·`verify-*/`도 뺀다), pact가 쓴 옛 `*`는 저절로 바뀐다. `git-state.mjs`가 `.pact/` 밑을 `pact`로 따로 돌려주고, build와 verify가 이번 판 폴더를 커밋한다.
+- RFP 틀: 명세는 무엇·왜·제약·검수 기준만 적고, 어떻게(언어, 구조, 도구, 셈법)는 build의 `plan.md`에 적는다. `## 검수 기준`(`A<n>`)이 생겼고, `pact: 3`부터 lint가 펼친 40줄과 펼친 `[AI 가정]` 5개를 센다.
+- spec-checker: 수행사 기획자 입장에서 '무엇'의 빈틈만 묻고, 구현이 섞인 줄(`구현 방식`)과 가릴 수 없는 검수 기준(`판정 못 함`)을 짚는다.
+- verifier: 검수 기준마다 `acceptance` 시나리오를 하나 만들고, 완료 검사가 빠진 기준을 막는다.
+- 남기는 파일: 조사 메모·원문 모음 같은 파일을 만들지 않는다. 임시 파일은 `<run-dir>/scratch/`에 둔다.
 
 ## 0.6.0에서 바뀐 것
 
@@ -56,9 +67,9 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
 
 | 위치 | 내용 |
 |---|---|
-| `docs/pact/<날짜>-<주제>.md` | 명세. 한 화면 분량, 항목마다 `[사용자]`/`[AI 가정]`, 결정 기록 |
+| `.pact/<날짜>-<주제>/spec.md` | 명세. 한 화면 분량, 항목마다 `[사용자]`/`[AI 가정]`, 검수 기준, 결정 기록 |
 | `.pact/<날짜>-<주제>/report.html` | 검수 보고서. 맨 위에 결론과 할 일(명세 `## 확인 필요`의 검수 항목이 저절로 올라온다), 그다음 실패·의심·미검증과 명세와 다른 것, 승인 기록(승인인지 위임인지, 인용한 말, 승인 뒤 바뀐 `[사용자]` 줄). 통과·작업 기록·결정 기록은 접힘 |
-| `.pact/<날짜>-<주제>/` | 실행 폴더. 명세 파일명(날짜 포함)으로 구분한다. 체크리스트, 스케치, 작업 보고, 검수 기록(`verification.json`)이 들어가고 스스로 git에서 빠진다 |
+| `.pact/<날짜>-<주제>/` | 실행 폴더. 판 하나의 모든 것이 여기 있고 폴더 이름(날짜 포함)이 run-id다. 체크리스트, 스케치, 작업 보고(`tasks/`), 검수 기록(`verification.json`), 스크린샷(`shots/`)이 들어가고 git에 들어간다. `wt/`(worktree)와 `scratch/`(임시 파일)만 `.pact/.gitignore`가 뺀다 |
 | `.pact/<날짜>-<주제>/log/subagents.jsonl` | 하위 에이전트가 끝날 때마다 훅이 마지막 답을 한 줄씩 덧붙인 기록. reviewer에게 붙일 worker 걱정도 여기서 읽는다 |
 | `.pact/<날짜>-<주제>/approvals.jsonl` | 승인·위임 기록. `spec.mjs approve`·`delegate`가 사용자 말을 대화 기록에서 찾아 맞춰 보고 한 줄씩 덧붙인다. 그때의 `[사용자]` 줄도 담는다 |
 | `.pact/<날짜>-<주제>/results.json` | 검수 결과. verifier만 쓴다. 앞 검수의 결과는 `snapshot`이 `results-round<n>.json`으로 남긴다 |
@@ -89,11 +100,11 @@ EOF
 - 승인 뒤 바뀐 `[사용자]` 줄(F3): `[사용자]`나 `[사용자: …]` 태그가 붙은 기능·규칙 줄은 그 케이스 줄과 함께 승인 기록의 `user_lines`에 들어간다. `[AI 가정]` 항목 밑 케이스 줄에 `[사용자]` 태그가 붙어 있으면(검수 질문에 사용자가 답한 케이스) 머리 줄은 빼고 그 줄만 따로 들어간다(`F3/1`: 그 항목의 `[사용자]` 케이스 줄 가운데 첫째). 그래서 머리 줄과 다른 케이스 줄은 AI가 고쳐도 걸리지 않고, F5가 짝으로 센 줄은 F3가 지킨다. `pact:worker` 부르기(훅), `snapshot`, 완료 검사가 가장 최근 기록의 줄과 지금 명세를 견줘서, 글·태그가 바뀌었거나 줄을 빼거나 더했으면 바뀐 줄을 알리고 거절한다. 바꿔 달라고 한 사용자 말을 인용해 `approve`로 다시 기록하면 이어 간다. 사용자가 파일을 직접 고쳤으면 한 번 묻고 그 답을 인용한다. `[AI 가정]` 줄만 바뀐 것은 막지 않는다.
 - 위험 항목: 기능·규칙 줄(케이스, 접힌 칸 포함)에 `[위험: 지우기|공개|비용]` 표시가 있으면 `delegate`가 거절하고 승인을 받으라고 알린다. 콜론을 빠뜨린 `[위험 지우기]`·`[위험-지우기]`도 표시로 읽는다. 표시가 빠졌는지는 코드가 낱말로 찾지 않는다(낱말로 찾으면 진짜 명세 17개 모두에 걸려 위임이 늘 멈춘다).
 - 기록이 없으면 `set-status approved`·`building`, `pact:worker` 부르기(훅), `verification.mjs snapshot`이 거절한다. 위임 기록이면 만들기를 시작할 때(`set-status building`, `pact:worker`) 지금 명세를 다시 보고, 위험 표시가 생겼거나 인용을 다시 맞춰 볼 수 없으면 거절한다. 질문 도구의 답으로 만든 옛 위임 기록(기록에 `answer_question`이 있다)도 거절한다. 사용자에게 승인을 다시 받아 `approve`로 기록하거나, 직접 쓴 새 말을 인용해 `delegate`로 다시 기록하면 이어 간다.
-- 옛 명세(frontmatter `pact: 1`이고 승인 기록이 없고 status가 approved·building·verifying·done)는 기록 없이 이어 가고 `참고: 옛 판이라 승인 기록 없음`을 알린다. 검수 번호 짝과 `[사용자]` 줄 확인도 건너뛰고, 보고서 맨 위 상자와 승인 기록 칸에 '옛 판이라 승인 기록 없음'이라고 적는다. `pact: 1`이어도 draft면 기록이 있어야 한다. `spec.mjs new`는 `pact: 2`로 쓴다.
+- 옛 명세(frontmatter `pact: 1`이고 승인 기록이 없고 status가 approved·building·verifying·done)는 기록 없이 이어 가고 `참고: 옛 판이라 승인 기록 없음`을 알린다. 검수 번호 짝과 `[사용자]` 줄 확인도 건너뛰고, 보고서 맨 위 상자와 승인 기록 칸에 '옛 판이라 승인 기록 없음'이라고 적는다. `pact: 1`이어도 draft면 기록이 있어야 한다. `spec.mjs new`는 `pact: 3`으로 쓴다.
 
 ## 완료 검사
 
-검수를 시작할 때 명세와 코드의 내용을 `.pact/<run-id>/verification.json`에 기록하고(`snapshot`), 결과 전체와 시나리오마다 그때의 `verification_id`를 적는다. 완료 전에 기능·케이스·처음 쓰는 사람 시나리오가 다 있는지, 단계마다 증거(스크린샷 또는 명령 출력과 종료 코드)가 있는지, 검수한 코드가 그대로 합쳐졌는지 본다. 스크린샷이 없거나 빈 파일이거나 실행 폴더 밖이면 그 시나리오는 미검증이다.
+검수를 시작할 때 명세와 코드의 내용을 `.pact/<run-id>/verification.json`에 기록하고(`snapshot`), 결과 전체와 시나리오마다 그때의 `verification_id`를 적는다. 완료 전에 기능·케이스·검수 기준·처음 쓰는 사람 시나리오가 다 있는지, 단계마다 증거(스크린샷 또는 명령 출력과 종료 코드)가 있는지, 검수한 코드가 그대로 합쳐졌는지 본다. 스크린샷이 없거나 빈 파일이거나 실행 폴더 밖이면 그 시나리오는 미검증이다.
 
 ```
 node <pact>/scripts/verification.mjs snapshot <명세> <worktree> <ui|command>   # 검수 시작 때
@@ -123,10 +134,10 @@ node <pact>/scripts/verification.mjs finish <명세> <프로젝트>             
 
 ## 훅
 
-`hooks/hooks.json`이 PreToolUse와 SubagentStop에 훅 하나(`hooks/guard.mjs`)를 건다. 플러그인 훅은 pact를 쓰지 않는 대화에서도 도는 터라, `.pact/`·`docs/pact/`를 만지지도 않고 pact 에이전트나 스크립트도 아닌 호출은 아무것도 읽지 않고 바로 통과시킨다(메인 세션이 agent id 꼴 `to`로 보내는 SendMessage만 예외다. 받는 쪽이 reviewer인지 `log/`를 읽어 본다).
+`hooks/hooks.json`이 PreToolUse와 SubagentStop에 훅 하나(`hooks/guard.mjs`)를 건다. 플러그인 훅은 pact를 쓰지 않는 대화에서도 도는 터라, `.pact/`를 만지지도 않고 pact 에이전트나 스크립트도 아닌 호출은 아무것도 읽지 않고 바로 통과시킨다(메인 세션이 agent id 꼴 `to`로 보내는 SendMessage만 예외다. 받는 쪽이 reviewer인지 `log/`를 읽어 본다).
 
 - PreToolUse: 메인 세션이 `pact:worker`를 부를 때 작업 지시의 판(`맥락` 칸의 run-dir)에 승인·위임 기록이 없거나 승인 뒤 `[사용자]` 줄이 바뀌었으면 막는다(옛 판은 통과). 지시문에서 판을 못 찾으면 "맥락 칸에 run-dir과 작업 번호를 넣는다"로 막는다. 위임 기록이면 지금 명세의 위험 항목과 인용을 다시 본다. 하위 에이전트가 Bash로 `spec.mjs approve`·`delegate`·`set-status`를 부르면 막고, 메인 세션도 approve·delegate 앞에 환경 변수(`HOME=`, `CLAUDE_CODE_SESSION_ID=`, `CLAUDE_CONFIG_DIR=` 등)를 덮어쓰면 막는다. 막을 때는 까닭과 대신 할 일을 한 줄로 알린다.
-- PreToolUse(결과 잠금): 실행 폴더 바로 밑의 파일은 정해진 쪽만 쓴다. `results.json`·`results-round*.json`은 `pact:verifier`만, `verification.json`은 `verification.mjs snapshot`만, `approvals.jsonl`과 `log/` 밑은 훅과 pact 스크립트만 쓴다. 메인 세션과 다른 하위 에이전트가 Edit·Write·MultiEdit·NotebookEdit로 쓰거나 Bash로 쓰면(`>`·`>>`·`tee`·`sed -i`·`perl -i`, `cp`·`mv`·`rm`·`truncate`·`touch`의 대상, `python -c`·`node -e`·heredoc 한 줄 스크립트의 `open(…, 'w')`·`writeFileSync` 같은 쓰기) 막고, 까닭과 대신 할 일을 한 줄로 알린다. 읽기(`cat`·`jq`·`grep`)와 pact 스크립트 호출은 막지 않는다. `<run-dir>/wt/` 밑, `summary.json`·`report.html`·`shots/`·`plan.md`·`tasks/`, 그리고 명세(`docs/pact/<run-id>.md`)가 없는 폴더는 대상이 아니다. 옛 판도 똑같이 건다. 이름은 대소문자를 가리지 않고 본다(이 컴퓨터의 파일 시스템이 가리지 않는다). 훅이 못 보는 길도 있다: 변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구(메인 세션도 CUA의 `js`로 `fs.writeFileSync`를 불러 실행 폴더에 쓸 수 있고, MCP 도구는 `hooks.json`의 matcher에 없다). 그 길로 `results.json`을 바꾸면 완료 검사의 지문 비교가 막는다. `approvals.jsonl`·`verification.json`·`log/`는 지문이 지키지 않는다(아래 한계).
+- PreToolUse(결과 잠금): 실행 폴더 바로 밑의 파일은 정해진 쪽만 쓴다. `results.json`·`results-round*.json`은 `pact:verifier`만, `verification.json`은 `verification.mjs snapshot`만, `approvals.jsonl`과 `log/` 밑은 훅과 pact 스크립트만 쓴다. 메인 세션과 다른 하위 에이전트가 Edit·Write·MultiEdit·NotebookEdit로 쓰거나 Bash로 쓰면(`>`·`>>`·`tee`·`sed -i`·`perl -i`, `cp`·`mv`·`rm`·`truncate`·`touch`의 대상, `python -c`·`node -e`·heredoc 한 줄 스크립트의 `open(…, 'w')`·`writeFileSync` 같은 쓰기) 막고, 까닭과 대신 할 일을 한 줄로 알린다. 읽기(`cat`·`jq`·`grep`)와 pact 스크립트 호출은 막지 않는다. `<run-dir>/wt/` 밑, `summary.json`·`report.html`·`shots/`·`plan.md`·`tasks/`·`scratch/`, 그리고 명세(`.pact/<run-id>/spec.md`)가 없는 폴더는 대상이 아니다. 옛 판도 똑같이 건다. 이름은 대소문자를 가리지 않고 본다(이 컴퓨터의 파일 시스템이 가리지 않는다). 훅이 못 보는 길도 있다: 변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구(메인 세션도 CUA의 `js`로 `fs.writeFileSync`를 불러 실행 폴더에 쓸 수 있고, MCP 도구는 `hooks.json`의 matcher에 없다). 그 길로 `results.json`을 바꾸면 완료 검사의 지문 비교가 막는다. `approvals.jsonl`·`verification.json`·`log/`는 지문이 지키지 않는다(아래 한계).
 - 한계(결과 잠금): 훅은 명령 글에서 쓰기를 찾는 것이라, 셸 한 줄 안의 쓰기 가운데 읽지 못하는 꼴이 있다: `perl -e`·`ruby -e`·`awk`, `sed`의 `w` 명령, `curl -o`, `tar -C`, python의 `os.open`, node의 `fs.openSync`·`fs.promises.writeFile`. 이 꼴들은 막지 않는다. 위 결과 잠금 항목에 적은 못 보는 길(변수로 만든 경로, 파일에 적어 둔 스크립트, MCP 도구)도 마찬가지다. 이 길들로 `results.json`을 바꾸면 완료 검사의 지문 비교가 잡는다. 지문은 verifier가 끝날 때 훅이 남긴 `results.json`의 sha256이고, 지금 파일과 다르면 완료 검사가 막는다. 지문이 지키는 것은 `results.json` 하나다. 같은 꼴로 `approvals.jsonl`(승인 기록)·`verification.json`(검수한 명세와 코드의 지문)·`log/`(verifier 지문 기록 포함)에 쓰면 잡는 그물이 없다. 꾸민 승인 기록으로 만들기가 시작되고(승인 기록은 시작할 때 인용을 다시 맞춰 보지 않는다. 다시 맞춰 보는 것은 위임 기록뿐이다), `log/`의 verifier 줄을 꾸미면(완료 검사는 `log/`의 가장 최근 verifier 줄을 믿는다) `results.json` 비교도 지나간다. `verification.json`의 지문을 지금 것으로 다시 쓰면 검수 뒤에 바뀐 코드가 다시 검수받지 않고 완료 검사를 지나간다. 이 장치는 실수와 흔한 꼼수를 막는 것이고 일부러 속이는 쓰기까지 막지는 않는다. 승인 기록의 인용은 보고서에 보이니 사용자가 거기서 본다.
 - PreToolUse(worker 걱정): 메인 세션이 `pact:reviewer`를 부르면 지시문의 판(보고서 경로의 run-dir)과 작업 번호(`작업 번호 n`, 없으면 보고서 경로가 하나일 때 그 번호)로 `log/`에서 그 작업의 가장 최근 worker 답을 찾아 `## 걱정·위험` 칸을 지시 끝에 `## worker 걱정`으로 붙이고 통과시킨다(입력의 다른 칸은 그대로 둔다). 판은 찾았는데 작업 번호를 못 읽으면 걱정이 말없이 빠지지 않게 호출을 막고, 까닭과 대신 할 일(지시 맨 앞에 `작업 번호 3`처럼 작업 번호를 숫자로 적어 다시 부른다)을 한 줄로 알린다. 지시문에서 판을 못 찾았을 때, 그 번호의 worker 기록이 없을 때, 걱정이 '없음'이거나 비었을 때, 이미 `## worker 걱정`이 있을 때는 그대로 통과한다. 메인 세션이 같은 reviewer에 SendMessage로 보낼 때도, `to`가 `log/`에 reviewer로 남은 agent id이면 그 작업의 가장 최근 worker 답(고친 뒤의 답)의 걱정을 message 끝에 붙인다. 이쪽은 막지 않고 그대로 통과한다: `to`가 agent id가 아니거나 `log/`에 없을 때, 그 reviewer의 작업 번호를 모를 때, 글이 그 reviewer의 작업과 다른 작업 번호를 말할 때, 이미 `## worker 걱정`이 있을 때, worker 기록이 없거나 걱정이 없을 때. 걱정은 worker 보고서가 아니라 `log/`의 worker 답에서 가져온다. 에이전트에 이름을 붙여 이름으로 보내면 받는 쪽을 알 수 없어 붙이지 않는다. SendMessage는 글에 pact 흔적이 없어도 `to`가 id 꼴이면 cwd 프로젝트(또는 글이 가리키는 프로젝트)의 `.pact/` 밑 `log/`를 읽어 받는 쪽을 찾는다. pact 프로젝트가 아니면 읽을 것이 없고, 아무것도 쓰지 않는다.
 - 한계: tiers 플러그인의 delegate가 켜져 있으면 같은 `pact:reviewer` 호출에 tiers(model 고정)와 pact(걱정 붙이기)가 둘 다 입력을 바꾸고, 어느 쪽이 남는지는 정해져 있지 않다(불확실). tiers delegate는 기본으로 꺼져 있다.

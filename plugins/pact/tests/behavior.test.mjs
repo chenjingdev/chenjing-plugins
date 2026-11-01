@@ -109,12 +109,12 @@ test('noFileCreated and fileChanged compare the work dir with the fixture', () =
   const work = tmp();
   writeFileSync(path.join(work, 'index.html'), '<button>a</button>');
   assert.equal(judge({ kind: 'fileChanged', path: 'index.html' }, [], work, fixture), false);
-  assert.equal(judge({ kind: 'noFileCreated', glob: 'docs/pact/**' }, [], work, fixture), true);
+  assert.equal(judge({ kind: 'noFileCreated', glob: '.pact/**' }, [], work, fixture), true);
   writeFileSync(path.join(work, 'index.html'), '<button style="color:blue">a</button>');
-  mkdirSync(path.join(work, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(work, 'docs', 'pact', 'x.md'), 'x');
+  mkdirSync(path.join(work, '.pact', 'x'), { recursive: true });
+  writeFileSync(path.join(work, '.pact', 'x', 'spec.md'), 'x');
   assert.equal(judge({ kind: 'fileChanged', path: 'index.html' }, [], work, fixture), true);
-  assert.equal(judge({ kind: 'noFileCreated', glob: 'docs/pact/**' }, [], work, fixture), false);
+  assert.equal(judge({ kind: 'noFileCreated', glob: '.pact/**' }, [], work, fixture), false);
 });
 
 const SPEC = (extra = '') => `---
@@ -139,8 +139,8 @@ ${extra}## 구조 판정
 test('spec checks: a clean short spec passes, lint errors, length and open assumptions fail', () => {
   const work = tmp();
   assert.equal(judge({ kind: 'specLint' }, [], work, tmp()), false, 'no spec at all fails');
-  mkdirSync(path.join(work, 'docs', 'pact'), { recursive: true });
-  const file = path.join(work, 'docs', 'pact', '2026-10-10-회의.md');
+  mkdirSync(path.join(work, '.pact', '2026-10-10-회의'), { recursive: true });
+  const file = path.join(work, '.pact', '2026-10-10-회의', 'spec.md');
   writeFileSync(file, SPEC());
   assert.equal(judge({ kind: 'specLint' }, [], work, tmp()), true);
   assert.equal(judge({ kind: 'specMaxLines', max: 40 }, [], work, tmp()), true);
@@ -177,11 +177,11 @@ test('agentNotInvoked fails when a build agent was dispatched', () => {
 
 test('spec checks also find a spec written under a new app folder, but not the worktree copy', () => {
   const work = tmp();
-  mkdirSync(path.join(work, 'app', 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(work, 'app', 'docs', 'pact', '2026-10-10-회의.md'), SPEC());
+  mkdirSync(path.join(work, 'app', '.pact', '2026-10-10-회의'), { recursive: true });
+  writeFileSync(path.join(work, 'app', '.pact', '2026-10-10-회의', 'spec.md'), SPEC());
   assert.equal(judge({ kind: 'specLint' }, [], work, tmp()), true);
-  mkdirSync(path.join(work, '.pact', 'x', 'wt', 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(work, '.pact', 'x', 'wt', 'docs', 'pact', 'bad.md'), 'not a spec');
+  mkdirSync(path.join(work, '.pact', 'x', 'wt', '.pact', 'x'), { recursive: true });
+  writeFileSync(path.join(work, '.pact', 'x', 'wt', '.pact', 'x', 'spec.md'), 'not a spec');
   assert.equal(judge({ kind: 'specLint' }, [], work, tmp()), true, 'worktree copy is ignored');
 });
 
@@ -268,19 +268,19 @@ test('explain: file checks name the file and leave match empty', () => {
   writeFileSync(path.join(work, 'index.html'), 'a');
   const same = explain({ kind: 'fileChanged', path: 'index.html' }, [], work, fixture);
   assert.deepEqual(same, { pass: false, reason: 'index.html가 바뀌지 않음', match: [] });
-  mkdirSync(path.join(work, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(work, 'docs', 'pact', 'x.md'), 'x');
-  writeFileSync(path.join(work, 'docs', 'pact', 'y.md'), 'y');
-  const made = explain({ kind: 'noFileCreated', glob: 'docs/pact/**' }, [], work, fixture);
-  assert.deepEqual(made, { pass: false, reason: '새로 생긴 파일: docs/pact/x.md, docs/pact/y.md', match: [] });
+  mkdirSync(path.join(work, '.pact', 'x'), { recursive: true });
+  writeFileSync(path.join(work, '.pact', 'x', 'spec.md'), 'x');
+  writeFileSync(path.join(work, '.pact', 'y.md'), 'y');
+  const made = explain({ kind: 'noFileCreated', glob: '.pact/**' }, [], work, fixture);
+  assert.deepEqual(made, { pass: false, reason: '새로 생긴 파일: .pact/x/spec.md, .pact/y.md', match: [] });
 });
 
 test('explain: spec checks give numbers or the first lint error, with no match', () => {
   const work = tmp();
   const none = explain({ kind: 'specMaxLines', max: 40 }, [], work, tmp());
   assert.deepEqual(none, { pass: false, reason: '명세 파일 없음', match: [] });
-  mkdirSync(path.join(work, 'docs', 'pact'), { recursive: true });
-  const file = path.join(work, 'docs', 'pact', '2026-10-10-회의.md');
+  mkdirSync(path.join(work, '.pact', '2026-10-10-회의'), { recursive: true });
+  const file = path.join(work, '.pact', '2026-10-10-회의', 'spec.md');
   writeFileSync(file, SPEC('x\n'.repeat(40)));
   const lines = SPEC('x\n'.repeat(40)).trimEnd().split('\n').length;
   const long = explain({ kind: 'specMaxLines', max: 40 }, [], work, tmp());

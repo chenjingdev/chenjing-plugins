@@ -255,7 +255,7 @@ test('results.json is the verifier\'s alone, and verify.md, verifier.md and the 
   assert.match(readme, /칸마다 `summary\.json`에 있으면 그것을, 없으면 `results\.json`의 같은 칸을 읽는다/);
   assert.match(readme, /PreToolUse\(결과 잠금\): 실행 폴더 바로 밑의 파일은 정해진 쪽만 쓴다/);
   assert.match(readme, /`results\.json`·`results-round\*\.json`은 `pact:verifier`만, `verification\.json`은 `verification\.mjs snapshot`만, `approvals\.jsonl`과 `log\/` 밑은 훅과 pact 스크립트만 쓴다/);
-  assert.match(readme, /`<run-dir>\/wt\/` 밑.*명세\(`docs\/pact\/<run-id>\.md`\)가 없는 폴더는 대상이 아니다\. 옛 판도 똑같이 건다/);
+  assert.match(readme, /`<run-dir>\/wt\/` 밑.*명세\(`\.pact\/<run-id>\/spec\.md`\)가 없는 폴더는 대상이 아니다\. 옛 판도 똑같이 건다/);
   assert.match(readme, /완료 검사는 `results\.json`의 지금 sha256을 가장 최근 verifier가 끝날 때 훅이 남긴 지문과 비교한다/);
   assert.match(readme, /코드를 고쳐야 하면 build로 되돌려 고친 뒤 verifier로 다시 검수하라고, 코드는 맞고 `results\.json`만 바뀐 것이면 verifier만 다시 돌리라고 알린다/);
   // 훅이 못 보는 길: 변수로 만든 경로, 파일에 적은 스크립트, MCP 도구(hooks.json은 그대로)
@@ -362,8 +362,8 @@ test('build starts only from an approval or delegation record, and tells the wor
   assert.match(skill, /하위 에이전트는 이 명령과 `set-status`를 부르지 못한다/);
 });
 
-test('a new spec starts with pact: 2, and the README says how approval, delegation and the hook work', () => {
-  assert.match(read('skills/pact/spec-template.md'), /^---\npact: 2\n/);
+test('a new spec starts with pact: 3, and the README says how approval, delegation and the hook work', () => {
+  assert.match(read('skills/pact/spec-template.md'), /^---\npact: 3\n/);
   const readme = read('README.md');
   assert.ok(readme.includes('approvals.jsonl'));
   assert.match(readme, /spec\.mjs approve <명세> - <<'EOF'/);
@@ -375,7 +375,7 @@ test('a new spec starts with pact: 2, and the README says how approval, delegati
   assert.match(readme, /이미 검수했는데도 기록이 없으면 훅이 돌지 않는 것이니/);
   assert.match(readme, /정리해서 10자 이하인 짧은 말\("승인"\)은 메시지 전체와 같아야 하고/);
   assert.match(readme, /`참고: 옛 판이라 승인 기록 없음`/);
-  assert.match(readme, /`spec\.mjs new`는 `pact: 2`로 쓴다/);
+  assert.match(readme, /`spec\.mjs new`는 `pact: 3`으로 쓴다/);
   assert.match(readme, /메인 세션이 `pact:worker`를 부를 때/);
   assert.match(readme, /맥락 칸에 run-dir과 작업 번호를 넣는다/);
   assert.doesNotMatch(readme, /PreToolUse: 지금은 아무것도 막지 않는다/);
@@ -493,7 +493,7 @@ test('first end-to-end run: friction fixes stay in the guidance', () => {
   assert.match(checker, /\(AI 제안에 동의\)/);
   assert.match(checker, /확인 안 함/);
   const build = read('skills/pact/build.md');
-  assert.match(build, /`untracked`\(미추적 파일\)에 있든 그 파일만 커밋한다/);
+  assert.match(build, /`\.pact\/` 밑의 파일\(명세, 승인 기록, 체크리스트, 스케치, 기록\)은 `changed`·`untracked`가 아니라 `pact`로 따로 온다/);
   assert.match(build, /세 번째 검토는 없다/);
   assert.match(build, /무엇을 맡겼는지 한 줄/);
   assert.match(read('skills/pact/SKILL.md'), /무엇을 하는지 쉬운 말로 한 줄/);
@@ -638,10 +638,10 @@ test('the refusals the scripts and the hook print tell only the standard-input w
   assert.match(approval, /const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';/);
 });
 
-test('plugin.json is at 0.6.0', () => {
+test('plugin.json is at 0.7.0', () => {
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
   assert.equal(manifest.name, 'pact');
-  assert.equal(manifest.version, '0.6.0');
+  assert.equal(manifest.version, '0.7.0');
 });
 
 test('the README lists what 0.6.0 changed in one short section, and says how the hook hands the worker worries to the reviewer, in the brief and in a message', () => {
@@ -735,4 +735,64 @@ test('README and probe.md say that a delegation never takes an AskUserQuestion a
   // R5: 옛 판 표시는 맨 위 상자에도 있고 스크립트가 붙인다
   assert.match(readme, /보고서 맨 위 상자와 승인 기록 칸에 '옛 판이라 승인 기록 없음'이라고 적는다/);
   assert.match(readme, /이 줄은 맨 위 상자에도 늘 있다\. 메인 세션이 `summary\.json`에 쓴 headline과 상관없이 스크립트가 붙이고, 새 판에는 없다\./);
+});
+
+// ---------- 0.7.0: 한 폴더, git에 남는 기록, RFP 틀(검수 기준, 구현은 build로), 메모 파일 금지 ----------
+
+test('0.7.0: the spec lives in .pact/<run-id>/spec.md, the folder goes into git, and nothing is written to docs/', () => {
+  const skill = read('skills/pact/SKILL.md');
+  assert.match(skill, /## 남기는 파일/);
+  assert.match(skill, /판 하나의 모든 것은 `<프로젝트>\/\.pact\/<run-id>\/` 한 폴더에 둔다\. 명세는 그 안의 `spec\.md`다\. 이 폴더는 git에 들어간다\. `wt\/`\(worktree\)와 `scratch\/`\(임시 파일\)만 `\.pact\/\.gitignore`가 뺀다/);
+  assert.match(skill, /조사 메모, 사용자 원문 모음, 진행 메모 같은 파일을 실행 폴더에도 프로젝트에도 따로 만들지 않는다/);
+  assert.match(skill, /대상 프로젝트의 `\.pact\/\*\/spec\.md`에서 status가 `done`이 아닌 명세를 찾는다/);
+  assert.match(skill, /`docs\/pact\/\*\.md`가 있으면 0\.7\.0 전의 자리다\. `node <pact>\/scripts\/spec\.mjs migrate <프로젝트>`로/);
+  const probe = read('skills/pact/probe.md');
+  assert.match(probe, /출력된 경로\(`<프로젝트>\/\.pact\/<run-id>\/spec\.md`\)가 이번 명세이고, 명세가 든 그 폴더가 실행 폴더\(`<run-dir>`\)다/);
+  assert.match(probe, /조사 메모, 사용자 원문 모음 같은 파일은 만들지 않는다/);
+  const build = read('skills/pact/build.md');
+  assert.match(build, /git add \.pact\/\.gitignore \.pact\/<run-id> && git commit -m "docs\(pact\): <주제> 명세"/);
+  assert.match(build, /worktree 안에도 커밋된 `\.pact\/` 사본이 들어 있는데 거기에는 아무도 쓰지 않는다/);
+  const verify = read('skills/pact/verify.md');
+  assert.match(verify, /git add \.pact\/<run-id> && git commit -m "docs\(pact\): <주제> 진행 기록"/);
+  assert.match(verify, /':\(exclude\)\.pact\/\*\*'`/);
+  assert.doesNotMatch(verify, /docs\/pact/);
+  assert.match(verify, /`<run-dir>\/scratch\/leftover\/`/);
+  assert.match(read('agents/worker.md'), /임시 파일\(시험용 스크립트, 데이터베이스\)은 `<run-dir>\/scratch\/`에 둔다/);
+  assert.match(read('agents/verifier.md'), /그 밖의 임시 파일\(시험용 스크립트, 받아 둔 응답, 로그\)은 `scratch\/`에 둔다/);
+  for (const file of PROSE) assert.doesNotMatch(readFileSync(file, 'utf8').replace(/`docs\/pact\/\*\.md`가 있으면 0\.7\.0 전의 자리다[^\n]*/, ''), /docs\/pact/, `${rel(file)}: 옛 자리를 말하지 않는다`);
+  const readme = read('README.md');
+  assert.match(readme, /\| `\.pact\/<날짜>-<주제>\/spec\.md` \| 명세\./);
+  assert.match(readme, /`wt\/`\(worktree\)와 `scratch\/`\(임시 파일\)만 `\.pact\/\.gitignore`가 뺀다 \|/);
+  assert.doesNotMatch(readme, /스스로 git에서 빠진다/);
+});
+
+test('0.7.0: the spec is an RFP — what, why, limits and acceptance criteria; how goes to plan.md; the checker and the verifier follow', () => {
+  const probe = read('skills/pact/probe.md');
+  assert.match(probe, /명세는 RFP다\. 발주처가 정하는 것만 적는다: 무엇을\(기능과 케이스\), 왜\(목적\), 어떤 제약 안에서\(범위, 하지 않는 것, 공통 규칙\), 무엇을 보면 받아들일지\(검수 기준\)\. 어떻게 만들지는 적지 않는다\./);
+  assert.match(probe, /언어와 프레임워크, 프로세스·파일·명령의 구조, 도구 설정과 격리 방법, 측정에 쓸 도구와 셈법, 알고리즘이 그것이다\. 그런 것은 build가 `plan\.md`에 적고/);
+  assert.match(probe, /`## 검수 기준`에는 `- A<n> <무엇을 보면 받아들이나> \[태그\]`로 적는다\. 하나마다 사용자가 결과물을 보고 통과인지 아닌지 가릴 수 있어야 한다/);
+  assert.match(probe, /여기서 고르는 구조는 사용자가 보는 화면의 구조다\. 언어, 프로세스, 파일 형식, 명령 체계 같은 만드는 쪽 구조는 build가 `plan\.md`에 정한다/);
+  assert.match(probe, /구현이 섞였다는 알림\(`<번호> 구현 방식`\)이 오면 그 부분을 명세에서 빼고/);
+  assert.match(probe, /검수를 반영한다고 명세에 "어떻게"를 더하지 않는다/);
+  assert.match(read('skills/pact/SKILL.md'), /명세는 RFP다\. 발주처가 정하는 것만 담는다: 무엇을, 왜, 어떤 제약 안에서 만들고, 무엇을 보면 받아들일지\(검수 기준\)\. 어떻게 만들지\(언어, 구조, 도구, 셈법\)는 명세가 아니라 build의 계획\(`plan\.md`\)에 적는다/);
+  assert.match(read('skills/pact/spec-template.md'), /## 검수 기준\n- A1 <무엇을 보면 받아들이나> \[사용자\]/);
+  const checker = read('agents/spec-checker.md');
+  assert.match(checker, /당신은 이 명세를 받아 만들 수행사의 기획자다/);
+  assert.match(checker, /"어떻게"의 빈틈\(어떤 저장소를 쓰나, 어떤 구조로 나누나, 무슨 도구로 재나, 명령 모양은 어떤가\)은 수행사가 build에서 정할 것이라 묻지 않는다/);
+  assert.match(checker, /\*\*\(c\) 구현이 섞인 곳\.\*\*/);
+  assert.match(checker, /\*\*\(d\) 검수 기준을 가릴 수 있나\.\*\*/);
+  assert.match(checker, /- <F·R·A 번호> 구현 방식 — <무엇이 구현인지> \(명세에서 빼고 build의 plan\.md에 둔다/);
+  assert.match(checker, /- A<n> 판정 못 함 — <왜> \(고쳐 쓸 문구: …\)/);
+  const build = read('skills/pact/build.md');
+  assert.match(build, /어떻게 만들지는 여기에 적는다\. 언어와 프레임워크, 프로세스·파일·명령의 구조, 도구 설정, 측정 방법처럼 명세\(RFP\)가 적지 않은 것이다/);
+  const verifier = read('agents/verifier.md');
+  assert.match(verifier, /- 검수 기준\(`A<n>`\)마다 1개: `"kind": "acceptance"`, `items`에 그 번호/);
+  assert.match(read('skills/pact/verify.md'), /검수 기준\(`A<n>`\)마다 하나\(`acceptance`\)/);
+  const readme = read('README.md');
+  const section = /^## 0\.7\.0에서 바뀐 것\n([\s\S]*?)(?=\n## )/m.exec(readme)?.[1] ?? '';
+  const bullets = section.split('\n').filter((line) => line.startsWith('- '));
+  const names = ['한 폴더', 'git에 남는 기록', 'RFP 틀', 'spec-checker', 'verifier', '남기는 파일'];
+  assert.equal(bullets.length, names.length, section);
+  names.forEach((name, i) => assert.ok(bullets[i].startsWith(`- ${name}: `), `${i + 1}번째는 ${name}: ${bullets[i]}`));
+  assert.ok(readme.indexOf('## 0.7.0에서 바뀐 것') < readme.indexOf('## 0.6.0에서 바뀐 것'));
 });

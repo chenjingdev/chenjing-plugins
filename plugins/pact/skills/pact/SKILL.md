@@ -7,6 +7,8 @@ description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라�
 
 사용자는 발주처이고 당신은 수행사다. RFP를 받은 수행사처럼 무엇을 만들지 계약하고(probe), 이행하고(build), 검수해서 넘긴다(verify). 어떻게 만들지는 수행사가 정한다. 무엇을 만들지는 발주처와 함께 정한다.
 
+명세는 RFP다. 발주처가 정하는 것만 담는다: 무엇을, 왜, 어떤 제약 안에서 만들고, 무엇을 보면 받아들일지(검수 기준). 어떻게 만들지(언어, 구조, 도구, 셈법)는 명세가 아니라 build의 계획(`plan.md`)에 적는다(`probe.md` 5).
+
 ## 도구 위치
 
 이 스킬의 Base directory에서 두 단계 위가 pact 폴더다. 아래에서 `<pact>`라고 쓴다. 스크립트는 `node <pact>/scripts/<이름>.mjs`로 부른다. 하위 에이전트는 `pact:spec-checker`, `pact:worker`, `pact:reviewer`, `pact:verifier`다.
@@ -15,11 +17,19 @@ description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라�
 
 페이지나 보고서를 사용자에게 열어 줄 때 macOS는 `open`, Linux는 `xdg-open`, Windows는 `start ""`를 쓴다. 아래에서 `open`이라고 쓴 곳은 모두 이것이다.
 
+## 남기는 파일
+
+판 하나의 모든 것은 `<프로젝트>/.pact/<run-id>/` 한 폴더에 둔다. 명세는 그 안의 `spec.md`다. 이 폴더는 git에 들어간다. `wt/`(worktree)와 `scratch/`(임시 파일)만 `.pact/.gitignore`가 뺀다. 0.7.0 전 판이 임시 파일을 두던 곳(`tasks/`의 보고서가 아닌 파일, `leftover/`, `verify-*/`)도 같이 뺀다. 프로젝트의 다른 곳(`docs/` 등)에 pact 파일을 만들지 않는다.
+
+pact가 만드는 파일은 명세와 스크립트·훅이 쓰는 기록뿐이다(README "남는 것" 표). 조사 메모, 사용자 원문 모음, 진행 메모 같은 파일을 실행 폴더에도 프로젝트에도 따로 만들지 않는다. 기록에서 읽은 것은 명세 항목과 그 태그(`[사용자]`, 출처 날짜)에 남고, 사용자 말은 승인 기록이 담는다. 잠깐 쓸 파일(시험용 스크립트, 받아 둔 자료)이 필요하면 `<run-dir>/scratch/`에 두고 끝나면 지운다.
+
 ## 시작할 때
 
 ### 1. 진행 중인 명세가 있나
 
-대상 프로젝트의 `docs/pact/*.md`에서 status가 `done`이 아닌 명세를 찾는다. 상태는 `node <pact>/scripts/spec.mjs status <명세>`로 본다. `draft`인데 `spec.mjs lint`가 기능 항목마다 `아직 틀 그대로입니다`를 내면 틀 그대로 버려진 초안이다. 진행 중으로 보지 않고 이어 할지 묻지도 않는다. 같은 주제를 다시 시작하면 그 파일을 채워 쓴다.
+대상 프로젝트의 `.pact/*/spec.md`에서 status가 `done`이 아닌 명세를 찾는다. 상태는 `node <pact>/scripts/spec.mjs status <명세>`로 본다. `draft`인데 `spec.mjs lint`가 기능 항목마다 `아직 틀 그대로입니다`를 내면 틀 그대로 버려진 초안이다. 진행 중으로 보지 않고 이어 할지 묻지도 않는다. 같은 주제를 다시 시작하면 그 파일을 채워 쓴다.
+
+`docs/pact/*.md`가 있으면 0.7.0 전의 자리다. `node <pact>/scripts/spec.mjs migrate <프로젝트>`로 `.pact/<run-id>/spec.md`로 옮기고(옛 `.pact/.gitignore`도 같이 맞춘다) 옮겼다고 한 줄 알린 뒤 위대로 찾는다. git 저장소면 옮긴 것은 사용자가 커밋하게 둔다.
 
 지금 요청이 그 명세를 이어 가는 것이면 status대로 간다.
 

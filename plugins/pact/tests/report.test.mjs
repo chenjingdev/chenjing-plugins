@@ -24,7 +24,7 @@ const scenario = (id, result, steps, title = `${id} 제목`) => ({
 });
 
 const RESULTS = {
-  spec: 'docs/pact/2026-10-10-x.md',
+  spec: '.pact/x/spec.md',
   scenarios: [
     scenario('S1', 'pass', [{ action: '목록 열기', shot: 'shots/S1-1.png', output: null }]),
     scenario('S2', 'fail', [{ action: '빈 수업', shot: 'shots/S2-1.png', output: null }]),
@@ -95,10 +95,9 @@ test('spec differences and changes share one list; rulings are folded at the bot
 
 test('the title names the topic from the spec next to the run dir', () => {
   const project = tmp();
-  mkdirSync(path.join(project, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(project, 'docs', 'pact', '2026-10-10-x.md'), '---\npact: 1\ntopic: 출결 관리\nstatus: verifying\n---\n# 출결 관리\n');
   const runDir = path.join(project, '.pact', 'x');
   mkdirSync(runDir, { recursive: true });
+  writeFileSync(path.join(runDir, 'spec.md'), '---\npact: 1\ntopic: 출결 관리\nstatus: verifying\n---\n# 출결 관리\n');
   assert.match(renderReport(RESULTS, { runDir }).html, /<title>출결 관리 검수 보고서<\/title>/);
   assert.match(renderReport(RESULTS, { runDir: tmp() }).html, /<title>검수 보고서<\/title>/);
 });
@@ -212,16 +211,15 @@ test('results from an earlier round of the same verification still count and are
 
 // ---------- 보고 칸은 summary.json에서, rulings는 명세 결정 기록에서 온다(명세 R13) ----------
 
-const SPEC_PATH = 'docs/pact/2026-10-10-x.md';
+const SPEC_PATH = '.pact/x/spec.md';
 const bullets = (lines) => lines.map((line) => `- ${line}\n`).join('');
 const specWith = (log) => `---\npact: 2\ntopic: 출결 관리\nstatus: verifying\n---\n# 출결 관리\n## 기능\n- F1 목록 [사용자]\n## 공통 규칙\n## 결정 기록\n${log}`;
 // 프로젝트 하나와 그 안의 실행 폴더(명세가 있는). 결정 기록은 줄 목록(rulings)이나 글 그대로(log)로 준다.
 function project({ rulings = [], log = bullets(rulings) } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'pact-report-project-'));
-  mkdirSync(path.join(root, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(root, SPEC_PATH), specWith(log));
   const run = path.join(root, '.pact', 'x');
   mkdirSync(path.join(run, 'shots'), { recursive: true });
+  writeFileSync(path.join(root, SPEC_PATH), specWith(log));
   writeFileSync(path.join(run, 'shots', 'S1-1.png'), png);
   return { root, run };
 }
@@ -310,7 +308,7 @@ test('(g) rulings are the Ruling lines of the spec\'s decision log; a spec with 
   const none = project();
   assert.match(renderReport(results, { runDir: none.run }).html, /<summary>결정 기록 1개<\/summary>[\s\S]*results\.json의 옛 것/);
   // 명세 경로가 틀렸거나 results.json에 spec이 없다
-  const gone = renderReport({ ...results, spec: 'docs/pact/없음.md' }, { runDir: fromSpec.run }).html;
+  const gone = renderReport({ ...results, spec: '.pact/없음/spec.md' }, { runDir: fromSpec.run }).html;
   assert.match(gone, /results\.json의 옛 것/);
   const noSpec = renderReport({ ...RESULTS, spec: undefined, rulings: undefined }, { runDir: fromSpec.run }).html;
   assert.match(noSpec, /<title>검수 보고서<\/title>/, 'results.json에 spec이 없으면 명세를 찾지 않는다');
@@ -371,10 +369,9 @@ const entryFor = (text, over = {}) => ({
 // 명세(지금 글)와 승인 기록(앞에서부터)을 가진 판. checker가 있으면 spec-checker 기록도 남긴다.
 function approvedProject({ spec, entries, checker }) {
   const root = mkdtempSync(path.join(tmpdir(), 'pact-report-approved-'));
-  mkdirSync(path.join(root, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(root, SPEC_PATH), spec);
   const run = path.join(root, '.pact', 'x');
   mkdirSync(run, { recursive: true });
+  writeFileSync(path.join(root, SPEC_PATH), spec);
   if (entries) writeFileSync(path.join(run, 'approvals.jsonl'), entries.map((entry) => `${JSON.stringify(entry)}\n`).join(''));
   if (checker) appendRecord(run, { time: '2026-10-29T01:05:00.000Z', agent_type: 'pact:spec-checker', agent_id: 'a', task: null, message: checker });
   return { root, run };
@@ -521,7 +518,7 @@ test('(g) an old spec says "옛 판이라 승인 기록 없음"; a new spec with
   assert.doesNotMatch(html, /승인 기록/);
   // 명세를 못 읽어도 기록이 있으면 기록은 보인다(바뀐 줄은 모른다)
   const lost = approvedProject({ spec: approvalSpec(), entries: [entryFor(approvalSpec())] });
-  const lostHtml = renderReport({ ...RESULTS, spec: 'docs/pact/없음.md', rulings: undefined }, { runDir: lost.run }).html;
+  const lostHtml = renderReport({ ...RESULTS, spec: '.pact/없음/spec.md', rulings: undefined }, { runDir: lost.run }).html;
   assert.match(lostHtml, /<strong>승인<\/strong>/);
   assert.doesNotMatch(lostHtml, /아직 다시 승인되지 않았습니다/);
 });

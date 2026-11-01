@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // pact 훅 — PreToolUse와 SubagentStop에 거는 스크립트 하나. 플러그인 훅은 pact를 쓰지 않는 대화에서도 도구를 부를 때마다 돈다.
-// 그래서 첫 일은 pact와 상관있는지 싸게 가르는 것이다(도구 이름, agent_type, 문자열에 `.pact/`·`docs/pact/`·pact 에이전트 이름이 있는지).
+// 그래서 첫 일은 pact와 상관있는지 싸게 가르는 것이다(도구 이름, agent_type, 문자열에 `.pact/`·pact 에이전트 이름이 있는지).
 // 상관없으면 파일을 읽지도 쓰지도 않고, 아무것도 출력하지 않고, 종료 코드 0으로 끝난다(명세 R1). 예외는 하나다: 메인 세션이 agent id 꼴 `to`로 보내는
 // SendMessage는 글에 pact 흔적이 없어도 받는 쪽이 reviewer인지 알아야 해서 cwd 프로젝트의 .pact/ 밑 log/를 읽는다(읽기만 한다).
 //
@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 // scripts/run-log.mjs의 LOGGED_AGENTS와 같아야 한다(시험이 맞춰 본다). 여기서 따로 두는 것은 상관없는 호출이 모듈을 불러오지 않게 하려는 것이다.
 // `pact:` 앞머리까지 맞춘다. `tiers:worker`가 걸리면 안 된다.
 export const PACT_AGENTS = new Set(['pact:spec-checker', 'pact:reviewer', 'pact:worker', 'pact:verifier']);
-const PACT_TEXT = /\.pact\/|docs\/pact\/|\bpact:(?:spec-checker|reviewer|worker|verifier)\b|\bscripts\/(?:spec|verification|report|checklist|gallery|git-state)\.mjs\b/i; // 대소문자를 가리지 않는다: 이 컴퓨터의 파일 시스템이 가리지 않아 `.PACT/`도 실제 `.pact/`다
+const PACT_TEXT = /\.pact\/|\bpact:(?:spec-checker|reviewer|worker|verifier)\b|\bscripts\/(?:spec|verification|report|checklist|gallery|git-state)\.mjs\b/i; // 대소문자를 가리지 않는다: 이 컴퓨터의 파일 시스템이 가리지 않아 `.PACT/`도 실제 `.pact/`다
 const ERROR_LOG = 'hook-error.log';
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 // Bash의 cwd가 실행 폴더(<프로젝트>/.pact/<run-id>) 안이면 명령에 `.pact/`가 없어도 pact 호출이다: `echo x > results.json`
@@ -64,7 +64,7 @@ export function allowOutput(updatedInput) {
 const emit = (output) => new Promise((resolve) => process.stdout.write(JSON.stringify(output), () => resolve()));
 
 // ---------- 싼 검사 ----------
-// 이 호출이 pact가 걸린 것인가: pact 에이전트를 부르거나, `.pact/`·`docs/pact/`를 쓰거나, pact 스크립트를 돌리는가.
+// 이 호출이 pact가 걸린 것인가: pact 에이전트를 부르거나, `.pact/`를 쓰거나, pact 스크립트를 돌리는가.
 // 도구가 만지는 곳(경로, 명령, 에이전트 종류)만 본다. 쓰는 파일의 내용이나 에이전트에게 준 지시문은 보지 않는다 — 크기가 크고 무관하다.
 export function touchesPact(input) {
   const ti = input && typeof input.tool_input === 'object' && input.tool_input ? input.tool_input : {};

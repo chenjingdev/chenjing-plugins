@@ -1,5 +1,5 @@
 ---
-pact: 2
+pact: 3
 topic: <주제>
 status: draft
 created: <YYYY-MM-DD>
@@ -20,6 +20,8 @@ created: <YYYY-MM-DD>
 
 </details>
 
+## 검수 기준
+- A1 <무엇을 보면 받아들이나> [사용자]
 ## 구조 판정
 ## 확인 필요
 ## 결정 기록

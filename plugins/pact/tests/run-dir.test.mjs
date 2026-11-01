@@ -17,7 +17,7 @@ const FEATURE = 'F1 오늘 수업 출석 현황 보기 [사용자]';
 
 // 명세 파일을 만든다. mtime은 초 단위 숫자.
 function spec(project, id, { status = 'building', feature = FEATURE, mtime } = {}) {
-  const file = path.join(project, 'docs', 'pact', `${id}.md`);
+  const file = path.join(project, '.pact', id, 'spec.md');
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `---\npact: 2\ntopic: x\nstatus: ${status}\n---\n# x\n## 기능\n- ${feature}\n## 공통 규칙\n`);
   if (mtime) utimesSync(file, mtime, mtime);
@@ -61,8 +61,8 @@ test('findRunDir turns a spec path into the run-dir without creating anything', 
   const found = findRunDir({ text: `명세 경로: ${specFile}\n요구 목록: …`, cwd: elsewhere() });
   assert.equal(found?.runDir, path.join(project, '.pact', ID));
   assert.equal(found.via, 'prompt');
-  assert.equal(existsSync(path.join(project, '.pact')), false, '찾기만 하고 폴더는 만들지 않는다');
-  // 명세 경로 뒤에 한국어 조사가 붙어도 .md가 끝을 알려 준다
+  assert.deepEqual(readdirSync(path.join(project, '.pact', ID)), ['spec.md'], '찾기만 하고 아무것도 만들지 않는다');
+  // 명세 경로 뒤에 한국어 조사가 붙어도 run-id 뒤의 /가 끝을 알려 준다
   assert.equal(findRunDir({ text: `${specFile}를 읽는다`, cwd: elsewhere() })?.runDir, path.join(project, '.pact', ID));
 });
 
@@ -71,7 +71,7 @@ test('paths inside the worktree point back to the real project, not to the spec 
   const rd = runDir(project, ID);
   const wt = path.join(rd, 'wt');
   spec(wt, ID); // worktree에는 커밋된 명세 사본이 있다. 원래 프로젝트에는 아직 명세가 없는 경우부터 본다
-  const text = `명세 사본: ${wt}/docs/pact/${ID}.md\n작업 공간: ${wt}/plugins/pact`;
+  const text = `명세 사본: ${wt}/.pact/${ID}/spec.md\n작업 공간: ${wt}/plugins/pact`;
   for (const withMainSpec of [false, true]) {
     if (withMainSpec) spec(project, ID);
     const found = findRunDir({ text, cwd: elsewhere() });
@@ -88,7 +88,7 @@ test('a relative path read from inside the worktree still points at the real pro
   spec(wt, ID); // worktree의 명세 사본: 윗 폴더를 거슬러 올라가다 여기서 멈추면 안 된다
   const sub = path.join(wt, 'plugins', 'pact');
   mkdirSync(sub, { recursive: true });
-  for (const text of [`docs/pact/${ID}.md`, `.pact/${ID}/tasks/1-report.md`, `./docs/pact/${ID}.md`]) {
+  for (const text of [`.pact/${ID}/spec.md`, `.pact/${ID}/tasks/1-report.md`, `./.pact/${ID}/spec.md`]) {
     const found = findRunDir({ text, cwd: sub });
     assert.equal(found?.runDir, path.join(project, '.pact', ID), text);
     assert.equal(found.project, project, text);
@@ -118,7 +118,7 @@ test('a ~ path and a relative path are resolved (home, and the cwd with its pare
   assert.equal(findRunDir({ text: '', cwd: deep })?.runId, '2026-10-30-더-최근', '글에 경로가 없으면 cwd의 가장 최근 명세');
   for (const [text, cwd] of [
     [`.pact/${ID}/tasks/1-report.md`, deep],
-    [`docs/pact/${ID}.md`, deep],
+    [`.pact/${ID}/spec.md`, deep],
     [`./.pact/${ID}`, project],
     [`../../.pact/${ID}/wt`, deep],
   ]) {
@@ -136,7 +136,7 @@ test('text that only looks like a path does not produce a run-dir', () => {
     `${project}/.pact/results.json`, // run-id 꼴이 아니고 실제로도 없다
     '`.pact/.gitignore`가 `*`라 log/는 git에 들어가지 않는다', // 틀의 한 줄
     '실행 폴더는 `<프로젝트>/.pact/<run-id>`이다',
-    'docs/pact/<run-id>.md',
+    '.pact/<run-id>/spec.md',
     'x.pact/2026-10-29-foo', // 다른 이름의 끝
     '',
   ];
@@ -164,7 +164,7 @@ test('a ./ or ../ relative path names a run only when its spec or run folder rea
   for (const [text, cwd] of [
     [`./.pact/${fresh}`, project],
     [`../../.pact/${fresh}/wt`, deep],
-    [`./docs/pact/${fresh}.md`, project],
+    [`./.pact/${fresh}/spec.md`, project],
     [`../.pact/${fresh}/tasks/1-report.md`, deep],
     [`sub/dir/.pact/${fresh}`, project],
     [`.pact/${fresh}`, project],
@@ -180,7 +180,7 @@ test('a ./ or ../ relative path names a run only when its spec or run folder rea
   assert.equal(findRunDir({ text: `../../.pact/${fresh}/wt`, cwd: deep })?.runDir, path.join(project, '.pact', fresh));
   const other = tmp();
   spec(other, fresh);
-  assert.equal(findRunDir({ text: `./docs/pact/${fresh}.md`, cwd: other })?.runId, fresh);
+  assert.equal(findRunDir({ text: `./.pact/${fresh}/spec.md`, cwd: other })?.runId, fresh);
   // 절대 경로는 아직 없는 판도 run-id 꼴이면 받는다(호출하는 쪽이 만든다)
   const none = tmp();
   assert.equal(findRunDir({ text: `${none}/.pact/${fresh}`, cwd: elsewhere() })?.runId, fresh);
@@ -204,15 +204,14 @@ test('with several candidates, what really exists beats what is mentioned more, 
   assert.equal(findRunDir({ text: `${project}/.pact/${other}\n${project}/.pact/${real}`, cwd })?.runId, other);
 });
 
-test('an old brief naming the undated run folder and the dated spec resolves to the folder the work is in', () => {
+test('an old brief naming the undated run folder and the dated spec resolves to the dated folder: the spec is there now, and a folder with its spec beats a bare folder', () => {
   const project = tmp();
-  spec(project, '2026-10-21-사용-대시보드'); // 명세 이름은 날짜가 있다
-  const legacy = runDir(project, '사용-대시보드'); // 일하는 폴더는 날짜가 없다(0.5.0 전)
-  const text = `명세: ${project}/docs/pact/2026-10-21-사용-대시보드.md\nrun-dir: ${legacy}, 작업 번호 2\nworktree: ${legacy}/wt`;
-  assert.equal(findRunDir({ text, cwd: elsewhere() })?.runDir, legacy);
-  // 날짜 있는 실행 폴더가 만들어져 있으면 그쪽이 이긴다(폴더와 명세가 둘 다 있다)
-  const dated = runDir(project, '2026-10-21-사용-대시보드');
-  assert.equal(findRunDir({ text, cwd: elsewhere() })?.runDir, dated);
+  spec(project, '2026-10-21-사용-대시보드'); // 명세는 날짜 있는 판 안에 있다(migrate가 옮겼다)
+  const legacy = runDir(project, '사용-대시보드'); // 옛 보고서·사진이 든 날짜 없는 폴더(0.5.0 전)
+  const text = `명세: ${project}/.pact/2026-10-21-사용-대시보드/spec.md\nrun-dir: ${legacy}, 작업 번호 2\nworktree: ${legacy}/wt`;
+  assert.equal(findRunDir({ text, cwd: elsewhere() })?.runDir, path.join(project, '.pact', '2026-10-21-사용-대시보드'));
+  // 명세 없는 폴더만 글에 있으면 그 폴더다
+  assert.equal(findRunDir({ text: `run-dir: ${legacy}, 작업 번호 2`, cwd: elsewhere() })?.runDir, legacy);
 });
 
 test('a brief that names several things still finds its own run (a real worker brief mentions placeholders, the worktree and a report)', () => {
@@ -242,7 +241,7 @@ test('without a path, the run-dir of the most recently changed in-progress spec 
   assert.equal(found.via, 'cwd');
   assert.equal(latestInProgressRunId(project), '2026-10-02-만드는-중');
   // 더 최근에 바뀐 쪽이 이긴다
-  utimesSync(path.join(project, 'docs', 'pact', '2026-10-01-초안.md'), 5000, 5000);
+  utimesSync(path.join(project, '.pact', '2026-10-01-초안', 'spec.md'), 5000, 5000);
   assert.equal(findRunDir({ text: '', cwd: project })?.runId, '2026-10-01-초안');
 });
 
@@ -253,7 +252,7 @@ test('the cwd fallback works from a sub folder and from inside a run-dir worktre
   mkdirSync(sub, { recursive: true });
   assert.equal(findRunDir({ text: '', cwd: sub })?.runId, ID);
   const wtRoot = path.join(runDir(project, ID), 'wt');
-  spec(wtRoot, ID); // 진짜 worktree에는 명세 사본(docs/pact/)도 있다. 윗 폴더를 거슬러 올라가다 거기서 멈추면 안 된다
+  spec(wtRoot, ID); // 진짜 worktree에는 명세 사본(.pact/<run-id>/spec.md)도 있다. 윗 폴더를 거슬러 올라가다 거기서 멈추면 안 된다
   const wt = path.join(wtRoot, 'plugins', 'pact');
   mkdirSync(wt, { recursive: true });
   assert.equal(projectOfCwd(wt), project);
@@ -262,7 +261,7 @@ test('the cwd fallback works from a sub folder and from inside a run-dir worktre
   const finished = tmp();
   spec(finished, ID, { status: 'done' });
   assert.equal(findRunDir({ text: '', cwd: finished }), null);
-  assert.equal(findRunDir({ text: '', cwd: elsewhere() }), null, 'docs/pact/가 없는 폴더');
+  assert.equal(findRunDir({ text: '', cwd: elsewhere() }), null, '.pact/가 없는 폴더');
 });
 
 test('taskNumber trusts the report line at the end of the worker reply, then the brief, and does not guess between several', () => {

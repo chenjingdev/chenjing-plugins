@@ -6,7 +6,7 @@
 
 - 명세 status가 `draft`면 build하지 않는다. 승인을 받지 않은 것이니 `probe.md` 5에서 명세를 마저 쓰고 6에서 승인을 받는다. status가 `approved`여도 승인이나 위임 기록(`<run-dir>/approvals.jsonl`)이 없으면 시작하지 못한다. 손으로 status만 고친 명세가 그렇다. 사용자의 승인을 받아 `spec.mjs approve`로 기록한다.
 - 0.6.0 전에 만든 명세(frontmatter `pact: 1`)는 승인 기록 없이 이어 간다. `set-status`가 `참고: 옛 판이라 승인 기록 없음`을 알려도 보고서에는 따로 적지 않는다. `report.mjs`가 보고서 맨 위 상자와 승인 기록 칸에 옛 판 줄을 붙이니 `summary.json`의 headline에 또 쓰지 않는다. `pact: 1`이어도 `draft`였던 명세는 기록이 있어야 한다.
-- `node <pact>/scripts/spec.mjs run-dir <명세>`로 run-dir을 얻는다. 명세 파일명(날짜 포함, 확장자 제외)이 `<run-id>`다. 예: `2026-10-25-출결.md` → `.pact/2026-10-25-출결/`, 브랜치 `pact/2026-10-25-출결`.
+- `node <pact>/scripts/spec.mjs run-dir <명세>`로 run-dir을 얻는다. 명세가 든 폴더(`.pact/<run-id>/`)이고 그 이름이 `<run-id>`다. 예: `.pact/2026-10-25-출결/spec.md` → run-dir `.pact/2026-10-25-출결/`, 브랜치 `pact/2026-10-25-출결`.
 - 예전 방식의 `.pact/<주제>/` 폴더(보고서, 사진)는 그대로 둔다. 그 안에 `wt`가 남아 있으면 `run-dir`이 멈춘다. 어느 명세의 작업인지 확인하고 사용자에게 알린 뒤에 정리한다.
 - `<run-dir>/wt`가 이미 있으면 이어 하는 중이다(중단됐거나 verify에서 되돌아왔다). 폴더만 보고 믿지 않고 `<run-dir>/plan.md` 머리의 명세 경로가 이번 명세와 같은지, `git -C <run-dir>/wt branch --show-current`가 `pact/<run-id>`인지 본다. 맞으면 1·2를 건너뛰고 `plan.md`와 `<run-dir>/tasks/*-report.md`를 읽은 뒤 남은 작업이나 verify가 넘긴 실패부터 3으로 이어 간다. 다르면 멈추고 알린다.
 
@@ -14,15 +14,17 @@
 
 1. `node <pact>/scripts/git-state.mjs <프로젝트>`로 확인한다.
    - `repo:false`면 멈추고 알린다: "git 저장소가 아니라 격리 작업을 할 수 없습니다 — git init 할까요?"
-   - 이번 명세 파일은 `changed`(추적 중인 파일의 변경)에 있든 `untracked`(미추적 파일)에 있든 그 파일만 커밋한다(`docs(pact): <주제> 명세`). 새로 만든 명세는 대개 `untracked`에 있다.
-   - 명세 말고 다른 `changed`가 있으면 그 목록을 알리고 멈춘다. 사용자의 작업을 섞지 않기 위해서다.
-   - 다른 `untracked`는 worktree로 섞이지 않으니 멈추지 않는다.
+   - `.pact/` 밑의 파일(명세, 승인 기록, 체크리스트, 스케치, 기록)은 `changed`·`untracked`가 아니라 `pact`로 따로 온다. 이번 판의 폴더를 커밋한다: `git add .pact/.gitignore .pact/<run-id> && git commit -m "docs(pact): <주제> 명세"`. `wt/`와 `scratch/`는 `.pact/.gitignore`가 빼니 같이 올라가지 않는다. 다른 판의 `pact` 항목은 건드리지 않는다.
+   - `changed`(추적 중인 파일의 변경)가 있으면 그 목록을 알리고 멈춘다. 사용자의 작업을 섞지 않기 위해서다.
+   - `untracked`는 worktree로 섞이지 않으니 멈추지 않는다.
 2. `node <pact>/scripts/spec.mjs set-status <명세> building`. 승인이나 위임 기록이 없으면 거절한다. 위임 기록이면 지금 명세를 다시 보고, 위험 항목(`[위험: …]` 표시가 있는 기능·규칙 줄)이 생겼으면 거절한다. 그때는 명세와 위험 항목을 사용자에게 보이고 승인을 받아 `spec.mjs approve`로 기록한 뒤 다시 한다.
-3. `git worktree add <run-dir>/wt -b pact/<run-id>`로 격리된 작업 공간을 만든다. 코드는 모두 이 worktree에서 바뀐다. 명세 파일은 메인 작업 트리에 있는 것만 고친다. worktree를 만들지 못하면 멈추고 알린다. 메인 작업 트리에서 대신 작업하지 않는다.
+3. `git worktree add <run-dir>/wt -b pact/<run-id>`로 격리된 작업 공간을 만든다. 코드는 모두 이 worktree에서 바뀐다. 명세와 기록은 메인 작업 트리의 `<run-dir>`에 있는 것만 고친다. worktree 안에도 커밋된 `.pact/` 사본이 들어 있는데 거기에는 아무도 쓰지 않는다(합칠 때 충돌한다). worktree를 만들지 못하면 멈추고 알린다. 메인 작업 트리에서 대신 작업하지 않는다.
 
 ## 2. 작업 나누기
 
 명세를 작업으로 나눠 `<run-dir>/plan.md`에 적는다. 맨 위에 명세의 절대 경로, 브랜치 `pact/<run-id>`, 시작할 때의 HEAD를 적는다. verify가 이 HEAD를 기준으로 그 사이 메인에 다른 변경이 들어왔는지 본다. 작업마다 목표, 관련 명세 항목, 완료 기준 명령을 적는다. 이 목록은 당신이 쓰는 것이다. 사용자에게 보여 주고 확인받지 않는다.
+
+어떻게 만들지는 여기에 적는다. 언어와 프레임워크, 프로세스·파일·명령의 구조, 도구 설정, 측정 방법처럼 명세(RFP)가 적지 않은 것이다. 명세의 검수 기준(`A<n>`)을 어떻게 잴지도 여기서 정한다. 결과를 바꾸는 결정은 Ruling으로 `## 결정 기록`에도 남긴다. 명세에 구현이 섞여 있으면 `[AI 가정]`이면 바꿔도 되고(Ruling), `[사용자]`면 제약으로 따른다.
 
 작업은 혼자 테스트할 수 있는 단위로 자른다. 설정, 뼈대, 문서 같은 준비는 그것이 필요한 작업에 넣는다.
 

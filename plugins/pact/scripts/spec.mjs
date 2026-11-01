@@ -1,15 +1,24 @@
 #!/usr/bin/env node
 // pact 명세 파일을 읽고 검사하고 상태를 바꾼다. 사람이 손으로 고친 명세도 받아야 하므로
 // 파서는 관대하게, 검사는 문제를 한국어 한 줄씩 돌려준다.
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { isatty } from 'node:tty';
 import { fileURLToPath } from 'node:url';
-import { ensureRunDir, isMainModule } from './paths.mjs';
+import { ensureRunDir, isMainModule, writePactIgnore } from './paths.mjs';
 
 export const STATUSES = ['draft', 'approved', 'building', 'verifying', 'done'];
 const TAGS = ['사용자', 'AI 가정'];
-const ITEM_SECTIONS = ['기능', '공통 규칙'];
+// 번호가 붙는 항목 칸: F(기능), R(공통 규칙), A(검수 기준). 검수 기준은 pact: 3부터 있다.
+const ITEM_SECTIONS = ['기능', '공통 규칙', '검수 기준'];
+const ITEM_HEAD = /^-\s+([FRA]\d+)\b\s*(.*?)\s*$/;
+// 명세는 <프로젝트>/.pact/<run-id>/spec.md 한 자리에 둔다. 0.7.0 전에는 docs/pact/<run-id>.md였다(migrate가 옮긴다).
+export const SPEC_NAME = 'spec.md';
+const LEGACY_SPEC_DIR = path.join('docs', 'pact');
+// 펼친 부분의 크기(probe.md 5): 사용자가 한 화면에서 읽는 양이다. 접힌 <details> 안과 `## 결정 기록`(승인 뒤에 쌓인다)은 세지 않는다.
+export const OPEN_LINES_MAX = 40;
+export const OPEN_ASSUMPTIONS_MAX = 5;
 const TEMPLATE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'pact', 'spec-template.md');
 
 function splitFrontmatter(text) {
@@ -90,7 +99,7 @@ export function parseSpec(text) {
     if (current === null) continue;
     sections[current] += (sections[current] ? '\n' : '') + line;
     if (!ITEM_SECTIONS.includes(current)) continue;
-    const it = /^-\s+([FR]\d+)\b\s*(.*?)\s*$/.exec(line);
+    const it = ITEM_HEAD.exec(line);
     if (!it) {
       if (/^-\s+\S/.test(line)) unnumbered.push(line.replace(/^-\s+/, '').trim());
       continue;
@@ -111,13 +120,41 @@ export function parseSpec(text) {
   return { frontmatter, sections, items, unnumbered };
 }
 
+// 명세 판(frontmatter `pact:`). 없거나 숫자가 아니면 0이다. 3부터 검수 기준 칸과 크기 검사가 있다.
+export const specVersion = (frontmatter) => Number.parseInt(frontmatter?.pact ?? '', 10) || 0;
+
+// 사용자가 한 화면에서 읽는 부분의 크기: { lines, assumptions }. 접힌 <details> 안(여닫는 줄 포함)과 `## 결정 기록`의 본문은 세지 않는다.
+// lines는 frontmatter와 빈 줄을 포함한 줄 수, assumptions는 펼쳐 둔 [AI 가정] 항목(F·R·A 머리 줄) 수다. 케이스 줄은 항목이 아니다.
+export function openSize(text) {
+  const rows = String(text ?? '').replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
+  let lines = 0;
+  let assumptions = 0;
+  let folded = false;
+  let section = null;
+  for (const line of rows) {
+    const h = /^##\s+(.+?)\s*$/.exec(line);
+    if (h) section = h[1];
+    if (!folded && /<details\b/i.test(line)) folded = true;
+    const inside = folded;
+    if (folded && /<\/details>/i.test(line)) folded = false;
+    if (inside) continue;
+    if (section === '결정 기록' && !h) continue;
+    lines++;
+    if (!ITEM_SECTIONS.includes(section)) continue;
+    const head = ITEM_HEAD.exec(line);
+    if (head && lineTag(head[2]).name === 'AI 가정') assumptions++;
+  }
+  return { lines, assumptions };
+}
+
 export function lintSpec(text) {
   const problems = [];
   const spec = parseSpec(text);
   const status = spec.frontmatter.status;
+  const version = specVersion(spec.frontmatter);
   if (!status) problems.push('status가 없습니다');
   else if (!STATUSES.includes(status)) problems.push(`status 값이 잘못됐습니다: ${status}`);
-  for (const section of ITEM_SECTIONS) {
+  for (const section of version >= 3 ? ITEM_SECTIONS : ITEM_SECTIONS.filter((name) => name !== '검수 기준')) {
     if (!(section in spec.sections)) problems.push(`## ${section} 섹션이 없습니다`);
   }
   const seen = new Set();
@@ -128,8 +165,17 @@ export function lintSpec(text) {
     else if (item.tag === null) problems.push(`${item.id}: 알 수 없는 태그 [${item.rawTag}]`);
     if (item.doubleTag) problems.push(`${item.id}: 태그가 둘입니다. 한 줄에 태그는 하나라서 번호는 한 태그에 모읍니다 ([사용자: 검수 1, 3])`);
     if (PLACEHOLDER.test(item.text)) problems.push(`아직 틀 그대로입니다: ${item.id}`);
+    const expected = { 기능: 'F', '공통 규칙': 'R', '검수 기준': 'A' }[item.section];
+    if (expected && !item.id.startsWith(expected)) problems.push(`${item.id}: ## ${item.section} 칸의 항목은 ${expected}<n>입니다`);
   }
-  for (const line of spec.unnumbered) problems.push(`번호가 없는 항목: ${line} (F<n> 또는 R<n>을 붙이세요)`);
+  for (const line of spec.unnumbered) problems.push(`번호가 없는 항목: ${line} (F<n>, R<n> 또는 A<n>을 붙이세요)`);
+  if (version >= 3) {
+    // 검수 기준(RFP의 '어떻게 검수할지')은 사용자가 정하는 칸이라 비울 수 없다.
+    if ('검수 기준' in spec.sections && !spec.items.some((item) => item.section === '검수 기준' && !PLACEHOLDER.test(item.text))) problems.push('## 검수 기준에 A 항목이 하나 이상 필요합니다 (무엇을 보면 받아들이나)');
+    const size = openSize(text);
+    if (size.lines > OPEN_LINES_MAX) problems.push(`펼친 부분이 ${size.lines}줄입니다 (${OPEN_LINES_MAX}줄 안. 사용자가 꼭 봐야 할 것만 남기고 나머지는 <details>에 접습니다)`);
+    if (size.assumptions > OPEN_ASSUMPTIONS_MAX) problems.push(`펼친 [AI 가정] 항목이 ${size.assumptions}개입니다 (${OPEN_ASSUMPTIONS_MAX}개까지. 결과를 바꿀 만한 것만 펼치고 나머지는 <details>에 접습니다)`);
+  }
   return problems;
 }
 
@@ -165,7 +211,7 @@ function itemUnits(text) {
       continue;
     }
     if (!ITEM_SECTIONS.includes(section)) continue;
-    const head = /^-\s+([FR]\d+)\b\s*(.*?)\s*$/.exec(line);
+    const head = ITEM_HEAD.exec(line);
     if (head) {
       const { name } = lineTag(head[2]);
       unit = { id: head[1], lines: [line], tag: TAGS.includes(name) ? name : null };
@@ -278,24 +324,63 @@ export function slugify(topic) {
     .join('-');
 }
 
+// 새 명세의 자리: <프로젝트>/.pact/<날짜>-<주제>/spec.md. 같은 날 같은 주제의 명세가 이미 있으면 -2, -3을 붙인다.
 export function newSpecPath(projectDir, topic, date) {
-  const dir = path.join(projectDir, 'docs', 'pact');
   const base = `${date}-${slugify(topic) || 'spec'}`;
-  let file = path.join(dir, `${base}.md`);
-  for (let n = 2; existsSync(file); n++) file = path.join(dir, `${base}-${n}.md`);
-  return file;
+  let runId = base;
+  for (let n = 2; existsSync(path.join(projectDir, '.pact', runId, SPEC_NAME)); n++) runId = `${base}-${n}`;
+  return path.join(projectDir, '.pact', runId, SPEC_NAME);
 }
 
-// 명세의 날짜와 중복 번호까지 실행 ID에 남겨 서로 다른 명세의 산출물을 분리한다.
+// 명세 경로에서 판의 자리: { spec, project, runId, runDir }. 명세는 <프로젝트>/.pact/<run-id>/spec.md여야 한다. 아니면 던진다.
+// 만들지 않는다. 옛 자리(docs/pact/<run-id>.md)의 명세는 migrate가 옮긴다.
+export function specLocation(specFile) {
+  const spec = path.resolve(specFile);
+  const runDir = path.dirname(spec);
+  const root = path.dirname(runDir);
+  if (path.basename(spec) !== SPEC_NAME || path.basename(root) !== '.pact' || root === runDir) {
+    throw new Error(`명세는 <프로젝트>/.pact/<run-id>/${SPEC_NAME}에 둡니다: ${spec}. 옛 자리(docs/pact/)의 명세는 spec.mjs migrate <프로젝트>로 옮깁니다.`);
+  }
+  return { spec, project: path.dirname(root), runId: path.basename(runDir), runDir };
+}
+
+// 명세가 든 폴더가 실행 폴더다. 없으면 만들고 .pact/.gitignore를 맞춘다. 날짜 없는 옛 작업 공간(.pact/<주제>/wt)이 남아 있으면 멈춘다.
 export function specRunDir(specFile) {
-  const projectDir = path.resolve(path.dirname(specFile), '..', '..');
-  const runId = path.basename(specFile, '.md');
+  const { project, runId } = specLocation(specFile);
   const legacySlug = runId.replace(/^\d{4}-\d{2}-\d{2}-/, '');
-  const legacyWorktree = path.join(projectDir, '.pact', legacySlug, 'wt');
+  const legacyWorktree = path.join(project, '.pact', legacySlug, 'wt');
   if (legacySlug !== runId && existsSync(legacyWorktree)) {
     throw new Error(`기존 pact 작업 공간을 자동으로 이어 할 수 없습니다: ${legacyWorktree}. 원래 명세를 확인한 뒤 별도로 복구하세요.`);
   }
-  return ensureRunDir(projectDir, runId);
+  return ensureRunDir(project, runId);
+}
+
+// 0.7.0 전의 명세(docs/pact/<run-id>.md)를 .pact/<run-id>/spec.md로 옮긴다. 옮긴 뒤 빈 docs/pact/(와 빈 docs/)는 지운다.
+// git 저장소면 `git mv`로 옮겨 이력이 이어지게 하고, 안 되면(추적 전, 저장소 아님) 그냥 옮긴다. 이미 새 자리에 있으면 건너뛴다.
+// 명세가 하나도 없어도 .pact/.gitignore는 맞춘다(옛 `*`를 새 내용으로). 돌려주는 것: { moved: [[from, to]], skipped: [[from, why]], removed: [dir] }
+export function migrateSpecs(projectDir) {
+  const project = path.resolve(projectDir);
+  const legacyDir = path.join(project, LEGACY_SPEC_DIR);
+  const moved = [];
+  const skipped = [];
+  const removed = [];
+  let names = [];
+  try { names = readdirSync(legacyDir).filter((name) => name.endsWith('.md')).sort(); } catch { /* 옛 자리가 없다 */ }
+  for (const name of names) {
+    const from = path.join(legacyDir, name);
+    const runId = name.slice(0, -'.md'.length);
+    const to = path.join(project, '.pact', runId, SPEC_NAME);
+    if (existsSync(to)) { skipped.push([from, `새 자리에 이미 있습니다: ${to}`]); continue; }
+    ensureRunDir(project, runId);
+    const git = spawnSync('git', ['-C', project, 'mv', '-k', from, to], { encoding: 'utf8' });
+    if (git.error || git.status !== 0 || !existsSync(to)) renameSync(from, to);
+    moved.push([from, to]);
+  }
+  for (const dir of [legacyDir, path.dirname(legacyDir)]) {
+    try { if (readdirSync(dir).filter((name) => name !== '.DS_Store').length === 0) { rmSync(dir, { recursive: true, force: true }); removed.push(dir); } } catch { /* 없거나 비지 않았다 */ }
+  }
+  if (existsSync(path.join(project, '.pact'))) writePactIgnore(path.join(project, '.pact'));
+  return { moved, skipped, removed };
 }
 
 function today() {
@@ -305,7 +390,8 @@ function today() {
 }
 
 const USAGE = `사용법:
-  spec.mjs new <projectDir> <주제>      명세 파일을 만들고 경로를 출력
+  spec.mjs new <projectDir> <주제>      명세 파일(.pact/<날짜>-<주제>/spec.md)을 만들고 경로를 출력. 그 폴더가 실행 폴더다
+  spec.mjs migrate <projectDir>        0.7.0 전의 명세(docs/pact/<run-id>.md)를 .pact/<run-id>/spec.md로 옮기고 .pact/.gitignore를 맞춤
   spec.mjs status <명세>                status 값을 출력
   spec.mjs approve <명세> -             사용자가 승인한 말을 표준 입력으로 받아 이 대화 기록에서 찾아 맞춰 보고, 맞으면 승인 기록을 남기고 status를 draft에서 approved로 바꿈
   spec.mjs delegate <명세> -            승인까지 맡긴다는 말을 같은 방식으로 기록. 위험 표시가 있으면 거절. 질문 도구의 답은 거절(승인 질문의 답이면 approve)
@@ -313,7 +399,7 @@ const USAGE = `사용법:
     말 속의 백틱·$·따옴표가 셸에서 풀리지 않는다. 말을 인자로 줄 수도 있지만 그러면 셸이 말 속의 백틱·$를 먼저 푼다.
   spec.mjs set-status <명세> <값>       status를 바꿈 (${STATUSES.join(', ')}). approved·building은 승인 기록이 있어야 함
   spec.mjs lint <명세>                  형식 문제를 줄마다 출력, 있으면 종료 코드 1
-  spec.mjs run-dir <명세>               실행 산출물 폴더 .pact/<명세 파일명(확장자 제외)>/를 만들고 경로를 출력`;
+  spec.mjs run-dir <명세>               명세가 든 실행 폴더 .pact/<run-id>/를 (없으면 만들고) 출력`;
 
 // 거절은 한 줄이다: 까닭과 대신 할 일(R6). 종료 코드 1.
 async function refuse(verdict) {
@@ -357,10 +443,18 @@ async function main([cmd, ...args]) {
     const topic = words.join(' ');
     const date = today();
     const file = newSpecPath(projectDir, topic, date);
-    mkdirSync(path.dirname(file), { recursive: true });
+    ensureRunDir(path.resolve(projectDir), path.basename(path.dirname(file)));
     const body = readFileSync(TEMPLATE, 'utf8').replaceAll('<주제>', topic).replaceAll('<YYYY-MM-DD>', date);
     writeFileSync(file, body);
     console.log(file);
+    return 0;
+  }
+  if (cmd === 'migrate' && args[0]) {
+    const { moved, skipped, removed } = migrateSpecs(args[0]);
+    for (const [from, to] of moved) console.log(`옮김: ${from} → ${to}`);
+    for (const [from, why] of skipped) console.log(`건너뜀: ${from} — ${why}`);
+    for (const dir of removed) console.log(`지움(빈 폴더): ${dir}`);
+    if (!moved.length && !skipped.length) console.log('옮길 옛 명세(docs/pact/*.md)가 없습니다');
     return 0;
   }
   if (cmd === 'status' && args[0]) {

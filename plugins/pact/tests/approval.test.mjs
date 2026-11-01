@@ -1,5 +1,6 @@
 // 승인·위임 기록 시험. 가짜 HOME에 손으로 만든 대화 기록(JSONL)을 두고, 실행 폴더 log/에 spec-checker 기록을 두고,
 // spec.mjs를 자식 프로세스로 돌린다(HOME과 CLAUDE_CODE_SESSION_ID만 가짜). 스크립트에는 대화 기록 위치를 덮어쓰는 옵션이 없다.
+import { PACT_GITIGNORE } from '../scripts/paths.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, rmSync, mkdirSync, existsSync } from 'node:fs';
@@ -45,7 +46,7 @@ test('(a) approve: a person\'s "승인" after the spec-checker finished is recor
   assert.equal(entry.spec_checker_time, T(5));
   assert.match(entry.recorded_at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
   assert.ok(Math.abs(Date.now() - Date.parse(entry.recorded_at)) < 60_000);
-  assert.equal(readFileSync(path.join(w.project, '.pact', '.gitignore'), 'utf8'), '*\n', '실행 폴더를 만들 때 .pact/.gitignore도 만든다');
+  assert.equal(readFileSync(path.join(w.project, '.pact', '.gitignore'), 'utf8'), PACT_GITIGNORE, '기록할 때 .pact/.gitignore도 맞춘다');
   // 명세는 status 한 줄만 바뀐다
   assert.equal(readFileSync(w.spec, 'utf8'), specText({ status: 'approved' }));
 });
@@ -238,7 +239,7 @@ test('(e) with no spec-checker record approve is refused, and an unreadable reco
   assert.match(line, /이미 검수했는데도 기록이 없으면 훅이 돌지 않는 것이다/);
   assert.match(line, /플러그인 데이터 폴더의 hook-error\.log를 보고 사용자에게 알린다\(log\/에 직접 쓰지 않는다\)/);
   assert.equal(specStatus(w), 'draft');
-  assert.equal(existsSync(path.join(w.project, '.pact')), false, '거절하면 실행 폴더도 만들지 않는다');
+  assert.equal(existsSync(path.join(w.run, 'approvals.jsonl')), false, '거절하면 기록 파일도 만들지 않는다');
   // 다른 에이전트의 기록만 있어도 spec-checker 기록이 아니다
   mkdirSync(path.join(w.run, 'log'), { recursive: true });
   writeFileSync(path.join(w.run, 'log', 'subagents.jsonl'), `${JSON.stringify({ time: T(1), agent_type: 'pact:worker', message: '끝' })}\n`);
@@ -354,7 +355,7 @@ test('(f) delegate with a [위험: …] mark on an F or R line, a case of it or 
     assert.equal(specStatus(w), 'draft', label);
     assert.equal(readFileSync(w.spec, 'utf8'), before, label);
     assert.deepEqual(approvalEntries(w), [], label);
-    assert.equal(existsSync(path.join(w.project, '.pact')), false, `${label}: 거절하면 실행 폴더도 만들지 않는다`);
+    assert.equal(existsSync(path.join(w.run, 'approvals.jsonl')), false, `${label}: 거절하면 기록 파일도 만들지 않는다`);
   }
   // 위험 항목이 여럿이면 번호를 모두(많으면 앞의 넷과 개수로) 알린다
   const many = makeWorld({ features: '- F2 비우기 [위험: 지우기] [사용자]\n- F3 올리기 [위험: 공개] [사용자]\n', rules: '- R2 결제 [위험: 비용] [AI 가정]\n- R3 지우기 [위험: 지우기] [AI 가정]\n- R4 올리기 [위험: 공개] [AI 가정]\n' });
@@ -409,7 +410,7 @@ test('approve and delegate refuse with one line when the quote is empty, the spe
   assertRefused(runSpec(w, ['approve', w.spec, '   ']), /인용한 사용자 말이 비어 있다/);
   assertRefused(runSpec(w, ['approve', w.spec]), /인용한 사용자 말이 비어 있다/);
   assertRefused(runSpec(w, ['delegate', w.spec, '!!!']), /인용한 사용자 말이 비어 있다/);
-  const missing = runSpec(w, ['approve', path.join(w.project, 'docs', 'pact', 'nope.md'), '승인']);
+  const missing = runSpec(w, ['approve', path.join(w.project, '.pact', 'nope', 'spec.md'), '승인']);
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /ENOENT/);
   // 세션 id가 없거나 대화 기록이 없다: 확인하지 못하면 기록하지 않는다
@@ -743,12 +744,12 @@ test('a missing spec, or a log/ that is a file, is refused with the Node message
   const w = makeWorld();
   addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('승인', T(10))]);
-  const missing = runSpec(w, ['approve', path.join(w.project, 'docs', 'pact', 'nope.md'), '승인']);
+  const missing = runSpec(w, ['approve', path.join(w.project, '.pact', 'nope', 'spec.md'), '승인']);
   assert.equal(missing.status, 1);
   const missingLines = missing.stderr.split('\n').filter(Boolean);
   assert.equal(missingLines.length, 1, missing.stderr);
   assert.match(missingLines[0], /^ENOENT: no such file or directory/);
-  assert.match(missingLines[0], /파일이나 폴더가 없다\(.*nope\.md\)\. 경로를 확인한다/);
+  assert.match(missingLines[0], /파일이나 폴더가 없다\(.*nope\/spec\.md\)\. 경로를 확인한다/);
   // log/ 자리에 파일이 있다(ENOTDIR)
   rmSync(path.join(w.run, 'log'), { recursive: true, force: true });
   writeFileSync(path.join(w.run, 'log'), '폴더 자리에 파일');
@@ -785,7 +786,7 @@ test('(h) delegate refuses a quote that is only an AskUserQuestion answer, and s
   assert.equal(specStatus(w), 'draft');
   assert.equal(readFileSync(w.spec, 'utf8'), before, '명세는 그대로다');
   assert.deepEqual(approvalEntries(w), [], '기록이 생기지 않는다');
-  assert.equal(existsSync(path.join(w.project, '.pact')), false, '거절하면 실행 폴더도 만들지 않는다');
+  assert.equal(existsSync(path.join(w.run, 'approvals.jsonl')), false, '거절하면 기록 파일도 만들지 않는다');
   // "끝까지 알아서 해"처럼 승인까지 맡긴다는 말을 질문 도구로 골라도 같다(고른 말은 그 질문의 답이다)
   writeTranscript(w, [answers({ '승인까지 맡기시겠어요?': '끝까지 알아서 해', '화면은 몇 개로 할까요?': '하나' }, T(10))]);
   assert.match(assertRefused(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']), /질문 도구\(AskUserQuestion\)의 답이다/), /\(질문: "승인까지 맡기시겠어요\?"\)/);

@@ -18,8 +18,8 @@ function world() {
   made.push(root);
   const project = path.join(root, 'project');
   const run = path.join(project, '.pact', ID);
-  mkdirSync(path.join(project, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(project, 'docs', 'pact', `${ID}.md`), '---\npact: 2\ntopic: x\nstatus: building\n---\n# x\n');
+  mkdirSync(run, { recursive: true });
+  writeFileSync(path.join(run, 'spec.md'), '---\npact: 2\ntopic: x\nstatus: building\n---\n# x\n');
   for (const dir of ['log', 'wt/sub', 'tasks', 'shots']) mkdirSync(path.join(run, dir), { recursive: true });
   writeFileSync(path.join(run, 'results.json'), '{}');
   const bare = path.join(root, 'bare'); // 명세 없는 임시 폴더
@@ -184,11 +184,11 @@ test('Bash: reading, copying out, and every file that is not locked pass', () =>
 test('Bash: a pact script call passes, and a write form in the same command is still caught', () => {
   const plugin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   for (const command of [
-    `node ${plugin}/scripts/verification.mjs snapshot ${w.project}/docs/pact/${ID}.md ${R}/wt ui`,
-    `node ${plugin}/scripts/verification.mjs finish ${w.project}/docs/pact/${ID}.md ${w.project}`,
-    `node ${plugin}/scripts/verification.mjs check ${w.project}/docs/pact/${ID}.md ${R}/wt 2>&1 | tail -3`,
+    `node ${plugin}/scripts/verification.mjs snapshot ${w.project}/.pact/${ID}/spec.md ${R}/wt ui`,
+    `node ${plugin}/scripts/verification.mjs finish ${w.project}/.pact/${ID}/spec.md ${w.project}`,
+    `node ${plugin}/scripts/verification.mjs check ${w.project}/.pact/${ID}/spec.md ${R}/wt 2>&1 | tail -3`,
     `node ${plugin}/scripts/report.mjs ${R}`, `node ${plugin}/scripts/report.mjs ${R} > /tmp/report.txt`,
-    `node ${plugin}/scripts/spec.mjs approve ${w.project}/docs/pact/${ID}.md - <<'EOF'\n승인\nEOF`,
+    `node ${plugin}/scripts/spec.mjs approve ${w.project}/.pact/${ID}/spec.md - <<'EOF'\n승인\nEOF`,
     `node /somewhere/else/scripts/report.mjs ${R}`,
   ]) free(bash(command), command);
   for (const command of [
@@ -347,11 +347,11 @@ test('commands taken from real conversation records (paths moved into the test p
   // 0.5.0 때 메인 세션이 results.json을 고친 꼴들: 모두 막힌다
   const edits = [
     `R=${R}; jq --slurpfile r $R/rulings.tmp.json '.rulings = $r[0]' $R/results.json > $R/results.tmp.json && mv $R/results.tmp.json $R/results.json && rm $R/rulings.tmp.json`,
-    `node -e '\nconst fs = require("fs");\nconst spec = fs.readFileSync("docs/pact/${ID}.md", "utf8");\nconst rulings = spec.slice(spec.indexOf("## 결정 기록")).split("\\n").filter(l => l.startsWith("- Ruling:")).map(l => l.slice(2));\nconst f = ".pact/${ID}/results.json";\nconst r = JSON.parse(fs.readFileSync(f, "utf8")); r.rulings = rulings; fs.writeFileSync(f, JSON.stringify(r, null, 2));\n'`,
+    `node -e '\nconst fs = require("fs");\nconst spec = fs.readFileSync(".pact/${ID}/spec.md", "utf8");\nconst rulings = spec.slice(spec.indexOf("## 결정 기록")).split("\\n").filter(l => l.startsWith("- Ruling:")).map(l => l.slice(2));\nconst f = ".pact/${ID}/results.json";\nconst r = JSON.parse(fs.readFileSync(f, "utf8")); r.rulings = rulings; fs.writeFileSync(f, JSON.stringify(r, null, 2));\n'`,
     `python3 -I - <<'EOF'\nimport json\np = '.pact/${ID}/results.json'\nd = json.load(open(p, encoding='utf8'))\nd['headline'] = '다 됐다'\njson.dump(d, open(p, 'w', encoding='utf8'), ensure_ascii=False, indent=2)\nEOF`,
     `cd ${R} && python3 - <<'EOF'\nimport json\nd=json.load(open('results.json',encoding='utf-8'))\njson.dump(d,open('results.json','w',encoding='utf-8'),ensure_ascii=False,indent=2)\nEOF`,
     `perl -CSD -0pi -e 's/화면 정리 명세 R13으로/화면 정리 명세 R26으로/' ${R}/results.json`,
-    `cd ${R} && cp results.json results-round1.json && node /x/plugin/scripts/verification.mjs snapshot ${w.project}/docs/pact/${ID}.md $PWD/wt command`,
+    `cd ${R} && cp results.json results-round1.json && node /x/plugin/scripts/verification.mjs snapshot ${w.project}/.pact/${ID}/spec.md $PWD/wt command`,
     `R=${R}; cp $R/results.json $R/results-round2.json && cat >> $R/plan.md <<'EOF'\n## build 4\nEOF`,
   ];
   for (const command of edits) blocked(bash(command, { cwd: w.project }), command);

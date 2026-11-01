@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { constants, copyFileSync, existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { lintSpec, parseSpec, setStatus, specRunDir } from './spec.mjs';
+import { lintSpec, parseSpec, setStatus, specLocation, specRunDir } from './spec.mjs';
 import { evidenceIssues, effectiveResult } from './evidence.mjs';
 import { isMainModule } from './paths.mjs';
 import { checkStart, completionChecks, refusalLine } from './approval.mjs';
@@ -17,8 +17,8 @@ const hash = (value) => createHash('sha256').update(value).digest('hex');
 const nonempty = (value) => typeof value === 'string' && value.trim().length > 0;
 const isSha = (value) => typeof value === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
 const slash = (value) => value.split(path.sep).join('/');
-// 명세와 pact 산출물은 검수 대상 코드가 아니다.
-const excluded = (value) => value === '.pact' || value.startsWith('.pact/') || value === 'docs/pact' || value.startsWith('docs/pact/') || value === '.git' || value.startsWith('.git/');
+// pact 산출물(명세 포함, .pact/ 밑 전부)은 검수 대상 코드가 아니다. git에 들어가도 지문에는 넣지 않는다.
+const excluded = (value) => value === '.pact' || value.startsWith('.pact/') || value === '.git' || value.startsWith('.git/');
 
 function git(dir, args) {
   const result = spawnSync('git', args, { cwd: dir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
@@ -77,8 +77,10 @@ function input(specFile, targetDir) {
   const parsed = parseSpec(text);
   const features = parsed.items.filter((item) => item.section === '기능' && /^F\d+$/.test(item.id));
   if (!features.length) issues.push('기능 F 항목이 하나 이상 필요합니다');
-  const project = realpathSync(path.resolve(path.dirname(specPath), '..', '..'));
-  return { specPath, text, parsed, features, project, specHash: specIdentity(text), source: sourceFingerprint(targetDir), issues };
+  // 검수 기준(A 항목, pact: 3부터). 기준마다 그것이 참인지 보인 시나리오가 있어야 한다.
+  const criteria = parsed.items.filter((item) => item.section === '검수 기준' && /^A\d+$/.test(item.id));
+  const project = realpathSync(specLocation(specPath).project);
+  return { specPath, text, parsed, features, criteria, project, specHash: specIdentity(text), source: sourceFingerprint(targetDir), issues };
 }
 
 // 명세에 적힌 케이스만 센다. 기능에 없는 케이스를 만들어 채우게 하지 않는다.
@@ -242,6 +244,7 @@ export function checkVerification(specFile, targetDir) {
   const itemIds = new Set(current.parsed.items.map((item) => item.id));
   const featureCoverage = new Set();
   const ruleCoverage = new Set();
+  const criterionCoverage = new Set();
   const declared = declaredCases(current.text);
   const expectedCases = new Map(declared.map((entry) => [entry.id, entry.feature]));
   const caseCoverage = new Set();
@@ -253,16 +256,17 @@ export function checkVerification(specFile, targetDir) {
     if (!nonempty(scenario?.id)) issues.push(`${label}: id가 없습니다`);
     else if (ids.has(scenario.id)) issues.push(`${label}: id가 겹칩니다`);
     ids.add(scenario?.id);
-    if (!['spec', 'case', 'newcomer'].includes(scenario?.kind)) issues.push(`${label}: kind가 잘못됐습니다`);
+    if (!['spec', 'case', 'newcomer', 'acceptance'].includes(scenario?.kind)) issues.push(`${label}: kind가 잘못됐습니다`);
     if (!nonempty(scenario?.verification_id) || !accepted.has(scenario.verification_id)) issues.push(`${label}: verification_id가 이 검수의 기록에 없습니다`);
     else if (scenario.verification_id !== currentId) carried.push(label);
     const items = Array.isArray(scenario?.items) ? scenario.items : [];
     if (scenario?.items !== undefined && !Array.isArray(scenario.items)) issues.push(`${label}: items는 배열이어야 합니다`);
-    if (['spec', 'case'].includes(scenario?.kind) && !items.length) issues.push(`${label}: 명세 items가 비어 있습니다`);
+    if (['spec', 'case', 'acceptance'].includes(scenario?.kind) && !items.length) issues.push(`${label}: 명세 items가 비어 있습니다`);
     for (const id of items) {
       if (!itemIds.has(id)) issues.push(`${label}: 알 수 없는 명세 항목 ${id}`);
       if (/^F\d+$/.test(id) && scenario.kind === 'spec') featureCoverage.add(id);
       if (/^R\d+$/.test(id)) ruleCoverage.add(id);
+      if (/^A\d+$/.test(id) && scenario.kind === 'acceptance') criterionCoverage.add(id);
     }
     if (scenario?.kind === 'case') {
       const id = scenario.case_id;
@@ -286,6 +290,8 @@ export function checkVerification(specFile, targetDir) {
     if (result === 'doubt' && !nonempty(decisionOf(scenario, summary))) issues.push(`${label}: 의심을 남기는 결정 이유가 없습니다`);
   }
   for (const feature of current.features) if (!featureCoverage.has(feature.id)) issues.push(`${feature.id}: 정상 흐름 검수가 없습니다`);
+  // 검수 기준은 발주처가 받아들이는 조건이라 하나라도 안 보이면 완료가 아니다.
+  for (const criterion of current.criteria) if (!criterionCoverage.has(criterion.id)) issues.push(`${criterion.id}: 검수 기준을 확인한 시나리오(kind: acceptance)가 없습니다`);
   // 공통 규칙은 시나리오로 확인할 수 없는 것(화면 한 장 규칙, 글 규칙)이 있어 막지 않고 알린다.
   for (const item of current.parsed.items) if (/^R\d+$/.test(item.id) && !ruleCoverage.has(item.id)) warnings.push(`${item.id}: 이 규칙을 확인한 시나리오가 없습니다`);
   for (const entry of declared) if (!caseCoverage.has(entry.id)) issues.push(`${entry.id}: 케이스 검수가 없습니다`);
@@ -312,7 +318,7 @@ export function checkVerification(specFile, targetDir) {
 
 // 합친 뒤 원래 프로젝트 폴더에서 돌린다. 검수한 코드가 그대로 합쳐졌고 완료 검사가 통과할 때만 status를 done으로 바꾼다.
 export function finishVerification(specFile, targetDir) {
-  const project = realpathSync(path.resolve(path.dirname(realpathSync(specFile)), '..', '..'));
+  const project = realpathSync(specLocation(realpathSync(specFile)).project);
   if (realpathSync(targetDir) !== project) throw new Error('완료는 명세가 속한 프로젝트 원래 폴더에서만 할 수 있습니다. worktree를 넘기지 마세요.');
   const checked = checkVerification(specFile, targetDir);
   if (!isSha(checked.snapshot?.head) || !isSha(checked.current.head)) checked.issues.push('완료 전에 검수 HEAD와 현재 HEAD를 모두 확인해야 합니다');

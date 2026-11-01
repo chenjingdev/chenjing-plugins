@@ -89,10 +89,10 @@ const globRe = (glob) =>
       '$',
   );
 
-// 새 앱을 하위 폴더에 만들면 명세도 그 아래 docs/pact에 생긴다. worktree(.pact/…/wt) 안의 사본은 뺀다.
+// 새 앱을 하위 폴더에 만들면 명세도 그 아래 .pact/<run-id>/spec.md에 생긴다. worktree(.pact/…/wt) 안의 사본은 뺀다.
 const specFiles = (work) =>
   files(work)
-    .filter((f) => /(^|\/)docs\/pact\/[^/]+\.md$/.test(f) && !f.startsWith('.pact/'))
+    .filter((f) => /(^|\/)\.pact\/[^/]+\/spec\.md$/.test(f) && !/(^|\/)wt\//.test(f))
     .map((f) => path.join(work, f));
 
 // 사용자가 화면에서 보는 줄: 접힌 <details> 안은 빼고 여는 줄만 남긴다.

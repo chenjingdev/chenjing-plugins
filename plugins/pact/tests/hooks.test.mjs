@@ -1,5 +1,6 @@
 // 훅은 손으로 만든 입력 JSON을 stdin으로 넣고 자식 프로세스로 돌려 시험한다. 실제 Claude Code를 띄우는 시험은 검수 때 따로 한다(R18).
 // 모든 시험은 CLAUDE_PLUGIN_DATA와 HOME을 임시 폴더로 돌려서, 진짜 ~/.claude 밑에는 아무것도 쓰지 않는다.
+import { PACT_GITIGNORE } from '../scripts/paths.mjs';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, symlinkSync, utimesSync, rmSync, cpSync } from 'node:fs';
@@ -25,20 +26,20 @@ function world() {
   const root = mkdtempSync(path.join(tmpdir(), 'pact-hook-'));
   made.push(root);
   const project = path.join(root, 'project');
-  mkdirSync(path.join(project, 'docs', 'pact'), { recursive: true });
+  mkdirSync(path.join(project, '.pact', ID), { recursive: true });
   mkdirSync(path.join(root, 'home'));
   return {
     root, project, n: 0,
     home: path.join(root, 'home'),
     data: path.join(root, 'plugin-data'),
     run: path.join(project, '.pact', ID),
-    spec: path.join(project, 'docs', 'pact', `${ID}.md`),
+    spec: path.join(project, '.pact', ID, 'spec.md'),
   };
 }
 
 // 명세 파일. mtime은 초 단위 숫자.
 function writeSpec(project, id, { status = 'building', mtime } = {}) {
-  const file = path.join(project, 'docs', 'pact', `${id}.md`);
+  const file = path.join(project, '.pact', id, 'spec.md');
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, `---\npact: 2\ntopic: x\nstatus: ${status}\n---\n# x\n## 기능\n- F1 오늘 수업 출석 현황 보기 [사용자]\n## 공통 규칙\n`);
   if (mtime) utimesSync(file, mtime, mtime);
@@ -172,7 +173,7 @@ test('every tool the PreToolUse matcher lists is one touchesPact knows, so a new
     Agent: { subagent_type: 'pact:worker', prompt: 'x' },
     SendMessage: { to: 'agent-1', message: '`.pact/2026-10-29-x/tasks/1-report.md`를 고쳐 주세요' },
     Edit: { file_path: '/p/.pact/r/results.json' },
-    Write: { file_path: '/p/docs/pact/a.md' },
+    Write: { file_path: '/p/.pact/a/spec.md' },
     MultiEdit: { file_path: '/p/.pact/r/log/subagents.jsonl' },
     NotebookEdit: { notebook_path: '/p/.pact/r/a.ipynb' },
     Bash: { command: 'node /x/pact/scripts/spec.mjs status a.md' },
@@ -188,15 +189,15 @@ test('the agents the hook records are the agents the log module knows', () => {
 
 // ---------- 싼 검사 ----------
 
-test('touchesPact: pact agents, .pact/ and docs/pact/ paths and pact scripts are pact calls; everything else is not', () => {
+test('touchesPact: pact agents, .pact/ paths and pact scripts are pact calls; everything else is not, the old docs/pact/ place included', () => {
   const yes = [
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:spec-checker' } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:reviewer' } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:verifier' } },
     { tool_name: 'Write', tool_input: { file_path: '/p/.pact/r/results.json', content: 'x' } },
-    { tool_name: 'Edit', tool_input: { file_path: 'docs/pact/2026-10-29-x.md' } },
+    { tool_name: 'Edit', tool_input: { file_path: '.pact/2026-10-29-x/spec.md' } },
     { tool_name: 'Bash', tool_input: { command: 'cat .pact/r/log/subagents.jsonl' } },
-    { tool_name: 'Bash', tool_input: { command: 'echo x > docs/pact/a.md' } },
+    { tool_name: 'Bash', tool_input: { command: 'echo x > .pact/a/spec.md' } },
     { tool_name: 'Bash', tool_input: { command: 'node ~/.claude/plugins/cache/chenjing-plugins/pact/0.6.0/scripts/verification.mjs finish a.md .' } },
     { tool_name: 'Bash', tool_input: { command: 'cd /x && node plugins/pact/scripts/report.mjs /p/run' } },
     { tool_name: 'SendMessage', tool_input: { to: 'a', message: { text: 'pact:worker 야 고쳐라' } } },
@@ -213,6 +214,7 @@ test('touchesPact: pact agents, .pact/ and docs/pact/ paths and pact scripts are
     { tool_name: 'Agent', tool_input: { prompt: 'general purpose' } },
     { tool_name: 'Write', tool_input: { file_path: '/tmp/a.md', content: '.pact/와 docs/pact/를 설명하는 글' } },
     { tool_name: 'Edit', tool_input: { file_path: '/p/src/impact/index.js' } },
+    { tool_name: 'Edit', tool_input: { file_path: 'docs/pact/2026-10-29-x.md' } }, // 0.7.0 전의 자리: 이제 pact가 아니다
     { tool_name: 'Bash', tool_input: { command: 'ls -la && git status' } },
     { tool_name: 'Bash', tool_input: { command: 'npm test && node scripts/build.mjs' } },
     { tool_name: 'Bash', tool_input: { command: 'grep -r impact docs/impact' } },
@@ -1347,7 +1349,7 @@ test('(f) another run\'s reviewer id is found in the same project, and a SendMes
   assert.equal(concernOf(attached(pre(w, messageCall('agent-r4', '다시 봐 주세요.'))).message), '- 앞 판의 걱정', '그 reviewer가 있는 판의 worker 답을 쓴다');
   // pact 프로젝트가 아닌 곳: 읽거나 쓰지 않는다
   const plain = world();
-  rmSync(path.join(plain.project, 'docs'), { recursive: true });
+  rmSync(path.join(plain.project, '.pact'), { recursive: true });
   const before = tree(plain.root);
   passed(runHook(plain, { hook_event_name: 'PreToolUse', session_id: 's', cwd: plain.project, ...messageCall('agent-r4', '다시 봐 주세요.') }));
   assert.deepEqual(tree(plain.root), before);
@@ -1416,13 +1418,14 @@ test('(b) the task number comes from the report line, or from the brief when the
   assert.deepEqual(readRecords(w.run).map((r) => r.task), [2, 3, null]);
 });
 
-test('(b) the run-dir is created when it does not exist yet, together with .pact/.gitignore', () => {
+test('(b) the log/ folder is created when it does not exist yet, together with .pact/.gitignore', () => {
   const w = world();
   writeSpec(w.project, ID);
-  assert.equal(existsSync(path.join(w.project, '.pact')), false);
+  assert.equal(existsSync(path.join(w.project, '.pact', '.gitignore')), false);
+  assert.equal(existsSync(path.join(w.run, 'log')), false);
   stop(w, stopInput(w, 'pact:worker', `run-dir: ${w.run} , 작업 번호 1`, '끝'));
   assert.equal(readRecords(w.run).length, 1);
-  assert.equal(readFileSync(path.join(w.project, '.pact', '.gitignore'), 'utf8'), '*\n');
+  assert.equal(readFileSync(path.join(w.project, '.pact', '.gitignore'), 'utf8'), PACT_GITIGNORE);
 });
 
 // ---------- (c) spec-checker, reviewer, verifier ----------
@@ -1511,7 +1514,7 @@ test('(e) input that is not a JSON object ends with exit 0, no output and one li
     const lines = errorLines(w);
     assert.equal(lines.length, 1, `${JSON.stringify(raw)} → ${lines.join(' / ')}`);
     assert.match(lines[0], /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z \[stdin\] 입력이/);
-    assert.equal(existsSync(path.join(w.project, '.pact')), false);
+    assert.deepEqual(readdirSync(path.join(w.project, '.pact', ID)), [], '아무것도 쓰지 않는다');
   }
 });
 
@@ -1524,7 +1527,7 @@ test('(e) a transcript path that is not a file ends with exit 0 and one line in 
   assert.match(lines[0], /\[SubagentStop pact:worker\]/);
   assert.match(lines[0], /실행 폴더를 찾지 못/);
   assert.match(lines[0], /ENOENT/);
-  assert.equal(existsSync(path.join(w.project, '.pact')), false);
+  assert.deepEqual(readdirSync(path.join(w.project, '.pact', ID)), [], '아무것도 쓰지 않는다');
 
   // 대화 기록 경로 필드가 아예 없는 입력과 폴더인 경로도 같다
   const { agent_transcript_path: _omit, ...withoutPath } = stopInput(w, 'pact:reviewer', 'x', '판정');
@@ -1534,7 +1537,7 @@ test('(e) a transcript path that is not a file ends with exit 0 and one line in 
   assert.equal(lines.length, 3, lines.join('\n'));
   assert.match(lines[1], /agent_transcript_path/);
   assert.match(lines[2], /EISDIR/);
-  assert.equal(existsSync(path.join(w.project, '.pact')), false);
+  assert.deepEqual(readdirSync(path.join(w.project, '.pact', ID)), [], '아무것도 쓰지 않는다');
 });
 
 test('(e) when only the transcript is unreadable but the cwd project has a run in progress, the answer is still recorded', () => {
@@ -1602,7 +1605,8 @@ test('(f) with no path in the first instruction, the run of the most recently ch
 
   stop(w, stopInput(w, 'pact:worker', '경로가 하나도 없는 지시', '끝'));
   assert.deepEqual(readRecords(pick).map((r) => r.agent_type), ['pact:worker']);
-  assert.deepEqual(readdirSync(path.join(w.project, '.pact')).sort(), ['.gitignore', '2026-10-02-만드는-중'], '다른 판의 폴더는 생기지 않는다');
+  const logged = () => readdirSync(path.join(w.project, '.pact')).filter((name) => existsSync(path.join(w.project, '.pact', name, 'log'))).sort();
+  assert.deepEqual(logged(), ['2026-10-02-만드는-중'], '다른 판에는 기록이 생기지 않는다');
 
   // cwd가 프로젝트의 하위 폴더여도 같다
   const sub = path.join(w.project, 'plugins', 'pact');
@@ -1611,7 +1615,7 @@ test('(f) with no path in the first instruction, the run of the most recently ch
   assert.deepEqual(readRecords(pick).map((r) => r.agent_type), ['pact:worker', 'pact:reviewer']);
 
   // 더 최근에 바뀐 쪽이 이긴다
-  utimesSync(path.join(w.project, 'docs', 'pact', '2026-10-01-초안.md'), 5000, 5000);
+  utimesSync(path.join(w.project, '.pact', '2026-10-01-초안', 'spec.md'), 5000, 5000);
   stop(w, stopInput(w, 'pact:spec-checker', '경로 없음', '검수'));
   assert.deepEqual(readRecords(path.join(w.project, '.pact', '2026-10-01-초안')).map((r) => r.agent_type), ['pact:spec-checker']);
   assert.deepEqual(errorLines(w), []);
@@ -1625,9 +1629,10 @@ test('(f) when no run can be found by the path or by the cwd, nothing is recorde
   assert.equal(lines.length, 1, lines.join('\n'));
   assert.match(lines[0], /실행 폴더를 찾지 못/);
   assert.match(lines[0], new RegExp(w.project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.equal(existsSync(path.join(w.project, '.pact')), false);
+  assert.equal(existsSync(path.join(w.run, 'log')), false, '아무 판에도 기록하지 않는다');
+  assert.deepEqual(readdirSync(path.join(w.project, '.pact')), [ID]);
 
-  // 프로젝트가 아닌 곳(docs/pact/가 없다)
+  // 프로젝트가 아닌 곳(.pact/가 없다)
   const elsewhere = path.join(w.root, 'elsewhere');
   mkdirSync(elsewhere);
   stop(w, stopInput(w, 'pact:verifier', '경로 없는 지시', '통과', { cwd: elsewhere }));

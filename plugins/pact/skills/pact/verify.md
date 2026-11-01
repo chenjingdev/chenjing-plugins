@@ -17,7 +17,7 @@
 4. 띄운 개발 서버를 멈춘다.
 
 완료 검사가 막는 것은 아홉 가지다.
-- 빠진 시나리오: 기능마다 정상 흐름, 케이스마다 하나, 처음 쓰는 사람 2~4개
+- 빠진 시나리오: 기능마다 정상 흐름, 케이스마다 하나, 검수 기준(`A<n>`)마다 하나(`acceptance`), 처음 쓰는 사람 2~4개
 - 빠진 증거: 화면 단계의 스크린샷, 명령 단계의 출력과 종료 코드
 - 실패나 미검증으로 남은 결과
 - 이유(`decision`) 없이 남긴 의심
@@ -63,12 +63,12 @@ verify에서는 고치지 않는다. build로 되돌린다.
 실패와 미검증이 없고, 남긴 의심에 이유를 적었고, 보고서의 완료 검사가 통과했으면 여기로 온다. 묻지 않고 로컬에서 마무리한다. git으로 되돌릴 수 있는 일이다.
 
 1. worktree에 커밋하지 않은 변경이 있으면 커밋한다. snapshot 뒤에 코드를 고쳤으면 3으로 돌아가 다시 검수한다. 검수한 코드와 합치는 코드가 같아야 한다.
-2. 메인 작업 트리의 명세 파일(status, 결정 기록)을 먼저 커밋한다(`docs(pact): <주제> 진행 기록`).
-3. `node <pact>/scripts/git-state.mjs <프로젝트>`로 확인한다. 그래도 `changed`가 남아 있으면 사용자의 작업이니 목록을 알리고 멈춘다. `untracked`는 상관없다.
-4. `plan.md`에 적어 둔 시작 HEAD 뒤로 메인에 다른 소스 변경이 들어왔는지 본다: `git diff <시작 HEAD> HEAD --name-only -- . ':(exclude)docs/pact/**' ':(exclude).pact/**'`. 있으면 합치지 않고 알린다. 합친 결과를 다시 검수해야 한다.
+2. 메인 작업 트리의 이번 판 폴더(`.pact/<run-id>/`: 명세의 status와 결정 기록, 검수 기록, 결과, 보고서, 스크린샷)를 먼저 커밋한다(`git add .pact/<run-id> && git commit -m "docs(pact): <주제> 진행 기록"`).
+3. `node <pact>/scripts/git-state.mjs <프로젝트>`로 확인한다. 그래도 `changed`가 남아 있으면 사용자의 작업이니 목록을 알리고 멈춘다. `untracked`와 `pact`(다른 판의 `.pact/` 파일)는 상관없다.
+4. `plan.md`에 적어 둔 시작 HEAD 뒤로 메인에 다른 소스 변경이 들어왔는지 본다: `git diff <시작 HEAD> HEAD --name-only -- . ':(exclude).pact/**'`. 있으면 합치지 않고 알린다. 합친 결과를 다시 검수해야 한다.
 5. 메인 작업 트리에서 `git merge --no-ff --no-edit -m "merge(pact): <주제>" pact/<run-id>`로 합친다. 충돌이 나면 `git merge --abort`로 되돌리고 멈춰서 알린다.
-6. `node <pact>/scripts/verification.mjs finish <명세> <프로젝트>`를 돌린다. 검수한 코드가 그대로 합쳐졌는지와 완료 검사(results.json이 verifier가 끝난 그대로인지 포함)를 다시 보고, 통과하면 status를 `done`으로 바꾼다. 막히면 완료라고 말하지 않고 이유를 알린다. `done`은 이 명령만 바꾼다. 통과하면 명세 파일을 커밋한다(`docs(pact): <주제> 완료`).
-7. `git worktree remove <run-dir>/wt`, 그리고 `git branch -d pact/<run-id>`. worktree에 커밋하지 않은 파일이 있어 지우기가 거부되어도 `--force`는 쓰지 않는다. `git -C <run-dir>/wt status --porcelain`으로 남은 파일을 보고, 빌드 산출물이나 임시 파일이면 `<run-dir>/leftover/`로 옮긴 뒤 다시 지운다. 소스로 보이는 파일이면 목록을 알리고 멈춘다.
+6. `node <pact>/scripts/verification.mjs finish <명세> <프로젝트>`를 돌린다. 검수한 코드가 그대로 합쳐졌는지와 완료 검사(results.json이 verifier가 끝난 그대로인지 포함)를 다시 보고, 통과하면 status를 `done`으로 바꾼다. 막히면 완료라고 말하지 않고 이유를 알린다. `done`은 이 명령만 바꾼다. 통과하면 이번 판 폴더를 커밋한다(`docs(pact): <주제> 완료`).
+7. `git worktree remove <run-dir>/wt`, 그리고 `git branch -d pact/<run-id>`. worktree에 커밋하지 않은 파일이 있어 지우기가 거부되어도 `--force`는 쓰지 않는다. `git -C <run-dir>/wt status --porcelain`으로 남은 파일을 보고, 빌드 산출물이나 임시 파일이면 `<run-dir>/scratch/leftover/`로 옮긴 뒤 다시 지운다. 소스로 보이는 파일이면 목록을 알리고 멈춘다.
 
 ## 5. 알리기
 
