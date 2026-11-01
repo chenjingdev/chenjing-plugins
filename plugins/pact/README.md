@@ -79,7 +79,7 @@ RFP를 받은 수행사처럼 일하는 바이브 코딩 플러그인. 사용자
 | `.pact/<날짜>-<주제>/spec.md` | 명세. 한 화면 분량, 항목마다 `[사용자]`/`[AI 가정]`, 검수 기준, 결정 기록 |
 | `.pact/<날짜>-<주제>/spec.html` | 승인 질문 때 여는 명세 페이지. `spec.mjs html`이 명세에서 만들어 내고 git에 들어가지 않는다(`.pact/.gitignore`가 뺀다). 기록에서 온 줄과 다른 저장소 줄이 구분되어 보인다 |
 | `.pact/<날짜>-<주제>/report.html` | 검수 보고서. 맨 위에 결론과 할 일(명세 `## 확인 필요`의 검수 항목이 저절로 올라온다), 그다음 실패·의심·미검증과 명세와 다른 것, 승인 기록(승인인지 위임인지, 인용한 말, 승인 뒤 바뀐 `[사용자]` 줄). 통과·작업 기록·결정 기록은 접힘 |
-| `.pact/<날짜>-<주제>/` | 실행 폴더. 판 하나의 모든 것이 여기 있고 폴더 이름(날짜 포함)이 run-id다. 체크리스트, 스케치, 작업 보고(`tasks/`), 검수 기록(`verification.json`), 스크린샷(`shots/`)이 들어가고 git에 들어간다. `wt/`(worktree)와 `scratch/`(임시 파일)만 `.pact/.gitignore`가 뺀다 |
+| `.pact/<날짜>-<주제>/` | 실행 폴더. 판 하나의 모든 것이 여기 있고 폴더 이름(날짜 포함)이 run-id다. 체크리스트, 스케치, 작업 보고(`tasks/`), 검수 기록(`verification.json`), 스크린샷(`shots/`)이 들어가고 git에 들어간다. `wt/`(worktree)·`scratch/`(임시 파일)·`spec.html`(명세에서 다시 만드는 파일)만 `.pact/.gitignore`가 뺀다 |
 | `.pact/<날짜>-<주제>/log/subagents.jsonl` | 하위 에이전트가 끝날 때마다 훅이 마지막 답을 한 줄씩 덧붙인 기록. reviewer에게 붙일 worker 걱정도 여기서 읽는다 |
 | `.pact/<날짜>-<주제>/approvals.jsonl` | 승인·위임 기록. `spec.mjs approve`·`delegate`가 사용자 말을 대화 기록에서 찾아 맞춰 보고 한 줄씩 덧붙인다. 그때의 `[사용자]` 줄도 담는다 |
 | `.pact/<날짜>-<주제>/results.json` | 검수 결과. verifier만 쓴다. 앞 검수의 결과는 `snapshot`이 `results-round<n>.json`으로 남긴다 |

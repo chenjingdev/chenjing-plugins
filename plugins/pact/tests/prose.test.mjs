@@ -742,7 +742,7 @@ test('README and probe.md say that a delegation never takes an AskUserQuestion a
 test('0.7.0: the spec lives in .pact/<run-id>/spec.md, the folder goes into git, and nothing is written to docs/', () => {
   const skill = read('skills/pact/SKILL.md');
   assert.match(skill, /## 남기는 파일/);
-  assert.match(skill, /판 하나의 모든 것은 `<프로젝트>\/\.pact\/<run-id>\/` 한 폴더에 둔다\. 명세는 그 안의 `spec\.md`다\. 이 폴더는 git에 들어간다\. `wt\/`\(worktree\)와 `scratch\/`\(임시 파일\)만 `\.pact\/\.gitignore`가 뺀다/);
+  assert.match(skill, /판 하나의 모든 것은 `<프로젝트>\/\.pact\/<run-id>\/` 한 폴더에 둔다\. 명세는 그 안의 `spec\.md`다\. 이 폴더는 git에 들어간다\. `wt\/`\(worktree\)·`scratch\/`\(임시 파일\)·`spec\.html`\(명세에서 다시 만드는 파일\)만 `\.pact\/\.gitignore`가 뺀다/);
   assert.match(skill, /조사 메모, 사용자 원문 모음, 진행 메모 같은 파일을 실행 폴더에도 프로젝트에도 따로 만들지 않는다/);
   assert.match(skill, /대상 프로젝트의 `\.pact\/\*\/spec\.md`에서 status가 `done`이 아닌 명세를 찾는다/);
   assert.match(skill, /`docs\/pact\/\*\.md`가 있으면 0\.7\.0 전의 자리다\. `node <pact>\/scripts\/spec\.mjs migrate <프로젝트>`로/);
@@ -762,7 +762,7 @@ test('0.7.0: the spec lives in .pact/<run-id>/spec.md, the folder goes into git,
   for (const file of PROSE) assert.doesNotMatch(readFileSync(file, 'utf8').replace(/`docs\/pact\/\*\.md`가 있으면 0\.7\.0 전의 자리다[^\n]*/, ''), /docs\/pact/, `${rel(file)}: 옛 자리를 말하지 않는다`);
   const readme = read('README.md');
   assert.match(readme, /\| `\.pact\/<날짜>-<주제>\/spec\.md` \| 명세\./);
-  assert.match(readme, /`wt\/`\(worktree\)와 `scratch\/`\(임시 파일\)만 `\.pact\/\.gitignore`가 뺀다 \|/);
+  assert.match(readme, /`wt\/`\(worktree\)·`scratch\/`\(임시 파일\)·`spec\.html`\(명세에서 다시 만드는 파일\)만 `\.pact\/\.gitignore`가 뺀다 \|/);
   assert.doesNotMatch(readme, /스스로 git에서 빠진다/);
 });
 
@@ -807,13 +807,16 @@ test('0.8.0: probe reads the past through recall:recall as a received document, 
   assert.match(probe, /네 묶음\(예전 시도와 그 끝, 실패와 원인, 미룬 아이디어, 지키라는 규칙\)은 프로젝트 문서와 같은 받은 문서다/);
   assert.match(probe, /머리줄에 `못 읽음`이 있으면 그 출처를 한 줄로 알리고 진행한다/);
   assert.match(probe, /첫 메시지에 "기록 없음" 한 줄을 쓴다/);
+  assert.match(probe, /recall을 부르기 전에 무엇을 읽는지 한 줄 알린다/);
+  assert.ok(!probe.includes('1분쯤'), '도중에 알 수 없는 일은 쓰지 않는다');
   assert.match(probe, /recall 결과도 파일로 남기지 않는다/);
   assert.ok(!probe.includes('메모리 도구가 있으면'), '옛 문구: 메모리 도구로 찾는다');
   // 첫 메시지 2와 기능 지도, 체크리스트
   assert.match(probe, /"예전 시도와 그 끝" 묶음으로 지난번엔 어디까지 하고 왜 멈췄나를 쓴다\. 끝난 판이면 명세 요지와 남긴 할 일, 버린 판이면 까닭이다/);
   assert.match(probe, /`비슷한 기록`\(같은 주제인지 애매한 것\)은 따로 한 줄로 보이고, 다른 저장소·대화에서 온 것은 요지와 날짜만 쓴다/);
-  assert.match(probe, /"미룬 아이디어" 묶음의 항목은 `\(기록 M\/D\)`를 붙여 갈래에 섞는다\. 그 뒤 판이나 지금 코드에 이미 있는 것은 올리지 않는다/);
-  assert.match(probe, /`suggested: true`에 `reason`을 `기록 M\/D: <요지>`로 쓴다/);
+  assert.match(probe, /"미룬 아이디어" 묶음의 항목은 `\(기록 M\/D\)`\(다른 저장소면 `\(기록 M\/D <저장소>\)`\)를 붙여 갈래에 섞는다\. 그 뒤 판이나 지금 코드에 이미 있는 것은 올리지 않는다/);
+  assert.match(probe, /예전 명세 `## 하지 않는 것`의 `기록에서 뺌` 줄에 든 것은 지도에도 명세에도 다시 올리지 않는다/);
+  assert.match(probe, /고르지 않은 기록 아이디어는 `suggested: true`에 `reason`을 `기록 M\/D: <요지>`로 쓴다/);
 });
 
 test('0.8.0: probe 5 teaches the source tags, failures as acceptance items, the rules that reach the result, the newest of two decisions, and "기록에서 뺌"', () => {
@@ -826,39 +829,44 @@ test('0.8.0: probe 5 teaches the source tags, failures as acceptance items, the 
   assert.match(probe, /"지키라는 규칙" 묶음에서 만들 결과물에 닿는 것은 묻지 않고 여기에 넣는다\. 답장 말투 같은 AI 쪽 규칙은 넣지 않는다/);
   // 6: spec-checker에 넘기는 요구 출처와 예전 실패, 알림 받기
   assert.ok(probe.includes('`(기록 M/D 사용자 원문)`·`(기록 M/D AI 보고)`'));
-  assert.match(probe, /"실패와 원인" 묶음은 `예전 실패` 목록으로 같이 넘긴다/);
-  assert.match(probe, /`예전 실패 못 막음`\)이 오면 제안한 문구를 `## 검수 기준`에 A 항목으로 더한다/);
+  assert.match(probe, /"실패와 원인" 묶음은 날짜와 저장소 이름이 붙은 채로 `예전 실패` 목록으로 같이 넘긴다/);
+  assert.ok(!probe.includes('케이스는 결과를 바꾸는 것만 더한다'), '바로 위 "결과를 바꾸는 것만 펼친다"와 같은 말');
+  assert.match(probe, /기록에서 온 줄에 답한 것이면 날짜 태그 대신 `\[사용자: 검수 n\]`만 단다\(지금 한 말이 우선이라 날짜는 떨어진다\)/);
+  assert.match(probe, /`예전 실패 못 막음`\)이 오면 제안한 문구에 그 실패의 날짜 태그\(`\[AI 가정: 기록 M\/D\]`, 다른 저장소면 `\[AI 가정: 기록 M\/D <저장소>\]`\)를 달아 `## 검수 기준`에 더한다/);
   // 조사 메모 금지는 그대로
   assert.match(probe, /조사 메모, 사용자 원문 모음 같은 파일은 만들지 않는다/);
 });
 
 test('0.8.0: the approval question opens the spec as an HTML page after saying so in the chat, and shows the record and other-repo lines apart', () => {
   const probe = read('skills/pact/probe.md');
-  assert.match(probe, /`node <pact>\/scripts\/spec\.mjs html <명세>`로 `<run-dir>\/spec\.html`을 만들어 `open`으로 연다/);
-  assert.match(probe, /채팅에는 페이지를 열었다는 것을 먼저 쓴다\. 말없이 열린 페이지는 사용자가 알아채지 못한다/);
+  assert.match(probe, /`node <pact>\/scripts\/spec\.mjs html <명세>`로 `<run-dir>\/spec\.html`을 만들고, `open`으로 열기 전에 채팅으로 알린다\(무슨 페이지인지, 채팅으로 답해도 된다는 것\)\. 말없이 열린 페이지는 사용자가 알아채지 못한다/);
+  assert.match(probe, /wt\/`\(worktree\)·`scratch\/`\(임시 파일\)·`spec\.html`\(명세에서 다시 만드는 파일\)만 `\.pact\/\.gitignore`가 뺀다/);
   assert.match(probe, /기록·다른 저장소·대화에서 온 줄은 따로 보인다/);
   assert.ok(probe.indexOf('spec.mjs html') < probe.indexOf('승인을 한 번 받는다'));
   assert.match(probe, /이 질문은 spec-checker가 끝난 뒤에 한다/);
   const skill = read('skills/pact/SKILL.md');
   assert.match(skill, /recall 결과는 파일로 남기지 않는다/);
-  assert.match(skill, /`spec\.html`은 `spec\.mjs html`이 명세에서 만들어 승인 질문 때 열어 주는 보기용 페이지라, `\.pact\/\.gitignore`가 따로 뺀다/);
+  assert.ok(!skill.includes('따로 뺀다'), 'spec.html은 첫 문단의 목록에 든다');
 });
 
 test('0.8.0: spec-checker counts a record request as grounded and checks the past failures against the A items, and still ends with the one-round line', () => {
   const checker = read('agents/spec-checker.md');
   assert.match(checker, /예전 기록에서 온 요구는 `\(기록 M\/D 사용자 원문\)`·`\(기록 M\/D AI 보고\)`다/);
   assert.match(checker, /- `예전 실패` 목록\(없을 수 있다\)/);
-  assert.match(checker, /기록에서 온 요구도 근거가 있는 요구다\. `\[사용자: M\/D …\]` 태그 줄을 근거 없음으로 짚지 않는다/);
+  assert.match(checker, /요구 목록에 `\(기록 M\/D …\)` 출처로 있는 요구에 닿는 `\[사용자: M\/D …\]` 줄은 근거가 있는 것으로 친다/);
+  assert.match(checker, /줄마다 날짜\(다른 저장소면 저장소 이름\)가 붙어 있다/);
   assert.match(checker, /\*\*\(e\) 예전 실패 대조\.\*\*/);
-  assert.match(checker, /`예전 실패 못 막음 — <요지> \(넣을 A 문구: …\)`/);
-  assert.match(checker, /^- 예전 실패 못 막음 — <요지> \(넣을 A 문구: …\)$/m, '결과 형식 블록에도 그 줄 꼴이 있다');
+  assert.match(checker, /`예전 실패 못 막음 — <요지> \(M\/D\[ 저장소\]\) \(넣을 A 문구: …\)`/);
+  assert.match(checker, /^- 예전 실패 못 막음 — <요지> \(M\/D\[ 저장소\]\) \(넣을 A 문구: …\)$/m, '결과 형식 블록에도 그 줄 꼴이 있다');
   assert.ok(checker.indexOf('(e) 예전 실패 대조') < checker.indexOf('**누구에게 물을지.**'));
   assert.equal(checker.trimEnd().split('\n').at(-1), '질문 라운드는 이것 한 번뿐입니다.');
 });
 
 test('0.8.0: the verifier replays a dated failure as its own scenario and leaves it unverified, with the reason, when the result cannot show it', () => {
   const verifier = read('agents/verifier.md');
-  assert.match(verifier, /태그에 날짜가 있는 기준\(`\[사용자: 10\/18\]`, `\[AI 가정: 기록 10\/11\]`처럼 기록에서 온 실패\)은 그 실패 장면을 그대로 재현하는 시나리오로 돌린다/);
+  assert.match(verifier, /기록에서 온 실패를 막는 기준\(태그에 날짜가 있고, 어떤 실패가 다시 일어나지 않는다고 적힌 것\./);
+  assert.match(verifier, /은 그 실패 장면을 그대로 재현하는 시나리오로 돌린다/);
+  assert.match(verifier, /날짜가 있어도 통과선 같은 다른 기준은 위처럼 보통 시나리오로 돌린다/);
   assert.match(verifier, /지금 결과물에서 재현할 수 없으면 `unverified`로 두고 까닭을 `summary`에 적는다/);
   assert.match(verifier, /- 검수 기준\(`A<n>`\)마다 1개: `"kind": "acceptance"`, `items`에 그 번호/);
 });
