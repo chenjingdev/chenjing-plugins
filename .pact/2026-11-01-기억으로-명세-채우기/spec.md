@@ -1,7 +1,7 @@
 ---
 pact: 3
 topic: 기억으로 명세 채우기
-status: verifying
+status: done
 created: 2026-11-01
 ---
 # 기억으로 명세 채우기
