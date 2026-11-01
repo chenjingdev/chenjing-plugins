@@ -50,6 +50,8 @@ const shape = (it) => ({
   path: it.path,
 });
 
+const SHORT_CUT = 8;
+
 export async function run({ words, project, env = process.env, sources = SOURCES }) {
   const started = Date.now();
   const settled = await Promise.allSettled(
@@ -68,7 +70,9 @@ export async function run({ words, project, env = process.env, sources = SOURCES
   const pool = { attempts: [], failures: [], ideas: [], rules: [] };
   const removed = [];
   for (const it of read.flatMap((v) => v.items)) {
-    if (cuts.some((cut) => keyOf(it.text).includes(cut))) removed.push(it);
+    const key = keyOf(it.text);
+    // 짧은 요지(`팀원 기억`)를 포함으로 걸면 그 낱말이 든 실패·규칙 줄까지 지운다
+    if (cuts.some((cut) => (cut.length < SHORT_CUT ? key === cut : key.includes(cut)))) removed.push(it);
     else pool[it.bucket]?.push(it);
   }
   const buckets = {};

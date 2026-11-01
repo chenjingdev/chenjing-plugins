@@ -132,26 +132,30 @@ test('render: 기억 서버 항목의 출처 이름은 사용자 말·AI 보고�
   assert.ok(lines.includes('- (10/9 · 사용자 말) 말 요지'));
 });
 
-test('run: 출처가 준 excluded와 같거나 그것을 포함하는 요지는 공백·문장부호를 뺀 뒤 비교해 네 묶음에서 빠지고, 빠진 항목은 result.excluded에 남는다', async () => {
+test('run: 출처가 준 excluded는 공백·문장부호를 뺀 뒤 비교해 네 묶음에서 빠진다 — 짧은 요지는 같을 때만, 긴 요지는 포함해도 — 빠진 항목은 result.excluded에 남는다', async () => {
   const items = [
     item({ bucket: 'ideas', text: '팀원 기억', overlap: 3 }),
     item({ bucket: 'ideas', text: '  팀원,  기억! ', overlap: 3, repo: 'b' }),
-    item({ bucket: 'failures', text: '실패: 팀원 기억(보류) — 까닭', overlap: 3 }),
+    item({ bucket: 'failures', text: '실패: 팀원 기억 서버를 열람 요청으로 붙이기 — 까닭', overlap: 3 }),
+    item({ bucket: 'failures', text: '실패: 체크리스트 페이지가 말없이 뜸(10/11) — 까닭', overlap: 3 }),
     item({ bucket: 'ideas', text: '팀원', overlap: 3 }),
     item({ bucket: 'ideas', text: '다른 아이디어', overlap: 2 }),
     item({ bucket: 'rules', text: '팀원 기억을 늘 먼저 본다', overlap: 1, source: 'memory', repo: null, same_repo: true }),
   ];
-  const cut = [{ text: '팀원 기억…', date: '11/2', path: '/spec' }, { text: '…', date: '11/2', path: '/spec' }];
+  const cut = [
+    { text: '팀원 기억…', date: '11/2', path: '/spec' },
+    { text: '체크리스트 페이지가 말없이 뜸', date: '11/2', path: '/spec' },
+    { text: '…', date: '11/2', path: '/spec' },
+  ];
   const sources = [fake('가짜', items), { name: '뺌', collect: async () => ({ items: [], excluded: cut }) }];
   const r = await run({ words: ['주제'], project: '/me', env: {}, sources });
   assert.deepEqual(r.buckets.ideas.map((i) => i.text), ['팀원', '다른 아이디어']);
-  assert.deepEqual(r.buckets.failures, []);
-  assert.deepEqual(r.buckets.rules, []);
+  assert.deepEqual(r.buckets.failures.map((i) => i.text), ['실패: 팀원 기억 서버를 열람 요청으로 붙이기 — 까닭']);
+  assert.deepEqual(r.buckets.rules.map((i) => i.text), ['팀원 기억을 늘 먼저 본다']);
   assert.deepEqual(r.excluded.map((i) => [i.bucket, i.text]), [
     ['ideas', '팀원 기억'],
     ['ideas', '팀원, 기억!'],
-    ['failures', '실패: 팀원 기억(보류) — 까닭'],
-    ['rules', '팀원 기억을 늘 먼저 본다'],
+    ['failures', '실패: 체크리스트 페이지가 말없이 뜸(10/11) — 까닭'],
   ]);
   assert.deepEqual(Object.keys(r.excluded[0]), ['bucket', 'date', 'source', 'repo', 'other_repo', 'similar', 'text', 'path']);
   assert.deepEqual(Object.keys(r), ['topic', 'elapsed_ms', 'sources', 'buckets', 'excluded']);
