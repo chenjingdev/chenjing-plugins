@@ -638,10 +638,10 @@ test('the refusals the scripts and the hook print tell only the standard-input w
   assert.match(approval, /const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';/);
 });
 
-test('plugin.json is at 0.7.0', () => {
+test('plugin.json is at 0.8.0', () => {
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
   assert.equal(manifest.name, 'pact');
-  assert.equal(manifest.version, '0.7.0');
+  assert.equal(manifest.version, '0.8.0');
 });
 
 test('the README lists what 0.6.0 changed in one short section, and says how the hook hands the worker worries to the reviewer, in the brief and in a message', () => {
@@ -795,4 +795,83 @@ test('0.7.0: the spec is an RFP — what, why, limits and acceptance criteria; h
   assert.equal(bullets.length, names.length, section);
   names.forEach((name, i) => assert.ok(bullets[i].startsWith(`- ${name}: `), `${i + 1}번째는 ${name}: ${bullets[i]}`));
   assert.ok(readme.indexOf('## 0.7.0에서 바뀐 것') < readme.indexOf('## 0.6.0에서 바뀐 것'));
+});
+
+// ---------- 0.8.0: recall 스킬로 기록 읽기, 출처 태그, 실패 → 검수 기준, 명세 HTML ----------
+
+test('0.8.0: probe reads the past through recall:recall as a received document, says "기록 없음" when there is none, and keeps the result out of files', () => {
+  const probe = read('skills/pact/probe.md');
+  assert.ok(probe.includes('`recall:recall`'));
+  assert.match(probe, /Skill 도구 목록에 `recall:recall`이 있으면 불러서/);
+  assert.match(probe, /주제 낱말 2~5개\(결과물 이름과 기능 낱말, 조사 뗌\)와 프로젝트 절대 경로를 넘긴다/);
+  assert.match(probe, /네 묶음\(예전 시도와 그 끝, 실패와 원인, 미룬 아이디어, 지키라는 규칙\)은 프로젝트 문서와 같은 받은 문서다/);
+  assert.match(probe, /머리줄에 `못 읽음`이 있으면 그 출처를 한 줄로 알리고 진행한다/);
+  assert.match(probe, /첫 메시지에 "기록 없음" 한 줄을 쓴다/);
+  assert.match(probe, /recall 결과도 파일로 남기지 않는다/);
+  assert.ok(!probe.includes('메모리 도구가 있으면'), '옛 문구: 메모리 도구로 찾는다');
+  // 첫 메시지 2와 기능 지도, 체크리스트
+  assert.match(probe, /"예전 시도와 그 끝" 묶음으로 지난번엔 어디까지 하고 왜 멈췄나를 쓴다\. 끝난 판이면 명세 요지와 남긴 할 일, 버린 판이면 까닭이다/);
+  assert.match(probe, /`비슷한 기록`\(같은 주제인지 애매한 것\)은 따로 한 줄로 보이고, 다른 저장소·대화에서 온 것은 요지와 날짜만 쓴다/);
+  assert.match(probe, /"미룬 아이디어" 묶음의 항목은 `\(기록 M\/D\)`를 붙여 갈래에 섞는다\. 그 뒤 판이나 지금 코드에 이미 있는 것은 올리지 않는다/);
+  assert.match(probe, /`suggested: true`에 `reason`을 `기록 M\/D: <요지>`로 쓴다/);
+});
+
+test('0.8.0: probe 5 teaches the source tags, failures as acceptance items, the rules that reach the result, the newest of two decisions, and "기록에서 뺌"', () => {
+  const probe = read('skills/pact/probe.md');
+  for (const s of ['`[사용자: 10/18]`', '`[사용자: 10/18 alibaba]`', '`[AI 가정: 기록 10/11]`', '`[AI 가정: 기록 10/11 alibaba]`', '`YYYY/M/D`']) assert.ok(probe.includes(s), s);
+  assert.match(probe, /기록에서 온 `\[사용자: …\]` 줄도 승인 때 `\[사용자\]` 줄로 기록되니 바꾸려면 묻는다/);
+  assert.match(probe, /같은 일을 두 번 다르게 정했으면 최신 것만 쓴다/);
+  assert.ok(probe.includes('`- 기록에서 뺌: <요지> (M/D)`'));
+  assert.match(probe, /"실패와 원인" 묶음에서 같은 주제·기능의 실패는 하나마다 `## 검수 기준`의 A 항목 하나로 적는다/);
+  assert.match(probe, /"지키라는 규칙" 묶음에서 만들 결과물에 닿는 것은 묻지 않고 여기에 넣는다\. 답장 말투 같은 AI 쪽 규칙은 넣지 않는다/);
+  // 6: spec-checker에 넘기는 요구 출처와 예전 실패, 알림 받기
+  assert.ok(probe.includes('`(기록 M/D 사용자 원문)`·`(기록 M/D AI 보고)`'));
+  assert.match(probe, /"실패와 원인" 묶음은 `예전 실패` 목록으로 같이 넘긴다/);
+  assert.match(probe, /`예전 실패 못 막음`\)이 오면 제안한 문구를 `## 검수 기준`에 A 항목으로 더한다/);
+  // 조사 메모 금지는 그대로
+  assert.match(probe, /조사 메모, 사용자 원문 모음 같은 파일은 만들지 않는다/);
+});
+
+test('0.8.0: the approval question opens the spec as an HTML page after saying so in the chat, and shows the record and other-repo lines apart', () => {
+  const probe = read('skills/pact/probe.md');
+  assert.match(probe, /`node <pact>\/scripts\/spec\.mjs html <명세>`로 `<run-dir>\/spec\.html`을 만들어 `open`으로 연다/);
+  assert.match(probe, /채팅에는 페이지를 열었다는 것을 먼저 쓴다\. 말없이 열린 페이지는 사용자가 알아채지 못한다/);
+  assert.match(probe, /기록·다른 저장소·대화에서 온 줄은 따로 보인다/);
+  assert.ok(probe.indexOf('spec.mjs html') < probe.indexOf('승인을 한 번 받는다'));
+  assert.match(probe, /이 질문은 spec-checker가 끝난 뒤에 한다/);
+  const skill = read('skills/pact/SKILL.md');
+  assert.match(skill, /recall 결과는 파일로 남기지 않는다/);
+  assert.match(skill, /`spec\.html`은 `spec\.mjs html`이 명세에서 만들어 승인 질문 때 열어 주는 보기용 페이지라, `\.pact\/\.gitignore`가 따로 뺀다/);
+});
+
+test('0.8.0: spec-checker counts a record request as grounded and checks the past failures against the A items, and still ends with the one-round line', () => {
+  const checker = read('agents/spec-checker.md');
+  assert.match(checker, /예전 기록에서 온 요구는 `\(기록 M\/D 사용자 원문\)`·`\(기록 M\/D AI 보고\)`다/);
+  assert.match(checker, /- `예전 실패` 목록\(없을 수 있다\)/);
+  assert.match(checker, /기록에서 온 요구도 근거가 있는 요구다\. `\[사용자: M\/D …\]` 태그 줄을 근거 없음으로 짚지 않는다/);
+  assert.match(checker, /\*\*\(e\) 예전 실패 대조\.\*\*/);
+  assert.match(checker, /`예전 실패 못 막음 — <요지> \(넣을 A 문구: …\)`/);
+  assert.match(checker, /^- 예전 실패 못 막음 — <요지> \(넣을 A 문구: …\)$/m, '결과 형식 블록에도 그 줄 꼴이 있다');
+  assert.ok(checker.indexOf('(e) 예전 실패 대조') < checker.indexOf('**누구에게 물을지.**'));
+  assert.equal(checker.trimEnd().split('\n').at(-1), '질문 라운드는 이것 한 번뿐입니다.');
+});
+
+test('0.8.0: the verifier replays a dated failure as its own scenario and leaves it unverified, with the reason, when the result cannot show it', () => {
+  const verifier = read('agents/verifier.md');
+  assert.match(verifier, /태그에 날짜가 있는 기준\(`\[사용자: 10\/18\]`, `\[AI 가정: 기록 10\/11\]`처럼 기록에서 온 실패\)은 그 실패 장면을 그대로 재현하는 시나리오로 돌린다/);
+  assert.match(verifier, /지금 결과물에서 재현할 수 없으면 `unverified`로 두고 까닭을 `summary`에 적는다/);
+  assert.match(verifier, /- 검수 기준\(`A<n>`\)마다 1개: `"kind": "acceptance"`, `items`에 그 번호/);
+});
+
+test('0.8.0: the README shows recall in the flow, lists spec.html as a made-and-ignored file, and has a 0.8.0 section above 0.7.0 in the same shape', () => {
+  const readme = read('README.md');
+  assert.match(readme, /│   1\. 넓게 펼치기   recall로 예전 기록을 읽고, 기능 지도/);
+  assert.match(readme, /\| `\.pact\/<날짜>-<주제>\/spec\.html` \| 승인 질문 때 여는 명세 페이지\. `spec\.mjs html`이 명세에서 만들어 내고 git에 들어가지 않는다/);
+  const section = /^## 0\.8\.0에서 바뀐 것\n([\s\S]*?)(?=\n## )/m.exec(readme)?.[1] ?? '';
+  const bullets = section.split('\n').filter((line) => line.startsWith('- '));
+  const names = ['recall 스킬로 기록 읽기', '출처 태그', '실패 → 검수 기준', '명세 HTML'];
+  assert.equal(bullets.length, names.length, section);
+  names.forEach((name, i) => assert.ok(bullets[i].startsWith(`- ${name}: `), `${i + 1}번째는 ${name}: ${bullets[i]}`));
+  assert.ok(readme.indexOf('## 0.8.0에서 바뀐 것') < readme.indexOf('## 0.7.0에서 바뀐 것'));
+  assert.ok(!/\/recall/.test(section), '사용자가 외울 새 슬래시 명령을 적지 않는다');
 });
