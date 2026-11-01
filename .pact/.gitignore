@@ -8,3 +8,4 @@
 */verify-*/
 node_modules/
 .DS_Store
+*/spec.html

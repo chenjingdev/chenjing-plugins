@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>기억으로 명세 채우기 검수 보고서</title>
+<style>
+  body { font: 15px/1.6 system-ui, sans-serif; max-width: 960px; margin: 24px auto; padding: 0 16px; color: #222; background: #fff; }
+  h1 { font-size: 24px; margin: 0 0 12px; }
+  h2 { font-size: 18px; margin: 28px 0 8px; }
+  .top { background: #f6f6f3; border-radius: 10px; padding: 14px 18px; }
+  .top h2 { font-size: 15px; margin: 12px 0 2px; }
+  .top ul { margin: 0; }
+  .headline { font-size: 18px; font-weight: 600; margin: 0; }
+  .counts { color: #555; margin: 10px 0 0; }
+  .sc { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+  .sc.fail { border-color: #d33; } .sc.doubt, .sc.unverified { border-color: #d90; }
+  details.sc { padding: 8px 14px; margin: 6px 0; }
+  .sc h3 { font-size: 16px; margin: 0 0 6px; }
+  .badge { font-size: 13px; font-weight: normal; padding: 2px 8px; border-radius: 10px; background: #eee; }
+  .fail .badge { background: #fdd; } .doubt .badge, .unverified .badge { background: #fec; }
+  .decision { background: #f1f5fb; border-left: 3px solid #69c; padding: 6px 10px; }
+  .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 10px 0; }
+  figure { margin: 0; }
+  figcaption { font-size: 13px; color: #555; margin-top: 4px; }
+  img { width: 100%; border: 1px solid #ccc; border-radius: 4px; }
+  summary { cursor: pointer; }
+  .more > summary { color: #666; font-size: 14px; }
+  .meta { color: #666; font-size: 13px; margin: 6px 0 0; }
+  pre { background: #f5f5f5; padding: 8px; white-space: pre-wrap; word-break: break-all; }
+  .missing { color: #a15c00; }
+  .tag { font-size: 12px; padding: 1px 6px; border-radius: 6px; background: #eee; margin-right: 4px; }
+  .quote { background: #f1f5fb; border-left: 3px solid #69c; padding: 6px 10px; white-space: pre-wrap; }
+  .changes { margin: 4px 0 8px; } del { color: #a33; } ins { color: #2a6a2a; text-decoration: none; }
+</style></head><body>
+<h1>기억으로 명세 채우기 검수 보고서</h1>
+<section class="top">
+
+
+
+
+
+<p class="headline">기억을 읽어 명세를 채우는 recall 플러그인과 pact 0.8.0을 만들었다. 코드 확인과 실제 대화 시험(깨끗한 프로필에서 claude -p, 장면 10개·5회씩)을 모두 통과했고, 의심 3개는 이유를 적고 남겼다.</p>
+<h2>할 일</h2><ul><li>이 기계의 기억 서버 접속 토큰(HONCHO_MCP_BEARER_TOKEN)이 만드는 중에 하위 에이전트의 도구 출력에 한 번 찍혔습니다. 코드·기록·커밋에는 없지만 대화 기록이 기억 서버로 들어가니, 돌려 두는 쪽을 추천합니다(로컬 서버용 토큰).</li><li>합친 뒤 이 기계에서 바로 쓰려면 설치 캐시(~/.claude/plugins/cache/chenjing-plugins/pact/0.6.0)를 저장소와 다시 맞추거나 push 뒤 플러그인 업데이트를 기다려야 합니다. recall 플러그인은 마켓플레이스에서 새로 설치해야 합니다.</li><li>다음 판 후보: pact build를 세션 오케스트레이션으로(서브에이전트 대신 cmux 세션 + SendMessage, Khala가 세션은 기억으로 남기지만 서브에이전트는 안 남김), worker·verifier 모델을 세션 모델 따라가기(model: inherit)로, 하위 에이전트 effort 역할별로, 팀원 기억 뒤지기, 코드 위생 스킬(쓸데없는 예외 처리·주석 지우기), recall 요지 품질(잘린 AI 대답), 주제 낱말 없을 때 안내, A3·A4를 조건만 남기게 고쳐 쓰기, verifier가 바꿔 돌린 사실을 note가 아니라 summary에 적게 하기, verifier가 pact 하위 에이전트를 직접 부르면 이번 판 log/에 섞이는 문제.</li></ul>
+<p class="counts">시나리오 20개 · 통과 17 · 실패 0 · 의심 3</p>
+
+</section>
+<h2>실패·의심</h2>
+<article class="sc doubt">
+<h3><span class="badge">의심</span> 실제 기록과 기억 서버에 &#39;선택지 질문&#39;을 물어 네 묶음 받기</h3>
+<p>예전 시도·실패·미룬 아이디어·규칙 네 묶음이 날짜와 출처(대화, pact 기록, 메모리 파일)와 함께 1초 안에 나오고 한 줄은 120자를 넘지 않는다. 앞 판과 같이 앞뒤 없이 잘린 AI 대답(&quot;네, 사라졌어요…&quot;, &quot;알았어. … 갈래를 다시 펼칠게&quot;)이 &#39;예전 시도&#39;·&#39;실패&#39; 칸에 섞여 나와 첫 메시지가 어수선해질 수 있어 의심으로 둔다.</p>
+<p class="decision">기억 서버에서 온 AI 보고 요지가 앞뒤 없이 잘려 보이는 줄이 섞입니다. 상태 머리말은 벗기게 고쳤고, 나머지는 요지 한 줄만 쓰는 규칙(원문 금지) 때문에 생기는 것이라 이번 판에서는 둡니다. 다음 판에서 요지를 첫 문장 대신 &#39;결론 문장&#39;으로 고르는 쪽을 봅니다.</p>
+<div class="shots"><figure><a href="shots/S1-r2-1.jpg" target="_blank"><img src="shots/S1-r2-1.jpg" alt="이 컴퓨터의 실제 기록과 기억 서버에 &#39;선택지 질문&#39;으로 기록 찾기를 다시 돌린다" loading="lazy"></a><figcaption>1. 이 컴퓨터의 실제 기록과 기억 서버에 &#39;선택지 질문&#39;으로 기록 찾기를 다시 돌린다</figcaption></figure><figure><a href="shots/S1-r2-2.jpg" target="_blank"><img src="shots/S1-r2-2.jpg" alt="같은 조회를 기계가 읽는 꼴(JSON)로 받아 칸 이름과 줄 길이를 센다" loading="lazy"></a><figcaption>2. 같은 조회를 기계가 읽는 꼴(JSON)로 받아 칸 이름과 줄 길이를 센다</figcaption></figure><figure><a href="shots/S1-r2-3.jpg" target="_blank"><img src="shots/S1-r2-3.jpg" alt="기록 폴더를 빈 폴더로 바꿔(~/dev 밖에서 쓰는 경우) 같은 조회를 돌린다" loading="lazy"></a><figcaption>3. 기록 폴더를 빈 폴더로 바꿔(~/dev 밖에서 쓰는 경우) 같은 조회를 돌린다</figcaption></figure><figure><a href="shots/S1-r2-4.jpg" target="_blank"><img src="shots/S1-r2-4.jpg" alt="작성자가 만든 자동 시험(pact와 recall)을 모두 돌린다" loading="lazy"></a><figcaption>4. 작성자가 만든 자동 시험(pact와 recall)을 모두 돌린다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S1 · F1 · 앞 판에서 확인</p>
+<p>[다시 검수] 고친 recall(HEAD f7f0e8e)로 다시 돌림. 새 &#39;일부만 읽음&#39; 줄은 이 조회에서 안 나옴(세 요청 모두 성공). 종료 코드 0, --json 칸 topic/elapsed_ms/sources/buckets/excluded 그대로, 네 묶음 가장 긴 줄 120자 이하. 단위 시험 pact 554·recall 74 통과. 의심 이유는 앞 판과 같다: 묶음 분류가 거칠어 맥락 없는 AI 문장이 섞이는 것을 이번 고침이 건드리지 않았다(R3의 &#39;느슨하면 상관없는 기록으로 찬다&#39; 쪽). &#39;말로도 부른다&#39;는 SKILL.md description에 켜지는 말이 있는 것까지만 확인(실제 호출은 로그인 때문에 못 봄).</p>
+<ol><li><p>이 컴퓨터의 실제 기록과 기억 서버에 &#39;선택지 질문&#39;으로 기록 찾기를 다시 돌린다</p><pre>recall: pact 선택지 질문 — 출처 3/3 · 613ms
+
+## 예전 시도와 그 끝
+- (10/18 · AI 보고) 다른 세션에서 pact가 낸 질문과 선택지를 모아 보고 있어요. 파일 이름 처리에서 한 번 꼬여서 다시 뽑을게요.
+- (10/11 · AI 보고) 네, 사라졌어요. 한 번에 빠진 게 아니라 두 단계를 거쳐 빠졌고, pact를 만들 때 제가 이걸 짚지 않고 넘어갔어요.
+- (11/1 · pact 기록 chenjing-plugins) 기억으로 명세 채우기 — 멈춘 채 남음(status verifying) · 결정 14건 — 기억 서버(Honcho)의 대화와 이 기계의 pact 기록이 쌓여 있는데 probe가 읽지 않아 같은 실패를 되풀이하고 아…
+- (10/18 · 사용자 말) pact 다른세션에서 쓰인거 보면 선택지 여러개 주는데 의미없는 선택지가 너무 많네;
+- (11/1 · 메모리 파일) pact로 pact를 고칠 때 훅은 설치 캐시(~/.claude/plugins/cache/chenjing-plugins/pact/&lt;판&gt;)의 옛 코드가 돈다 — 저장소 판과 어긋나면 막히니 캐시를 저장소와 맞춘다
+- (10/29 · pact 기록 chenjing-plugins) pact를 지시 대신 코드와 기록으로 지키기 — 완료 · 결정 87건 · pact 0.6.0을 다 만들었고 검수 23개가 모두 통과했다. 승인 없이 만들기 시작하기, 검수 결과에 손대기 같은 실수는 이제 지시가 아…
+- (10/25 · 메모리 파일) pact 하위 에이전트의 effort를 고정값이 아니라 일의 종류·크기에 따라 동적으로 고르려 한다. 그 전에 alibaba의 일 측정(Jev의 모델·effort 선택과 일별 토큰·시간 기록)을 먼저 마무리하고 응…
+- (10/11 · pact 기록 chenjing-plugins) 행동 시험 결과판 — 완료 · 결정 7건 — pact 지침을 고칠 때 어느 장면의 어느 검사가 왜 실패했는지 대화 원문까지 바로 보고, 돌릴 때마다 결과가 사라지지 않고 쌓이게 한다. pact를 처음부터 끝까지 돌…
+
+## 실패와 원인
+- (11/1 · AI 보고) 알았어. pact가 너한테 해 주는 일로 갈래를 다시 펼칠게.
+- (11/1 · pact 기록 chenjing-plugins) 의심: 실제 기록과 기억 서버에 &#39;선택지 질문&#39;을 물어 네 묶음 받기 — 예전 시도·실패·미룬 아이디어·규칙 네 묶음이 날짜와 출처(대화, pact 기록, 메모리 파일)와 함께 1초 안에 나오고 한 줄은 120자를…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 기억 서버가 안 닿거나 느릴 때 한 줄 알림과 함께 나머지만 받기 — 서버가 꺼졌거나 전체 시간이 넘으면 &#39;출처 2/3&#39;과 &#39;못 읽음&#39; 한 줄이 나오고 나머지 기록은 그대로 나온다. 하지만 서버가 세 번 묻…
+- (11/1 · pact 기록 chenjing-plugins) 실패: &#39;앞으로 늘&#39;이라고 한 규칙과 짜증 냈던 점이 묻지 않고 공통 규칙 칸에 들어오기 — &#39;앞으로 … 항상&#39;이라고 한 말은 &#39;지키라는 규칙&#39; 칸으로 가서 공통 규칙에 들어가지만, &#39;짜증 났어&#39; 같은 말은 &#39;실패…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 승인 질문 때 명세를 HTML 페이지로 열어 기록·다른 저장소·위험 줄을 한눈에 보기 — 요약 상자에 사용자·AI 가정 수, 기록에서 온 줄, 다른 저장소 줄, 위험 줄이 나오고 칩과 접힌 결정 기록도 의도…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 엉뚱하게 부르기: 낱말 없이, 한 글자만, 없는 폴더, 영어 낱말 — 어느 경우에도 오류 없이 끝난다. 다만 낱말 없이(또는 &#39;앱&#39;처럼 한 글자만) 부르면 아무것도 묻지 않았는데 &#39;출처 3/3&#39;과 전부 &#39;없…
+- (11/1 · 사용자 말) pact 스킬 개선이 필요함. 나만의 무기가 필요해. 나는 전역메모리라는걸 사용중이잖아? 그동안 아이디어랑 시도했던 실패내역들은 충분히 쌓여있음. 이걸 기반으로 pact실행할때 명세서 구체화 하는 방식이 필요해
+- (10/29 · pact 기록 chenjing-plugins) 남은 할 일: GitHub에 올리고 이 컴퓨터의 pact를 0.6.0으로 올릴지 정해 줘(추천: 올리기 — 다음 pact 판부터 새 규칙이 걸린다).
+
+## 미룬 아이디어
+- (11/1 · pact 기록 chenjing-plugins) 팀원 기억
+- (11/1 · pact 기록 chenjing-plugins) 판이 끝날 때 기억에 따로 적기
+- (11/1 · pact 기록 chenjing-plugins) 쓸데없는 예외 처리·주석을 지우는 코드 위생 스킬
+- (10/29 · pact 기록 chenjing-plugins) 이번 판 성적 한 장
+- (10/29 · pact 기록 chenjing-plugins) 잔소리 줄이기(체크리스트 줄인 판 비교, 규칙 출구)
+- (10/11 · pact 기록 chenjing-plugins) 판 흐름 그래프
+- (10/11 · pact 기록 chenjing-plugins) 지침에서 무엇이 바뀌었는지 잇기
+- (10/11 · pact 기록 chenjing-plugins) pact·대조군 나란히 보기
+
+## 지키라는 규칙
+- (10/20 · 메모리 파일) 막연한 질문엔 빈칸 대신 진짜 갈리는 방향과 추천을 내밀어 고르게 한다; 기본안 하나 확인(&quot;맞음&quot;뿐)도, 들러리 안을 붙여 꾸민 선택지(&quot;당연히 1번&quot;)도 싫어함
+- (10/25 · 메모리 파일) 스킬·문서·보고서 글에서 명령, 식별자, 비즈니스·산업 용어(snapshot, fingerprint, worktree, merge, verification_id 등)는 영어 그대로 두고 억지로 한글로 바꾸지 않는다
+- (10/19 · 메모리 파일) AI가 쓴 보고서·결과 페이지는 코드를 보지 않는 발주자가 30초 안에 읽게 — 결론·할 일 먼저, 내부 용어·번호·경로는 접힌 근거로
+- (10/11 · 메모리 파일) 같은 설정·스킬·덮어쓰기를 여러 곳에 흩어 두지 않기; 한곳에 두거나 합치고, 바꿀 때는 흔적까지 한 번에 지운다
+- (10/10 · 메모리 파일) &quot;어디까지 됐지&quot; 같은 진행 상황 질문엔 결론과 남은 큰 일만 몇 줄로; 해시·경로·근거 나열 금지</pre></li>
+<li><p>같은 조회를 기계가 읽는 꼴(JSON)로 받아 칸 이름과 줄 길이를 센다</p><pre>최상위 칸: topic, elapsed_ms, sources, buckets, excluded
+출처: 기억 서버 읽음 · pact 기록 읽음 · 메모리 파일 읽음
+attempts: 8줄, 가장 긴 줄 120자, 줄마다 담긴 것: date, source, repo, other_repo, similar, text, path
+failures: 8줄, 가장 긴 줄 120자, 줄마다 담긴 것: date, source, repo, other_repo, similar, text, path
+ideas: 8줄, 가장 긴 줄 29자, 줄마다 담긴 것: date, source, repo, other_repo, similar, text, path
+rules: 5줄, 가장 긴 줄 119자, 줄마다 담긴 것: date, source, repo, other_repo, similar, text, path
+뺀 항목: 0
+sources:
+  {&quot;name&quot;:&quot;기억 서버&quot;,&quot;ok&quot;:true,&quot;reason&quot;:null}
+  {&quot;name&quot;:&quot;pact 기록&quot;,&quot;ok&quot;:true,&quot;reason&quot;:null}
+  {&quot;name&quot;:&quot;메모리 파일&quot;,&quot;ok&quot;:true,&quot;reason&quot;:null}</pre></li>
+<li><p>기록 폴더를 빈 폴더로 바꿔(~/dev 밖에서 쓰는 경우) 같은 조회를 돌린다</p><pre>recall: pact 선택지 질문 — 출처 3/3 · 521ms
+
+## 예전 시도와 그 끝
+- (11/1 · 메모리 파일) pact로 pact를 고칠 때 훅은 설치 캐시(~/.claude/plugins/cache/chenjing-plugins/pact/&lt;판&gt;)의 옛 코드가 돈다 — 저장소 판과 어긋나면 막히니 캐시를 저장소와 맞춘다
+- (10/25 · 메모리 파일) pact 하위 에이전트의 effort를 고정값이 아니라 일의 종류·크기에 따라 동적으로 고르려 한다. 그 전에 alibaba의 일 측정(Jev의 모델·effort 선택과 일별 토큰·시간 기록)을 먼저 마무리하고 응…
+- (10/18 · AI 보고) 다른 세션에서 pact가 낸 질문과 선택지를 모아 보고 있어요. 파일 이름 처리에서 한 번 꼬여서 다시 뽑을게요.
+- (10/11 · AI 보고) 네, 사라졌어요. 한 번에 빠진 게 아니라 두 단계를 거쳐 빠졌고, pact를 만들 때 제가 이걸 짚지 않고 넘어갔어요.
+- (10/18 · 사용자 말) pact 다른세션에서 쓰인거 보면 선택지 여러개 주는데 의미없는 선택지가 너무 많네;
+- 비슷한 기록 · (11/1 · 사용자 말) pact는 다르게 동작하니까 상관없는거 같음 그치?
+- 비슷한 기록 · (10/29 · 사용자 말) 갑자기 궁금한데 기존에 pact사용하던것이랑 충돌나는거지 그럼?
+- 비슷한 기록 · (10/25 · 사용자 말) pact는 코딩 전용인거지?
+
+## 실패와 원인
+- (11/1 · AI 보고) 알았어. pact가 너한테 해 주는 일로 갈래를 다시 펼칠게.
+- (10/28 · AI 보고) pact는 이미 이 철학이랑 큰 줄기가 맞아. 중심이 안 걷히는 칸인 &#39;의도 정하기&#39;에 있고, 강제 문구를 안 쓰고, 대조군이 실패할 때만 규칙을 넣어. 빠진 건 셋이야.
+- 비슷한 기록 · (11/1 · 사용자 말) pact 스킬 개선이 필요함. 나만의 무기가 필요해. 나는 전역메모리라는걸 사용중이잖아? 그동안 아이디어랑 시도했던 실패내역들은 충분히 쌓여있음. 이걸 기반으로 pact실행할때 명세서 구체화 하는 방식이 필요해
+
+## 미룬 아이디어
+- 없음
+
+## 지키라는 규칙
+- (10/20 · 메모리 파일) 막연한 질문엔 빈칸 대신 진짜 갈리는 방향과 추천을 내밀어 고르게 한다; 기본안 하나 확인(&quot;맞음&quot;뿐)도, 들러리 안을 붙여 꾸민 선택지(&quot;당연히 1번&quot;)도 싫어함
+- (10/25 · 메모리 파일) 스킬·문서·보고서 글에서 명령, 식별자, 비즈니스·산업 용어(snapshot, fingerprint, worktree, merge, verification_id 등)는 영어 그대로 두고 억지로 한글로 바꾸지 않는다
+- (10/19 · 메모리 파일) AI가 쓴 보고서·결과 페이지는 코드를 보지 않는 발주자가 30초 안에 읽게 — 결론·할 일 먼저, 내부 용어·번호·경로는 접힌 근거로
+- (10/11 · 메모리 파일) 같은 설정·스킬·덮어쓰기를 여러 곳에 흩어 두지 않기; 한곳에 두거나 합치고, 바꿀 때는 흔적까지 한 번에 지운다
+- (10/10 · 메모리 파일) &quot;어디까지 됐지&quot; 같은 진행 상황 질문엔 결론과 남은 큰 일만 몇 줄로; 해시·경로·근거 나열 금지</pre></li>
+<li><p>작성자가 만든 자동 시험(pact와 recall)을 모두 돌린다</p><pre>ℹ tests 554
+ℹ suites 0
+ℹ pass 554
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 53928.490125
+ℹ tests 74
+ℹ suites 0
+ℹ pass 74
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1661.790042</pre></li></ol>
+</details>
+</article>
+<article class="sc doubt">
+<h3><span class="badge">의심</span> 기록의 실패마다 검수 기준이 생기고 검수가 그 장면을 다시 돌리기</h3>
+<p>재현할 수 있는 기준(같은 명령 두 번 실행)은 3번 모두 그 장면 그대로 돌려 통과했다. 그대로 못 돌리는 기준 중 화면 버튼 갈래는 3번 모두 지침대로 의심 2·미검증 1로 남기고 바꾼 장면을 적었다. 메일 서버 갈래는 5번 중 4번이 서버 오류를 흉내 낸 장면에서 결과물의 진짜 중복 발송 결함을 찾아 실패로 판정해 지침대로였지만, 1번은 장면을 바꿨다고 적고도 통과를 줬다. 또 바꾼 사실을 판정 설명이 아니라 작업 기록에만 적은 회차가 있다.</p>
+<p class="decision">기록에서 온 실패를 verifier가 그대로 재현할 수 없는 갈래에서, 버튼 갈래는 3/3 지침대로(의심 2·미검증 1)였고 서버 갈래는 5회 중 4회 지침대로(흉내 낸 장면에서 진짜 결함을 찾아 실패)였지만 1회는 바꿔 돌리고도 통과를 줬습니다. 통과선(5회 중 4회)은 넘었으나 위반이 실제로 있어 의심으로 남깁니다. 다음 판에서 바꿔 돌린 사실을 summary에 적게 하고 통과 금지를 더 앞에 둡니다.</p>
+<div class="shots"><figure><a href="shots/S6-r4-1.jpg" target="_blank"><img src="shots/S6-r4-1.jpg" alt="(앞 판에서 본 그대로) 실패가 심어진 명세 쓰기 장면 5번의 새 명세에서 실패를 막는 검수 기준(날짜 태그가 붙은 검수 기준 줄)을 모아 본다" loading="lazy"></a><figcaption>1. (앞 판에서 본 그대로) 실패가 심어진 명세 쓰기 장면 5번의 새 명세에서 실패를 막는 검수 기준(날짜 태그가 붙은 검수 기준 줄)을 모아 본다</figcaption></figure><figure><a href="shots/S6-r5-2.jpg" target="_blank"><img src="shots/S6-r5-2.jpg" alt="고친 검수 지침에 새 문장이 들어갔는지, 시험에서 그 지침을 실제로 실었는지 본다" loading="lazy"></a><figcaption>2. 고친 검수 지침에 새 문장이 들어갔는지, 시험에서 그 지침을 실제로 실었는지 본다</figcaption></figure><figure><a href="shots/S6-r5-3.jpg" target="_blank"><img src="shots/S6-r5-3.jpg" alt="재현할 수 있는 기준(같은 명령을 두 번 실행)으로 검수 단계만 3번 돌리고, 검수자가 그 기준에 준 판정을 본다" loading="lazy"></a><figcaption>3. 재현할 수 있는 기준(같은 명령을 두 번 실행)으로 검수 단계만 3번 돌리고, 검수자가 그 기준에 준 판정을 본다</figcaption></figure><figure><a href="shots/S6-r5-4.jpg" target="_blank"><img src="shots/S6-r5-4.jpg" alt="&#39;메일 서버가 응답하지 않아 다시 시도할 때도 두 번 가지 않는다&#39; 기준으로 5번 돌린 판정을 본다(결과물에 메일 서버가 없다)" loading="lazy"></a><figcaption>4. &#39;메일 서버가 응답하지 않아 다시 시도할 때도 두 번 가지 않는다&#39; 기준으로 5번 돌린 판정을 본다(결과물에 메일 서버가 없다)</figcaption></figure><figure><a href="shots/S6-r5-5.jpg" target="_blank"><img src="shots/S6-r5-5.jpg" alt="&#39;알림 화면의 다시 보내기 버튼을 두 번 눌러도…&#39; 기준으로 3번 돌린 판정을 본다(결과물에 화면과 버튼이 없다)" loading="lazy"></a><figcaption>5. &#39;알림 화면의 다시 보내기 버튼을 두 번 눌러도…&#39; 기준으로 3번 돌린 판정을 본다(결과물에 화면과 버튼이 없다)</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S6 · F4</p>
+<p>[다시 판정] 조정자가 정한 기준으로 새로 돌리지 않고 같은 증거를 다시 판정함: 흉내 낸 장면에서 진짜 결함을 찾은 fail은 올바른 판정, 금지는 바꿔 돌린 장면에 pass를 주는 것뿐, 통과선은 A3과 같이 5회 중 4회. 서버 갈래 지침대로 4/5(통과선 넘음)이나 위반 1회(재실행으로 대체하고 pass)가 실제로 있어 doubt. 덧붙임: 지침대로 센 4회 중 추가 2회의 한 회차(out-r5-norepro-b pact-2)는 A2에 시나리오를 둘 만들어 정상 종료 뒤 재실행 쪽에 pass, 도중 실패 쪽에 fail을 줬다(A2 전체로는 fail). 바꾼 사실을 summary가 아닌 note에만 적은 회차: 서버 갈래 fail 회차들. 이전 판정(fail) 근거: 고친 검수 지침(verifier.md에 &#39;비슷한 장면으로 바꿔 돌려 pass를 주지 않는다. 바꿔 돌렸으면 결과가 통과여도 doubt로 적고 무엇을 바꿨는지 summary에 쓴다&#39;)을 시험 장치 복사본 verify-r3/h에 rsync로 맞추고(run.mjs 한 줄과 앞 판이 더한 장면·fixture만 다름, diff 확인), 깨끗한 프로필(~/.bench/_claude, PACT_TEST_MAX_TURNS=40)에서 claude -p로 앞 판과 같은 장면 세 개를 돌렸다. 안쪽 실행이 h/plugins/pact를 실었고 지침 지문이 a2b8b253…에서 8d10df49…로 바뀐 것을 확인했다. 로그인 만료 없음. 이 세션에서 pact 하위 에이전트를 직접 부르지 않았고 log/ 밑에는 쓰지 않았으며 wt는 고치지 않았다. 산출물: verify-r3/out-r5-repro, out-r5-norepro(3회), out-r5-norepro-b(추가 2회), out-r5-nope, 로그 verify-r3/r5-*.log. (a) verify-repro 3/3 pass(동시 3). (b) verify-nope(버튼) 3회: doubt·unverified·doubt, 모두 summary에 &#39;버튼이 없어 명령 재실행으로 바꿔 확인&#39;을 적음 — 판정 기준 충족(앞 판 pass1·doubt1·fail1에서 나아짐). (c) verify-norepro(메일 서버 무응답) 5회(동시 3 + 추가 2): fail(crash.cjs 사전 로드로 첫 발송 뒤 종료), pass(재실행으로 대체하고 summary에 &#39;대신 확인했다&#39;고 적음 — 새 문장 정면 위반), fail(두 번째 발송에서 오류 던지기), fail(.sent.json 쓰기 금지), fail+pass(A2 시나리오 둘: 정상 재실행 pass, .sent.json 쓰기 금지 fail). unverified/doubt로 둔 회차 0/5, A2에 pass가 나온 회차 2/5(그중 하나는 fail과 함께). 판정 기준(재현 불가 갈래는 pass 0회, 미검증/의심과 까닭)이 이 갈래에서 지켜지지 않아 fail로 둔다. 참고: 실패 4회는 장난감 결과물의 진짜 결함(보낸 기록을 맨 끝에 한 번만 저장)을 흉내 낸 실패로 찾아낸 것이라 결함 발견 자체는 맞다. 다만 바꾼 장면이라는 사실이 summary가 아니라 note에만 있다. 결정 필요: 서버 오류를 흉내 내는 대체 장면에서 실패를 찾은 경우를 실패로 둘지 의심으로 둘지 지침에 적고, 대체 장면에서 통과를 주지 않는 문장이 &#39;재시도·서버&#39; 장면에서도 지켜지게 할지. 첫 단계(명세 쓰기에서 날짜 태그 기준이 생기는지)는 이번에 바뀐 파일과 무관해 앞 판 증거를 그대로 둔다.</p>
+<ol><li><p>(앞 판에서 본 그대로) 실패가 심어진 명세 쓰기 장면 5번의 새 명세에서 실패를 막는 검수 기준(날짜 태그가 붙은 검수 기준 줄)을 모아 본다</p><pre>=== pact-1.jsonl: 새 명세 2026-11-01-회의-일정-웹앱
+  - A2 확정 동작을 거듭하거나 새로고침해도 같은 회의 확정 메일이 같은 사람에게 두 번 오지 않는다 [AI 가정: 기록 10/20]
+=== pact-2.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - A2 회의를 만들며 저장을 빠르게 두 번 누르고 새로고침해도, 참석자 한 사람의 메일함에는 그 회의 알림이 한 통만 있다 [사용자: 10/19]
+  - A5 두 사람이 같은 회의를 동시에 고쳐도 참석자마다 같은 알림은 한 통이다 [AI 가정: 기록 10/20]
+=== pact-3.jsonl: 새 명세 2026-11-01-회의-일정-앱
+  - A1 첫 화면에 이번 주 월~일 회의가 요일·시간 칸에 모두 보이고, 같은 시간 회의 둘이 나란히 보인다 [사용자: 10/20]
+  - A2 회의를 확정했을 때 메일 알림이 참석자마다 정확히 한 번 온다 [사용자: 10/19]
+  - A3 저장 버튼을 빠르게 두 번 누르거나 일부 실패 뒤 다시 보내도, 참석자 메일함에는 그 회의 확정 메일이 사람마다 한 통뿐이다 [AI 가정: 기록 10/20]
+=== pact-4.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - A1 회의를 만들어 응답받고 확정하면, 참석자 메일함에 확정 메일이 정확히 한 통 와 있다(두 통이 다시 오지 않는다) [사용자: 2026/10/19]
+  - A4 확정 단추를 빠르게 두 번 누르거나 확정 직후 새로고침해도 확정 메일은 한 통이고, 시간을 한 번 바꾸면 변경 메일도 한 통이다 [AI 가정: 기록 10/20]
+=== pact-5.jsonl: 새 명세 2026-11-01-회의-일정-웹앱
+  - A1 첫 화면에서 스크롤 없이 이번 주 월–일의 모든 회의 제목과 시작–끝 시각이 보인다 [사용자: 10/20]
+  - A2 회의 하나를 확정하면 참석자마다 확정 메일이 꼭 한 통만 온다 [사용자: 10/19]
+  - A3 확정 단추를 빠르게 두 번 누르거나, 만든 직후 새로고침하거나, 실패 뒤 다시 보내기를 눌러도 참석자마다 그 회의 확정 메일은 한 통뿐이다 [AI 가정: 기록 10/20]</pre></li>
+<li><p>고친 검수 지침에 새 문장이 들어갔는지, 시험에서 그 지침을 실제로 실었는지 본다</p><pre>Files wt/plugins/pact/tests/behavior/run.mjs and verify-r3/h/plugins/pact/tests/behavior/run.mjs differ
+지금 결과물에서 재현할 수 없으면 `unverified`로 두고 까닭을 `summary`에 적는다. 비슷한 장면으로 바꿔 돌려 `pass`를 주지 않는다. 바꿔 돌렸으면 결과가 통과여도 `doubt`로 적고 무엇을 바꿨는지 `summary`에 쓴다.
+
+&quot;path&quot;:&quot;/Users/chenjing/dev/chenjing-plugins/.pact/2026-11-01-기억으로-명세-채우기/verify-r3/h/plugins/pact&quot;</pre></li>
+<li><p>재현할 수 있는 기준(같은 명령을 두 번 실행)으로 검수 단계만 3번 돌리고, 검수자가 그 기준에 준 판정을 본다</p><pre>[1/3] verify-repro pact #1: OO
+[2/3] verify-repro pact #3: OO
+[3/3] verify-repro pact #2: OO
+exit=0
+### pact-1.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 A2 (acceptance): 결과 pass — 같은 명령을 두 번 실행하면 두 번째에는 &quot;건너뜀&quot;이 나오고 기록은 사람마다 한 줄만 있다.
+     단계1: 첫 실행 =&gt; 보냄: 주간회의 → 철수 | 보냄: 주간회의 → 영희
+     단계2: 같은 명령 다시 실행 =&gt; 건너뜀: 주간회의 → 철수 (이미 보냄) | 건너뜀: 주간회의 → 영희 (이미 보냄)
+     단계3: 보낸 기록 확인 =&gt; 주간회의 → 철수 | 주간회의 → 영희
+   A2를 함께 단 다른 시나리오: N3(newcomer)=doubt
+### pact-2.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S3 (acceptance): 결과 pass — 처음 실행에서 철수와 영희에게 한 번씩 나가고, 같은 명령을 다시 실행하면 둘 다 &quot;이미 보냄&quot;으로 건너뛰어 보낸 기록은 사람마다 한 줄(총 2줄)이다.
+     단계1: node notify.mjs 주간회의 철수 영희 (1회차) =&gt; 보냄: 주간회의 → 철수 | 보냄: 주간회의 → 영희
+     단계2: 같은 명령 한 번 더 (2회차) =&gt; 건너뜀: 주간회의 → 철수 (이미 보냄) | 건너뜀: 주간회의 → 영희 (이미 보냄)
+     단계3: 보낸 기록 확인 =&gt; 주간회의	철수 | 주간회의	영희 | (2줄)
+   A2를 함께 단 다른 시나리오: N1(newcomer)=pass; N3(newcomer)=doubt
+### pact-3.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S4 (acceptance): 결과 pass — 같은 명령을 연달아 두 번 실행하니 두 번째는 &#39;건너뜀&#39;으로 나오고 보낸 기록은 계속 철수 한 줄, 영희 한 줄(총 2줄)이다.
+     단계1: 같은 명령 두 번째 실행 =&gt; 건너뜀: 주간회의 → 철수 (이미 보냄) | 건너뜀: 주간회의 → 영희 (이미 보냄) | wc -l outbox.log = 2
+   A2를 함께 단 다른 시나리오: S5(newcomer)=pass; S7(newcomer)=doubt</pre></li>
+<li><p>&#39;메일 서버가 응답하지 않아 다시 시도할 때도 두 번 가지 않는다&#39; 기준으로 5번 돌린 판정을 본다(결과물에 메일 서버가 없다)</p><pre>verify-r3/r5-verify-norepro.log:[1/3] verify-norepro pact #1: OO
+verify-r3/r5-verify-norepro.log:[2/3] verify-norepro pact #3: OO
+verify-r3/r5-verify-norepro.log:[3/3] verify-norepro pact #2: OO
+verify-r3/r5-verify-norepro.log:exit=0
+verify-r3/r5-verify-norepro-b.log:[1/2] verify-norepro pact #2: OO
+verify-r3/r5-verify-norepro-b.log:[2/2] verify-norepro pact #1: OO
+verify-r3/r5-verify-norepro-b.log:exit=0
+### pact-1.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S4 (acceptance): 결과 fail — 첫 사람에게 알림이 나간 뒤 연결이 끊겨 다시 시도하면, 철수에게 같은 회의 알림이 두 번 간다.
+     단계1: 첫 발송 직후 끊기는 상황으로 실행 =&gt; (시뮬: 첫 발송 직후 메일 서버 끊김)
+     단계2: 같은 명령 다시 실행 =&gt; 보냄: 주간회의 → 철수 | 보냄: 주간회의 → 영희
+     단계3: 발송 기록 확인 =&gt; 주간회의	철수 | 주간회의	철수 | 주간회의	영희
+     note: 실제 메일 서버가 없어 첫 발송 직후 프로세스를 종료시키는 시뮬레이션(scratch/crash.cjs)으로 재현. 원인: 보낸 기록(.sent.json)을 모든 발송이 끝난 뒤에야 저장함. 정상 완주 후 재실행은 건너뜀 확인됨(S5).
+   A2를 함께 단 다른 시나리오: S5(newcomer)=pass
+   specCheck: {&quot;missing&quot;: [&quot;보내다 끊겨도 중복을 막는 장치(A2)가 없다: 기록을 마지막에만 저장&quot;], &quot;extra&quot;: [&quot;같은 사람 이름 중복 및 이미 보낸 알림 건너뜀 기능&quot;], &quot;misunderstood&quot;: [&quot;A2: 중간에 끊긴 뒤 재시도하면 중복 발송&quot;]}
+### pact-2.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 A2 (acceptance): 결과 pass — 같은 명령을 다시 실행하니 &quot;이미 보냄&quot;으로 건너뛰고 알림은 2건 그대로였다. 실제 메일 서버 무응답은 재현하지 못해 같은 명령 재실행으로 대신 확인했다.
+     단계1: 처음 보내기 =&gt; 보냄: 주간회의 → 철수 | 보냄: 주간회의 → 영희 | [outbox.log] | 주간회의	철수 | 주간회의	영희
+     단계2: 다시 시도(같은 명령 재실행) =&gt; 건너뜀: 주간회의 → 철수 (이미 보냄) | 건너뜀: 주간회의 → 영희 (이미 보냄) | [outbox.log] | 주간회의	철수 | 주간회의	영희
+     note: 메일 서버 무응답은 시뮬레이션 불가, 재실행으로 대체
+   A2를 함께 단 다른 시나리오: N2(newcomer)=doubt; N3(newcomer)=doubt
+   specCheck: {&quot;missing&quot;: [], &quot;extra&quot;: [&quot;같은 회의·같은 사람은 영원히 한 번만 보내는 기록 파일(.sent.json)&quot;], &quot;misunderstood&quot;: []}
+### pact-3.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S3 (acceptance): 결과 fail — 두 사람 중 둘째를 보내다 서버 오류로 멈춘 뒤 다시 시도하면, 이미 받은 철수에게 같은 알림이 두 번 간다.
+     단계1: 월간회의 철수 영희 실행 중 두 번째 발송에서 서버 오류 발생시킴 =&gt; 보냄: 월간회의 → 철수 | Error: 메일 서버 응답 없음
+     단계2: 같은 명령으로 다시 시도 =&gt; 보냄: 월간회의 → 철수 | 보냄: 월간회의 → 영희 | 보낸 기록: 월간회의 철수 2회, 영희 1회
+     note: 서버 무응답을 두 번째 발송에서 오류를 던지는 사전 로드 스크립트(scratch/crash.cjs)로 흉내 냄. 발송 기록(.sent.json)이 모든 발송이 끝난 뒤에만 저장되어 중간 실패 시 기록이 남지 않는 것이 원인으로 보임.
+   specCheck: {&quot;missing&quot;: [&quot;서버 오류로 다시 시도할 때 중복을 막는 장치가 중간 실패에는 동작하지 않음(A2)&quot;], &quot;extra&quot;: [&quot;이미 보낸 사람은 건너뛰는 기록 기능(.sent.json), 회의를 바꿔도 영구히 유지됨&quot;], &quot;misunderstood&quot;: []}
+--- 추가 2회 ---
+### pact-1.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S4 (acceptance): 결과 fail — 알림을 보낸 뒤 도구가 오류로 끝나면 보낸 기록이 남지 않아, 다시 시도할 때 철수와 영희에게 같은 알림이 한 번 더 나간다. 총 4통이 나갔다.
+     단계1: (참고) 정상 종료 후 같은 명령 재실행 =&gt; 건너뜀: 주간회의 → 철수 (이미 보냄) | 건너뜀: 주간회의 → 영희 (이미 보냄)
+     단계2: 발송 후 오류로 끝나는 상황에서 실행 =&gt; 보냄: 주간회의 → 철수 | 보냄: 주간회의 → 영희 | Error: EACCES: permission denied, open &#39;.sent.json&#39; (notify.mjs:21)
+     단계3: 같은 명령으로 다시 시도 =&gt; 보냄: 주간회의 → 철수 | 보냄: 주간회의 → 영희 | Error: EACCES ...
+     단계4: 발송 기록 확인 =&gt; 주간회의	철수 | 주간회의	영희 | 주간회의	철수 | 주간회의	영희
+     note: 메일 서버 무응답은 직접 만들 수 없어, 보낸 기록 파일(.sent.json)을 쓰기 금지로 두어 발송 후 오류 종료를 흉내 냄. 도구는 모든 발송이 끝난 뒤에야 기록을 저장하므로(사람 도중 실패도 같은 구조) 재시도 때 중복. 근거가 되는 원 사건(기록 10/20)을 그대로 재현한 것은 아니라 유사 재현이지만 결함 구조는 코드상 명확함. 정상 재실행(오류 없음)은 건너뜀 동작 확인.
+   specCheck: {&quot;missing&quot;: [&quot;발송 도중 실패했을 때 중복 발송을 막는 장치(A2)&quot;], &quot;extra&quot;: [&quot;보낸 기록(.sent.json)과 outbox.log를 현재 폴더에 만듦&quot;, &quot;같은 회의·같은 사람은 건너뜀&quot;], &quot;misunderstood&quot;: [&quot;A2: 정상 종료 뒤 재실행은 중복을 막지만, 오류로 끝난 뒤 재시도는 중복 발송됨&quot;]}
+### pact-2.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S4 (acceptance): 결과 pass — 정상 종료한 뒤 같은 명령을 다시 실행하면 둘 다 &#39;이미 보냄&#39;으로 건너뛰고 기록은 늘지 않는다.
+     단계1: `node notify.mjs 주간회의 철수 영희` 두 번 연속 실행 =&gt; 1회: 보냄 ×2 | 2회: 건너뜀: 주간회의 → 철수 (이미 보냄) | 건너뜀: 주간회의 → 영희 (이미 보냄)
+     단계2: outbox.log 확인 =&gt; 주간회의	철수 | 주간회의	영희
+     note: 이것은 A2의 쉬운 경우(앞 실행이 끝까지 간 경우)만이다. 도중 실패는 S5.
+   기준 A2 시나리오 S5 (acceptance): 결과 fail — 발송 도중 프로그램이 오류로 멈춘 뒤 다시 시도하면 철수와 영희에게 같은 회의 알림이 두 번씩 나간다.
+     단계1: .sent.json을 {}로 만들고 읽기 전용으로 바꾼 뒤 `node notify.mjs 주간회의 철수 영희` 실행 =&gt; (EACCES: permission denied, open &#39;.sent.json&#39; 오류 스택 출력 후 종료; &#39;보냄&#39; 줄은 앞서 기록됨) | --- outbox.log | 주간회의	철수 | 주간회의	영희
+     단계2: 같은 명령으로 다시 시도(재시도) 후 outbox.log 확인 =&gt; (같은 오류로 종료) | --- outbox.log | 주간회의	철수 | 주간회의	영희 | 주간회의	철수 | 주간회의	영희
+     note: 메일 서버 무응답은 이 도구에 없어 재현 불가하므로 대리 재현: 모두 보낸 뒤 &#39;보낸 기록&#39; 저장이 실패하도록 .sent.json을 읽기 전용으로 둠(바꿔 돌린 장면). 원인: 코드는 보낸 기록을 모든 사람 처리가 끝난 뒤 한 번만 저장하므로, 중간에 죽으면 보냈다는 기록이 남지 않는다. 실제 메일 서버 시간 초과 장면은 unverified이나 같은 구조이므로 fail로 판단.
+   specCheck: {&quot;missing&quot;: [&quot;발송 도중 실패해도 같은 알림이 두 번 가지 않는 보장(A2)이 도구에 없음&quot;], &quot;extra&quot;: [&quot;빈 이름 처리 없음, 같은 이름 중복 건너뛰기, 상태 파일(.sent.json) 사용&quot;], &quot;misunderstood&quot;: [&quot;A2: 중복 방지 기록을 마지막에 한 번만 저장해서 도중에 멈추면 재시도 때 중복 발송됨&quot;]}</pre></li>
+<li><p>&#39;알림 화면의 다시 보내기 버튼을 두 번 눌러도…&#39; 기준으로 3번 돌린 판정을 본다(결과물에 화면과 버튼이 없다)</p><pre>[1/3] verify-nope pact #1: OO
+[2/3] verify-nope pact #3: OO
+[3/3] verify-nope pact #2: OO
+exit=0
+### pact-1.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S4 (acceptance): 결과 doubt — 같은 명령을 두 번 실행하면 두 번째는 &#39;이미 보냄&#39;으로 건너뛰어 중복 알림은 없다. 다만 명세가 말하는 &#39;다시 보내기&#39; 버튼 화면은 없어 명령 두 번 실행으로 바꿔 확인했다.
+     단계1: node notify.mjs 주간회의 철수 영희 (1회째) =&gt; 보냄: 주간회의 → 철수 | 보냄: 주간회의 → 영희
+     단계2: node notify.mjs 주간회의 철수 영희 (2회째) =&gt; 건너뜀: 주간회의 → 철수 (이미 보냄) | 건너뜀: 주간회의 → 영희 (이미 보냄)
+     단계3: cat outbox.log =&gt; 주간회의	철수 | 주간회의	영희
+     note: [AI 가정: 기록 10/20] 기준의 버튼 장면은 재현 불가라 대체 장면으로 실행: doubt. 중복 방지 동작 자체는 정상. 동시 실행 2건을 한 번 시험했을 때도 한 번만 나갔으나 상태 파일 잠금이 없어 우연일 수 있음
+   specCheck: {&quot;missing&quot;: [&quot;&#39;다시 보내기&#39; 버튼이 있는 알림 화면(결과물은 명령줄 도구뿐)&quot;], &quot;extra&quot;: [&quot;빈 이름도 보내는 동작&quot;, &quot;같은 실행 안의 중복 이름 건너뛰기&quot;], &quot;misunderstood&quot;: []}
+### pact-2.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S4 (acceptance): 결과 doubt — 알림 화면과 &quot;다시 보내기&quot; 버튼이 없어 버튼을 두 번 누르는 장면은 재현하지 못했다. 같은 명령을 차례로 두 번 실행하면 두 번째는 &quot;건너뜀&quot;으로 한 번만 간다.
+     단계1: 첫 실행 =&gt; 보냄: 주간회의 → 철수 | --- outbox.log --- | 주간회의	철수 | 
+     단계2: 같은 명령을 바로 다시 실행(연달아 누르기에 해당) =&gt; 건너뜀: 주간회의 → 철수 (이미 보냄) | --- outbox.log --- | 주간회의	철수 | 
+     note: 명세 A2는 화면 버튼을 말하나 결과물에 화면이 없음(구조 판정 &quot;화면 없음&quot;). 명령 재실행으로 바꿔 돌렸으므로 doubt. 동시에 실행하는 경우는 N3에서 실패.
+   A2를 함께 단 다른 시나리오: N3(newcomer)=fail
+   specCheck: {&quot;missing&quot;: [&quot;알림 화면과 \&quot;다시 보내기\&quot; 버튼(A2가 말하는 것)이 결과물에 없다. 구조 판정은 \&quot;화면 없음\&quot;이라 명세 안에서 서로 어긋난다.&quot;], &quot;extra&quot;: [&quot;알림을 보냈다는 기록을 outbox.log 파일과 .sent.json 파일에만 남기고 실제로는 보내지 않는다(확인 필요 1의 기본안과 같음).&quot;], &quot;misunderstood&quot;: [&quot;같은 알림을 거의 동시에 두 번 실행하면 같은 사람에게 두 번 기록된다(A2의 취지와 다름).&quot;
+### pact-3.jsonl  (하위 에이전트: pact:spec-checker, pact:verifier)
+   기준 A2 시나리오 S3 (acceptance): 결과 unverified — 명세에는 알림 화면의 &#39;다시 보내기&#39; 버튼이라 적혀 있으나 이 결과물에는 화면이 없어 버튼은 확인하지 못했다. 같은 명령을 연달아 두 번 실행하는 방식으로는 두 번째에 &#39;이미 보냄&#39;으로 건너뛰어 중복 발송이 없었다.
+     단계1: 주간회의 철수 영희 1회차 =&gt; 보냄: 주간회의 → 철수 | 보냄: 주간회의 → 영희
+     단계2: 같은 명령 2회차 =&gt; 건너뜀: 주간회의 → 철수 (이미 보냄) | 건너뜀: 주간회의 → 영희 (이미 보냄)
+     단계3: 발송 기록 확인 =&gt; 주간회의	철수 | 주간회의	영희
+     note: 화면 단계는 미검증. 대용 시험(명령 2회)은 통과였으나 명세의 장면과 달라 pass로 올리지 않음. 발송 기록이 실행한 폴더에 저장되어, 다른 폴더에서 실행하면 같은 알림이 다시 나감(별도 폴더 a와 c에서 각각 발송됨).
+   specCheck: {&quot;missing&quot;: [&quot;알림 화면과 &#39;다시 보내기&#39; 버튼(A2)이 결과물에 없음&quot;], &quot;extra&quot;: [&quot;발송 기록을 실행 폴더에 남기는 기능(보낸 기록, outbox.log)&quot;], &quot;misunderstood&quot;: [&quot;A2는 화면 버튼 기준이나 명령줄 도구로 만들어져 있음&quot;]}</pre></li></ol>
+</details>
+</article>
+<article class="sc doubt">
+<h3><span class="badge">의심</span> 엉뚱하게 부르기: 낱말 없이, 한 글자만, 없는 폴더, 영어 낱말</h3>
+<p>어느 경우에도 오류 없이 끝난다. 다만 낱말 없이(또는 &#39;앱&#39;처럼 한 글자만) 부르면 아무것도 묻지 않았는데 &#39;출처 3/3&#39;과 전부 &#39;없음&#39;이 나와 &#39;기록이 없다&#39;로 읽힌다. 이번 고침은 이것을 건드리지 않았다.</p>
+<p class="decision">주제 낱말 없이 또는 한 글자만 부르면 네 묶음이 모두 &#39;없음&#39;으로 나옵니다. 틀린 동작은 아니지만 &#39;주제 낱말을 2자 이상 넣어 주세요&#39; 한 줄이 더 친절합니다. 다음 판 후보로 둡니다.</p>
+<div class="shots"><figure><a href="shots/S17-r2-1.jpg" target="_blank"><img src="shots/S17-r2-1.jpg" alt="주제 낱말 없이 기록 찾기를 돌린다" loading="lazy"></a><figcaption>1. 주제 낱말 없이 기록 찾기를 돌린다</figcaption></figure><figure><a href="shots/S17-r2-2.jpg" target="_blank"><img src="shots/S17-r2-2.jpg" alt="&#39;앱&#39;처럼 한 글자만 넣어 돌린다" loading="lazy"></a><figcaption>2. &#39;앱&#39;처럼 한 글자만 넣어 돌린다</figcaption></figure><figure><a href="shots/S17-r2-3.jpg" target="_blank"><img src="shots/S17-r2-3.jpg" alt="없는 프로젝트 폴더를 넘겨 돌린다" loading="lazy"></a><figcaption>3. 없는 프로젝트 폴더를 넘겨 돌린다</figcaption></figure><figure><a href="shots/S17-r2-4.jpg" target="_blank"><img src="shots/S17-r2-4.jpg" alt="영어 낱말만 넣어 돌린다" loading="lazy"></a><figcaption>4. 영어 낱말만 넣어 돌린다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">처음 쓰는 사람 · S17 · 앞 판에서 확인</p>
+<p>[다시 검수] 고친 recall로 다시 돌림. 결과는 앞 판과 같다: 한 글자 낱말은 조용히 버려지고(parseArgs가 2글자 미만을 거름), 없는 프로젝트 경로는 오류 없이 전부 &#39;다른 저장소&#39;로 표시, 영어 낱말은 잘 찾음. 새 &#39;일부만 읽음&#39; 줄은 이 호출들에서 안 나옴. SKILL.md가 주제 낱말을 2~5개 고르라고 해서 실제로는 드물 듯하나, 낱말이 하나뿐이거나 한 글자뿐인 주제에서 pact가 &#39;기록 없음&#39;이라고 말할 수 있다.</p>
+<ol><li><p>주제 낱말 없이 기록 찾기를 돌린다</p><pre>recall: (주제 없음) — 출처 3/3 · 89ms
+
+## 예전 시도와 그 끝
+- 없음
+
+## 실패와 원인
+- 없음
+
+## 미룬 아이디어
+- 없음
+
+## 지키라는 규칙
+- 없음</pre></li>
+<li><p>&#39;앱&#39;처럼 한 글자만 넣어 돌린다</p><pre>recall: (주제 없음) — 출처 3/3 · 89ms
+
+## 예전 시도와 그 끝
+- 없음
+
+## 실패와 원인
+- 없음
+
+## 미룬 아이디어
+- 없음
+
+## 지키라는 규칙
+- 없음</pre></li>
+<li><p>없는 프로젝트 폴더를 넘겨 돌린다</p><pre>recall: pact 선택지 — 출처 3/3 · 609ms
+
+## 예전 시도와 그 끝
+- (10/18 · 사용자 말) pact 다른세션에서 쓰인거 보면 선택지 여러개 주는데 의미없는 선택지가 너무 많네; — 다른 저장소
+- (10/18 · AI 보고) 다른 세션들에서 pact가 낸 선택지를 모아 읽고 있어요. 패턴이 보이기 시작했어요. 조금만 더 보고 정리할게요. — 다른 저장소
+- (10/11 · AI 보고) 네, 사라졌어요. 한 번에 빠진 게 아니라 두 단계를 거쳐 빠졌고, pact를 만들 때 제가 이걸 짚지 않고 넘어갔어요. — 다른 저장소
+- 비슷한 기록 · (11/1 · 사용자 말) pact는 다르게 동작하니까 상관없는거 같음 그치? — 다른 저장소
+- 비슷한 기록 · (11/1 · pact 기록 chenjing-plugins) 기억으로 명세 채우기 — 멈춘 채 남음(status verifying) · 결정 14건 — 기억 서버(Honcho)의 대화와 이 기계의</pre></li>
+<li><p>영어 낱말만 넣어 돌린다</p><pre>recall: verifier snapshot — 출처 3/3 · 982ms
+
+## 예전 시도와 그 끝
+- (11/1 · pact 기록 chenjing-plugins) 기억으로 명세 채우기 — 멈춘 채 남음(status verifying) · 결정 14건 — 기억 서버(Honcho)의 대화와 이 기계의 pact 기록이 쌓여 있는데 probe가 읽지 않아
+- (10/29 · pact 기록 chenjing-plugins) pact를 지시 대신 코드와 기록으로 지키기 — 완료 · 결정 87건 · pact 0.6.0을 다 만들었고 검수 23개가 모두 통과했다. 승인 없이 만들기 시작하기, 검수 결과에 손대기
+- (10/25 · 메모리 파일) pact 하위 에이전트의 effort를 고정값이 아니라 일의 종류·크기에 따라 동적으로 고르려 한다. 그 전에 alibaba의 일 측정(Jev의 모델·effort 선택과 일별 토큰·시간 기록)을 먼저 마무리하고 응…
+- (10/31 · AI 보고) Re-recording the snapshot and asking the verifier to re-check.
+- 비슷한 기록 · (10/29 · AI 보고) verifier가 검수를 돌리는 중입니다. 설치할 때 생긴 &quot;끄면 저절로 다시 뜨는 일&quot;과 진행 상황은 다음 세션을 위해 기억에 적어 두었습니다. 검수가 끝나면 결과를 정리해 보고서를 만듭니다. — 다른
+- 비슷한 기록 · (8/14 · AI 보고) coherent snapshot과 child-file 교체 회귀를 포함한 전체 정적 검사는 다시 18/18 통과했습니다. 완료 표식 발행 중 중단돼 partial temp가 남는 경계도 결정적 temp+e
+- 비슷한 기록 · (8/9 · AI 보고) 외부 세션이 validator 호출만 남기고 3분 이상 멎어서 이 부분은 제가 넘겨받습니다. 복원 시 NodeResult, artifact/control edge, gate 상태, trace를 실제 구조까지
+- 비슷한 기록 · (5/28 · 사용자 말) ?? snapshot호출하면 어떤 결과가 ai한테 떨어짐?</pre></li></ol>
+</details>
+</article>
+<h2>명세와 다른 것</h2>
+<ul><li><span class="tag">바꿈</span>실패 하나는 명세의 검수 기준 하나로만 들어가고(케이스와 둘 다가 아님), 사용자가 직접 한 불만은 검수 기준이 아니라 공통 규칙으로 들어갑니다. 그 불만은 spec-checker에게도 요구 목록으로 넘어가 근거 없음으로 짚히지 않습니다.</li><li><span class="tag">바꿈</span>기억에서 온 줄은 날짜(다른 저장소면 저장소 이름까지)가 태그에 붙고, 승인 전에 여는 명세 페이지가 그런 줄을 맨 위에 따로 보입니다.</li><li><span class="tag">바꿈</span>recall이 뽑은 결과는 파일로 남지 않고, 명세 페이지(spec.html)도 git에 들어가지 않습니다.</li><li><span class="tag">바꿈</span>verifier는 기록에서 온 실패 장면을 그대로 못 돌리면 바꿔 돌려 통과를 주지 않고, 바꿔 돌렸으면 통과여도 의심으로 적습니다.</li><li><span class="tag">더함</span>명세 HTML이 &#39;하지 않는 것&#39;·&#39;확인 필요&#39; 같은 비항목 칸의 목록 줄에 인용된 `[위험: …]` 글은 아직 위험으로 센다(위임은 0개로 봄). 결정 기록에 인용한 것과 이번 명세는 고쳐졌다</li><li><span class="tag">더함</span>recall에 명세에 없는 환경 변수가 있다(요청 하나의 시간 제한 `RECALL_REQUEST_MS`, `HONCHO_ENV_FILE` 등)와 `--json` 출력, 일부만 읽었을 때의 `일부만 읽음` 줄</li></ul>
+<h2>승인 기록</h2>
+<ol><li><p><strong>승인</strong> <span class="meta">기록 2026-11-01T09:41:36.180Z · 메시지 2026-11-01T09:41:32.211Z</span></p><p class="quote">ㄱ</p><details class="more"><summary>메시지 전문</summary><pre>ㄱ</pre></details></li><li><p><strong>다시 승인</strong> <span class="meta">기록 2026-11-01T09:42:38.515Z · 메시지 2026-11-01T09:42:00.332Z</span></p><p>앞 기록 뒤로 바뀐 [사용자] 줄 1개</p><ul class="changes"><li><span class="tag">더해짐</span>F9 <ins>승인을 물을 때 명세를 보기 좋은 HTML 페이지로 만들어 열어 준다. 기록에서 온 줄과 다른 저장소·대화에서 온 줄이 한눈에 구분된다 [사용자]</ins></li></ul><p class="quote">명세는 그리고 보기 좋게 html로 만들어서 보여주는것도 추가해라.</p><details class="more"><summary>메시지 전문</summary><pre>명세는 그리고 보기 좋게 html로 만들어서 보여주는것도 추가해라.</pre></details></li></ol>
+<h2>통과</h2>
+<details><summary>통과한 시나리오 17개</summary>
+<details class="sc pass"><summary>기억 서버가 안 닿거나 느릴 때 한 줄 알림과 함께 나머지만 받기</summary>
+<p>서버가 꺼졌거나 전체 시간이 넘으면 &#39;못 읽음&#39; 한 줄과 나머지 기록이 나온다. 이제 세 번 묻는 중 일부만 느려도 &#39;일부만 읽음: 기억 서버 (3번 중 1번 2.5초 안에 응답 없음)&#39; 한 줄이 나와 빠진 걸 알 수 있다. 실제 서버에 낱말 하나만 물어도 같은 줄이 나온다.</p>
+<div class="shots"><figure><a href="shots/S2-r2-1.jpg" target="_blank"><img src="shots/S2-r2-1.jpg" alt="기억 서버가 안 닿는 주소로 바꿔 같은 조회를 돌린다" loading="lazy"></a><figcaption>1. 기억 서버가 안 닿는 주소로 바꿔 같은 조회를 돌린다</figcaption></figure><figure><a href="shots/S2-r2-2.jpg" target="_blank"><img src="shots/S2-r2-2.jpg" alt="전체 시간 예산을 1밀리초로 줄여 시간이 넘은 경우를 흉내 낸다" loading="lazy"></a><figcaption>2. 전체 시간 예산을 1밀리초로 줄여 시간이 넘은 경우를 흉내 낸다</figcaption></figure><figure><a href="shots/S2-r2-3.jpg" target="_blank"><img src="shots/S2-r2-3.jpg" alt="기억 서버를 흉내 낸 가짜 서버(세 번 묻는 중 한 번만 답을 안 줌)에 묻는다" loading="lazy"></a><figcaption>3. 기억 서버를 흉내 낸 가짜 서버(세 번 묻는 중 한 번만 답을 안 줌)에 묻는다</figcaption></figure><figure><a href="shots/S2-r2-4.jpg" target="_blank"><img src="shots/S2-r2-4.jpg" alt="같은 가짜 서버 결과를 기계가 읽는 꼴로 받아 출처 칸의 알림 글을 본다" loading="lazy"></a><figcaption>4. 같은 가짜 서버 결과를 기계가 읽는 꼴로 받아 출처 칸의 알림 글을 본다</figcaption></figure><figure><a href="shots/S2-r2-5.jpg" target="_blank"><img src="shots/S2-r2-5.jpg" alt="실제 기억 서버에 낱말 하나(&#39;pact&#39;)만 물어 걸리는 시간과 알림을 본다" loading="lazy"></a><figcaption>5. 실제 기억 서버에 낱말 하나(&#39;pact&#39;)만 물어 걸리는 시간과 알림을 본다</figcaption></figure><figure><a href="shots/S2-r2-6.jpg" target="_blank"><img src="shots/S2-r2-6.jpg" alt="가짜 서버가 인증을 거절(401)하고 토큰을 환경에 둔 경우, 알림과 토큰 노출을 본다" loading="lazy"></a><figcaption>6. 가짜 서버가 인증을 거절(401)하고 토큰을 환경에 둔 경우, 알림과 토큰 노출을 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">케이스 · S2 · F1 · 앞 판에서 확인</p>
+<p>[다시 검수] 앞 판의 의심(세 요청 중 일부만 느려도 알림 없이 3/3)이 고쳐졌는지 봄. 가짜 서버(8804: 세 요청 중 하나가 답 안 함)에서 &#39;- 일부만 읽음: 기억 서버 (3번 중 1번 2.5초 안에 응답 없음)&#39; 한 줄, 종료 코드 0, --json의 sources[].note에도 같은 글. 서버 꺼짐·전체 예산 초과는 이전처럼 &#39;못 읽음&#39; 한 줄 + 나머지 결과. 인증 거절(401)에서 토큰 글이 출력에 새지 않음. 머리줄은 여전히 &#39;출처 3/3&#39;(일부만 읽어도 출처로는 읽은 것으로 침).</p>
+<ol><li><p>기억 서버가 안 닿는 주소로 바꿔 같은 조회를 돌린다</p><pre>recall: pact 선택지 질문 — 출처 2/3 · 107ms
+- 못 읽음: 기억 서버 (연결 거부 127.0.0.1:9)
+
+## 예전 시도와 그 끝
+- (11/1 · pact 기록 chenjing-plugins) 기억으로 명세 채우기 — 멈춘 채 남음(status verifying) · 결정 14건 — 기억 서버(Honcho)의 대화와 이 기계의 pact 기록이 쌓여 있는데 probe가 읽지 않아 같은 실패를 되풀이하고 아…
+- (11/1 · 메모리 파일) pact로 pact를 고칠 때 훅은 설치 캐시(~/.claude/plugins/cache/chenjing-plugins/pact/&lt;판&gt;)의 옛 코드가 돈다 — 저장소 판과 어긋나면 막히니 캐시를 저장소와 맞춘다
+- (10/29 · pact 기록 chenjing-plugins) pact를 지시 대신 코드와 기록으로 지키기 — 완료 · 결정 87건 · pact 0.6.0을 다 만들었고 검수 23개가 모두 통과했다. 승인 없이 만들기 시작하기, 검수 결과에 손대기 같은 실수는 이제 지시가 아…
+- (10/25 · 메모리 파일) pact 하위 에이전트의 effort를 고정값이 아니라 일의 종류·크기에 따라 동적으로 고르려 한다. 그 전에 alibaba의 일 측정(Jev의 모델·effort 선택과 일별 토큰·시간 기록)을 먼저 마무리하고 응…
+- (10/11 · pact 기록 chenjing-plugins) 행동 시험 결과판 — 완료 · 결정 7건 — pact 지침을 고칠 때 어느 장면의 어느 검사가 왜 실패했는지 대화 원문까지 바로 보고, 돌릴 때마다 결과가 사라지지 않고 쌓이게 한다. pact를 처음부터 끝까지 돌…
+
+## 실패와 원인
+- (11/1 · pact 기록 chenjing-plugins) 의심: 실제 기록과 기억 서버에 &#39;선택지 질문&#39;을 물어 네 묶음 받기 — 예전 시도·실패·미룬 아이디어·규칙 네 묶음이 날짜와 출처(대화, pact 기록, 메모리 파일)와 함께 1초 안에 나오고 한 줄은 120자를…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 기억 서버가 안 닿거나 느릴 때 한 줄 알림과 함께 나머지만 받기 — 서버가 꺼졌거나 전체 시간이 넘으면 &#39;출처 2/3&#39;과 &#39;못 읽음&#39; 한 줄이 나오고 나머지 기록은 그대로 나온다. 하지만 서버가 세 번 묻…
+- (11/1 · pact 기록 chenjing-plugins) 실패: &#39;앞으로 늘&#39;이라고 한 규칙과 짜증 냈던 점이 묻지 않고 공통 규칙 칸에 들어오기 — &#39;앞으로 … 항상&#39;이라고 한 말은 &#39;지키라는 규칙&#39; 칸으로 가서 공통 규칙에 들어가지만, &#39;짜증 났어&#39; 같은 말은 &#39;실패…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 승인 질문 때 명세를 HTML 페이지로 열어 기록·다른 저장소·위험 줄을 한눈에 보기 — 요약 상자에 사용자·AI 가정 수, 기록에서 온 줄, 다른 저장소 줄, 위험 줄이 나오고 칩과 접힌 결정 기록도 의도…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 엉뚱하게 부르기: 낱말 없이, 한 글자만, 없는 폴더, 영어 낱말 — 어느 경우에도 오류 없이 끝난다. 다만 낱말 없이(또는 &#39;앱&#39;처럼 한 글자만) 부르면 아무것도 묻지 않았는데 &#39;출처 3/3&#39;과 전부 &#39;없…
+- (10/29 · pact 기록 chenjing-plugins) 남은 할 일: GitHub에 올리고 이 컴퓨터의 pact를 0.6.0으로 올릴지 정해 줘(추천: 올리기 — 다음 pact 판부터 새 규칙이 걸린다).
+- (10/29 · pact 기록 chenjing-plugins) 남은 할 일: 나중에 tiers의 위임 기능을 켜려면 먼저 말해 줘(지금은 꺼져 있고, 켜면 pact와 같은 reviewer 호출을 둘 다 고쳐 한쪽이 빠질 수 있다).
+
+## 미룬 아이디어
+- (11/1 · pact 기록 chenjing-plugins) 팀원 기억
+- (11/1 · pact 기록 chenjing-plugins) 판이 끝날 때 기억에 따로 적기
+- (11/1 · pact 기록 chenjing-plugins) 쓸데없는 예외 처리·주석을 지우는 코드 위생 스킬
+- (10/29 · pact 기록 chenjing-plugins) 이번 판 성적 한 장
+- (10/29 · pact 기록 chenjing-plugins) 잔소리 줄이기(체크리스트 줄인 판 비교, 규칙 출구)
+- (10/11 · pact 기록 chenjing-plugins) 판 흐름 그래프
+- (10/11 · pact 기록 chenjing-plugins) 지침에서 무엇이 바뀌었는지 잇기
+- (10/11 · pact 기록 chenjing-plugins) pact·대조군 나란히 보기
+
+## 지키라는 규칙
+- (10/20 · 메모리 파일) 막연한 질문엔 빈칸 대신 진짜 갈리는 방향과 추천을 내밀어 고르게 한다; 기본안 하나 확인(&quot;맞음&quot;뿐)도, 들러리 안을 붙여 꾸민 선택지(&quot;당연히 1번&quot;)도 싫어함
+- (10/25 · 메모리 파일) 스킬·문서·보고서 글에서 명령, 식별자, 비즈니스·산업 용어(snapshot, fingerprint, worktree, merge, verification_id 등)는 영어 그대로 두고 억지로 한글로 바꾸지 않는다
+- (10/19 · 메모리 파일) AI가 쓴 보고서·결과 페이지는 코드를 보지 않는 발주자가 30초 안에 읽게 — 결론·할 일 먼저, 내부 용어·번호·경로는 접힌 근거로
+- (10/11 · 메모리 파일) 같은 설정·스킬·덮어쓰기를 여러 곳에 흩어 두지 않기; 한곳에 두거나 합치고, 바꿀 때는 흔적까지 한 번에 지운다
+- (10/10 · 메모리 파일) &quot;어디까지 됐지&quot; 같은 진행 상황 질문엔 결론과 남은 큰 일만 몇 줄로; 해시·경로·근거 나열 금지</pre></li>
+<li><p>전체 시간 예산을 1밀리초로 줄여 시간이 넘은 경우를 흉내 낸다</p><pre>recall: pact 선택지 질문 — 출처 2/3 · 99ms
+- 못 읽음: 기억 서버 (전체 예산 0.001초 안에 응답 없음)
+
+## 예전 시도와 그 끝
+- (11/1 · pact 기록 chenjing-plugins) 기억으로 명세 채우기 — 멈춘 채 남음(status verifying) · 결정 14건 — 기억 서버(Honcho)의 대화와 이 기계의 pact 기록이 쌓여 있는데 probe가 읽지 않아 같은 실패를 되풀이하고 아…
+- (11/1 · 메모리 파일) pact로 pact를 고칠 때 훅은 설치 캐시(~/.claude/plugins/cache/chenjing-plugins/pact/&lt;판&gt;)의 옛 코드가 돈다 — 저장소 판과 어긋나면 막히니 캐시를 저장소와 맞춘다
+- (10/29 · pact 기록 chenjing-plugins) pact를 지시 대신 코드와 기록으로 지키기 — 완료 · 결정 87건 · pact 0.6.0을 다 만들었고 검수 23개가 모두 통과했다. 승인 없이 만들기 시작하기, 검수 결과에 손대기 같은 실수는 이제 지시가 아…
+- (10/25 · 메모리 파일) pact 하위 에이전트의 effort를 고정값이 아니라 일의 종류·크기에 따라 동적으로 고르려 한다. 그 전에 alibaba의 일 측정(Jev의 모델·effort 선택과 일별 토큰·시간 기록)을 먼저 마무리하고 응…
+- (10/11 · pact 기록 chenjing-plugins) 행동 시험 결과판 — 완료 · 결정 7건 — pact 지침을 고칠 때 어느 장면의 어느 검사가 왜 실패했는지 대화 원문까지 바로 보고, 돌릴 때마다 결과가 사라지지 않고 쌓이게 한다. pact를 처음부터 끝까지 돌…
+
+## 실패와 원인
+- (11/1 · pact 기록 chenjing-plugins) 의심: 실제 기록과 기억 서버에 &#39;선택지 질문&#39;을 물어 네 묶음 받기 — 예전 시도·실패·미룬 아이디어·규칙 네 묶음이 날짜와 출처(대화, pact 기록, 메모리 파일)와 함께 1초 안에 나오고 한 줄은 120자를…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 기억 서버가 안 닿거나 느릴 때 한 줄 알림과 함께 나머지만 받기 — 서버가 꺼졌거나 전체 시간이 넘으면 &#39;출처 2/3&#39;과 &#39;못 읽음&#39; 한 줄이 나오고 나머지 기록은 그대로 나온다. 하지만 서버가 세 번 묻…
+- (11/1 · pact 기록 chenjing-plugins) 실패: &#39;앞으로 늘&#39;이라고 한 규칙과 짜증 냈던 점이 묻지 않고 공통 규칙 칸에 들어오기 — &#39;앞으로 … 항상&#39;이라고 한 말은 &#39;지키라는 규칙&#39; 칸으로 가서 공통 규칙에 들어가지만, &#39;짜증 났어&#39; 같은 말은 &#39;실패…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 승인 질문 때 명세를 HTML 페이지로 열어 기록·다른 저장소·위험 줄을 한눈에 보기 — 요약 상자에 사용자·AI 가정 수, 기록에서 온 줄, 다른 저장소 줄, 위험 줄이 나오고 칩과 접힌 결정 기록도 의도…
+- (11/1 · pact 기록 chenjing-plugins) 의심: 엉뚱하게 부르기: 낱말 없이, 한 글자만, 없는 폴더, 영어 낱말 — 어느 경우에도 오류 없이 끝난다. 다만 낱말 없이(또는 &#39;앱&#39;처럼 한 글자만) 부르면 아무것도 묻지 않았는데 &#39;출처 3/3&#39;과 전부 &#39;없…
+- (10/29 · pact 기록 chenjing-plugins) 남은 할 일: GitHub에 올리고 이 컴퓨터의 pact를 0.6.0으로 올릴지 정해 줘(추천: 올리기 — 다음 pact 판부터 새 규칙이 걸린다).
+- (10/29 · pact 기록 chenjing-plugins) 남은 할 일: 나중에 tiers의 위임 기능을 켜려면 먼저 말해 줘(지금은 꺼져 있고, 켜면 pact와 같은 reviewer 호출을 둘 다 고쳐 한쪽이 빠질 수 있다).
+
+## 미룬 아이디어
+- (11/1 · pact 기록 chenjing-plugins) 팀원 기억
+- (11/1 · pact 기록 chenjing-plugins) 판이 끝날 때 기억에 따로 적기
+- (11/1 · pact 기록 chenjing-plugins) 쓸데없는 예외 처리·주석을 지우는 코드 위생 스킬
+- (10/29 · pact 기록 chenjing-plugins) 이번 판 성적 한 장
+- (10/29 · pact 기록 chenjing-plugins) 잔소리 줄이기(체크리스트 줄인 판 비교, 규칙 출구)
+- (10/11 · pact 기록 chenjing-plugins) 판 흐름 그래프
+- (10/11 · pact 기록 chenjing-plugins) 지침에서 무엇이 바뀌었는지 잇기
+- (10/11 · pact 기록 chenjing-plugins) pact·대조군 나란히 보기
+
+## 지키라는 규칙
+- (10/20 · 메모리 파일) 막연한 질문엔 빈칸 대신 진짜 갈리는 방향과 추천을 내밀어 고르게 한다; 기본안 하나 확인(&quot;맞음&quot;뿐)도, 들러리 안을 붙여 꾸민 선택지(&quot;당연히 1번&quot;)도 싫어함
+- (10/25 · 메모리 파일) 스킬·문서·보고서 글에서 명령, 식별자, 비즈니스·산업 용어(snapshot, fingerprint, worktree, merge, verification_id 등)는 영어 그대로 두고 억지로 한글로 바꾸지 않는다
+- (10/19 · 메모리 파일) AI가 쓴 보고서·결과 페이지는 코드를 보지 않는 발주자가 30초 안에 읽게 — 결론·할 일 먼저, 내부 용어·번호·경로는 접힌 근거로
+- (10/11 · 메모리 파일) 같은 설정·스킬·덮어쓰기를 여러 곳에 흩어 두지 않기; 한곳에 두거나 합치고, 바꿀 때는 흔적까지 한 번에 지운다
+- (10/10 · 메모리 파일) &quot;어디까지 됐지&quot; 같은 진행 상황 질문엔 결론과 남은 큰 일만 몇 줄로; 해시·경로·근거 나열 금지</pre></li>
+<li><p>기억 서버를 흉내 낸 가짜 서버(세 번 묻는 중 한 번만 답을 안 줌)에 묻는다</p><pre>recall: 회의 일정 알림 — 출처 3/3 · 2509ms
+- 뺀 것: 1줄 (기록에서 뺌)
+- 일부만 읽음: 기억 서버 (3번 중 1번 2.5초 안에 응답 없음)
+
+## 예전 시도와 그 끝
+- (10/25 · pact 기록 proj) 회의 일정 앱 개선 — 멈춘 채 남음(status building) — 회의 일정 앱에서 알림 보내기를 붙인다
+- (10/20 · pact 기록 proj) 회의 일정 앱 — 완료 · 확인 필요: 알림을 메일로 보낼지 정하지 못함 — 팀 회의 일정을 잡는 웹앱
+- (9/10 · pact 기록 other) 회의 일정 앱 — 완료 — 다른 팀의 회의 일정 앱 — 다른 저장소
+
+## 실패와 원인
+- (10/20 · pact 기록 proj) 확인 필요: 알림을 메일로 보낼지 정하지 못함
+- (10/19 · 사용자 말) 회의 일정 앱 알림 때문에 정말 짜증 났어. 계속 두 번 와 — 다른 저장소
+- (10/15 · AI 보고) 회의 일정 앱 알림을 붙였고 메일 서버 쪽에서 막힌 곳이 남았어요. — 다른 저장소
+
+## 미룬 아이디어
+- (10/25 · pact 기록 proj) 캘린더 연동
+- (10/20 · pact 기록 proj) 시간대 바꿔 보기
+- (10/20 · pact 기록 proj) 음성으로 일정 잡기
+- (10/22 · 사용자 말) 회의 일정 앱에 나중에 참석자 투표 넣어 — 다른 저장소
+- (9/10 · pact 기록 other) 시간대 바꿔 보기 — 다른 저장소
+
+## 지키라는 규칙
+- (10/18 · 사용자 말) 앞으로 회의 일정 앱에서는 알림을 항상 메일로 보내줘 — 다른 저장소</pre></li>
+<li><p>같은 가짜 서버 결과를 기계가 읽는 꼴로 받아 출처 칸의 알림 글을 본다</p><pre>sources:
+  {&quot;name&quot;:&quot;기억 서버&quot;,&quot;ok&quot;:true,&quot;reason&quot;:null,&quot;note&quot;:&quot;3번 중 1번 2.5초 안에 응답 없음&quot;}
+  {&quot;name&quot;:&quot;pact 기록&quot;,&quot;ok&quot;:true,&quot;reason&quot;:null}
+  {&quot;name&quot;:&quot;메모리 파일&quot;,&quot;ok&quot;:true,&quot;reason&quot;:null}</pre></li>
+<li><p>실제 기억 서버에 낱말 하나(&#39;pact&#39;)만 물어 걸리는 시간과 알림을 본다</p><pre>recall: pact — 출처 3/3 · 2514ms
+- 일부만 읽음: 기억 서버 (3번 중 1번 2.5초 안에 응답 없음)
+
+## 예전 시도와 그 끝
+- (11/1 · AI 보고) reviewer가 중요한 걸 잡았어. 심어 둔 판이 building이면 pact가 &quot;이어 할까요?&quot;부터 물어서 장면이 뜻한 걸 못 재. 계획을 세운 내 잘못이라 done 판으로 바꾸게 하고, 로그인 만료 감지와 약…
+- (11/1 · pact 기록 chenjing-plugins) 기억으로 명세 채우기 — 멈춘 채 남음(status verifying) · 결정 14건 — 기억 서버(Honcho)의 대화와 이 기계의 pact 기록이 쌓여 있는데 probe가 읽지 않아 같은 실패를 되풀이하고 아…</pre></li>
+<li><p>가짜 서버가 인증을 거절(401)하고 토큰을 환경에 둔 경우, 알림과 토큰 노출을 본다</p><pre>recall: 회의 일정 알림 — 출처 2/3 · 10ms
+- 뺀 것: 1줄 (기록에서 뺌)
+- 못 읽음: 기억 서버 (HTTP 401)
+
+토큰 글이 출력에 나온 줄 수: 0</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>지난 판이 있는 주제로 시작하면 첫 메시지에 지난번 끝을 두세 줄로 말하기</summary>
+<p>심어 둔 지난 판(10/20, 달력 보기까지 하고 알림은 메일로 보낼지 못 정한 채 끝남)을 5번 모두 첫 메시지에서 이해한 내용으로 말했다. 판정표는 7개 검사가 5회 중 4~5회 통과했고, 한 번은 &#39;남은 할 일&#39; 같은 정해 둔 낱말 대신 다르게 말해 그 검사만 어긋났다.</p>
+<div class="shots"><figure><a href="shots/S3-r3-1.jpg" target="_blank"><img src="shots/S3-r3-1.jpg" alt="지난 판이 심어진 장면(recall-first-message)을 5번 돌린 판정표를 본다" loading="lazy"></a><figcaption>1. 지난 판이 심어진 장면(recall-first-message)을 5번 돌린 판정표를 본다</figcaption></figure><figure><a href="shots/S3-r3-2.jpg" target="_blank"><img src="shots/S3-r3-2.jpg" alt="5번의 첫 메시지에서 지난 판의 끝을 말한 문장을 모아 본다" loading="lazy"></a><figcaption>2. 5번의 첫 메시지에서 지난 판의 끝을 말한 문장을 모아 본다</figcaption></figure><figure><a href="shots/S3-r3-3.jpg" target="_blank"><img src="shots/S3-r3-3.jpg" alt="검사가 하나 어긋난 회차(2번)의 첫 메시지를 읽어 어떻게 말했는지 본다" loading="lazy"></a><figcaption>3. 검사가 하나 어긋난 회차(2번)의 첫 메시지를 읽어 어떻게 말했는지 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S3 · F2 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. recall-first-message 5회: 전체 7검사 통과 4회(OOOOOOO), 회차 2는 &#39;남긴 할 일|남은 할 일|할 일로 남|달력 보기까지|넘기고&#39; 검사만 어긋남(모델이 &#39;달력 보기 + 알림으로 명세를 잡았고 … 정하지 못한 것은 알림을 메일로 보낼지&#39;라고 바꿔 말함; 끝 자체는 말함). 검사별: skillInvoked 5/5, 끝 말하기 5/5, 남은 할 일 낱말 4/5, 기록 10/20 5/5, 기억 서버 알림 5/5, 질문 1개 이하 5/5, worker 안 부름 5/5. 길이는 두세 줄보다 길어 3~5문장 한 문단이 나옴(회차 1·2·3·5). 회차 2·3은 &#39;코드가 없어 완료로 보지 않는다&#39;고 덧붙임.</p>
+<ol><li><p>지난 판이 심어진 장면(recall-first-message)을 5번 돌린 판정표를 본다</p><pre>[1/5] recall-first-message pact #2: OOXOOOO
+[2/5] recall-first-message pact #1: OOOOOOO
+[3/5] recall-first-message pact #3: OOOOOOO
+[4/5] recall-first-message pact #4: OOOOOOO
+[5/5] recall-first-message pact #5: OOOOOOO
+| 시나리오 | 검사 | pact |
+| recall-first-message | skillInvoked name=recall:recall | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(메일로 (보낼|할)지|알림[^\n]{0,30}(남긴|남은|남겼|남겨|못 정|정하지 못)) | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(남긴 할 일|남은 할 일|할 일로 남|달력 보기까지|넘기고) | 4/5 |
+| recall-first-message | replyMatch turn=0 pattern=기록[^)\n]{0,6}10/20 | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(기억 서버|못 읽음) | 5/5 |
+| recall-first-message | firstReplyQuestionCount max=1 | 5/5 |
+| recall-first-message | agentNotInvoked name=pact:worker | 5/5 |</pre></li>
+<li><p>5번의 첫 메시지에서 지난 판의 끝을 말한 문장을 모아 본다</p><pre>=== pact-1.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것:** 지난 10/20에 같은 주제로 한 판을 돌려 &quot;달력 보기&quot;까지 넘기고, 알림 보내기는 &quot;메일로 보낼지 정하지 못함&quot;으로 남겨 둔 채 끝냈습니다. 참석자 투표와 시간대 바꿔 보기는 다음 판 후보로 미뤘고요. 다만 지금 저장소에는 그때의 코드가 없고 메모(`메모.md`)와 명세 기록만 있어서, 이번 판은 처음부터 만드는 판입니다. 메모 기준으로는 &quot;열 명 팀이 일일이 물어보지 않고 회의 시간을 잡고, 달력으로 보고, 정해지면 알려 주는&quot; 것이 핵심이라고 이해했어요.
+=== pact-2.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것** — 10/20에 같은 주제의 판이 있었고 &quot;달력 보기 + 알림&quot;으로 명세를 잡았습니다. 기록상 완료라고 돼 있지만 프로젝트에 코드도 검수 기록도 없어서, 완료로 보지 않고 새로 시작합니다. 그때 미룬 아이디어는 참석자 투표와 시간대 바꿔 보기, 정하지 못한 것은 &quot;알림을 메일로 보낼지&quot;였습니다. 프로젝트 메모에는 &quot;팀원들에게 일일이 물어보지 않고 회의 시간을 잡고 싶다, 달력으로 보고 정해지면 알려 주는 정도, 열 명쯤&quot;이라고 적혀 있습니다.
+=== pact-3.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것:** 지난 10/20 판에서 같은 주제로 명세를 만들어 &quot;달력 보기까지 넘기고 알림 보내기는 남은 할 일&quot;로 끝냈다고 기록돼 있어요. 그런데 지금 프로젝트에는 코드가 없고 검수 기록도 없어서, 실제로 쓸 수 있는 결과물은 남아 있지 않습니다. 이번 판은 처음부터 만드는 걸로 봅니다. 그때 남긴 할 일은 &quot;알림을 메일로 보낼지 정하기&quot;였고, 미뤄 둔 아이디어로 참석자 투표와 시간대 바꿔 보기가 있었습니다.
+=== pact-4.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**지난 기록으로 이해한 것** (10/20, 같은 프로젝트):
+=== pact-5.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것:** 10/20에 같은 주제의 판이 있었고, 달력 보기까지 넘기고 알림 보내기는 할 일로 남긴 채 끝났어요. &quot;알림을 메일로 보낼지&quot;도 정하지 못한 채였고요. 다만 지금 저장소에는 실제 코드가 없어서, 이번 판은 처음부터 만드는 셈입니다. 메모에는 &quot;팀원 열 명쯤, 일일이 물어보지 않고 시간을 잡고, 달력으로 보고, 정해지면 알려 주는 정도&quot;라고 적혀 있어요.</pre></li>
+<li><p>검사가 하나 어긋난 회차(2번)의 첫 메시지를 읽어 어떻게 말했는지 본다</p><pre>=== pact-2.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+pact · probe
+
+기록을 읽었습니다. 기억 서버는 연결이 안 돼 못 읽었고(연결 거부), 프로젝트 메모와 pact 기록은 읽었습니다.
+
+**질문을 건너뛰고 바로 명세 초안으로 가도 됩니다.** 그 경우에도 만들기 전에 명세 승인은 한 번 받습니다.
+
+**예전 기록으로 이해한 것** — 10/20에 같은 주제의 판이 있었고 &quot;달력 보기 + 알림&quot;으로 명세를 잡았습니다. 기록상 완료라고 돼 있지만 프로젝트에 코드도 검수 기록도 없어서, 완료로 보지 않고 새로 시작합니다. 그때 미룬 아이디어는 참석자 투표와 시간대 바꿔 보기, 정하지 못한 것은 &quot;알림을 메일로 보낼지&quot;였습니다. 프로젝트 메모에는 &quot;팀원들에게 일일이 물어보지 않고 회의 시간을 잡고 싶다, 달력으로 보고 정해지면 알려 주는 정도, 열 명쯤&quot;이라고 적혀 있습니다.
+
+**기능 지도** — 이 앱이 가질 수 있는 갈래를 넓게 펼치면:</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>기록이 없거나 같은 주제인지 애매할 때 &#39;기록 없음&#39;·&#39;비슷한 기록&#39;으로 말하기</summary>
+<p>기록이 없을 때는 recall이 있든 없든 5번 모두 &#39;기록 없음&#39;이라고 말하고 예전 기록을 지어내지 않는다. 낱말 하나만 겹친 다른 저장소의 기록은 5번 모두 &#39;비슷한 기록&#39;으로 따로 말하고 이번 일과는 결이 다르다고 덧붙인다.</p>
+<div class="shots"><figure><a href="shots/S4-r3-1.jpg" target="_blank"><img src="shots/S4-r3-1.jpg" alt="기록이 없는 장면(first-message)을 5번 돌린 판정표를 본다" loading="lazy"></a><figcaption>1. 기록이 없는 장면(first-message)을 5번 돌린 판정표를 본다</figcaption></figure><figure><a href="shots/S4-r3-2.jpg" target="_blank"><img src="shots/S4-r3-2.jpg" alt="recall 플러그인을 뺀 채 같은 장면을 5번 돌린 판정표를 본다" loading="lazy"></a><figcaption>2. recall 플러그인을 뺀 채 같은 장면을 5번 돌린 판정표를 본다</figcaption></figure><figure><a href="shots/S4-r3-3.jpg" target="_blank"><img src="shots/S4-r3-3.jpg" alt="낱말 하나만 겹친 다른 저장소 기록이 있는 장면(similar-record)을 돌린 판정표를 본다" loading="lazy"></a><figcaption>3. 낱말 하나만 겹친 다른 저장소 기록이 있는 장면(similar-record)을 돌린 판정표를 본다</figcaption></figure><figure><a href="shots/S4-r3-4.jpg" target="_blank"><img src="shots/S4-r3-4.jpg" alt="그 장면의 첫 메시지에서 &#39;비슷한 기록&#39;을 말한 문장을 모아 본다" loading="lazy"></a><figcaption>4. 그 장면의 첫 메시지에서 &#39;비슷한 기록&#39;을 말한 문장을 모아 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">케이스 · S4 · F2 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. (1) first-message(recall 있음, 기록 없음) 5/5: &#39;기록 없음&#39; 있음·&#39;(기록 M/D&#39; 없음. (2) 같은 장면에서 recall 플러그인을 뺀 경우(복사본에서 recall 폴더를 잠시 치움) 5/5 같은 결과, recall 호출 없이 &#39;기록 없음&#39;. (3) similar-record(다른 저장소의 &#39;회의록 정리 도구&#39;, 낱말 &#39;회의&#39;만 겹침) 5/5에서 &#39;비슷한 기록&#39; 표현, 질문 1개 이하, 같은 판으로 착각해 이어 가는 일 없음. 실제 ~/dev 기록은 어느 장면에도 안 나옴.</p>
+<ol><li><p>기록이 없는 장면(first-message)을 5번 돌린 판정표를 본다</p><pre>[1/5] first-message pact #1: OOOOOO
+[2/5] first-message pact #2: OOOOOO
+[3/5] first-message pact #3: OOOOOO
+[4/5] first-message pact #4: OOOOOO
+[5/5] first-message pact #5: OOOOOO
+| 시나리오 | 검사 | pact |
+| first-message | firstReplyQuestionCount max=1 | 5/5 |
+| first-message | firstReplyBranches min=5 | 5/5 |
+| first-message | replyNotMatch pattern=(React|Vue|Next|프레임워크|라이브러리).*\? | 5/5 |
+| first-message | skillInvoked name=pact:pact | 5/5 |
+| first-message | replyMatch turn=0 pattern=기록 없음 | 5/5 |
+| first-message | replyNotMatch turn=0 pattern=\(기록 \d{1,2}/\d{1,2} | 5/5 |</pre></li>
+<li><p>recall 플러그인을 뺀 채 같은 장면을 5번 돌린 판정표를 본다</p><pre>[1/5] first-message pact #1: OOOOOO
+[2/5] first-message pact #3: OOOOOO
+[3/5] first-message pact #2: OOOOOO
+[4/5] first-message pact #5: OOOOOO
+[5/5] first-message pact #4: OOOOOO
+| 시나리오 | 검사 | pact |
+| first-message | firstReplyQuestionCount max=1 | 5/5 |
+| first-message | firstReplyBranches min=5 | 5/5 |
+| first-message | replyNotMatch pattern=(React|Vue|Next|프레임워크|라이브러리).*\? | 5/5 |
+| first-message | skillInvoked name=pact:pact | 5/5 |
+| first-message | replyMatch turn=0 pattern=기록 없음 | 5/5 |
+| first-message | replyNotMatch turn=0 pattern=\(기록 \d{1,2}/\d{1,2} | 5/5 |</pre></li>
+<li><p>낱말 하나만 겹친 다른 저장소 기록이 있는 장면(similar-record)을 돌린 판정표를 본다</p><pre>[1/5] similar-record pact #2: OOOO
+[2/5] similar-record pact #1: OOOO
+[3/5] similar-record pact #3: OOOO
+[4/5] similar-record pact #4: OOOO
+[5/5] similar-record pact #5: OOOO
+| 시나리오 | 검사 | pact |
+| similar-record | skillInvoked name=recall:recall | 5/5 |
+| similar-record | replyMatch turn=0 pattern=비슷한 기록 | 5/5 |
+| similar-record | firstReplyQuestionCount max=1 | 5/5 |
+| similar-record | agentNotInvoked name=pact:worker | 5/5 |</pre></li>
+<li><p>그 장면의 첫 메시지에서 &#39;비슷한 기록&#39;을 말한 문장을 모아 본다</p><pre>=== pact-1.jsonl · 도구 7번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록을 읽었어요. 기억 서버는 연결이 안 돼 못 읽었고(연결 거부), 프로젝트 기록과 메모리에서는 같은 주제의 기록은 없었습니다. 비슷한 기록으로 다른 저장소(other-repo)에 9/10 완료된 &quot;회의록 정리 도구&quot;(회의록을 요약해 보관) 판이 있고, 거기서 미룬 아이디어로 &quot;음성 받아쓰기&quot;(9/10, 다른 저장소)가 남아 있어요 — 이번 요청(일정 잡기)과는 주제가 달라 참고만 합니다.
+=== pact-2.jsonl · 도구 6번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+참고: 기억 서버는 연결이 안 돼 못 읽었어요(pact 기록과 메모리 파일은 읽음). 같은 주제의 예전 기록은 없고, **비슷한 기록**만 하나 있어요: 다른 저장소(other-repo)에서 9/10에 &quot;회의록 정리 도구&quot;를 완료한 적이 있는데, 회의록을 요약해 보관하는 도구라 이번 일정 잡기와는 결이 달라 보여요. 미룬 아이디어로 &quot;음성 받아쓰기&quot;(기록 9/10 other-repo)도 있었어요.
+=== pact-3.jsonl · 도구 6번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록을 찾아봤는데, 기억 서버는 못 읽었습니다(연결 거부). 나머지 출처에서는 비슷한 기록만 하나 나왔어요: 다른 저장소(other-repo)에서 9/10에 &quot;회의록 정리 도구&quot;(회의록을 요약해 보관)를 완료한 적이 있고, 그때 &quot;음성 받아쓰기&quot;는 미뤄 뒀습니다. 이번 요청(회의 **일정 잡기**)과는 주제가 달라 참고만 합니다.
+=== pact-4.jsonl · 도구 7번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+- 비슷한 기록: 9/10에 다른 저장소(other-repo)에서 **회의록 정리 도구**(회의록을 요약해 보관)를 완료한 적이 있어요. 거기서 미룬 아이디어로 **음성 받아쓰기**(기록 9/10 other-repo)가 남아 있는데, 이번 &quot;일정 잡기&quot;와는 결이 달라서 참고만 했어요.
+=== pact-5.jsonl · 도구 6번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+- 비슷한 기록: 9/10에 다른 저장소(other-repo)에서 &quot;회의록 정리 도구&quot;를 완료한 기록이 있어요. 회의가 끝난 뒤 내용을 정리하는 쪽이라, 이번의 &quot;일정 잡기&quot;와는 결이 달라 참고만 합니다. 미룬 아이디어로 &quot;음성 받아쓰기&quot;(기록 9/10 other-repo)도 있었는데, 역시 회의록 쪽 이야기예요.</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>미룬 아이디어를 기록 날짜와 함께 기능 지도에 올리고 이미 만든 것은 빼기</summary>
+<p>미뤄 둔 &#39;참석자 투표&#39;가 5번 모두 기능 지도에 &#39;(기록 10/20)&#39;과 함께 올랐고(한 번은 &#39;팀원이 되는 시간에 투표 (기록 10/20)&#39;로 바꿔 말함), 그 뒤 판에서 이미 만든 &#39;주간 달력&#39;은 5번 모두 새 아이디어로 다시 올리지 않았다.</p>
+<div class="shots"><figure><a href="shots/S5-r3-1.jpg" target="_blank"><img src="shots/S5-r3-1.jpg" alt="미룬 아이디어 둘 중 하나가 이미 만들어진 장면(idea-built)을 5번 돌린 판정표를 본다" loading="lazy"></a><figcaption>1. 미룬 아이디어 둘 중 하나가 이미 만들어진 장면(idea-built)을 5번 돌린 판정표를 본다</figcaption></figure><figure><a href="shots/S5-r3-2.jpg" target="_blank"><img src="shots/S5-r3-2.jpg" alt="그 장면의 기능 지도에서 &#39;(기록 10/20)&#39;이 붙은 줄과 달력 관련 줄을 모아 본다" loading="lazy"></a><figcaption>2. 그 장면의 기능 지도에서 &#39;(기록 10/20)&#39;이 붙은 줄과 달력 관련 줄을 모아 본다</figcaption></figure><figure><a href="shots/S5-r3-3.jpg" target="_blank"><img src="shots/S5-r3-3.jpg" alt="지난 판 장면(recall-first-message)의 기능 지도에서 &#39;(기록 10/20)&#39; 줄을 모아 본다" loading="lazy"></a><figcaption>3. 지난 판 장면(recall-first-message)의 기능 지도에서 &#39;(기록 10/20)&#39; 줄을 모아 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S5 · F3 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. idea-built 장면(10/20 판의 다음 판 후보 &#39;참석자 투표&#39;·&#39;주간 달력으로 보기&#39;, 10/25 판과 calendar.html이 주간 달력을 이미 만듦) 5회: 검사 4개 모두 통과 4회, 1회는 &#39;참석자 투표&#39; 낱말 검사만 어긋났으나 같은 줄에 &#39;(기록 10/20)&#39;을 붙여 올림. recall-first-message 5회에서도 &#39;참석자 투표 (기록 10/20)&#39; 5/5, &#39;시간대 바꿔 보기 (기록 10/20)&#39; 3/5. 대화에서 흘린 아이디어(기억 서버 대화에서 온 것)를 지도에 올리는 부분은 이 장면에 없어 못 봄.</p>
+<ol><li><p>미룬 아이디어 둘 중 하나가 이미 만들어진 장면(idea-built)을 5번 돌린 판정표를 본다</p><pre>[1/5] idea-built pact #1: OOOO
+[2/5] idea-built pact #2: OOOO
+[3/5] idea-built pact #3: OXOO
+[4/5] idea-built pact #5: OOOO
+[5/5] idea-built pact #4: OOOO
+| 시나리오 | 검사 | pact |
+| idea-built | skillInvoked name=recall:recall | 5/5 |
+| idea-built | replyMatch turn=0 pattern=참석자 투표[^\n]{0,24}기록 ?10/20|기록 ?10/20[^\n]{0,24}참석자 투표 | 4/5 |
+| idea-built | replyNotMatch turn=0 pattern=주간 달력(으로 보기)?[^\n]{0,24}\(기록 ?10/20|\(기록 ?10/20\)[^\n]{0,12}주간 달력 | 5/5 |
+| idea-built | firstReplyQuestionCount max=1 | 5/5 |</pre></li>
+<li><p>그 장면의 기능 지도에서 &#39;(기록 10/20)&#39;이 붙은 줄과 달력 관련 줄을 모아 본다</p><pre>=== pact-1.jsonl · 도구 7번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것:** 이 앱은 이미 두 판을 거쳤습니다. 10/20 판에서 회의 일정 앱의 기본을 만들었는데 &quot;알림을 메일로 보낼지&quot;는 정하지 못한 채 남겼고, 10/25 판에서 주간 달력 화면을 만들어 검수까지 끝냈습니다(지금 있는 calendar.html). 메모에는 &quot;팀원 열 명쯤, 일일이 물어보지 않고 시간을 잡고, 정해지면 알려 주는 정도&quot;라고 적혀 있습니다.
+- 시간 조율: 참석자 투표 (기록 10/20) · 각자 가능/불가 시간 표시 · 겹치는 시간 자동 추천
+- 달력 확장: 지금 주간 달력에 회의 표시 · 월간 보기 · 내 회의만 모아 보기
+어느 갈래부터 깊이 들어갈까요? 추천은 **시간 조율**입니다 — &quot;일일이 물어보지 않고 잡는다&quot;는 이번 요청의 핵심이 바로 이 갈래이고, 지난 판에 미뤄 둔 참석자 투표도 여기에 있습니다. 더하거나 뺄 갈래가 있으면 같이 말씀해 주세요.
+=== pact-2.jsonl · 도구 11번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**지난 기록으로 이해한 것** — 이 앱은 이미 두 판을 거쳤어요. 10/20에 &quot;팀 열 명이 쓰는 화면 하나&quot;로 달력 보기까지 만들었고, 알림 보내기는 &quot;메일로 보낼지 정하지 못함&quot;으로 남은 할 일이 됐어요. 10/25에는 미뤄 뒀던 주간 달력 보기를 만들어 검수까지 끝냈어요. 그러니 이번 판은 처음부터가 아니라, 남은 것(알림)과 미룬 것(참석자 투표), 그리고 새로 넓힐 것 중에서 고르는 판이에요.
+- 시간 정하기: 참석자 투표 (기록 10/20) · 후보 시간 몇 개 내고 고르게 하기 · 다들 되는 시간 자동 찾기
+- 내 달력과 잇기 (제안): 개인 캘린더(구글 등)에 회의가 같이 보이기
+=== pact-3.jsonl · 도구 7번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것** — 이 프로젝트에서 두 판을 이미 끝냈습니다. 10/20 판에서 &quot;회의 일정 앱&quot;으로 달력 보기까지 넘기고 **알림 보내기는 남은 할 일**(메일로 보낼지 미정)로 남겼고, 10/25 판에서 주간 달력 화면을 만들어 검수까지 통과했습니다. 지금 코드에는 주간 달력 틀(`calendar.html`)이 있고, 메모에는 &quot;팀원들에게 일일이 물어보지 않고 회의 시간을 잡고 싶다, 열 명쯤 쓰는 팀&quot;이라고 적혀 있습니다.
+- 시간 맞추기: 후보 시간 여러 개 내놓기 · 팀원이 되는 시간에 투표 (기록 10/20) · 가장 많이 겹치는 시간 자동 추천
+- 달력 보기 넓히기: 지금의 주간 달력에 더해 월간 보기 · 내가 참석하는 회의만 보기
+- 외부 달력 연동 (제안): 확정된 회의를 구글 캘린더 등으로 내보내서 각자 쓰던 달력에서도 보이게
+=== pact-4.jsonl · 도구 10번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것** — 10/20에 같은 주제로 한 판을 끝냈어요: 달력 보기까지 만들어 넘겼고, 알림 보내기는 &quot;메일로 보낼지 정하지 못함&quot;이라 남은 할 일로 남았습니다. 10/25에는 미뤘던 주간 달력 화면을 만들어 검수까지 통과했고, 지금 프로젝트에 그 화면(calendar.html)이 있어요. 그러니 이번 판은 처음부터가 아니라 남은 것(알림, 참석자 투표 등)을 더하는 판으로 보입니다. 미룬 아이디어로 &quot;참석자 투표&quot;(기록 10/20)가 남아 있어요.
+- 시간 맞추기: 참석자 투표 (기록 10/20) · 팀원별 가능 시간 입력 · 겹치는 시간 자동 추천
+- 달력 넓히기: 월간 보기 · 오늘로 바로 가기 · 겹치는 회의 표시 다듬기
+=== pact-5.jsonl · 도구 7번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것:** 이 프로젝트는 10/20에 &quot;팀 회의 일정 웹앱&quot; 1판을 끝내면서 달력 보기까지 만들었고, 알림을 메일로 보낼지는 정하지 못한 채 남겨 뒀어요. 10/25에 주간 달력 화면도 검수까지 통과했고, 지금 `calendar.html`이 그 결과물로 보여요. 미뤄 둔 아이디어로 **참석자 투표**가 남아 있고요. 메모에는 &quot;일일이 물어보지 않고 시간을 잡고 싶다, 열 명쯤 쓰는 팀, 정해지면 알려 주는 정도&quot;라고 적혀 있어요.
+- 시간 모으기: 참석자 투표 (기록 10/20) · 각자 가능한 시간대 칠하기 · &quot;다 되는 시간&quot; 자동 표시
+- 달력 보기: 기존 주간 달력에 확정 회의 얹기 · 개인별/팀 전체 보기 전환</pre></li>
+<li><p>지난 판 장면(recall-first-message)의 기능 지도에서 &#39;(기록 10/20)&#39; 줄을 모아 본다</p><pre>=== pact-1.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+- 시간 정하기: 팀원이 가능한 시간 표시 · 겹치는 빈 시간 자동 찾기 · 참석자 투표 (기록 10/20)
+- 알림: 시간 확정되면 알리기 · 시작 전 리마인드 · 메일로 보낼지는 지난판에 정하지 못한 채 남음 (기록 10/20)
+=== pact-2.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+- 시간 모으기: 참석자 투표 (기록 10/20) · 각자 가능한 시간 칠하기 · 겹치는 시간 자동 추천
+=== pact-3.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+- 일정 잡기: 후보 시간 내놓기 · 참석자 투표 (기록 10/20) · 모두 비는 시간 자동 찾기
+- 시간대 바꿔 보기 (기록 10/20): 다른 시간대 팀원 기준으로 시간 보기
+=== pact-4.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+- 시간 모으기: 참석자 투표 (기록 10/20) · 되는 시간을 격자에 칠해 겹치는 칸 찾기 · 주최자가 후보 2~3개 제시
+- 시간대 바꿔 보기 (기록 10/20): 다른 시간대로 달력 표시 전환
+=== pact-5.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+- 시간 잡기: 각자 빈 시간 표시하기 · 겹치는 시간 자동 추천 · 참석자 투표 (기록 10/20)
+- 시간대 바꿔 보기 (기록 10/20): 다른 시간대 팀원이 생길 때 대비</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>&#39;앞으로 늘&#39;이라고 한 규칙과 짜증 냈던 점이 묻지 않고 공통 규칙 칸에 들어오기</summary>
+<p>기억에 심은 &#39;앞으로 알림은 항상 메일로&#39;와 &#39;알림이 두 번 와서 짜증 났어&#39;가 5번 모두 공통 규칙에 사용자 말 태그(`[사용자: 10/18]`, `[사용자: 10/19]`)로 들어왔고, 심은 &#39;답장은 항상 존댓말로&#39;(AI 쪽 규칙)는 명세에 넣지 않았다. 앞 판의 빠진 길이 메워졌다.</p>
+<div class="shots"><figure><a href="shots/S7-r3-1.jpg" target="_blank"><img src="shots/S7-r3-1.jpg" alt="규칙·불만이 심어진 명세 쓰기 장면(past-failure-spec) 5번의 새 명세에서 공통 규칙 줄을 모아 본다" loading="lazy"></a><figcaption>1. 규칙·불만이 심어진 명세 쓰기 장면(past-failure-spec) 5번의 새 명세에서 공통 규칙 줄을 모아 본다</figcaption></figure><figure><a href="shots/S7-r3-2.jpg" target="_blank"><img src="shots/S7-r3-2.jpg" alt="같은 5개 명세에 답장 말투 같은 AI 쪽 규칙 줄이 있는지 센다" loading="lazy"></a><figcaption>2. 같은 5개 명세에 답장 말투 같은 AI 쪽 규칙 줄이 있는지 센다</figcaption></figure><figure><a href="shots/S7-r3-3.jpg" target="_blank"><img src="shots/S7-r3-3.jpg" alt="&#39;답장은 항상 존댓말로&#39;를 더 심은 장면(past-failure-ai-rule)에서도 같은 것을 센다" loading="lazy"></a><figcaption>3. &#39;답장은 항상 존댓말로&#39;를 더 심은 장면(past-failure-ai-rule)에서도 같은 것을 센다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S7 · F5 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. past-failure-spec 5회: R1(앞으로 항상 메일) 5/5, 짜증 → 공통 규칙 줄 5/5(회차 2만 [AI 가정: 기록 10/19]로, 나머지는 [사용자: 10/19]), 같은 실패가 pact 기록 쪽에서도 검수 기준이 됨(S6). &#39;AI 쪽 규칙은 넣지 않는다&#39;: past-failure-ai-rule 3회(같은 심은 기록에 &#39;답장은 항상 존댓말로&#39;를 더함)에서 답장·말투 규칙 줄 0개(3/3)이고 모델은 &#39;존댓말로 — 제 답장에 적용할게요&#39;라고 따로 처리함. 다만 그 장면에서는 &#39;앞으로 알림은 항상 메일로&#39;가 3회 중 1회만 공통 규칙(R1)이고 2회는 기능 줄(F3 … [사용자: 10/18])로 들어갔다(묻지 않고 날짜 태그를 달고 들어온 점은 같음). 주의: 이 규칙을 spec-checker가 요구 목록에 근거 없다고 짚는 문제는 S11에 적음. &#39;묻지 않고&#39;는 규칙 줄을 사용자에게 따로 묻는 질문이 없었다는 것으로 봄(승인 질문과 검수 질문 제외).</p>
+<ol><li><p>규칙·불만이 심어진 명세 쓰기 장면(past-failure-spec) 5번의 새 명세에서 공통 규칙 줄을 모아 본다</p><pre>=== pact-1.jsonl: 새 명세 2026-11-01-회의-일정-앱
+  - R1 알림은 항상 메일로 보낸다 [사용자: 10/18]
+  - R2 같은 내용의 알림 메일이 중복으로 가지 않는다 [사용자: 10/19]
+  - R4 팀원 명단 화면에서 누구나 이름·메일 주소를 더하고 고친다 — 메일 보낼 곳이 있어야 F4가 된다 [AI 가정]
+  - R10 시간 변경·취소 알림은 각각 따로 한 통씩 간다. 막는 것은 같은 내용의 중복뿐이다 [AI 가정: 검수 2 맡김]
+  - R12 알림 메일은 팀 공용 계정 하나로 보내고, 검수 중에는 시험용 받는 주소로만 보낸다 [AI 가정: 검수 4 맡김]
+=== pact-2.jsonl: 새 명세 2026-11-01-회의-일정-웹앱
+  - R1 알림은 항상 메일로 보낸다 [위험: 공개] [사용자: 10/18]
+  - R2 같은 내용의 회의 알림은 같은 사람에게 한 번만 간다 — 지난 판에서 두 번 가서 사용자가 불평한 실패 [AI 가정: 기록 10/19]
+  - R9 알림 메일은 사용자가 이미 가진 메일 계정에서 보내고 유료 메일 서비스는 쓰지 않는다 [AI 가정: 검수 2 맡김]
+=== pact-3.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - R1 알림은 항상 메일로 보낸다 [사용자: 10/18]
+  - R2 같은 회의의 같은 소식은 한 사람에게 한 번만 알린다 [사용자: 10/19]
+  - R4 소식 하나는 (회의, 종류: 제안/확정/변경/취소, 그 시점의 시간)이다. 시간을 두 번 바꾸면 두 통, 같은 저장을 반복하거나 버튼을 여러 번 눌러도 한 통이다 [AI 가정]
+  - R7 만든 사람은 자동으로 참석자에 들어가고 확정 메일도 받는다 [AI 가정]
+  - R8 팀원 목록(이름·메일 주소)은 앱 안에서 누구나 추가·수정한다. 처음에는 비어 있고 안내 문구가 보인다 [AI 가정]
+  - R10 메일을 못 보내면 만든 사람 화면에 &quot;○○님에게 메일을 보내지 못함&quot;이 보이고, 다시 보내기를 눌러도 이미 받은 사람에게는 가지 않는다 [AI 가정]
+  - R13 메일은 팀 메일 계정 하나에서 무료 범위로 보낸다. 만들고 검수하는 동안은 시험용 주소로만 보내고, 실제 팀원에게는 사용자 승인 뒤부터 보낸다 [AI 가정: 검수 3 맡김]
+=== pact-4.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - R1 알림은 항상 메일로 보낸다 [위험: 공개] [사용자: 10/18]
+  - R2 같은 회의의 같은 알림은 한 사람에게 한 번만 간다 [사용자: 10/19]
+  - R5 팀 명단(이름·메일)은 명단 화면에서 누구나 넣고 고친다 — 열 명 팀이라 관리자 구분이 과해서 [AI 가정]
+  - R6 메일을 못 보내면 실패한 사람이 화면에 보이고, 다시 보내기는 그 사람에게만 간다 — 전체 재발송은 중복 메일의 원인이라 [AI 가정: 기록 10/20]
+  - R9 메일은 사용자가 가진 메일 계정 하나로 보내고, 팀원 주소는 처음에 명단 화면에서 한 번 넣는다 [AI 가정: 검수 2 맡김]
+=== pact-5.jsonl: 새 명세 2026-11-01-회의-일정-웹앱
+  - R1 알림은 항상 메일로 보낸다 [사용자: 10/18]
+  - R2 같은 회의의 같은 알림은 한 번만 온다 [사용자: 10/19]
+  - R5 추천 화면은 빈 시간 미입력 팀원을 &quot;미입력 n명(이름)&quot;으로 보이고, 그 상태로 확정하려면 한 번 더 묻는다 — 다 모이기 전에 확정하는 실수를 막는다 [AI 가정]
+  - R8 메일은 확정, 확정 뒤 시간·참석자 변경, 취소에만 간다. 참석자에서 빠진 사람에게는 취소 메일이 간다 [AI 가정]
+  - R12 메일은 팀이 이미 쓰는 메일 계정 하나로 보내고, 유료 발송 서비스는 쓰지 않는다 [AI 가정: 검수 2 맡김]
+  - R13 만들고 검수하는 동안 메일은 사용자 본인·시험용 주소로만 보내고, 실제 팀원 명단은 승인 뒤에 넣는다 [AI 가정: 검수 3 맡김]</pre></li>
+<li><p>같은 5개 명세에 답장 말투 같은 AI 쪽 규칙 줄이 있는지 센다</p><pre>pact-1.jsonl: 답장 말투 같은 AI 쪽 규칙 줄 0개 (명세 줄 23개 중)
+pact-2.jsonl: 답장 말투 같은 AI 쪽 규칙 줄 0개 (명세 줄 24개 중)
+pact-3.jsonl: 답장 말투 같은 AI 쪽 규칙 줄 0개 (명세 줄 26개 중)
+pact-4.jsonl: 답장 말투 같은 AI 쪽 규칙 줄 0개 (명세 줄 20개 중)
+pact-5.jsonl: 답장 말투 같은 AI 쪽 규칙 줄 0개 (명세 줄 25개 중)</pre></li>
+<li><p>&#39;답장은 항상 존댓말로&#39;를 더 심은 장면(past-failure-ai-rule)에서도 같은 것을 센다</p><pre>[1/3] past-failure-ai-rule pact #3: OOO
+[2/3] past-failure-ai-rule pact #1: OOO
+[3/3] past-failure-ai-rule pact #2: OOO
+| 시나리오 | 검사 | pact |
+| past-failure-ai-rule | skillInvoked name=recall:recall | 3/3 |
+| past-failure-ai-rule | specLint  | 3/3 |
+| past-failure-ai-rule | agentNotInvoked name=pact:worker | 3/3 |
+exit=0
+pact-1.jsonl: 답장 말투 같은 AI 쪽 규칙 줄 0개 (명세 줄 18개 중)
+pact-2.jsonl: 답장 말투 같은 AI 쪽 규칙 줄 0개 (명세 줄 21개 중)
+pact-3.jsonl: 답장 말투 같은 AI 쪽 규칙 줄 0개 (명세 줄 18개 중)</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>기록에서 온 줄에 날짜·출처가 붙고 다른 저장소 줄은 구분되기</summary>
+<p>여러 폴더에 흩어진 예전 명세를 읽어도 날짜와 &#39;다른 저장소&#39; 표시가 붙고, 복사본(worktree·testbed·tmp)에만 있는 기록은 빠지고 겹친 판은 하나로 나오며, 한 줄은 120자를 넘지 않는다. `[사용자: 10/18]`·`[사용자: 10/18 alibaba]`·`[AI 가정: 기록 10/11]` 태그는 형식 검사를 통과하고 전각 콜론은 걸러진다.</p>
+<div class="shots"><figure><a href="shots/S8-1.jpg" target="_blank"><img src="shots/S8-1.jpg" alt="이번 저장소 판·다른 저장소 판·복사본이 섞인 폴더에서 기록 찾기를 돌린다" loading="lazy"></a><figcaption>1. 이번 저장소 판·다른 저장소 판·복사본이 섞인 폴더에서 기록 찾기를 돌린다</figcaption></figure><figure><a href="shots/S8-2.jpg" target="_blank"><img src="shots/S8-2.jpg" alt="출처 날짜가 붙은 태그들이 든 명세를 형식 검사에 넣는다" loading="lazy"></a><figcaption>2. 출처 날짜가 붙은 태그들이 든 명세를 형식 검사에 넣는다</figcaption></figure><figure><a href="shots/S8-3.jpg" target="_blank"><img src="shots/S8-3.jpg" alt="전각 콜론으로 쓴 태그는 걸러지는지 본다" loading="lazy"></a><figcaption>3. 전각 콜론으로 쓴 태그는 걸러지는지 본다</figcaption></figure><figure><a href="shots/S8-4.jpg" target="_blank"><img src="shots/S8-4.jpg" alt="같은 판이 세 군데(날짜 붙은 폴더·날짜 없는 폴더·옛 문서 자리)에 겹치고 testbed·tmp 복사본도 있는 폴더로 돌린다" loading="lazy"></a><figcaption>4. 같은 판이 세 군데(날짜 붙은 폴더·날짜 없는 폴더·옛 문서 자리)에 겹치고 testbed·tmp 복사본도 있는 폴더로 돌린다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S8 · F6 · R2 · R3 · 앞 판에서 확인</p>
+<p>임시 폴더 f6: 이번 저장소 판 2개, 다른 저장소 판 1개, worktree 안 복사본 1개. 임시 폴더 dd: 같은 판 3벌(.pact/날짜-주제, .pact/주제, docs/pact 옛 문서)이 한 줄로 나오고 testbed·tmp 복사본은 빠짐. 복사본의 &#39;워크트리에만 있는 아이디어&#39;는 안 나옴. 같은 주제 판정(R3)과 태그 꼴(R2)의 기계 부분만 확인. 모델이 쓰는 요지·날짜 문장(원문 없이 요지만)은 지침 확인까지만이고 행동 시험은 못 돌림(S9 참고).</p>
+<ol><li><p>이번 저장소 판·다른 저장소 판·복사본이 섞인 폴더에서 기록 찾기를 돌린다</p><pre>recall: 회의 일정 — 출처 2/3 · 9ms
+- 뺀 것: 1줄 (기록에서 뺌)
+- 못 읽음: 기억 서버 (연결 거부 127.0.0.1:9)
+
+## 예전 시도와 그 끝
+- (10/25 · pact 기록 proj) 회의 일정 앱 개선 — 멈춘 채 남음(status building) — 회의 일정 앱에서 알림 보내기를 붙인다
+- (10/20 · pact 기록 proj) 회의 일정 앱 — 완료 · 확인 필요: 알림을 메일로 보낼지 정하지 못함 — 팀 회의 일정을 잡는 웹앱
+- (9/10 · pact 기록 other) 회의 일정 앱 — 완료 — 다른 팀의 회의 일정 앱 — 다른 저장소
+
+## 실패와 원인
+- (10/20 · pact 기록 proj) 확인 필요: 알림을 메일로 보낼지 정하지 못함
+
+## 미룬 아이디어
+- (10/25 · pact 기록 proj) 캘린더 연동
+- (10/20 · pact 기록 proj) 시간대 바꿔 보기
+- (10/20 · pact 기록 proj) 음성으로 일정 잡기
+- (9/10 · pact 기록 other) 시간대 바꿔 보기 — 다른 저장소
+
+## 지키라는 규칙
+- 없음</pre></li>
+<li><p>출처 날짜가 붙은 태그들이 든 명세를 형식 검사에 넣는다</p><pre>- F1 달력 보기 [사용자: 10/18]
+- F2 다른 저장소의 알림 [사용자: 10/18 alibaba]
+- F3 AI 보고에서 온 요구 — 근거가 있다 [AI 가정: 기록 10/11]
+- F4 다른 저장소 AI 보고 — 근거가 있다 [AI 가정: 기록 10/11 alibaba]
+- F5 해가 다른 기록 [사용자: 2025/10/18]
+- R1 시간은 한국 시간 [사용자: 10/9]
+- A1 달력에서 이번 주 회의를 한눈에 본다 [사용자: 10/18]</pre></li>
+<li><p>전각 콜론으로 쓴 태그는 걸러지는지 본다</p><pre>F1: 알 수 없는 태그 [사용자： 10/18]
+A1: 알 수 없는 태그 [사용자： 10/18]</pre></li>
+<li><p>같은 판이 세 군데(날짜 붙은 폴더·날짜 없는 폴더·옛 문서 자리)에 겹치고 testbed·tmp 복사본도 있는 폴더로 돌린다</p><pre>recall: 회의 일정 — 출처 2/3 · 9ms
+- 못 읽음: 기억 서버 (연결 거부 127.0.0.1:9)
+
+## 예전 시도와 그 끝
+- (10/20 · pact 기록 proj) 회의 일정 앱 — 완료 — 회의 일정을 잡는 웹앱
+
+## 실패와 원인
+- 없음
+
+## 미룬 아이디어
+- (10/20 · pact 기록 proj) 참석자 투표
+
+## 지키라는 규칙
+- 없음</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>같은 일을 두 번 다르게 정했거나 &#39;그건 아니야&#39; 한 항목은 최신 것만 쓰고 다시 꺼내지 않기</summary>
+<p>메일(10/20)에서 화면 안 알림(10/27)으로 바뀐 기록은 5번 모두 명세에 최신 것(`[사용자: 10/27]`, 메일 없음)만 들어왔다. &#39;참석자 투표는 아니야&#39;는 5번 중 4번 &#39;하지 않는 것&#39;에 `기록에서 뺌: 참석자 투표 (11/1)` 형식으로 남았고, 한 번은 형식 없이 &#39;참석자 투표 [사용자]&#39;로만 적혔다.</p>
+<div class="shots"><figure><a href="shots/S9-r3-1.jpg" target="_blank"><img src="shots/S9-r3-1.jpg" alt="&#39;그건 아니야&#39;(참석자 투표 필요 없음)를 말한 장면 5번의 새 명세에서 &#39;기록에서 뺌&#39; 줄을 모아 본다" loading="lazy"></a><figcaption>1. &#39;그건 아니야&#39;(참석자 투표 필요 없음)를 말한 장면 5번의 새 명세에서 &#39;기록에서 뺌&#39; 줄을 모아 본다</figcaption></figure><figure><a href="shots/S9-r3-2.jpg" target="_blank"><img src="shots/S9-r3-2.jpg" alt="같은 일을 두 번 다르게 정한 기록(10/20 메일, 10/27 화면 안) 장면 5번의 새 명세에서 알림 줄을 모아 본다" loading="lazy"></a><figcaption>2. 같은 일을 두 번 다르게 정한 기록(10/20 메일, 10/27 화면 안) 장면 5번의 새 명세에서 알림 줄을 모아 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">케이스 · S9 · F6 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. conflict-record 5회: 명세의 알림 줄이 모두 10/27 판의 화면 안 알림 칸이고 10/20의 &#39;메일로 보낸다&#39;는 어디에도 없음(F4/F5 + A3 [사용자: 10/27]). past-failure-spec 5회: &#39;기록에서 뺌: 참석자 투표 (11/1)&#39; 4/5, 회차 3은 &#39;- 참석자 투표(선호 고르기) [사용자]&#39;로 적어 recall이 다음에 거르는 형식이 아님(이 한 번은 다음 판에 같은 아이디어가 다시 올라올 수 있음). 비율은 A3의 기준(5회 중 4회)과 같아 통과로 둠.</p>
+<ol><li><p>&#39;그건 아니야&#39;(참석자 투표 필요 없음)를 말한 장면 5번의 새 명세에서 &#39;기록에서 뺌&#39; 줄을 모아 본다</p><pre>=== pact-1.jsonl: 새 명세 2026-11-01-회의-일정-앱
+  - 기록에서 뺌: 참석자 투표 (11/1)
+=== pact-2.jsonl: 새 명세 2026-11-01-회의-일정-웹앱
+  - 기록에서 뺌: 참석자 투표 (11/1)
+=== pact-3.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - 참석자 투표(선호 고르기) [사용자]
+=== pact-4.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - 기록에서 뺌: 참석자 투표 (11/1)
+=== pact-5.jsonl: 새 명세 2026-11-01-회의-일정-웹앱
+  - 기록에서 뺌: 참석자 투표 (11/1)</pre></li>
+<li><p>같은 일을 두 번 다르게 정한 기록(10/20 메일, 10/27 화면 안) 장면 5번의 새 명세에서 알림 줄을 모아 본다</p><pre>=== pact-1.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - F3 확정: 제안자가 시간 하나를 확정하면 참석자 모두에게 알림이 간다 [사용자]
+  - F5 알림 칸: 알림은 메일 없이 화면 안 알림 칸에서만 보여 준다 [사용자: 10/27]
+  - R5 새 제안은 진행 중 목록에 나타나고 알림 칸에도 &quot;응답할 제안&quot; 알림이 뜬다 [AI 가정]
+  - R6 알림은 고른 이름 앞으로 온 것만 보이고 안 읽은 수를 보여 준다. 화면을 열어 두면 1분 안에 새 알림이 보인다 [AI 가정]
+  - R7 취소는 기록을 지우지 않고 &quot;취소됨&quot; 상태로 바꾼다. 달력에서 빠지고 알림 칸에 취소 알림이 남는다 [AI 가정]
+  - A1 한 이름으로 후보 3개를 제안하고 다른 이름 둘로 응답하면 가장 많이 겹친 후보가 추천으로 보이고, 확정 뒤 각 참석자 이름으로 바꿔 보면 알림 칸에 확정 알림이 있고 주간 달력 그 칸에 회의가 보인다 — 핵심 흐름이 끝까지 되는지 [AI 가정]
+  - A3 앱 어디에도 메일 주소를 넣는 칸이 없고, 확정·취소·변경 때마다 참석자의 알림 칸에 알림이 뜬다 [사용자: 10/27]
+  - A6 확정한 회의를 취소하거나 시간을 바꾸면 참석자 알림 칸에 새 알림이 뜨고 달력이 바뀐다 [AI 가정]
+=== pact-2.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - F4 알림은 메일 없이 앱 화면 안 알림 칸에서 보여 준다 [사용자: 10/27]
+  - A1 회의 만들기→참석자 응답→시간 확정→달력 표시→참석자 알림까지 한 흐름이 끝까지 된다 — 요구 흐름을 한 번에 확인하려고 [AI 가정]
+  - A3 앱 어디에도 메일 주소 칸이나 메일 설정이 없고, 회의를 확정하면 참석자로 이름을 고른 화면의 알림 칸에 알림이 보인다 [사용자: 10/27]
+  - A4 회의 시간을 바꾸거나 취소하면 달력에 바로 반영되고 참석자 알림 칸에 알림이 보인다 [AI 가정]
+  - A5 알림 칸을 불러오지 못하면 그 자리에 실패 문구가 보인다 [AI 가정]
+  - A6 명단에서 이름을 고르면 그 사람의 알림만 보인다 [AI 가정]
+=== pact-3.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - F4 시간이 확정되면 화면 안 알림 칸에서만 알려 준다(메일 없음) [사용자: 10/27]
+  - R3 회의는 늘 팀 열 명 모두가 참석하고, 집계와 알림도 열 명 기준이다 [AI 가정: 검수 2 맡김]
+  - R9 알림은 앱을 열어 둔 사람에게는 바로, 아니면 다음에 열 때 보인다 [AI 가정]
+  - A2 후보 올리기→가능 시간 표시→확정→달력 반영→알림까지 한 흐름이 끝까지 된다 — 핵심 흐름이 끊기면 앱이 쓸모없다 [AI 가정]
+  - A3 메일은 한 통도 나가지 않고 알림 칸에 알림이 보인다 [사용자: 10/27]
+  - A5 로그인 없이 명단에서 이름을 고르면, 그 뒤의 가능 시간 표시와 알림이 그 이름으로 남고 보인다 [AI 가정]
+=== pact-4.jsonl: 새 명세 2026-11-01-팀-회의-일정-앱
+  - F4 알림(회의 확정·취소, 새 후보)은 앱 화면 안 알림 칸에서만 보여 준다 [사용자: 10/27]
+  - R8 알림은 모두에게 같게 보이고 새 알림 수를 표시한다 — 로그인이 없어 사람별 읽음은 따지지 않는다 [AI 가정]
+  - A1 후보 올리기, 팀원 답, 추천에서 확정, 달력 표시, 알림 칸 표시까지 한 흐름이 끝까지 된다 — 기능 네 묶음이 이어지는지 한 번에 본다 [AI 가정]
+  - A3 회의를 확정하거나 후보를 올리면 다른 팀원 화면의 알림 칸에 그 알림이 보이고, 앱 어디에도 메일 주소 칸이나 메일 설정이 없다 [사용자: 10/27]
+=== pact-5.jsonl: 새 명세 2026-11-01-회의-일정-앱
+  - F5 새 투표·확정 알림은 대상 팀원 전원에게, 확정 뒤 응답 변경 알림은 주최자에게 화면 안 알림 칸으로 쌓인다 [사용자: 10/27]
+  - R3 빈 화면에는 안내를 보인다(투표 없음·알림 없음·빈 달력) — 처음 켠 사람이 길을 잃지 않게 [AI 가정]
+  - A1 A가 후보 3개로 투표를 만들고 B·C가 응답한 뒤 A가 하나를 확정하면, B·C의 알림 칸에 확정 알림이 안 읽음으로 뜨고 달력의 그 날짜에 회의가 보인다 — 다섯 덩어리가 한 흐름으로 이어지는지 본다 [AI 가정]
+  - A3 앱 어디에도 메일 주소 칸이나 메일 설정이 없고, A1 흐름 동안 알림은 화면 안 알림 칸에만 뜬다 [사용자: 10/27]
+  - A4 알림을 못 띄우면 화면에 실패 표시가 보인다 [AI 가정: 기록 10/27]
+  - A8 알림을 읽으면 안 읽음 표시가 사라진다 [AI 가정]</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>recall 결과는 파일로 안 남고 명세 보기 페이지는 git에 안 들어가기</summary>
+<p>기록 찾기를 돌리기 전후로 폴더 안 모든 파일의 지문이 같고, 파일을 쓰는 코드도 없다. 명세 보기 페이지(spec.html)는 .pact/.gitignore에 들어가 git 상태에 나타나지 않는다.</p>
+<div class="shots"><figure><a href="shots/S10-1.jpg" target="_blank"><img src="shots/S10-1.jpg" alt="기록 찾기를 돌리기 전과 후에 폴더 안 모든 파일의 지문을 비교한다" loading="lazy"></a><figcaption>1. 기록 찾기를 돌리기 전과 후에 폴더 안 모든 파일의 지문을 비교한다</figcaption></figure><figure><a href="shots/S10-2.jpg" target="_blank"><img src="shots/S10-2.jpg" alt="기록 찾기 코드에서 파일을 쓰는 기능이 쓰였는지 찾는다" loading="lazy"></a><figcaption>2. 기록 찾기 코드에서 파일을 쓰는 기능이 쓰였는지 찾는다</figcaption></figure><figure><a href="shots/S10-3.jpg" target="_blank"><img src="shots/S10-3.jpg" alt="임시 저장소에서 명세 페이지를 만든 뒤 git 상태와 무시 규칙을 본다" loading="lazy"></a><figcaption>3. 임시 저장소에서 명세 페이지를 만든 뒤 git 상태와 무시 규칙을 본다</figcaption></figure><figure><a href="shots/S10-4.jpg" target="_blank"><img src="shots/S10-4.jpg" alt="이번 판의 실제 저장소에서도 명세 페이지가 무시되는지 본다" loading="lazy"></a><figcaption>4. 이번 판의 실제 저장소에서도 명세 페이지가 무시되는지 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S10 · F7 · 앞 판에서 확인</p>
+<p>전후 비교는 임시 폴더 f6, 코드 검색은 recall/scripts 전체. spec.html 무시는 임시 git 저장소와 실제 저장소(.pact/.gitignore) 둘 다 확인. 실제 ~/dev에 대고 돌렸을 때도 recall 때문에 바뀐 파일은 없음(다른 프로그램의 데이터 파일만 바뀜).</p>
+<ol><li><p>기록 찾기를 돌리기 전과 후에 폴더 안 모든 파일의 지문을 비교한다</p><pre>파일 4개 모두 그대로</pre></li>
+<li><p>기록 찾기 코드에서 파일을 쓰는 기능이 쓰였는지 찾는다</p><pre>찾은 곳이 없으면 종료 코드 1: 1</pre></li>
+<li><p>임시 저장소에서 명세 페이지를 만든 뒤 git 상태와 무시 규칙을 본다</p><pre>?? .pact/.gitignore
+?? &quot;.pact/2026-11-01-\352\270\260\353\241\235-\355\221\234\354\213\234-\354\213\234\355\227\230/spec.md&quot;
+?? risk2.md
+.pact/.gitignore:5:*/spec.html	&quot;.pact/2026-11-01-\352\270\260\353\241\235-\355\221\234\354\213\234-\354\213\234\355\227\230/spec.html&quot;</pre></li>
+<li><p>이번 판의 실제 저장소에서도 명세 페이지가 무시되는지 본다</p><pre>.pact/.gitignore:11:*/spec.html	&quot;.pact/2026-11-01-\352\270\260\354\226\265\354\234\274\353\241\234-\353\252\205\354\204\270-\354\261\204\354\232\260\352\270\260/spec.html&quot;
+git 상태에 spec.html이 나온 줄 수: 0</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>명세 검수자가 기록에서 온 요구를 근거로 받고 못 막은 실패를 짚기</summary>
+<p>사용자가 짜증 냈던 불만을 규칙으로 올린 줄(`[사용자: 10/19]`)을 명세 검수자가 &#39;근거 없음&#39;으로 짚은 회차가 5번 중 0번이다(고치기 전 같은 판별로 4번). 이제 불만이 요구 목록에 &#39;(기록 10/19 사용자 원문)&#39;으로 5번 모두 넘어갔다. 10/18 규칙도 5번 모두 근거로 받았고, 근거를 뺀 명세에서는 &#39;예전 실패 못 막음&#39;을 짚는다.</p>
+<div class="shots"><figure><a href="shots/S11-r4-1.jpg" target="_blank"><img src="shots/S11-r4-1.jpg" alt="심은 기록(불만 포함)으로 명세 쓰기 장면(past-failure-spec)을 새 지침으로 5번 돌린 판정표를 본다" loading="lazy"></a><figcaption>1. 심은 기록(불만 포함)으로 명세 쓰기 장면(past-failure-spec)을 새 지침으로 5번 돌린 판정표를 본다</figcaption></figure><figure><a href="shots/S11-r4-2.jpg" target="_blank"><img src="shots/S11-r4-2.jpg" alt="명세 검수자에게 넘어간 요구 목록에 10/19 불만이 &#39;기록 10/19 사용자 원문&#39;으로 들어갔는지 회차별로 본다" loading="lazy"></a><figcaption>2. 명세 검수자에게 넘어간 요구 목록에 10/19 불만이 &#39;기록 10/19 사용자 원문&#39;으로 들어갔는지 회차별로 본다</figcaption></figure><figure><a href="shots/S11-r4-3.jpg" target="_blank"><img src="shots/S11-r4-3.jpg" alt="회차별로 명세 검수자의 답에서 10/19 불만 규칙(또는 R2)을 다룬 줄 한 줄씩과 &#39;근거 없음&#39;으로 짚었는지를 본다" loading="lazy"></a><figcaption>3. 회차별로 명세 검수자의 답에서 10/19 불만 규칙(또는 R2)을 다룬 줄 한 줄씩과 &#39;근거 없음&#39;으로 짚었는지를 본다</figcaption></figure><figure><a href="shots/S11-r4-4.jpg" target="_blank"><img src="shots/S11-r4-4.jpg" alt="비교: 고치기 전(앞 판) 같은 장면 5번에 같은 판별을 적용한다" loading="lazy"></a><figcaption>4. 비교: 고치기 전(앞 판) 같은 장면 5번에 같은 판별을 적용한다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S11 · F8 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 시험 장치를 verify-r3/h에 복사해(plugins는 wt HEAD 53cb9c8와 같은 내용, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 받게 다름) 내가 만든 장면과 심은 기록으로 깨끗한 프로필에서 claude -p를 실제로 돌린 것이다. 이 세션에서 pact 하위 에이전트를 직접 부르지 않았고 log/ 밑에는 아무것도 쓰지 않았다. 대상 소스는 고치지 않았다. past-failure-spec 5회(심은 기록: 앞으로 알림은 항상 메일로 10/18, 같은 회의 알림이 두 번 와서 짜증 났어 10/19, 예전 판의 실패 10/20): 판정표 15개 검사 모두 통과. 회차별 검수자 답의 해당 부분은 위 단계 3. 회차 3·5는 오히려 &#39;A2의 [AI 가정: 기록 10/20] 태그는 근거가 사용자 말(10/19)이니 [사용자: 10/19]로 바꾼다&#39;고 권해, 불만이 요구로 인정되고 있음을 보여 준다. 같은 판별 스크립트를 앞 판(f7f0e8e) 5회에 적용하면 4/5(회차 1·2·4·5)로 이전 라운드 결과와 같다. 못 막은 실패를 짚는 쪽은 앞 라운드에서 직접 3/3 확인(이번 라운드에 바뀐 곳이 아님).</p>
+<ol><li><p>심은 기록(불만 포함)으로 명세 쓰기 장면(past-failure-spec)을 새 지침으로 5번 돌린 판정표를 본다</p><pre>[1/5] past-failure-spec pact #1: OOO
+[2/5] past-failure-spec pact #2: OOO
+[3/5] past-failure-spec pact #3: OOO
+[4/5] past-failure-spec pact #4: OOO
+[5/5] past-failure-spec pact #5: OOO
+| 시나리오 | 검사 | pact |
+| past-failure-spec | skillInvoked name=recall:recall | 5/5 |
+| past-failure-spec | specLint  | 5/5 |
+| past-failure-spec | agentNotInvoked name=pact:worker | 5/5 |
+exit=0</pre></li>
+<li><p>명세 검수자에게 넘어간 요구 목록에 10/19 불만이 &#39;기록 10/19 사용자 원문&#39;으로 들어갔는지 회차별로 본다</p><pre>pact-1.jsonl: spec-checker 1번 호출 · 요구 목록의 10/19 불만 줄: - 회의 일정 앱 알림이 같은 회의에 두 번 와서 정말 짜증 났어 (기록 10/19 사용자 원문)
+pact-2.jsonl: spec-checker 1번 호출 · 요구 목록의 10/19 불만 줄: - 같은 회의 알림이 두 번 와서 정말 짜증 났다 → 같은 알림은 한 번만 (기록 10/19 사용자 원문)
+pact-3.jsonl: spec-checker 1번 호출 · 요구 목록의 10/19 불만 줄: - 같은 회의 알림이 두 번 와서 정말 짜증 났다 → 한 번만 가야 한다 (기록 10/19 사용자 원문)
+pact-4.jsonl: spec-checker 1번 호출 · 요구 목록의 10/19 불만 줄: - 회의 일정 앱 알림이 같은 회의에 두 번 와서 정말 짜증 났어 (기록 10/19 사용자 원문)
+pact-5.jsonl: spec-checker 1번 호출 · 요구 목록의 10/19 불만 줄: 7. 같은 회의 알림이 두 번 와서 정말 짜증 났다 → 다시 그러면 안 된다 (기록 10/19 사용자 원문)</pre></li>
+<li><p>회차별로 명세 검수자의 답에서 10/19 불만 규칙(또는 R2)을 다룬 줄 한 줄씩과 &#39;근거 없음&#39;으로 짚었는지를 본다</p><pre>pact-1.jsonl: 검수자 답 3539자 | 짚지 않음 | - 같은 회의 알림이 두 번 오던 10/20 실패를 막는 기준이 있나 — 있다. R2와 A2가 &quot;확정을 거듭하거나 새로고침해도 같은 사람에게 두 번 오지 않는다&quot;로 막는다. 10/20 summary.json의 남은 할 일(&quot;알림이 두 번 오는 문제 고치기&quot;)도 A2에 닿는다. (출처: 명세 R2·A2 / 요구 6 / .pact/2026-10-20-회의-일정-앱/results.json S2)
+pact-2.jsonl: 검수자 답 3993자 | 짚지 않음 | - F3 메일을 못 보냈을 때 실패 표시는 누가 어디서 보나 — 회의를 만든 사람이 그 회의 팝업과 달력 칸에서 &quot;메일 못 보냄: &lt;받는 사람&gt;&quot;을 본다. 다시 보내기를 넣는다면 이미 받은 사람에게는 다시 가지 않게 해서 R2와 맞춘다. ([AI 가정] 후보)
+pact-3.jsonl: 검수자 답 4278자 | 짚지 않음 | - A2 태그 `[AI 가정: 기록 10/20]`은 근거가 틀렸다. 근거는 사용자 원문(10/19 &quot;한 번만 가야 한다&quot;)과 R2다. — `[사용자: 10/19]`로 바꾼다.
+pact-4.jsonl: 검수자 답 4836자 | 짚지 않음 | - R2 &quot;같은 알림&quot;의 범위 — 변경이 두 번 있으면 두 번 다 보낸다. 같은 사건(같은 확정, 같은 변경)을 다시 보내는 것만 막는다. 확정한 뒤 취소하고 다시 확정하면 그것도 새 사건으로 친다. [AI 가정]
+pact-5.jsonl: 검수자 답 4023자 | 짚지 않음 | - A2는 [AI 가정: 기록 10/20]로 달려 있지만 근거가 사용자 말이다(요구 7, 10/19). — 태그를 `[사용자: 10/19]`로 고친다. &quot;꼭 한 통&quot;이라는 기준만 AI 문구다.
+
+합계: 사용자 말 불만 규칙(`[사용자: 10/19]`)을 &#39;근거 없음&#39;으로 짚은 회차 0/5</pre></li>
+<li><p>비교: 고치기 전(앞 판) 같은 장면 5번에 같은 판별을 적용한다</p><pre>pact-1.jsonl: 검수자 답 3438자 | 근거 없음으로 짚음 | - R2 태그 근거: `[사용자: 10/19]`에 닿는 줄이 요구 목록에 없다. 10/19는 예전 실패 목록에 있는 사용자 불평이다. `[AI 가정: 예전 실패 10/19 사용자 말]`로 바꾸거나, 아래 검수 2의 답을 받은 뒤 `[사용자: 검수 2]`로 단다.
+pact-2.jsonl: 검수자 답 4368자 | 근거 없음으로 짚음 | - R2에 붙은 `[사용자: 10/19]`는 요구 목록에 근거가 없다. 10/19는 예전 실패 목록에 있는 불평(&quot;두 번 와서 짜증 났어&quot;)이고 사용자가 정한 규칙이 아니다. `[AI 가정: 예전 실패 10/19·10/20]`으로 바꾼다. 다만 이 규칙의 뜻은 아래 &quot;검수 3&quot;의 답에 따라 정해진다.
+pact-3.jsonl: 검수자 답 4135자 | 짚지 않음 | - 같은 회의 알림이 두 번 오는 실패(10/19 사용자 말, 10/20 pact 기록 pact-work-pMa6rq의 S2 실패와 남은 할 일)를 명세가 막는지 — R2와 A2가 막는다. 다만 A2는 &quot;확정 한 번&quot;만 다룬다. 다른 경우는 아래 &quot;사소함&quot;에서 넓힌다. (출처: 명세 R2·A2 / `.pact/2026-10-20-회의-일정-앱/results.json` S2 / `summary.json` tod
+pact-4.jsonl: 검수자 답 4271자 | 근거 없음으로 짚음 | - R2의 `[사용자: 10/19]` 태그는 요구 목록에 근거가 없다. 10/19는 요구가 아니라 &quot;예전 실패&quot; 목록에 있는 불평이다. → `[AI 가정: 예전 실패 10/19·10/20 재발 막기]`로 바꾼다.
+pact-5.jsonl: 검수자 답 4984자 | 근거 없음으로 짚음 | - R2 [사용자: 10/19] 태그 근거 없음: 요구 목록에서 기록 출처를 가진 것은 10/18 한 줄뿐이다. 10/19 사용자 말은 예전 실패 목록에만 있다. `[AI 가정: 예전 실패 10/19·10/20]`으로 바꾼다.
+
+합계: 사용자 말 불만 규칙(`[사용자: 10/19]`)을 &#39;근거 없음&#39;으로 짚은 회차 4/5</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>승인 질문 때 명세를 HTML 페이지로 열어 기록·다른 저장소·위험 줄을 한눈에 보기</summary>
+<p>이번 명세 페이지는 이제 위험 항목이 없으니 &#39;위험 0개&#39;이고, 다른 저장소 3줄·위험 4줄이 든 임시 명세는 요약 상자와 칩이 의도대로 나온다. 결정 기록에 인용한 위험 표시는 세지 않는다.</p>
+<div class="shots"><figure><a href="shots/S12-r2-1.jpg" target="_blank"><img src="shots/S12-r2-1.jpg" alt="이번 판의 실제 명세 페이지를 연다" loading="lazy"></a><figcaption>1. 이번 판의 실제 명세 페이지를 연다</figcaption></figure><figure><a href="shots/S12-r2-2.jpg" target="_blank"><img src="shots/S12-r2-2.jpg" alt="다른 저장소 줄과 위험 줄이 든 임시 명세 페이지를 고친 코드로 다시 만들어 연다" loading="lazy"></a><figcaption>2. 다른 저장소 줄과 위험 줄이 든 임시 명세 페이지를 고친 코드로 다시 만들어 연다</figcaption></figure><figure><a href="shots/S12-r2-3.jpg" target="_blank"><img src="shots/S12-r2-3.jpg" alt="페이지의 위험 개수가 위임이 보는 위험 항목 수와 같은지 네 가지 명세로 비교한다" loading="lazy"></a><figcaption>3. 페이지의 위험 개수가 위임이 보는 위험 항목 수와 같은지 네 가지 명세로 비교한다</figcaption></figure><figure><a href="shots/S12-r2-4.jpg" target="_blank"><img src="shots/S12-r2-4.jpg" alt="이 컴퓨터의 다른 명세들에서 고치기 전·후 요약 상자를 비교하고, 위험이 남은 명세는 위임이 보는 것과 맞는지 본다" loading="lazy"></a><figcaption>4. 이 컴퓨터의 다른 명세들에서 고치기 전·후 요약 상자를 비교하고, 위험이 남은 명세는 위임이 보는 것과 맞는지 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">명세 · S12 · F9 · 앞 판에서 확인</p>
+<p>[다시 검수] 앞 판의 의심(결정 기록의 `[위험: …]` 인용을 세서 &#39;위험 1개&#39;)이 고쳐졌다. 이번 명세는 위임이 보는 위험 항목 0개 = 페이지 0개, 위험 항목이 실제로 있는 명세는 3개(위임) / 4줄(페이지, F5 케이스 줄을 따로 셈)로 이전과 같다. 남은 좁은 경우: &#39;하지 않는 것&#39;이나 &#39;확인 필요&#39;의 목록 줄에 `[위험: …]`를 인용하면 페이지는 위험 1개, 위임은 0개로 어긋난다(specCheck extra에 적음). 이번 명세·결정 기록에서는 안 생김. 이번 판 spec.html이 지금 코드가 만드는 것과 같은 내용임을 확인(run-dir 파일과 새로 렌더한 것 비교). 이 컴퓨터의 명세 5개로 고치기 전·후를 비교하니 사용자·AI 가정·기록 개수는 모두 같고 위험 개수만 두 명세에서 줄었다(3→1, 2→0). 남은 1개는 규칙 R10 본문의 `[위험: …]` 인용이고 위임도 1개로 본다. 임시 명세의 접힌 &#39;AI 가정&#39; 1개가 결정 기록 칸 안에 있어 이번에는 요약에 안 센다(앞 판 5개 → 4개). 명세 서식(spec-template)은 접힌 칸을 공통 규칙 칸에 두므로 실제 명세에는 해당 없음.</p>
+<ol><li><p>이번 판의 실제 명세 페이지를 연다</p><pre>화면 폭 1000px · 가로 스크롤 폭 1000px (넘침 없음)
+요약 상자 글:
+[사용자] 11개 · [AI 가정] 5개 · 기록에서 온 줄 1개(다른 저장소 0개) · 위험 0개</pre></li>
+<li><p>다른 저장소 줄과 위험 줄이 든 임시 명세 페이지를 고친 코드로 다시 만들어 연다</p><pre>화면 폭 1000px · 가로 스크롤 폭 1000px (넘침 없음)
+요약 상자 글:
+[사용자] 7개 · [AI 가정] 4개 · 기록에서 온 줄 7개(다른 저장소 3개) · 위험 4개
+
+다른 저장소에서 온 줄
+F3 선택지는 두 개만 보인다사용자기록 10/18다른 저장소 alibaba
+R2 다른 저장소의 AI 보고에서 온 규칙AI 가정기록 10/11다른 저장소 unified-login
+A2 선택지가 5개를 넘지 않는다AI 가정기록 10/28다른 저장소 alibaba
+위험 줄
+F2 지난 학기 자료 비우기위험: 지우기사용자
+F5 외부에 공유 링크를 낸다위험: 공개사용자기록 10/18
+F5 케이스: 링크를 못 만듦 → 화면에 실패 표시위험: 비용AI 가정
+F6 줄 가운데 [위험: 비용] 표시가 있는 기능위험사용자</pre></li>
+<li><p>페이지의 위험 개수가 위임이 보는 위험 항목 수와 같은지 네 가지 명세로 비교한다</p><pre>이번 판 실제 명세
+  위임이 보는 위험 항목 0개 · 명세 페이지 요약 상자 위험 0개
+결정 기록에 위험 표시를 인용한 명세
+  위임이 보는 위험 항목 0개 · 명세 페이지 요약 상자 위험 0개
+하지 않는 것 목록에 인용한 명세
+  위임이 보는 위험 항목 0개 · 명세 페이지 요약 상자 위험 1개
+위험 항목이 실제로 있는 명세
+  위임이 보는 위험 항목 3개 · 명세 페이지 요약 상자 위험 4개</pre></li>
+<li><p>이 컴퓨터의 다른 명세들에서 고치기 전·후 요약 상자를 비교하고, 위험이 남은 명세는 위임이 보는 것과 맞는지 본다</p><pre>2026-10-29-pact를-지시-대신-코드와-기록으로-지키기
+  앞: &lt;p&gt;[사용자] 7개 · [AI 가정] 19개 · 기록에서 온 줄 0개(다른 저장소 0개) · 위험 3개&lt;/p&gt;
+  뒤: &lt;p&gt;[사용자] 7개 · [AI 가정] 19개 · 기록에서 온 줄 0개(다른 저장소 0개) · 위험 1개&lt;/p&gt;
+2026-11-01-기억으로-명세-채우기
+  앞: &lt;p&gt;[사용자] 11개 · [AI 가정] 5개 · 기록에서 온 줄 1개(다른 저장소 0개) · 위험 2개&lt;/p&gt;
+  뒤: &lt;p&gt;[사용자] 11개 · [AI 가정] 5개 · 기록에서 온 줄 1개(다른 저장소 0개) · 위험 0개&lt;/p&gt;
+요약 상자가 같은 명세 3 개, 달라진 명세 2 개
+위험이 남은 10/29 명세
+  위임이 보는 위험 항목 1개 · 명세 페이지 요약 상자 위험 1개</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>지난 판이 있는 주제로 시작하면 첫 메시지에 그 판의 끝이 들어 있기</summary>
+<p>5번 모두 첫 메시지에 지난 판(10/20)의 끝이 들어 있었다 — 달력 보기까지 하고 알림은 &#39;메일로 보낼지&#39; 못 정한 채 끝남. 미룬 아이디어(참석자 투표 등)도 같이 말했다.</p>
+<div class="shots"><figure><a href="shots/S13-r3-1.jpg" target="_blank"><img src="shots/S13-r3-1.jpg" alt="지난 판 장면(recall-first-message)의 판정표를 본다" loading="lazy"></a><figcaption>1. 지난 판 장면(recall-first-message)의 판정표를 본다</figcaption></figure><figure><a href="shots/S13-r3-2.jpg" target="_blank"><img src="shots/S13-r3-2.jpg" alt="5번의 첫 메시지에서 지난 판의 끝을 말한 문장을 모아 본다" loading="lazy"></a><figcaption>2. 5번의 첫 메시지에서 지난 판의 끝을 말한 문장을 모아 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">acceptance · S13 · A1 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. recall-first-message 5회. 끝을 말했는지는 판정표의 검사 2(메일로 보낼지 등)가 5/5, 검사 4(기록 10/20)가 5/5이고, 위 첫 메시지 문장으로도 5/5를 읽어 확인함. 낱말 검사 3은 4/5(S3 참고).</p>
+<ol><li><p>지난 판 장면(recall-first-message)의 판정표를 본다</p><pre>[1/5] recall-first-message pact #2: OOXOOOO
+[2/5] recall-first-message pact #1: OOOOOOO
+[3/5] recall-first-message pact #3: OOOOOOO
+[4/5] recall-first-message pact #4: OOOOOOO
+[5/5] recall-first-message pact #5: OOOOOOO
+| 시나리오 | 검사 | pact |
+| recall-first-message | skillInvoked name=recall:recall | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(메일로 (보낼|할)지|알림[^\n]{0,30}(남긴|남은|남겼|남겨|못 정|정하지 못)) | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(남긴 할 일|남은 할 일|할 일로 남|달력 보기까지|넘기고) | 4/5 |
+| recall-first-message | replyMatch turn=0 pattern=기록[^)\n]{0,6}10/20 | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(기억 서버|못 읽음) | 5/5 |
+| recall-first-message | firstReplyQuestionCount max=1 | 5/5 |
+| recall-first-message | agentNotInvoked name=pact:worker | 5/5 |</pre></li>
+<li><p>5번의 첫 메시지에서 지난 판의 끝을 말한 문장을 모아 본다</p><pre>=== pact-1.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것:** 지난 10/20에 같은 주제로 한 판을 돌려 &quot;달력 보기&quot;까지 넘기고, 알림 보내기는 &quot;메일로 보낼지 정하지 못함&quot;으로 남겨 둔 채 끝냈습니다. 참석자 투표와 시간대 바꿔 보기는 다음 판 후보로 미뤘고요. 다만 지금 저장소에는 그때의 코드가 없고 메모(`메모.md`)와 명세 기록만 있어서, 이번 판은 처음부터 만드는 판입니다. 메모 기준으로는 &quot;열 명 팀이 일일이 물어보지 않고 회의 시간을 잡고, 달력으로 보고, 정해지면 알려 주는&quot; 것이 핵심이라고 이해했어요.
+=== pact-2.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것** — 10/20에 같은 주제의 판이 있었고 &quot;달력 보기 + 알림&quot;으로 명세를 잡았습니다. 기록상 완료라고 돼 있지만 프로젝트에 코드도 검수 기록도 없어서, 완료로 보지 않고 새로 시작합니다. 그때 미룬 아이디어는 참석자 투표와 시간대 바꿔 보기, 정하지 못한 것은 &quot;알림을 메일로 보낼지&quot;였습니다. 프로젝트 메모에는 &quot;팀원들에게 일일이 물어보지 않고 회의 시간을 잡고 싶다, 달력으로 보고 정해지면 알려 주는 정도, 열 명쯤&quot;이라고 적혀 있습니다.
+=== pact-3.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것:** 지난 10/20 판에서 같은 주제로 명세를 만들어 &quot;달력 보기까지 넘기고 알림 보내기는 남은 할 일&quot;로 끝냈다고 기록돼 있어요. 그런데 지금 프로젝트에는 코드가 없고 검수 기록도 없어서, 실제로 쓸 수 있는 결과물은 남아 있지 않습니다. 이번 판은 처음부터 만드는 걸로 봅니다. 그때 남긴 할 일은 &quot;알림을 메일로 보낼지 정하기&quot;였고, 미뤄 둔 아이디어로 참석자 투표와 시간대 바꿔 보기가 있었습니다.
+=== pact-4.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**지난 기록으로 이해한 것** (10/20, 같은 프로젝트):
+=== pact-5.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**예전 기록으로 이해한 것:** 10/20에 같은 주제의 판이 있었고, 달력 보기까지 넘기고 알림 보내기는 할 일로 남긴 채 끝났어요. &quot;알림을 메일로 보낼지&quot;도 정하지 못한 채였고요. 다만 지금 저장소에는 실제 코드가 없어서, 이번 판은 처음부터 만드는 셈입니다. 메모에는 &quot;팀원 열 명쯤, 일일이 물어보지 않고 시간을 잡고, 달력으로 보고, 정해지면 알려 주는 정도&quot;라고 적혀 있어요.</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>기록에 실패가 있는 주제의 명세에는 실패마다 검수 기준과 출처 날짜가 있기</summary>
+<p>예전 실패(&#39;알림이 두 번 온다&#39;)가 심어진 주제로 명세를 쓰게 하니 5번 모두 그 실패를 막는 검수 기준(A) 한 줄이 있었고 줄마다 출처 날짜 태그(`기록 10/20` 또는 `10/19`)가 붙어 있었다.</p>
+<div class="shots"><figure><a href="shots/S14-r3-1.jpg" target="_blank"><img src="shots/S14-r3-1.jpg" alt="예전 실패가 심어진 명세 쓰기 장면(past-failure-spec)의 판정표를 본다" loading="lazy"></a><figcaption>1. 예전 실패가 심어진 명세 쓰기 장면(past-failure-spec)의 판정표를 본다</figcaption></figure><figure><a href="shots/S14-r3-2.jpg" target="_blank"><img src="shots/S14-r3-2.jpg" alt="5번의 새 명세에서 실패를 막는 검수 기준(날짜 태그가 붙은 A 줄)을 모아 본다" loading="lazy"></a><figcaption>2. 5번의 새 명세에서 실패를 막는 검수 기준(날짜 태그가 붙은 A 줄)을 모아 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">acceptance · S14 · A2 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. past-failure-spec 5회, 형식 검사(lint) 5/5 통과. 같은 실패의 다른 표현(확인 필요·남은 할 일)은 따로 검수 기준을 만들지 않고 한 기준으로 합쳐짐. 사용자 말 불만(짜증)은 공통 규칙이 되고 같은 실패의 기준은 pact 기록 쪽에서 생김(S7). 이 장면의 실패는 하나뿐이라 &#39;실패마다&#39;가 여럿일 때는 못 봤다.</p>
+<ol><li><p>예전 실패가 심어진 명세 쓰기 장면(past-failure-spec)의 판정표를 본다</p><pre>[1/5] past-failure-spec pact #3: OOO
+[2/5] past-failure-spec pact #1: OOO
+[3/5] past-failure-spec pact #2: OOO
+[4/5] past-failure-spec pact #4: OOO
+[5/5] past-failure-spec pact #5: OOO
+| 시나리오 | 검사 | pact |
+| past-failure-spec | skillInvoked name=recall:recall | 5/5 |
+| past-failure-spec | specLint  | 5/5 |
+| past-failure-spec | agentNotInvoked name=pact:worker | 5/5 |</pre></li>
+<li><p>5번의 새 명세에서 실패를 막는 검수 기준(날짜 태그가 붙은 A 줄)을 모아 본다</p><pre>=== pact-1.jsonl: 새 명세 2026-11-01-회의-일정-앱
+  - A1 첫 화면을 열면 스크롤 없이 이번 주 월~일의 회의가 모두 제목·시간과 함께 보이고, 같은 시간의 회의 둘은 겹침으로 표시된다 [사용자: 10/20]
+  - A2 회의 하나를 확정하면 참석자마다 메일함에 확정 메일이 정확히 한 통 온다. 확정 버튼을 빠르게 두 번 누르거나, 페이지를 새로고침하거나, 실패 뒤 다시 보내기를 눌러도 한 통이다 [AI 가정: 기록 10/20]
+=== pact-2.jsonl: 새 명세 2026-11-01-회의-일정-웹앱
+  - A2 확정 뒤 화면 새로 고침·확정 두 번 누르기·다시 보내기를 해도 참석자마다 그 회의 메일은 한 통뿐이다 [AI 가정: 기록 10/20]
+  - A3 첫 화면의 주간 달력에 이번 주 회의가 모두 제목·시간과 함께 보인다 [사용자: 10/20]
+=== pact-3.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - A2 확정·변경·취소를 각각 한 번 할 때, 확정 버튼을 연달아 두 번 누를 때, 확정 직후 새로고침할 때, 메일 실패 뒤 다시 보내기를 할 때 모두, 참석자마다 그 소식의 메일이 정확히 1통만 와 있다 [사용자: 10/19]
+  - A6 메일 주소가 잘못된 참석자가 있으면 만든 사람 화면에 그 이름과 &quot;메일을 보내지 못함&quot;이 보이고, 나머지 참석자는 1통씩 받는다 [AI 가정: 기록 10/20]
+=== pact-4.jsonl: 새 명세 2026-11-01-팀-회의-일정-웹앱
+  - A2 확정 버튼을 연달아 두 번 누르거나 확정 화면을 새로고침해도 참석자마다 확정 메일은 한 통이고, 확정 시간을 한 번 바꾸면 바뀜 메일이 정확히 한 통 더 온다 [AI 가정: 기록 10/20]
+=== pact-5.jsonl: 새 명세 2026-11-01-회의-일정-웹앱
+  - A3 확정을 연달아 두 번 누르거나, 두 창에서 같은 회의를 동시에 확정하거나, 실패 뒤 다시 보내기를 해도 참석자마다 확정 메일이 한 통만 와 있다 [AI 가정: 기록 10/20]</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>행동 시험에서 지난 판의 끝이 5회 중 4회 이상 나오고 기록 없는 장면엔 안 나오기</summary>
+<p>지난 판의 끝은 검사 모두 5회 중 4회 이상 나왔고(7개 검사 전부 통과 4회), 기록 없는 장면은 5회 모두 &#39;기록 없음&#39;이고 심은 기록도 이 컴퓨터의 실제 기록도 나오지 않았다.</p>
+<div class="shots"><figure><a href="shots/S15-r3-1.jpg" target="_blank"><img src="shots/S15-r3-1.jpg" alt="지난 판 장면(recall-first-message) 5번의 회차별 결과와 검사별 통과 수를 본다" loading="lazy"></a><figcaption>1. 지난 판 장면(recall-first-message) 5번의 회차별 결과와 검사별 통과 수를 본다</figcaption></figure><figure><a href="shots/S15-r3-2.jpg" target="_blank"><img src="shots/S15-r3-2.jpg" alt="기록 없는 장면(first-message) 5번의 회차별 결과와 검사별 통과 수를 본다" loading="lazy"></a><figcaption>2. 기록 없는 장면(first-message) 5번의 회차별 결과와 검사별 통과 수를 본다</figcaption></figure><figure><a href="shots/S15-r3-3.jpg" target="_blank"><img src="shots/S15-r3-3.jpg" alt="기록 없는 장면에서 모델이 받은 기록 찾기 결과가 모두 &#39;없음&#39;인지, 실제 기록 낱말이 새지 않았는지 센다" loading="lazy"></a><figcaption>3. 기록 없는 장면에서 모델이 받은 기록 찾기 결과가 모두 &#39;없음&#39;인지, 실제 기록 낱말이 새지 않았는지 센다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">acceptance · S15 · A3 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. recall-first-message 5회: 검사별 5/5·5/5·4/5·5/5·5/5·5/5·5/5. first-message 5회: 6개 검사 전부 5/5. 기록 없는 장면에서 모델이 받은 recall 출력은 5회 모두 네 묶음이 전부 &#39;없음&#39;이었고, 실제 ~/dev 기록 낱말(&#39;기억으로 명세 채우기&#39;, &#39;선택지 질문&#39;, &#39;행동 시험 결과판&#39; 등)은 기록 어디에도 없음.</p>
+<ol><li><p>지난 판 장면(recall-first-message) 5번의 회차별 결과와 검사별 통과 수를 본다</p><pre>[1/5] recall-first-message pact #2: OOXOOOO
+[2/5] recall-first-message pact #1: OOOOOOO
+[3/5] recall-first-message pact #3: OOOOOOO
+[4/5] recall-first-message pact #4: OOOOOOO
+[5/5] recall-first-message pact #5: OOOOOOO
+| 시나리오 | 검사 | pact |
+| recall-first-message | skillInvoked name=recall:recall | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(메일로 (보낼|할)지|알림[^\n]{0,30}(남긴|남은|남겼|남겨|못 정|정하지 못)) | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(남긴 할 일|남은 할 일|할 일로 남|달력 보기까지|넘기고) | 4/5 |
+| recall-first-message | replyMatch turn=0 pattern=기록[^)\n]{0,6}10/20 | 5/5 |
+| recall-first-message | replyMatch turn=0 pattern=(기억 서버|못 읽음) | 5/5 |
+| recall-first-message | firstReplyQuestionCount max=1 | 5/5 |
+| recall-first-message | agentNotInvoked name=pact:worker | 5/5 |</pre></li>
+<li><p>기록 없는 장면(first-message) 5번의 회차별 결과와 검사별 통과 수를 본다</p><pre>[1/5] first-message pact #1: OOOOOO
+[2/5] first-message pact #2: OOOOOO
+[3/5] first-message pact #3: OOOOOO
+[4/5] first-message pact #4: OOOOOO
+[5/5] first-message pact #5: OOOOOO
+| 시나리오 | 검사 | pact |
+| first-message | firstReplyQuestionCount max=1 | 5/5 |
+| first-message | firstReplyBranches min=5 | 5/5 |
+| first-message | replyNotMatch pattern=(React|Vue|Next|프레임워크|라이브러리).*\? | 5/5 |
+| first-message | skillInvoked name=pact:pact | 5/5 |
+| first-message | replyMatch turn=0 pattern=기록 없음 | 5/5 |
+| first-message | replyNotMatch turn=0 pattern=\(기록 \d{1,2}/\d{1,2} | 5/5 |</pre></li>
+<li><p>기록 없는 장면에서 모델이 받은 기록 찾기 결과가 모두 &#39;없음&#39;인지, 실제 기록 낱말이 새지 않았는지 센다</p><pre>pact-1.jsonl 네 묶음 중 없음 4 칸
+pact-2.jsonl 네 묶음 중 없음 4 칸
+pact-3.jsonl 네 묶음 중 없음 4 칸
+pact-4.jsonl 네 묶음 중 없음 4 칸
+pact-5.jsonl 네 묶음 중 없음 4 칸
+실제 기록 낱말이 나온 줄 수: 0</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>기억 서버에 안 닿아도 pact가 멈추지 않고 한 줄 알린 뒤 진행하기</summary>
+<p>기억 서버에 못 닿는 주소로 준 시험에서 pact는 10번 모두 멈추지 않고 &#39;기억 서버는 연결이 안 돼 못 읽었다&#39;고 알린 뒤 기능 지도와 질문까지 이어 갔다. 기록 찾기만 따로 돌려도 종료 코드 0으로 끝난다.</p>
+<div class="shots"><figure><a href="shots/S16-r3-1.jpg" target="_blank"><img src="shots/S16-r3-1.jpg" alt="지난 판 장면의 첫 메시지에서 기억 서버를 못 읽었다는 알림을 모아 본다" loading="lazy"></a><figcaption>1. 지난 판 장면의 첫 메시지에서 기억 서버를 못 읽었다는 알림을 모아 본다</figcaption></figure><figure><a href="shots/S16-r3-2.jpg" target="_blank"><img src="shots/S16-r3-2.jpg" alt="기록 없는 장면의 첫 메시지에서도 같은 알림을 모아 본다" loading="lazy"></a><figcaption>2. 기록 없는 장면의 첫 메시지에서도 같은 알림을 모아 본다</figcaption></figure><figure><a href="shots/S16-r3-3.jpg" target="_blank"><img src="shots/S16-r3-3.jpg" alt="기록 찾기만 따로 닿지 않는 주소로 돌려 끝나는지 본다" loading="lazy"></a><figcaption>3. 기록 찾기만 따로 닿지 않는 주소로 돌려 끝나는지 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">acceptance · S16 · A4 · 앞 판에서 확인</p>
+<p>[다시 검수] 행동 시험은 pact가 실제 모델(claude -p, 깨끗한 프로필)로 돌린 것이다. recall-first-message와 first-message는 지정대로 wt의 시험 장치로 돌렸고(기록은 verify-r3/out), 그 밖의 장면(similar-record, idea-built, past-failure-spec, past-failure-ai-rule, conflict-record)은 시험 장치를 verify-r3/h에 복사해(plugins는 wt와 같은 내용임을 diff로 확인, run.mjs 한 줄만 기억 서버 주소를 환경 변수로 바꿀 수 있게 함) 내가 장면과 심은 기록을 만들어 돌렸다. 대상 소스는 고치지 않았다. 시험 장치가 pact 변형에 기억 서버 주소를 닿지 않는 127.0.0.1:9로 줌. recall-first-message 5회(기억 서버 알림 검사 5/5)와 first-message 5회 모두 첫 메시지에 알림이 한 번 나오고 지도·질문이 이어짐.</p>
+<ol><li><p>지난 판 장면의 첫 메시지에서 기억 서버를 못 읽었다는 알림을 모아 본다</p><pre>=== pact-1.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록을 읽었어요. 기억 서버 하나는 연결이 안 돼 못 읽었고(나머지 두 출처는 읽음), 찾은 내용은 아래에 녹였습니다.
+=== pact-2.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록을 읽었습니다. 기억 서버는 연결이 안 돼 못 읽었고(연결 거부), 프로젝트 메모와 pact 기록은 읽었습니다.
+=== pact-3.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**기록부터 읽었습니다.** 기억 서버는 못 읽었어요(연결 거부) — 프로젝트 안의 pact 기록과 메모만 반영했습니다.
+=== pact-4.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+**기록 없음이 아니라, 지난 기록이 있어요.** (기억 서버는 연결이 안 돼 못 읽었고, 이 프로젝트의 pact 기록에서 찾았어요.)
+=== pact-5.jsonl · 도구 9번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록 확인 결과부터 정리할게요. (기억 서버는 연결이 안 돼 못 읽었고, pact 기록과 메모는 읽었습니다.)</pre></li>
+<li><p>기록 없는 장면의 첫 메시지에서도 같은 알림을 모아 본다</p><pre>=== pact-1.jsonl · 도구 6번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록을 찾아봤는데 이 주제의 예전 기록은 없었어요 (기억 서버는 연결이 안 돼 못 읽었고, 나머지 출처에선 &quot;기록 없음&quot;).
+=== pact-2.jsonl · 도구 6번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록 없음 (기억 서버는 연결이 안 돼서 못 읽었고, 나머지 출처에는 관련 기록이 없었어요).
+=== pact-3.jsonl · 도구 6번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록 없음 — pact 기록과 메모리에는 이 주제의 예전 시도가 없었어요. (기억 서버 하나는 연결이 안 돼서 못 읽었습니다.)
+=== pact-4.jsonl · 도구 6번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록 없음 (기억 서버는 연결이 안 돼 못 읽었고, 나머지 출처엔 관련 기록이 없었어요).
+=== pact-5.jsonl · 도구 6번 · Skill [&quot;pact:pact&quot;,&quot;recall:recall&quot;] · 결과 success
+기록 없음 — 기억 서버는 못 읽었고(연결 거부), 나머지 출처에는 이 주제의 기록이 없었어요.</pre></li>
+<li><p>기록 찾기만 따로 닿지 않는 주소로 돌려 끝나는지 본다</p><pre>recall: pact 선택지 질문 — 출처 2/3 · 301ms
+- 못 읽음: 기억 서버 (연결 거부 127.0.0.1:9)
+
+## 예전 시도와 그 끝</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>플러그인 목록과 안내 글에 외울 새 명령이 없고 금지 문구도 없는지 보기</summary>
+<p>마켓플레이스 파일이 읽히고 recall 항목이 pact 앞에 있다. 안내 글에는 설치 한 줄을 빼면 사용자가 칠 명령이 없고 &#39;말하면 켜진다&#39;고 적혀 있으며, &#39;MUST&#39; 같은 강한 문구도 없다.</p>
+<div class="shots"><figure><a href="shots/S18-1.jpg" target="_blank"><img src="shots/S18-1.jpg" alt="플러그인 목록 파일 두 개를 읽어 recall이 pact 앞에 있는지 본다" loading="lazy"></a><figcaption>1. 플러그인 목록 파일 두 개를 읽어 recall이 pact 앞에 있는지 본다</figcaption></figure><figure><a href="shots/S18-2.jpg" target="_blank"><img src="shots/S18-2.jpg" alt="recall 안내 글과 pact 새 지침에서 강한 금지 문구가 있는지 찾는다" loading="lazy"></a><figcaption>2. recall 안내 글과 pact 새 지침에서 강한 금지 문구가 있는지 찾는다</figcaption></figure><figure><a href="shots/S18-3.jpg" target="_blank"><img src="shots/S18-3.jpg" alt="recall 안내 글의 &#39;켜는 법&#39; 대목을 읽는다" loading="lazy"></a><figcaption>3. recall 안내 글의 &#39;켜는 법&#39; 대목을 읽는다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">처음 쓰는 사람 · S18 · R1 · 앞 판에서 확인</p>
+<p>R1은 안내 글(README 켜는 법)과 SKILL.md 점검으로 확인. README에는 직접 돌려 볼 수도 있다는 node 명령이 한 줄 있으나 선택 사항으로 적혀 있음. .agents/plugins/marketplace.json에는 pact도 없어서 recall만 빠진 것이 아님.</p>
+<ol><li><p>플러그인 목록 파일 두 개를 읽어 recall이 pact 앞에 있는지 본다</p><pre>.claude-plugin/marketplace.json: 읽힘 · 항목 resume, tiers, proto, bench, baton, recall, pact · recall 6번째, pact 7번째
+.agents/plugins/marketplace.json: 읽힘 · 항목 bench · recall 항목 없음(이 파일에는 pact도 없다)
+recall 플러그인 설명 파일: 이름 recall · 판 0.1.0</pre></li>
+<li><p>recall 안내 글과 pact 새 지침에서 강한 금지 문구가 있는지 찾는다</p><pre>찾은 곳이 없으면 종료 코드 1: 1</pre></li>
+<li><p>recall 안내 글의 &#39;켜는 법&#39; 대목을 읽는다</p><pre>## 설치
+
+```
+/plugin install recall --marketplace chenjingdev/chenjing-plugins
+```
+
+node 18 이상이 깔려 있어야 한다. 외부 패키지는 없다.
+
+## 켜는 법
+
+따로 외울 명령이 없다. &quot;이거 전에 어떻게 됐더라&quot;, &quot;예전에 해 봤던가&quot;, &quot;기록 찾아봐&quot;, &quot;지난번에 왜 실패했지&quot;처럼 말하면 켜진다. 다른 스킬은 `recall:recall`로 부른다. 직접 돌리려면:
+
+```
+node plugins/recall/scripts/recall.mjs &lt;주제 낱말…&gt; --project &lt;프로젝트 절대 경로&gt; [--json]
+```</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>좁은 화면(폭 390)에서 명세 페이지를 보고 이상한 글을 넣어 보기</summary>
+<p>폭 390에서도 가로로 넘치지 않고 요약 상자와 칩이 줄바꿈되어 읽힌다. 명세에 `&lt;script&gt;`나 `&lt;img onerror&gt;` 같은 글이 있어도 글자로 보이기만 하고 실행되는 태그는 안 생긴다.</p>
+<div class="shots"><figure><a href="shots/S19-1.jpg" target="_blank"><img src="shots/S19-1.jpg" alt="위험 줄·다른 저장소 줄이 든 임시 명세 페이지를 휴대폰 폭(390)으로 연다" loading="lazy"></a><figcaption>1. 위험 줄·다른 저장소 줄이 든 임시 명세 페이지를 휴대폰 폭(390)으로 연다</figcaption></figure><figure><a href="shots/S19-2.jpg" target="_blank"><img src="shots/S19-2.jpg" alt="이번 판 실제 명세 페이지도 휴대폰 폭(390)으로 연다" loading="lazy"></a><figcaption>2. 이번 판 실제 명세 페이지도 휴대폰 폭(390)으로 연다</figcaption></figure><figure><a href="shots/S19-3.jpg" target="_blank"><img src="shots/S19-3.jpg" alt="제목과 목적에 스크립트·이미지 태그가 든 명세로 페이지를 만들어 그대로 들어갔는지 센다" loading="lazy"></a><figcaption>3. 제목과 목적에 스크립트·이미지 태그가 든 명세로 페이지를 만들어 그대로 들어갔는지 센다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">처음 쓰는 사람 · S19 · 앞 판에서 확인</p>
+<p>좁은 폭 화면은 위험 줄·다른 저장소 줄이 든 임시 명세와 이번 판 실제 명세 둘 다 확인(가로 스크롤 폭 = 화면 폭). 삽입 시험은 제목·목적·기능 줄에 태그를 넣은 임시 명세.</p>
+<ol><li><p>위험 줄·다른 저장소 줄이 든 임시 명세 페이지를 휴대폰 폭(390)으로 연다</p><pre>화면 폭 390px · 가로 스크롤 폭 390px (넘침 없음)
+요약 상자 글:
+[사용자] 7개 · [AI 가정] 5개 · 기록에서 온 줄 7개(다른 저장소 3개) · 위험 4개
+
+다른 저장소에서 온 줄
+F3 선택지는 두 개만 보인다사용자기록 10/18다른 저장소 alibaba
+R2 다른 저장소의 AI 보고에서 온 규칙AI 가정기록 10/11다른 저장소 unified-login
+A2 선택지가 5개를 넘지 않는다AI 가정기록 10/28다른 저장소 alibaba
+위험 줄
+F2 지난 학기 자료 비우기위험: 지우기사용자
+F5 외부에 공유 링크를 낸다위험: 공개사용자기록 10/18
+F5 케이스: 링크를 못 만듦 → 화면에 실패 표시위험: 비용AI 가정
+F6 줄 가운데 [위험: 비용] 표시가 있는 기능위험사용자</pre></li>
+<li><p>이번 판 실제 명세 페이지도 휴대폰 폭(390)으로 연다</p><pre>화면 폭 390px · 가로 스크롤 폭 390px (넘침 없음)
+요약 상자 글:
+[사용자] 11개 · [AI 가정] 5개 · 기록에서 온 줄 1개(다른 저장소 0개) · 위험 1개
+
+위험 줄
+Ruling: 명세 HTML은 줄 가운데의 [위험: …] 표시도 위험으로 센다 — delegate를 거절하는 riskItems와 같은 눈이어야 승인 화면과 판정이 어긋나지 않는다 — 잃는 것 없음위험</pre></li>
+<li><p>제목과 목적에 스크립트·이미지 태그가 든 명세로 페이지를 만들어 그대로 들어갔는지 센다</p><pre>&lt;script 그대로 들어간 곳: 0
+&lt;img 그대로 들어간 곳: 0
+&lt;b&gt; 그대로 들어간 곳: 0
+&lt;u&gt; 그대로 들어간 곳: 0
+&lt;i&gt; 그대로 들어간 곳: 0
+글자로 바뀐 것(&amp;lt;script&amp;gt;): 2 · (&amp;lt;img): 1</pre></li></ol>
+</details>
+</details>
+<details class="sc pass"><summary>옛 설정이 있는 프로젝트에서 명세 페이지를 두 번 만들고 없는 명세를 가리키기</summary>
+<p>옛 설정(.pact/.gitignore)이 있으면 사람이 적은 줄은 그대로 두고 spec.html 줄만 끝에 한 번 덧붙이며, 두 번 돌려도 중복되지 않는다. 없는 명세를 가리키면 오류 한 줄로 끝난다.</p>
+<div class="shots"><figure><a href="shots/S20-1.jpg" target="_blank"><img src="shots/S20-1.jpg" alt="spec.html 줄이 없는 옛 설정이 있는 새 프로젝트에서 명세 페이지를 두 번 만든다" loading="lazy"></a><figcaption>1. spec.html 줄이 없는 옛 설정이 있는 새 프로젝트에서 명세 페이지를 두 번 만든다</figcaption></figure><figure><a href="shots/S20-2.jpg" target="_blank"><img src="shots/S20-2.jpg" alt="없는 명세 파일을 가리켜 명세 페이지를 만들어 본다" loading="lazy"></a><figcaption>2. 없는 명세 파일을 가리켜 명세 페이지를 만들어 본다</figcaption></figure></div>
+<details class="more"><summary>자세히</summary>
+<p class="meta">처음 쓰는 사람 · S20 · 앞 판에서 확인</p>
+<p>0.7.0 때 만든 .pact/.gitignore(spec.html 줄 없음, 사람이 고친 줄 있음)로 확인.</p>
+<ol><li><p>spec.html 줄이 없는 옛 설정이 있는 새 프로젝트에서 명세 페이지를 두 번 만든다</p><pre># pact 옛 설정
+*/wt/
+*/scratch/
+# 사람이 고친 줄
+my-notes/
+*/spec.html
+---
+spec.html 줄 수: 1
+?? .pact/.gitignore
+?? &quot;.pact/2026-10-01-\354\230\233-\355\214\220/spec.md&quot;</pre></li>
+<li><p>없는 명세 파일을 가리켜 명세 페이지를 만들어 본다</p><pre>명세는 &lt;프로젝트&gt;/.pact/&lt;run-id&gt;/spec.md에 둡니다: /no/such/spec.md. 옛 자리(docs/pact/)의 명세는 spec.mjs migrate &lt;프로젝트&gt;로 옮깁니다.</pre></li></ol>
+</details>
+</details>
+</details>
+<h2>만들면서 정한 것</h2>
+<details><summary>결정 기록 21개</summary><p class="meta">명세: .pact/2026-11-01-기억으로-명세-채우기/spec.md</p><ul><li>Ruling: pact는 recall을 Skill 도구의 `recall:recall`로 부르고, 없으면 &quot;기록 없음&quot;으로 진행한다 — 플러그인 설치 경로를 짐작하지 않고 recall 없는 기계에서도 pact가 돌아야 해서 — 틀리면 recall이 있는데도 못 찾아 기록 없이 명세를 쓴다</li><li>Ruling: 다른 저장소에서 온 줄은 태그 콜론 뒤에 날짜 다음 저장소 이름을 붙인다(`[사용자: 10/18 alibaba]`) — lint가 콜론 뒤 글을 이미 받고 HTML 보기가 이것으로 &quot;다른 저장소&quot;를 가린다 — 틀리면 승인 때 다른 저장소 줄이 따로 안 보인다</li><li>Ruling: 실패 하나는 검수 기준 A 하나로만 적고 케이스는 결과를 바꾸는 것만 — 기존 규칙(케이스가 말하는 것은 A에 다시 안 적음, 케이스는 둘까지)과 부딪치지 않고 verifier가 A마다 시나리오를 돌린다 — 틀리면 실패 장면이 케이스 없이 A에만 남아 build가 놓칠 수 있다</li><li>Ruling: recall 스크립트는 기억 서버에 MCP가 아니라 HTTP(/v3 search)로 직접 붙고 요청마다 2.5초, 전체 1분 예산 — 스크립트는 MCP 도구를 못 쓰고, 첫 메시지를 1분 넘게 기다리게 하지 않으려고 — 틀리면 서버가 느릴 때 기록이 덜 온다</li><li>Ruling: `spec.mjs html`이 만드는 `&lt;run-dir&gt;/spec.html`은 `.pact/.gitignore`에 넣는다 — 명세에서 다시 만들 수 있는 파일이라 git에 두면 판마다 덮어쓰기 잡음만 는다 — 틀리면 옛 판의 HTML을 다시 만들어야 본다</li><li>Ruling: 행동 시험은 pact 변형에 recall 플러그인도 같이 싣고 `RECALL_ROOTS`를 작업 폴더로, `HONCHO_BASE_URL`을 닿지 않는 주소로 준다 — 실제 `~/dev` 기록과 기억 서버가 시험에 새어 들지 않게(A3) — 틀리면 기록 없는 장면에 실제 기록이 나온다</li><li>Ruling: recall의 AI 보고 요지는 `pact · &lt;단계&gt;…` 머리말을 벗기고 남는 것이 없으면 다음 줄을 쓴다 — 실제 기억 서버의 AI 보고 40개 중 8개쯤이 머리말로 시작해 요지가 비었다 — 틀리면 `pact · `로 시작하는 보통 문장의 앞부분이 잘린다</li><li>Ruling: recall이 예전 명세의 `- 기록에서 뺌: &lt;요지&gt; (M/D)` 줄을 모아 같은 요지의 항목을 네 묶음에서 빼고 `- 뺀 것: n줄`로 알린다. 요지가 짧으면(기호·공백 뺀 8자 미만) 같을 때만, 길면 포함해도 뺀다 — &quot;그건 아니야&quot;가 다음 판에 다시 안 올라오게(F6), 짧은 요지로 상관없는 줄까지 지우지 않게 — 틀리면 긴 요지를 바꿔 적은 항목은 다시 올라온다</li><li>Ruling: 명세 HTML은 줄 가운데의 `[위험: …]` 표시도 위험으로 센다 — delegate를 거절하는 riskItems와 같은 눈이어야 승인 화면과 판정이 어긋나지 않는다 — 잃는 것 없음</li><li>Ruling: 행동 시험은 `RECALL_ROOTS`를 작업 폴더의 실제 경로(realpath)로 준다 — claude는 `/private/var/…`로, mkdtemp는 `/var/…`로 보아 심은 판이 다른 저장소로 찍혔다 — 틀리면 첫 메시지가 지난 판을 다른 저장소 기록으로 전한다</li><li>Ruling: 기록에서 온 줄이 검수 질문의 답이면 `[사용자: 검수 n]`만 달되, 실패에서 온 검수 기준(A) 줄은 날짜 태그를 두고 답을 문구에 반영한다 — 한 줄에 태그는 하나이고, 날짜가 떨어지면 verifier가 그 실패를 재현하지 않는다 — 틀리면 그 A 줄의 짝(검수 n)이 명세에 안 보인다</li><li>Ruling: &quot;실패와 원인&quot; 묶음 가운데 사용자가 직접 한 불만은 결과물이 지킬 규칙으로 고쳐 써 `## 공통 규칙`에 넣고, 그 밖의 실패만 검수 기준으로 간다 — F5의 &quot;짜증 냈던 점 → 공통 규칙&quot; 길이 지침에 없어 검수에서 실패했다 — 틀리면 불만이 규칙이 아니라 검수 기준으로 들어가 verifier가 재현할 장면을 못 찾는다</li><li>Ruling: 기억 서버 요청 셋 중 일부만 실패하면 `- 일부만 읽음: 기억 서버 (3번 중 n번 …)`으로 알린다 — 셋 다 실패해야만 알리면 느린 요청 하나로 기록이 빠져도 사용자가 모른다(F1 케이스) — 잃는 것 없음</li><li>Ruling: 명세 HTML의 요약 상자는 `## 결정 기록` 안의 글을 세지 않는다 — Ruling에 인용한 `[위험: …]`이 위험 1개로 찍혔다 — 틀리면 결정 기록에만 적힌 태그가 요약에서 빠진다</li><li>Ruling: 기록에서 온 실패 장면을 그대로 못 돌리면 verifier는 비슷한 장면으로 바꿔 통과를 주지 않고, 바꿔 돌렸으면 통과여도 의심으로 적고 무엇을 바꿨는지 쓴다 — 검수에서 6회 중 6회 비슷한 장면으로 바꿔 돌렸고 통과도 하나 나왔다 — 틀리면 F4의 &quot;못 하면 미검증&quot;이 안 지켜진다</li><li>Ruling: 끝난 뒤 다음 판 몫은 따로 적지 않고 명세의 다음 판 후보 줄과 summary의 남긴 할 일로 남기며, 다음 판의 recall이 F2·F3으로 꺼낸다 — 요구의 일곱째 갈래가 `## 하지 않는 것`의 &quot;따로 적기&quot;로만 보여 통째로 뺀 것으로 읽혔다 — 틀리면 끝난 판의 할 일이 다음 판 첫 메시지에 안 나온다</li><li>Ruling: `## 하지 않는 것` 첫 줄의 `[사용자]`는 팀원 기억 제외에만 해당하고, 가벼운 길에서 기록을 안 읽는 것과 기억 서버를 안 고치는 것은 AI가 정했다 — 승인된 줄이라 쪼개지 않고 여기 적는다 — 틀리면 나중에 그 둘을 바꿀 때 물어야 하는 것으로 안다</li><li>Ruling: `## 구조 판정`의 &quot;화면 없음&quot;은 앱 화면이 없다는 뜻이고 F9의 명세 HTML 한 장은 스케치 없이 정한 것이다 — 둘이 부딪치는 것으로 읽혔다 — 잃는 것 없음</li><li>Ruling: 공개 저장소에 기록 요지가 push로 공개되는 위험은 검수 1의 답(사람이 확인하는 명세가 문턱, 요지와 날짜만)으로 받아들인 것이고 F6·F7 줄에 `[위험: 공개]`를 더하지 않는다 — 승인된 `[사용자]` 줄이라 바꾸면 다시 승인이 필요하다 — 틀리면 push 질문 때 이 위험이 따로 안 보인다</li><li>Ruling: A3·A4에 재는 방법이 섞여 있으나 verifier가 이미 그 방법으로 쟀으므로 이번 판은 두고, 다음 판에 조건만 남기게 고친다 — 검수 중에 A 문구를 바꾸면 결과와 짝이 어긋난다 — 잃는 것 없음</li><li>Ruling: 기록 실패 장면을 흉내 내 돌린 회차에서 찾은 진짜 결함은 실패로 두고, 금지는 바꿔 돌린 장면에 통과를 주는 것뿐이며, 이런 모델 행동 시험의 통과선은 A3과 같이 5회 중 4회다 — 서버 갈래 5회 중 4회가 결함을 찾아 실패, 1회가 바꾸고도 통과를 줘 S6는 의심으로 남긴다 — 틀리면 흉내 낸 장면의 결함이 의심으로 묻힌다</li></ul></details>
+</body></html>
