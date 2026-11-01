@@ -1,6 +1,6 @@
 // 명세를 사용자가 읽는 HTML 한 장으로 만든다(승인을 묻기 전에 연다). 파일 하나로 열리고 외부 자원·스크립트가 없다.
 // 태그·위험 표시를 읽는 규칙은 spec.mjs의 것을 그대로 쓴다. 여기서 새로 읽는 것은 태그 콜론 뒤의 출처뿐이다.
-import { parseSpec, splitTrailing, tagParts, decisionRulings, ITEM_HEAD, ITEM_SECTIONS } from './spec.mjs';
+import { parseSpec, splitTrailing, tagParts, decisionRulings, ITEM_HEAD, ITEM_SECTIONS, HAS_RISK_MARK } from './spec.mjs';
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -20,7 +20,10 @@ function renderLine(rest) {
   const { name, rest: detail } = tagParts(rawTag);
   const known = name === '사용자' || name === 'AI 가정';
   const chips = [];
+  // 줄 가운데의 위험 표시도 delegate가 거절하므로(approval.mjs riskItems) 같은 눈으로 센다
+  const marked = risk !== null || HAS_RISK_MARK.test(rest);
   if (risk !== null) chips.push(chip('risk', risk ? `위험: ${risk}` : '위험'));
+  else if (marked) chips.push(chip('risk', '위험'));
   let record = false;
   let other = false;
   if (known) {
@@ -33,11 +36,10 @@ function renderLine(rest) {
         other = true;
         chips.push(chip('repo', `다른 저장소 ${source[2]}`));
       }
-    } else if (detail) chips.push(chip('note', detail)); // `검수 1`, `검수 2 맡김`
+    } else if (detail) chips.push(chip('note', detail));
   }
-  // 태그로 읽지 못한 [..]는 글이다
   const body = rawTag !== null && !known ? `${text} [${rawTag}]` : text;
-  return { html: inline(body) + chips.join(''), tag: known ? name : null, record, other, risk: risk !== null };
+  return { html: inline(body) + chips.join(''), tag: known ? name : null, record, other, risk: marked };
 }
 
 // 한 칸의 줄을 문단·목록·접힌 블록으로 나눈다. 번호(F1 등)는 항목 칸에서만 읽는다.

@@ -221,3 +221,9 @@ test('ensureIgnoreLine appends a missing line once, keeps what is there, and cre
   ensureIgnoreLine(dir, 'y');
   assert.equal(readFileSync(path.join(dir, '.gitignore'), 'utf8'), 'x\r\ny\r\n');
 });
+
+test('줄 가운데의 위험 표시도 위험으로 센다 (delegate의 riskItems와 같은 눈)', () => {
+  const html = renderSpecHtml(SPEC.replace('- F1 오늘 수업 보기 [사용자]', '- F1 지난 자료 비우기 [위험: 지우기] 가운데 [사용자]'));
+  assert.match(html, /위험 2개/);
+  assert.match(html, /<strong>F1<\/strong> 지난 자료 비우기 \[위험: 지우기\] 가운데<span class="chip risk">위험<\/span>/);
+});

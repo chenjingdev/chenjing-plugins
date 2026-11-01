@@ -36,7 +36,7 @@ const RISK_GROUP = /^\s*위험(?![가-힣])/;
 // 태그로 보이는 묶음: `[사용자…]`·`[AI 가정…]`(전각 콜론 꼴도 포함)
 const TAG_GROUP = /^\s*(?:사용자|AI 가정)/u;
 // 줄 어디에 있든 위험 표시로 읽는 것
-const HAS_RISK_MARK = /\[\s*위험(?![가-힣])[^\]]*\]/;
+export const HAS_RISK_MARK = /\[\s*위험(?![가-힣])[^\]]*\]/;
 // 표시 안의 값: 앞의 `위험`과 구분 글자(콜론·공백·하이픈 …)를 뺀 것
 const riskValue = (group) => group.replace(/^\s*위험[\s:：\-–—_/,]*/, '').trim();
 
@@ -515,7 +515,6 @@ async function main([cmd, ...args]) {
     const runDir = specRunDir(args[0]);
     const out = path.join(runDir, 'spec.html');
     writeFileSync(out, renderSpecHtml(readFileSync(args[0], 'utf8')));
-    // 이미 있는 .pact/.gitignore(0.7.0이 쓴 것)에는 이 줄이 없다
     ensureIgnoreLine(path.dirname(runDir), '*/spec.html');
     console.log(out);
     return 0;
