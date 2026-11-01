@@ -6,13 +6,13 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { isatty } from 'node:tty';
 import { fileURLToPath } from 'node:url';
-import { ensureRunDir, isMainModule, writePactIgnore } from './paths.mjs';
+import { ensureIgnoreLine, ensureRunDir, isMainModule, writePactIgnore } from './paths.mjs';
 
 export const STATUSES = ['draft', 'approved', 'building', 'verifying', 'done'];
 const TAGS = ['사용자', 'AI 가정'];
 // 번호가 붙는 항목 칸: F(기능), R(공통 규칙), A(검수 기준). 검수 기준은 pact: 3부터 있다.
-const ITEM_SECTIONS = ['기능', '공통 규칙', '검수 기준'];
-const ITEM_HEAD = /^-\s+([FRA]\d+)\b\s*(.*?)\s*$/;
+export const ITEM_SECTIONS = ['기능', '공통 규칙', '검수 기준'];
+export const ITEM_HEAD = /^-\s+([FRA]\d+)\b\s*(.*?)\s*$/;
 // 명세는 <프로젝트>/.pact/<run-id>/spec.md 한 자리에 둔다. 0.7.0 전에는 docs/pact/<run-id>.md였다(migrate가 옮긴다).
 export const SPEC_NAME = 'spec.md';
 const LEGACY_SPEC_DIR = path.join('docs', 'pact');
@@ -43,7 +43,7 @@ const riskValue = (group) => group.replace(/^\s*위험[\s:：\-–—_/,]*/, '')
 // 항목 줄의 `<글> [위험: …] [태그]`를 뒤에서부터 떼어 낸다. 태그는 맨 뒤(또는 위험 표시 뒤)의 [..] 하나이고, 위험 표시는 태그 앞뒤 어디든 읽는다.
 // 표시가 태그로 읽히면 안 된다: `[위험: 지우기] [사용자]`의 태그는 사용자이고, 표시만 있으면 태그가 없는 줄이다.
 // 그 밖의 [..]는 글로 둔다(`목록 [초안] 보기 [사용자]`).
-function splitTrailing(rest) {
+export function splitTrailing(rest) {
   let text = rest;
   let rawTag = null;
   const risks = [];
@@ -66,7 +66,7 @@ function splitTrailing(rest) {
 // 태그 글(`[..]` 안의 글)을 이름과 콜론 뒤의 글로 나눈다: `사용자: 검수 1` → { name: '사용자', rest: '검수 1' }. 태그가 없으면 name이 null이다.
 // 이름은 첫 반각 콜론(:) 앞이다. lint가 태그를 읽는 규칙 그대로라서 전각 콜론(：)으로 쓴 `사용자： 검수 1`은 이름이 `사용자： 검수 1`이 되어 알 수 없는 태그다.
 // 검수 번호의 짝(reviewMarks)과 [사용자] 줄(userLinesOf)도 이 함수로 읽는다 — lint와 다르게 읽는 태그가 생기면 F5가 짝으로 센 줄을 F3가 지키지 못한다.
-function tagParts(rawTag) {
+export function tagParts(rawTag) {
   if (rawTag === null || rawTag === undefined) return { name: null, rest: '' };
   const colon = rawTag.indexOf(':');
   return colon < 0 ? { name: rawTag.trim(), rest: '' } : { name: rawTag.slice(0, colon).trim(), rest: rawTag.slice(colon + 1).trim() };
@@ -399,7 +399,8 @@ const USAGE = `사용법:
     말 속의 백틱·$·따옴표가 셸에서 풀리지 않는다. 말을 인자로 줄 수도 있지만 그러면 셸이 말 속의 백틱·$를 먼저 푼다.
   spec.mjs set-status <명세> <값>       status를 바꿈 (${STATUSES.join(', ')}). approved·building은 승인 기록이 있어야 함
   spec.mjs lint <명세>                  형식 문제를 줄마다 출력, 있으면 종료 코드 1
-  spec.mjs run-dir <명세>               명세가 든 실행 폴더 .pact/<run-id>/를 (없으면 만들고) 출력`;
+  spec.mjs run-dir <명세>               명세가 든 실행 폴더 .pact/<run-id>/를 (없으면 만들고) 출력
+  spec.mjs html <명세>                  명세를 보기 좋은 HTML 한 장(<run-dir>/spec.html)으로 만들고 경로를 출력. 기록·다른 저장소에서 온 줄이 구분된다`;
 
 // 거절은 한 줄이다: 까닭과 대신 할 일(R6). 종료 코드 1.
 async function refuse(verdict) {
@@ -507,6 +508,16 @@ async function main([cmd, ...args]) {
   }
   if (cmd === 'run-dir' && args[0]) {
     console.log(specRunDir(args[0]));
+    return 0;
+  }
+  if (cmd === 'html' && args[0]) {
+    const { renderSpecHtml } = await import('./spec-html.mjs');
+    const runDir = specRunDir(args[0]);
+    const out = path.join(runDir, 'spec.html');
+    writeFileSync(out, renderSpecHtml(readFileSync(args[0], 'utf8')));
+    // 이미 있는 .pact/.gitignore(0.7.0이 쓴 것)에는 이 줄이 없다
+    ensureIgnoreLine(path.dirname(runDir), '*/spec.html');
+    console.log(out);
     return 0;
   }
   console.error(USAGE);
