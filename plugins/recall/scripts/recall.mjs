@@ -41,7 +41,7 @@ export async function run({ words, project, env = process.env, sources = SOURCES
   const settled = await Promise.allSettled(
     sources.map(async (s) => {
       const { items } = await s.collect({ topicWords: words, project, env });
-      return items;
+      return [...items];
     }),
   );
   const pool = { attempts: [], failures: [], ideas: [], rules: [] };
