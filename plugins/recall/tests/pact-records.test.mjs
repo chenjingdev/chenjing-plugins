@@ -248,3 +248,27 @@ test('RECALL_ROOTS는 콜론으로 여러 개를 받고, 하나라도 읽히면 
 test('RECALL_ROOTS를 하나도 읽지 못하면 던진다(머리줄에 못 읽음으로 남는다)', async () => {
   await assert.rejects(() => run('/no/such/root', ['주제']), /RECALL_ROOTS/);
 });
+
+test('하지 않는 것의 `기록에서 뺌: 요지 (M/D)` 줄은 주제와 상관없이 모든 명세(옛 꼴 포함)에서 excluded로 모인다', async () => {
+  const root = tmp();
+  const a = path.join(root, 'repoA/.pact/2026-10-20-로그인/spec.md');
+  const b = path.join(root, 'repoB/docs/pact/2026-10-01-결제.md');
+  put(a, spec({ topic: '로그인', notNow: '- 기록에서 뺌: 팀원 기억 (11/2)\n- 기록에서 뺌 : 판이 끝날 때 기억에 따로 적기 (2025/12/3)\n- 다음 판 후보: 가 아이디어\n- 기록에서 뺌: 날짜 없는 줄\n기록에서 뺌: 줄 머리 - 없음 (1/2)\n  - 기록에서 뺌: 들여쓴 줄 (1/2)' }));
+  put(b, spec({ topic: '결제', notNow: '- 기록에서 뺌: 괄호 (안) 있는 요지 (10/9)' }));
+  const { items, excluded } = await run(root, ['로그인']);
+  assert.deepEqual(
+    [...excluded].sort((x, y) => x.text.localeCompare(y.text)),
+    [
+      { text: '괄호 (안) 있는 요지', date: '10/9', path: b },
+      { text: '팀원 기억', date: '11/2', path: a },
+      { text: '판이 끝날 때 기억에 따로 적기', date: '2025/12/3', path: a },
+    ],
+  );
+  assert.deepEqual(of(items, 'ideas').map((i) => i.text), ['가 아이디어']);
+});
+
+test('기록에서 뺌 줄이 없으면 excluded는 빈 배열이다', async () => {
+  const root = tmp();
+  put(path.join(root, 'repoA/.pact/2026-10-20-로그인/spec.md'), spec({ topic: '로그인', notNow: '- 다음 판 후보: 가 아이디어' }));
+  assert.deepEqual((await run(root, ['로그인'])).excluded, []);
+});

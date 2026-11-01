@@ -127,6 +127,12 @@ function readJson(dirs, file) {
   }
   return null;
 }
+const EXCLUDED_LINE = /^기록에서 뺌\s*[:：]\s*(.+?)\s*\(((?:\d{4}\/)?\d{1,2}\/\d{1,2})\)$/;
+const excludedOf = (record, sections) =>
+  bullets(sections['하지 않는 것']).flatMap((b) => {
+    const m = EXCLUDED_LINE.exec(b);
+    return m ? [{ text: oneLine(m[1]), date: m[2], path: record.file }] : [];
+  });
 const textList = (v) => (Array.isArray(v) ? v : [v]).map(oneLine).filter(Boolean);
 
 function dateOf(record, fm) {
@@ -179,11 +185,13 @@ export async function collect({ topicWords, project, env }) {
 
   const projectDir = path.resolve(project);
   const items = [];
+  const excluded = [];
   for (const record of dedupe(readable.flatMap(findRecords))) {
     const spec = parseSpec(readFileSync(record.file, 'utf8'));
+    excluded.push(...excludedOf(record, spec.sections));
     const haystack = [spec.fm.topic, spec.sections['목적']?.find((l) => l.trim()), ...bullets(spec.sections['기능']).filter((b) => /^F\d+\b/.test(b))].join('\n');
     const overlap = overlapOf(topicWords, haystack);
     if (overlap) items.push(...itemsOf(record, spec, overlap, inside(projectDir, record.repoRoot)));
   }
-  return { items };
+  return { items, excluded };
 }

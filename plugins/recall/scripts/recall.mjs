@@ -37,36 +37,48 @@ function clip(text) {
   return chars.length > MAX_TEXT ? `${chars.slice(0, MAX_TEXT - 1).join('')}…` : chars.join('');
 }
 
+// 기록에서 뺀 요지와 비교할 때는 공백·문장부호를 없앤다(요지가 120자에서 …로 잘려 적혔을 수 있다)
+const keyOf = (text) => String(text).replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
+
+const shape = (it) => ({
+  date: it.date,
+  source: it.source,
+  repo: it.repo ?? null,
+  other_repo: it.repo != null && !it.same_repo,
+  similar: scoreOf(it) === 1,
+  text: clip(it.text),
+  path: it.path,
+});
+
 export async function run({ words, project, env = process.env, sources = SOURCES }) {
   const started = Date.now();
   const settled = await Promise.allSettled(
     sources.map(async (s) => {
-      const { items } = await s.collect({ topicWords: words, project, env });
-      return [...items];
+      const { items, excluded = [] } = await s.collect({ topicWords: words, project, env });
+      return { items: [...items], excluded };
     }),
   );
+  const report = settled.map((r, i) =>
+    r.status === 'rejected'
+      ? { name: sources[i].name, ok: false, reason: String(r.reason?.message ?? r.reason).split('\n')[0] }
+      : { name: sources[i].name, ok: true, reason: null },
+  );
+  const read = settled.filter((r) => r.status === 'fulfilled').map((r) => r.value);
+  const cuts = read.flatMap((v) => v.excluded.map((e) => keyOf(e.text))).filter(Boolean);
   const pool = { attempts: [], failures: [], ideas: [], rules: [] };
-  const report = settled.map((r, i) => {
-    if (r.status === 'rejected') return { name: sources[i].name, ok: false, reason: String(r.reason?.message ?? r.reason).split('\n')[0] };
-    for (const it of r.value) pool[it.bucket]?.push(it);
-    return { name: sources[i].name, ok: true, reason: null };
-  });
+  const removed = [];
+  for (const it of read.flatMap((v) => v.items)) {
+    if (cuts.some((cut) => keyOf(it.text).includes(cut))) removed.push(it);
+    else pool[it.bucket]?.push(it);
+  }
   const buckets = {};
   for (const [key] of BUCKETS) {
     buckets[key] = pool[key]
       .sort((a, b) => scoreOf(b) - scoreOf(a) || newestFirst(a, b))
       .slice(0, MAX_LINES)
-      .map((it) => ({
-        date: it.date,
-        source: it.source,
-        repo: it.repo ?? null,
-        other_repo: it.repo != null && !it.same_repo,
-        similar: scoreOf(it) === 1,
-        text: clip(it.text),
-        path: it.path,
-      }));
+      .map(shape);
   }
-  return { topic: words.join(' '), elapsed_ms: Date.now() - started, sources: report, buckets };
+  return { topic: words.join(' '), elapsed_ms: Date.now() - started, sources: report, buckets, excluded: removed.map((it) => ({ bucket: it.bucket, ...shape(it) })) };
 }
 
 export function formatDate(iso, now = new Date()) {
@@ -80,6 +92,7 @@ const whereOf = (it) =>
 export function render(result, now = new Date()) {
   const readable = result.sources.filter((s) => s.ok).length;
   const lines = [`recall: ${result.topic || '(주제 없음)'} — 출처 ${readable}/${result.sources.length} · ${result.elapsed_ms}ms`];
+  if (result.excluded.length) lines.push(`- 뺀 것: ${result.excluded.length}줄 (기록에서 뺌)`);
   for (const s of result.sources) if (!s.ok) lines.push(`- 못 읽음: ${s.name} (${s.reason})`);
   for (const [key, title] of BUCKETS) {
     lines.push('', `## ${title}`);
