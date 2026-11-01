@@ -839,7 +839,7 @@ test('0.8.0: probe 5 teaches the source tags, failures as acceptance items, the 
 
 test('0.8.0: the approval question opens the spec as an HTML page after saying so in the chat, and shows the record and other-repo lines apart', () => {
   const probe = read('skills/pact/probe.md');
-  assert.match(probe, /`node <pact>\/scripts\/spec\.mjs html <명세>`로 `<run-dir>\/spec\.html`을 만들고, `open`으로 열기 전에 채팅으로 알린다\(무슨 페이지인지, 채팅으로 답해도 된다는 것\)\. 말없이 열린 페이지는 사용자가 알아채지 못한다/);
+  assert.match(probe, /`node <pact>\/scripts\/spec\.mjs html <명세>`로 `<run-dir>\/spec\.html`을 만들고, `open`으로 열기 전에 채팅으로 알린다\(무슨 페이지인지, 승인은 채팅으로 받는다는 것\)\. 말없이 열린 페이지는 사용자가 알아채지 못한다/);
   assert.match(probe, /wt\/`\(worktree\)·`scratch\/`\(임시 파일\)·`spec\.html`\(명세에서 다시 만드는 파일\)만 `\.pact\/\.gitignore`가 뺀다/);
   assert.match(probe, /기록·다른 저장소·대화에서 온 줄은 따로 보인다/);
   assert.ok(probe.indexOf('spec.mjs html') < probe.indexOf('승인을 한 번 받는다'));
