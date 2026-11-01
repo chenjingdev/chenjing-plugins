@@ -254,6 +254,27 @@ test('항목 꼴: source·날짜·path, 요지는 첫 줄(마크다운 머리와
   });
 });
 
+test('요지: AI 보고 첫 줄 머리의 pact 단계 표시는 벗기고, 남은 게 없으면 다음 빈 줄 아닌 줄을 쓴다', async () => {
+  const cases = [
+    ['pact · probe\n실제 내용', '실제 내용'],
+    ['pact · build 2/3 — 내용', '내용'],
+    ['`pact · verify (2차)`\n\n\n선택지 검수 결과', '선택지 검수 결과'],
+    ['pact · build 10/10\npact · 완료\n선택지 끝', '선택지 끝'],
+    ['pact · build 6/8 — 두 번째 검토 통과(사소 3). 선택지 남은 건 둘', '두 번째 검토 통과(사소 3). 선택지 남은 건 둘'],
+    ['pact · build 1/3: 선택지 검토자가 대조 중', '선택지 검토자가 대조 중'],
+    ['pact · build 8/9. 선택지 결정을 옮긴다', '선택지 결정을 옮긴다'],
+    ['pact · build 4/10 통과 (두 번째 검토) → 6/10 — 선택지 고침 확인', '선택지 고침 확인'],
+    ['pact · 완료: 선택지 단추를 만들었다', '선택지 단추를 만들었다'],
+    ['pact · 완료', 'pact · 완료'],
+    ['pact 선택지를 끝냈다 — 이건 머리말이 아니다', 'pact 선택지를 끝냈다 — 이건 머리말이 아니다'],
+  ];
+  const report = cases.map(([content], i) => ai({ session_id: `h${i}`, content }));
+  await withServer(answer({ report }), async (server) => {
+    const { items } = await get(server);
+    assert.deepEqual(items.map((i) => i.text), cases.map(([, expected]) => expected));
+  });
+});
+
 test('날짜는 created_at을 이 기계의 지역 시간 날짜로 바꾼 것이다', async () => {
   const saved = process.env.TZ;
   process.env.TZ = 'Asia/Seoul';

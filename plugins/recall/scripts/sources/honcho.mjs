@@ -121,9 +121,12 @@ function keep(m, kind) {
 }
 
 const tidy = (s) => s.replace(/[`*]/g, '').replace(/^[\s#-]+/, '').trim();
+// AI 보고 첫 줄의 상태 머리말: "pact · build 6/8 — 내용", "pact · build 1/3: 내용", "pact · verify (2차)"
+const STATUS_HEAD = /^pact\s*·\s*[^—:]{0,40}?(?:—|:\s|\.\s|$)/;
 function gist(content) {
-  const first = tidy(content.trim().split(/\r?\n/)[0]);
-  return first || tidy(content.replace(/\s+/g, ' ')).split(/(?<=[.!?。])\s/)[0];
+  const lines = content.trim().split(/\r?\n/).map(tidy);
+  if (!lines[0]) return tidy(content.replace(/\s+/g, ' ')).split(/(?<=[.!?。])\s/)[0];
+  return lines.map((l) => l.replace(STATUS_HEAD, '').trim()).find(Boolean) ?? lines[0];
 }
 
 function repoResolver(env, project) {
@@ -154,7 +157,6 @@ export async function collect({ topicWords, project, env }) {
   const config = configOf(env);
   const requestMs = positive(env.RECALL_REQUEST_MS, DEFAULT_REQUEST_MS);
   const budgetMs = positive(env.RECALL_BUDGET_MS, DEFAULT_BUDGET_MS);
-  // 요청 셋을 한꺼번에 보내므로 예산의 남은 시간은 요청마다 예산 전체다
   const limit = { ms: Math.min(requestMs, budgetMs), label: budgetMs < requestMs ? `전체 예산 ${seconds(budgetMs)}` : seconds(requestMs) };
   const topic = topicWords.join(' ');
   const asUser = { peer_id: config.user };
