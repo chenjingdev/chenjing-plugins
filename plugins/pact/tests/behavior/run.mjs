@@ -4,7 +4,7 @@
 // --resume 1이면 out/에 있는 유효한 transcript는 다시 돌리지 않고 다시 판정만 한다.
 // 돌릴 때마다 판정 결과를 out/runs/<id>.json 판 하나로 쌓고(runs.mjs), 결과판 out/board.html을 새로 만든다(board.mjs). 한도로 끝나도 같다.
 // 사용 한도에 걸린 회차는 실패로 세지 않고, 한도를 만나면 새 회차를 띄우지 않고 종료 코드 3으로 끝낸다.
-// pact 변형만 --plugin-dir로 pact를 싣는다. 대조군에서도 실패가 안 나오는 검사는 지침이 필요 없다는 뜻이다.
+// pact 변형만 --plugin-dir로 pact와 recall을 싣고, recall이 실제 ~/dev 기록·기억 서버·메모리 파일을 읽지 못하게 env를 돌린다. 대조군에서도 실패가 안 나오는 검사는 지침이 필요 없다는 뜻이다.
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, readdirSync, existsSync, chmodSync, realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
@@ -17,6 +17,7 @@ import { judgeChecks, fingerprint as fingerprintOf, guidelineHash, judgmentFinge
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACT = path.resolve(HERE, '..', '..');
+const RECALL = path.resolve(PACT, '..', 'recall');
 const OUT = defaultOutDir();
 const PROFILE = process.env.PACT_TEST_PROFILE || path.join(homedir(), '.bench', '_claude');
 const TURN_TIMEOUT_MS = Number(process.env.PACT_TEST_TURN_TIMEOUT_MS) || 15 * 60 * 1000;
@@ -107,7 +108,10 @@ function reap(workdir) {
 function runTurn({ prompt, cwd, sessionId, variant, env }) {
   const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions', '--max-turns', process.env.PACT_TEST_MAX_TURNS || '20'];
   if (sessionId) args.push('--resume', sessionId);
-  if (variant === 'pact') args.push('--plugin-dir', PACT);
+  if (variant === 'pact') {
+    args.push('--plugin-dir', PACT);
+    if (existsSync(RECALL)) args.push('--plugin-dir', RECALL);
+  }
   if (process.env.PACT_TEST_MODEL) args.push('--model', process.env.PACT_TEST_MODEL);
   return new Promise((resolve) => {
     // 프로세스 그룹으로 띄워, 시간 초과나 중단 때 claude가 띄운 하위 프로세스까지 함께 끈다.
@@ -175,6 +179,9 @@ async function runOnce(scenario, variant, n, bin, resume) {
     PATH: `${bin}:${BASE_PATH}`,
     PACT_CHECKLIST_TIMEOUT_MS: '5000',
     CLAUDE_PLUGIN_DATA: path.join(tmpdir(), 'pact-test-data'),
+    RECALL_ROOTS: realpathSync(cwd),
+    HONCHO_BASE_URL: 'http://127.0.0.1:9',
+    CLAUDE_PROJECTS_DIR: mkdtempSync(path.join(tmpdir(), 'pact-projects-')),
   };
   const transcript = [];
   let sessionId = null;

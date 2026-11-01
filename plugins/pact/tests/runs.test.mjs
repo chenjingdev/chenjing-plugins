@@ -351,3 +351,33 @@ test('fixture ordering is stable and judgment-code changes only change verdict p
   assert.equal(fingerprint(a.pact, scenario, 'control', a.options), executionBefore);
   assert.notEqual(judgmentFingerprint(a.pact), judgmentBefore);
 });
+
+test('recall SKILL.md and scripts are part of the pact variant fingerprint and the guideline hash, not the control one', () => {
+  const w = executionWorld();
+  const recall = path.join(path.dirname(w.pact), 'recall');
+  mkdirSync(path.join(recall, 'skills', 'recall'), { recursive: true });
+  mkdirSync(path.join(recall, 'scripts', 'sources'), { recursive: true });
+  writeFileSync(path.join(recall, 'skills', 'recall', 'SKILL.md'), 'recall v1');
+  writeFileSync(path.join(recall, 'scripts', 'recall.mjs'), 'export const a = 1;');
+  writeFileSync(path.join(recall, 'scripts', 'sources', 'honcho.mjs'), 'export const b = 1;');
+  const fp = (variant) => fingerprint(w.pact, scenario, variant, w.options);
+  const before = { pact: fp('pact'), control: fp('control'), guideline: guidelineHash(w.pact) };
+
+  for (const [file, text] of [
+    [path.join(recall, 'skills', 'recall', 'SKILL.md'), 'recall v2'],
+    [path.join(recall, 'scripts', 'recall.mjs'), 'export const a = 2;'],
+    [path.join(recall, 'scripts', 'sources', 'honcho.mjs'), 'export const b = 2;'],
+  ]) {
+    const [pactBefore, guidelineBefore] = [fp('pact'), guidelineHash(w.pact)];
+    writeFileSync(file, text);
+    assert.notEqual(fp('pact'), pactBefore, `${path.basename(file)} 변경은 pact 변형의 지문을 바꾼다`);
+    assert.notEqual(guidelineHash(w.pact), guidelineBefore, `${path.basename(file)} 변경은 지침 지문을 바꾼다`);
+  }
+  assert.equal(fp('control'), before.control, '대조군은 recall을 싣지 않는다');
+
+  const same = fp('pact');
+  writeFileSync(path.join(recall, 'scripts', 'notes.txt'), 'mjs가 아닌 파일');
+  writeFileSync(path.join(recall, 'tests-only.mjs'), 'scripts 밖 파일');
+  assert.equal(fp('pact'), same);
+  assert.notEqual(same, before.pact);
+});

@@ -21,6 +21,11 @@
     {
       "kind": "skillInvoked",
       "name": "pact:pact"
+    },
+    {
+      "kind": "replyMatch",
+      "turn": 0,
+      "pattern": "기록 없음"
     }
   ]
 }

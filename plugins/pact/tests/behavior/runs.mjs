@@ -31,10 +31,12 @@ const roundsDir = (outDir) => path.join(outDir, 'runs');
 function guidelineFiles(pactDir) {
   const walk = (dir) =>
     readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
-  return [...walk(path.join(pactDir, 'skills')), ...walk(path.join(pactDir, 'agents'))].sort();
+  const recall = path.resolve(pactDir, '..', 'recall');
+  const recallFiles = [path.join(recall, 'skills', 'recall', 'SKILL.md'), ...treeFiles(path.join(recall, 'scripts')).filter((f) => f.endsWith('.mjs'))].filter((f) => existsSync(f));
+  return [...walk(path.join(pactDir, 'skills')), ...walk(path.join(pactDir, 'agents')), ...recallFiles].sort();
 }
 
-// pact 지침(skills, agents)만의 지문. 판끼리 "지침 바뀜"을 가릴 때 쓴다.
+// pact 지침(skills, agents)과 함께 싣는 recall(SKILL.md, scripts)만의 지문. 판끼리 "지침 바뀜"을 가릴 때 쓴다.
 export function guidelineHash(pactDir) {
   const h = createHash('sha256');
   for (const f of guidelineFiles(pactDir)) h.update(readFileSync(f));

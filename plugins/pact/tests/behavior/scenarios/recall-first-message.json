@@ -1,0 +1,42 @@
+{
+  "name": "recall-first-message",
+  "scene": "기록이 있는 주제 — 지난 판의 끝과 미룬 아이디어가 첫 메시지에 들어오는가",
+  "fixture": "recall-idea",
+  "turns": [
+    "팀 회의 일정 잡는 웹앱 만들고 싶어"
+  ],
+  "checks": [
+    {
+      "kind": "skillInvoked",
+      "name": "recall:recall"
+    },
+    {
+      "kind": "replyMatch",
+      "turn": 0,
+      "pattern": "알림"
+    },
+    {
+      "kind": "replyMatch",
+      "turn": 0,
+      "pattern": "(멈췄|멈춘|하다가|남은 할 일|이어)"
+    },
+    {
+      "kind": "replyMatch",
+      "turn": 0,
+      "pattern": "기록[^)\\n]{0,6}10/20"
+    },
+    {
+      "kind": "replyMatch",
+      "turn": 0,
+      "pattern": "(기억 서버|못 읽음)"
+    },
+    {
+      "kind": "firstReplyQuestionCount",
+      "max": 1
+    },
+    {
+      "kind": "agentNotInvoked",
+      "name": "pact:worker"
+    }
+  ]
+}
