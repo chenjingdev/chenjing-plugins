@@ -870,6 +870,7 @@ test('0.8.0: the verifier replays a dated failure as its own scenario and leaves
   assert.match(verifier, /은 그 실패 장면을 그대로 재현하는 시나리오로 돌린다/);
   assert.match(verifier, /날짜가 있어도 통과선 같은 다른 기준은 위처럼 보통 시나리오로 돌린다/);
   assert.match(verifier, /지금 결과물에서 재현할 수 없으면 `unverified`로 두고 까닭을 `summary`에 적는다/);
+  assert.match(verifier, /비슷한 장면으로 바꿔 돌려 `pass`를 주지 않는다\. 바꿔 돌렸으면 결과가 통과여도 `doubt`로 적고 무엇을 바꿨는지 `summary`에 쓴다/);
   assert.match(verifier, /- 검수 기준\(`A<n>`\)마다 1개: `"kind": "acceptance"`, `items`에 그 번호/);
 });
 
