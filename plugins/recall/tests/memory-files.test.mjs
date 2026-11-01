@@ -76,3 +76,13 @@ test('이 프로젝트의 메모리 폴더가 없으면 빈 결과다(오류가 
   const base = tmp();
   assert.deepEqual(await run(base, ['명령'], '/work/none'), { items: [] });
 });
+
+test('겹침은 pact 기록과 같은 규칙이다: 영문 낱말은 이웃에 영숫자가 붙으면 안 맞고, 백틱 안 낱말은 세지 않는다', async () => {
+  const project = '/work/demo';
+  const base = setup(project, {
+    'a.md': memory({ name: 'a', description: 'impact 줄이기', type: 'feedback' }),
+    'b.md': memory({ name: 'b', description: '`pact` 훅 이름만 적은 글', type: 'feedback' }),
+    'c.md': memory({ name: 'c', description: 'Pact를 쓸 때 짧게', type: 'feedback' }),
+  });
+  assert.deepEqual((await run(base, ['pact'], project)).items.map((i) => i.text), ['Pact를 쓸 때 짧게']);
+});

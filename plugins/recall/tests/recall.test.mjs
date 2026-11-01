@@ -17,6 +17,7 @@ const put = (file, text) => {
 const item = (o) => ({ bucket: 'attempts', overlap: 1, same_repo: false, date: '2026-10-01', source: 'pact', repo: 'other', text: '요지', path: '/p', ...o });
 const fake = (name, items) => ({ name, collect: async () => ({ items }) });
 const NOW = new Date(2026, 10, 1);
+const NO_HONCHO = { HONCHO_BASE_URL: 'http://127.0.0.1:9', HONCHO_ENV_FILE: '/no/such/honcho.env' };
 
 test('parseArgs: 주제 낱말은 공백으로 나눠 2자 이상만, 옵션은 따로 읽는다', () => {
   const a = parseArgs(['pact', '선택지 질문', 'a', 'pact', '--project', '/x/y', '--json']);
@@ -112,6 +113,23 @@ test('render: 머리줄, 못 읽음 줄, 네 묶음 제목(빈 묶음은 없음)
   ]);
 });
 
+test('render: 기억 서버 항목의 출처 이름은 사용자 말·AI 보고이고 다른 저장소 표시가 붙는다', () => {
+  const result = {
+    topic: '주제',
+    elapsed_ms: 1,
+    sources: [{ name: '기억 서버', ok: true, reason: null }],
+    buckets: {
+      attempts: [{ date: '2026-10-29', source: 'assistant', repo: 'repoB', other_repo: true, similar: false, text: '보고 요지', path: null }],
+      failures: [],
+      ideas: [],
+      rules: [{ date: '2026-10-09', source: 'user', repo: null, other_repo: false, similar: false, text: '말 요지', path: null }],
+    },
+  };
+  const lines = render(result, NOW).split('\n');
+  assert.ok(lines.includes('- (10/29 · AI 보고) 보고 요지 — 다른 저장소'));
+  assert.ok(lines.includes('- (10/9 · 사용자 말) 말 요지'));
+});
+
 test('CLI: 종료 0, 네 묶음 제목, pact 기록과 메모리 파일 줄, 파일은 아무것도 쓰지 않는다', () => {
   const root = tmp();
   put(
@@ -123,11 +141,12 @@ test('CLI: 종료 0, 네 묶음 제목, pact 기록과 메모리 파일 줄, 파
   const key = project.replace(/[^A-Za-z0-9]/g, '-');
   put(path.join(mem, key, 'memory/fb.md'), '---\nname: fb\ndescription: 선택지는 둘 이하로\nmetadata:\n  type: feedback\n  modified: 2026-10-09T12:00:00.000Z\n---\n본문\n');
   const cwd = tmp();
-  const env = { ...process.env, RECALL_ROOTS: root, CLAUDE_PROJECTS_DIR: mem };
+  const env = { ...process.env, ...NO_HONCHO, RECALL_ROOTS: root, CLAUDE_PROJECTS_DIR: mem };
   const r = spawnSync('node', [CLI, '선택지', '--project', project], { encoding: 'utf8', env, cwd });
   assert.equal(r.status, 0, r.stderr);
   for (const h of ['## 예전 시도와 그 끝', '## 실패와 원인', '## 미룬 아이디어', '## 지키라는 규칙']) assert.ok(r.stdout.includes(h), h);
-  assert.match(r.stdout, /^recall: 선택지 — 출처 2\/2 · \d+ms$/m);
+  assert.match(r.stdout, /^recall: 선택지 — 출처 2\/3 · \d+ms$/m);
+  assert.match(r.stdout, /^- 못 읽음: 기억 서버 \(연결 거부 127\.0\.0\.1:9\)$/m);
   assert.match(r.stdout, /^- \(10\/20 · pact 기록 repoA\) 선택지 질문 — 멈춘 채 남음\(status building\)/m);
   assert.match(r.stdout, /^- \(10\/20 · pact 기록 repoA\) 가 아이디어$/m);
   assert.match(r.stdout, /^- \(10\/9 · 메모리 파일\) 선택지는 둘 이하로$/m);
@@ -137,13 +156,13 @@ test('CLI: 종료 0, 네 묶음 제목, pact 기록과 메모리 파일 줄, 파
 test('CLI: --json은 약속한 모양이다', () => {
   const root = tmp();
   put(path.join(root, 'repoA/.pact/2026-10-20-로그인/spec.md'), '---\ntopic: 로그인\nstatus: done\ncreated: 2026-10-20\n---\n## 목적\n로그인\n');
-  const env = { ...process.env, RECALL_ROOTS: root, CLAUDE_PROJECTS_DIR: tmp() };
+  const env = { ...process.env, ...NO_HONCHO, RECALL_ROOTS: root, CLAUDE_PROJECTS_DIR: tmp() };
   const r = spawnSync('node', [CLI, '로그인', '--project', path.join(root, 'repoB'), '--json'], { encoding: 'utf8', env, cwd: tmp() });
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.deepEqual(Object.keys(out), ['topic', 'elapsed_ms', 'sources', 'buckets']);
   assert.equal(out.topic, '로그인');
-  assert.deepEqual(out.sources.map((s) => [s.name, s.ok, s.reason]), [['pact 기록', true, null], ['메모리 파일', true, null]]);
+  assert.deepEqual(out.sources.map((s) => [s.name, s.ok, s.reason]), [['기억 서버', false, '연결 거부 127.0.0.1:9'], ['pact 기록', true, null], ['메모리 파일', true, null]]);
   assert.deepEqual(Object.keys(out.buckets), ['attempts', 'failures', 'ideas', 'rules']);
   assert.deepEqual(out.buckets.attempts, [
     {
@@ -159,17 +178,18 @@ test('CLI: --json은 약속한 모양이다', () => {
 });
 
 test('CLI: 출처 하나를 못 읽어도 종료 0이고 머리줄 아래에 못 읽음 줄이 남는다', () => {
-  const env = { ...process.env, RECALL_ROOTS: '/no/such/root', CLAUDE_PROJECTS_DIR: tmp() };
+  const env = { ...process.env, ...NO_HONCHO, RECALL_ROOTS: '/no/such/root', CLAUDE_PROJECTS_DIR: tmp() };
   const r = spawnSync('node', [CLI, '로그인', '--project', tmp()], { encoding: 'utf8', env, cwd: tmp() });
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.split('\n');
-  assert.match(lines[0], /^recall: 로그인 — 출처 1\/2 · \d+ms$/);
-  assert.match(lines[1], /^- 못 읽음: pact 기록 \(.*RECALL_ROOTS.*\)$/);
+  assert.match(lines[0], /^recall: 로그인 — 출처 1\/3 · \d+ms$/);
+  assert.match(lines[1], /^- 못 읽음: 기억 서버 \(연결 거부 127\.0\.0\.1:9\)$/);
+  assert.match(lines[2], /^- 못 읽음: pact 기록 \(.*RECALL_ROOTS.*\)$/);
   assert.ok(r.stdout.includes('## 지키라는 규칙'));
 });
 
 test('CLI: 주제 낱말이 없어도 종료 0이다', () => {
-  const env = { ...process.env, RECALL_ROOTS: tmp(), CLAUDE_PROJECTS_DIR: tmp() };
+  const env = { ...process.env, ...NO_HONCHO, RECALL_ROOTS: tmp(), CLAUDE_PROJECTS_DIR: tmp() };
   const r = spawnSync('node', [CLI], { encoding: 'utf8', env, cwd: tmp() });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^recall: \(주제 없음\)/);

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { overlapOf } from './words.mjs';
 
 export const name = 'pact 기록';
 
@@ -21,7 +22,7 @@ const isFile = (file) => {
   }
 };
 const oneLine = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
-const inside = (dir, parent) => dir === parent || dir.startsWith(parent + path.sep);
+export const inside = (dir, parent) => dir === parent || dir.startsWith(parent + path.sep);
 
 function readDir(dir) {
   try {
@@ -126,11 +127,6 @@ function readJson(dirs, file) {
   }
   return null;
 }
-const wordPattern = (word) => {
-  const left = /^[a-z0-9]/.test(word) ? '(?<![a-z0-9])' : '';
-  const right = /[a-z0-9]$/.test(word) ? '(?![a-z0-9])' : '';
-  return new RegExp(left + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + right);
-};
 const textList = (v) => (Array.isArray(v) ? v : [v]).map(oneLine).filter(Boolean);
 
 function dateOf(record, fm) {
@@ -181,16 +177,12 @@ export async function collect({ topicWords, project, env }) {
   });
   if (!readable.length) throw new Error(`RECALL_ROOTS를 읽을 수 없음: ${roots.join(':')}`);
 
-  const words = [...new Set(topicWords.map((w) => w.toLowerCase()))];
   const projectDir = path.resolve(project);
   const items = [];
   for (const record of dedupe(readable.flatMap(findRecords))) {
     const spec = parseSpec(readFileSync(record.file, 'utf8'));
-    const haystack = [spec.fm.topic, spec.sections['목적']?.find((l) => l.trim()), ...bullets(spec.sections['기능']).filter((b) => /^F\d+\b/.test(b))]
-      .join('\n')
-      .replace(/`[^`]*`/g, ' ')
-      .toLowerCase();
-    const overlap = words.filter((w) => wordPattern(w).test(haystack)).length;
+    const haystack = [spec.fm.topic, spec.sections['목적']?.find((l) => l.trim()), ...bullets(spec.sections['기능']).filter((b) => /^F\d+\b/.test(b))].join('\n');
+    const overlap = overlapOf(topicWords, haystack);
     if (overlap) items.push(...itemsOf(record, spec, overlap, inside(projectDir, record.repoRoot)));
   }
   return { items };

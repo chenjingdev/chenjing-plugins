@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { overlapOf } from './words.mjs';
 
 export const name = '메모리 파일';
 
@@ -20,7 +21,7 @@ function parseMemory(text) {
   return { fm, body: text.slice(m[0].length) };
 }
 
-const localDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const localDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 export async function collect({ topicWords, project, env }) {
   const base = env.CLAUDE_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects');
@@ -31,15 +32,13 @@ export async function collect({ topicWords, project, env }) {
   } catch {
     return { items: [] };
   }
-  const words = [...new Set(topicWords.map((w) => w.toLowerCase()))];
   const items = [];
   for (const file of files) {
     const full = path.join(dir, file);
     const { fm, body } = parseMemory(readFileSync(full, 'utf8'));
     const bucket = BUCKETS[fm.type];
     if (!bucket) continue;
-    const haystack = [fm.name, fm.description, body].join('\n').toLowerCase();
-    const overlap = words.filter((w) => haystack.includes(w)).length;
+    const overlap = overlapOf(topicWords, [fm.name, fm.description, body].join('\n'));
     if (!overlap) continue;
     const modified = new Date(fm.modified);
     items.push({

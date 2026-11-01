@@ -2,12 +2,13 @@
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as honcho from './sources/honcho.mjs';
 import * as pactRecords from './sources/pact-records.mjs';
 import * as memoryFiles from './sources/memory-files.mjs';
 
 export const MAX_LINES = 8;
 export const MAX_TEXT = 120;
-const SOURCES = [pactRecords, memoryFiles];
+const SOURCES = [honcho, pactRecords, memoryFiles];
 const BUCKETS = [
   ['attempts', '예전 시도와 그 끝'],
   ['failures', '실패와 원인'],
@@ -73,7 +74,8 @@ export function formatDate(iso, now = new Date()) {
   return y === now.getFullYear() ? `${m}/${d}` : `${y}/${m}/${d}`;
 }
 
-const whereOf = (it) => (it.source === 'pact' ? `pact 기록 ${it.repo}` : it.source === 'memory' ? '메모리 파일' : it.source);
+const whereOf = (it) =>
+  it.source === 'pact' ? `pact 기록 ${it.repo}` : { memory: '메모리 파일', user: '사용자 말', assistant: 'AI 보고' }[it.source] ?? it.source;
 
 export function render(result, now = new Date()) {
   const readable = result.sources.filter((s) => s.ok).length;
