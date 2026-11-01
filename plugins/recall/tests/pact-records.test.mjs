@@ -123,7 +123,6 @@ test('results.json의 fail·doubt는 실패 묶음으로 오고 pass는 오지 �
     '실패: 깨진 장면 — 버튼이 안 눌림',
     '의심: 애매한 장면 — 고치지 않고 둠',
   ]);
-  // summary.json이 없으면 results.json의 headline이 끝 줄에 쓰인다
   assert.match(of(items, 'attempts')[0].text, /결과 머리말/);
 });
 
@@ -180,12 +179,39 @@ test('확인 필요 항목은 실패 묶음으로 오되 이미 확인한 것(�
   assert.deepEqual(of(items, 'failures').map((i) => i.text), ['확인 필요: 운영 허브에 등록할지 사용자 허락 필요']);
 });
 
-test('낱말이 하나도 안 겹치는 기록은 아무것도 내지 않는다(결과 파일도 읽지 않는다)', async () => {
+test('낱말이 하나도 안 겹치는 기록은 아무것도 내지 않는다', async () => {
   const root = tmp();
   put(path.join(root, 'r/.pact/2026-10-20-무관/spec.md'), spec({ topic: '무관한 일', features: ['F1 아무 기능 [사용자]'] }));
-  put(path.join(root, 'r/.pact/2026-10-20-무관/results.json'), '{ 깨진 json');
+  put(path.join(root, 'r/.pact/2026-10-20-무관/results.json'), JSON.stringify({ scenarios: [{ title: '깨짐', result: 'fail', summary: '안 됨' }] }));
   const { items } = await run(root, ['전혀다른']);
   assert.deepEqual(items, []);
+});
+
+test('백틱 안의 코드·경로에는 낱말이 맞지 않는다(겉으로 쓴 낱말만 센다)', async () => {
+  const root = tmp();
+  put(
+    path.join(root, 'r/.pact/2026-10-20-화면/spec.md'),
+    spec({ topic: '화면 정리', purpose: '옛 `.pact/화면-정리/sketches/a.png` 를 `pact` 도구로 고친다', features: ['F1 `spec.mjs` 보기 [사용자]'] }),
+  );
+  const count = async (words) => (await run(root, words)).items.find((i) => i.bucket === 'attempts')?.overlap;
+  assert.equal(await count(['pact']), undefined);
+  assert.equal(await count(['sketches']), undefined);
+  assert.equal(await count(['spec']), undefined);
+  assert.equal(await count(['정리']), 1);
+  assert.equal(await count(['도구']), 1);
+});
+
+test('영문·숫자 낱말은 낱말 경계로, 한글 낱말은 조사가 붙어도 되게 부분 일치로 맞는다', async () => {
+  const root = tmp();
+  put(path.join(root, 'r1/.pact/2026-10-20-가/spec.md'), spec({ topic: 'impact 분석', purpose: 'cua-bar2 앱에서 선택지를 묻는다' }));
+  put(path.join(root, 'r2/.pact/2026-10-20-나/spec.md'), spec({ topic: '나', purpose: 'Pact를 고친다' }));
+  const repos = async (words) => (await run(root, words)).items.filter((i) => i.bucket === 'attempts').map((i) => i.repo).sort();
+  assert.deepEqual(await repos(['pact']), ['r2']);
+  assert.deepEqual(await repos(['impact']), ['r1']);
+  assert.deepEqual(await repos(['act']), []);
+  assert.deepEqual(await repos(['cua-bar']), []);
+  assert.deepEqual(await repos(['cua-bar2']), ['r1']);
+  assert.deepEqual(await repos(['선택']), ['r1']);
 });
 
 test('겹침 수는 topic·목적 첫 줄·기능 줄의 서로 다른 주제 낱말 수다(대소문자 무시, 목적 둘째 줄은 안 봄)', async () => {

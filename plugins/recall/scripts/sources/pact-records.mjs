@@ -1,15 +1,10 @@
-// pact 기록 출처: RECALL_ROOTS(기본 ~/dev) 아래의 .pact/*/spec.md 와 옛 꼴 docs/pact/*.md 를 읽어
-// 예전 시도·실패·미룬 아이디어 항목으로 낸다. 주제 낱말이 하나도 안 겹치는 기록은 읽지도 내지도 않는다.
-// 항목 꼴과 collect 약속은 recall.mjs 머리말에 있다.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 export const name = 'pact 기록';
 
-// .pact 또는 docs/pact 폴더를 root 아래 이 깊이까지 찾는다(root의 자식이 깊이 1).
 const MAX_DEPTH = 4;
-// 복사본·시험 판이 같은 주제를 여러 번 세지 않게 뺀다. root 기준 상대 경로에 이 글이 들어 있으면 지나간다.
 const EXCLUDED = ['/wt/', '/scratch/', 'node_modules', 'testbed', '/tmp/', '-wt-'];
 const DATE_PREFIX = /^\d{4}-\d{2}-\d{2}-/;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -36,7 +31,6 @@ function readDir(dir) {
   }
 }
 
-// root 아래에서 판 하나하나의 명세 파일을 찾는다. 심볼릭 링크는 isDirectory()가 거짓이라 따라가지 않는다.
 function findRecords(root) {
   const found = [];
   const visit = (dir, depth) => {
@@ -62,7 +56,6 @@ function findRecords(root) {
   return found;
 }
 
-// 같은 저장소의 같은 슬러그(날짜 앞머리를 뗀 이름)는 한 판이다. 날짜 있는 .pact 판 > 날짜 없는 .pact 판 > 옛 docs/pact 판, 같은 급이면 늦은 날짜.
 function dedupe(records) {
   const rank = (r) => (r.legacy ? 0 : DATE_PREFIX.test(r.base) ? 2 : 1);
   const best = new Map();
@@ -100,7 +93,6 @@ function parseSpec(text) {
 
 const bullets = (lines = []) => lines.map((l) => /^-\s+(.*\S)\s*$/.exec(l)?.[1]).filter(Boolean);
 
-// "다음 판 후보: A, B(c, d), E." 를 괄호 밖 쉼표에서 쪼갠다. 줄 단독이든 문단 끝이든 표지 뒤부터 줄 끝까지다.
 function nextVersionIdeas(lines = []) {
   const ideas = [];
   for (const line of lines) {
@@ -130,12 +122,15 @@ function readJson(dirs, file) {
   for (const dir of dirs) {
     try {
       return JSON.parse(readFileSync(path.join(dir, file), 'utf8'));
-    } catch {
-      // 없거나 깨진 파일은 없는 것으로 본다. 그 때문에 출처 전체를 못 읽은 것으로 하지는 않는다
-    }
+    } catch {}
   }
   return null;
 }
+const wordPattern = (word) => {
+  const left = /^[a-z0-9]/.test(word) ? '(?<![a-z0-9])' : '';
+  const right = /[a-z0-9]$/.test(word) ? '(?![a-z0-9])' : '';
+  return new RegExp(left + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + right);
+};
 const textList = (v) => (Array.isArray(v) ? v : [v]).map(oneLine).filter(Boolean);
 
 function dateOf(record, fm) {
@@ -148,7 +143,6 @@ function dateOf(record, fm) {
 function itemsOf(record, { fm, sections }, overlap, sameRepo) {
   const head = { overlap, same_repo: sameRepo, date: dateOf(record, fm), source: 'pact', repo: path.basename(record.repoRoot), path: record.file };
   const make = (bucket, text) => ({ bucket, ...head, text });
-  // 옛 꼴(docs/pact)의 결과 폴더는 같은 이름 또는 슬러그만 쓴 .pact 폴더다
   const runDirs = [...new Set([record.legacy ? null : path.dirname(record.file), path.join(record.repoRoot, '.pact', record.base), path.join(record.repoRoot, '.pact', record.slug)].filter(Boolean))];
   const summary = readJson(runDirs, 'summary.json');
   const results = readJson(runDirs, 'results.json');
@@ -191,14 +185,12 @@ export async function collect({ topicWords, project, env }) {
   const projectDir = path.resolve(project);
   const items = [];
   for (const record of dedupe(readable.flatMap(findRecords))) {
-    let spec;
-    try {
-      spec = parseSpec(readFileSync(record.file, 'utf8'));
-    } catch {
-      continue;
-    }
-    const haystack = [spec.fm.topic, spec.sections['목적']?.find((l) => l.trim()), ...bullets(spec.sections['기능']).filter((b) => /^F\d+\b/.test(b))].join('\n').toLowerCase();
-    const overlap = words.filter((w) => haystack.includes(w)).length;
+    const spec = parseSpec(readFileSync(record.file, 'utf8'));
+    const haystack = [spec.fm.topic, spec.sections['목적']?.find((l) => l.trim()), ...bullets(spec.sections['기능']).filter((b) => /^F\d+\b/.test(b))]
+      .join('\n')
+      .replace(/`[^`]*`/g, ' ')
+      .toLowerCase();
+    const overlap = words.filter((w) => wordPattern(w).test(haystack)).length;
     if (overlap) items.push(...itemsOf(record, spec, overlap, inside(projectDir, record.repoRoot)));
   }
   return { items };

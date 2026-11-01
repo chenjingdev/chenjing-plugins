@@ -1,5 +1,3 @@
-// Claude 메모리 파일 출처: ~/.claude/projects/<프로젝트 폴더 이름>/memory/*.md 중 type이 feedback·user면 지키라는 규칙,
-// project면 예전 시도로 낸다. 메모리는 이 프로젝트의 것이라 늘 같은 저장소로 친다. 항목 꼴은 recall.mjs 머리말에 있다.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,7 +9,6 @@ const BUCKETS = { feedback: 'rules', user: 'rules', project: 'attempts' };
 // Claude Code는 프로젝트 경로에서 영숫자가 아닌 글자를 모두 -로 바꿔 폴더 이름을 만든다(/만 바꾸면 점·한글이 든 경로를 놓친다)
 export const projectDirName = (project) => path.resolve(project).replace(/[^A-Za-z0-9]/g, '-');
 
-// frontmatter에서 name·description·type·modified를 읽는다. type·modified는 metadata 아래에 들여쓰여 있어 들여쓰기를 가리지 않고 첫 줄을 쓴다.
 function parseMemory(text) {
   const fm = {};
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);

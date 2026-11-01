@@ -20,7 +20,6 @@ metadata:
 ${body}
 `;
 
-// 프로젝트 폴더 이름은 Claude Code가 정하는 대로 영숫자가 아닌 글자를 모두 -로 바꾼 것이다
 function setup(project, files) {
   const base = tmp();
   const dir = path.join(base, projectDirName(project), 'memory');
