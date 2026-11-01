@@ -831,6 +831,7 @@ test('0.8.0: probe 5 teaches the source tags, failures as acceptance items, the 
   // 6: spec-checker에 넘기는 요구 출처와 예전 실패, 알림 받기
   assert.ok(probe.includes('`(기록 M/D 사용자 원문)`·`(기록 M/D AI 보고)`'));
   assert.match(probe, /"실패와 원인" 묶음은 날짜와 저장소 이름이 붙은 채로 `예전 실패` 목록으로 같이 넘긴다/);
+  assert.match(probe, /사용자 말 불만을 공통 규칙으로 올린 줄\(5의 "실패와 원인" 가운데 사용자가 직접 한 말\)도 `\(기록 M\/D 사용자 원문\)` 출처로 요구 목록에 넣는다/);
   assert.ok(!probe.includes('케이스는 결과를 바꾸는 것만 더한다'), '바로 위 "결과를 바꾸는 것만 펼친다"와 같은 말');
   assert.match(probe, /기록에서 온 줄에 답한 것이면 날짜 태그 대신 `\[사용자: 검수 n\]`만 단다\(지금 한 말이 우선이라 날짜는 떨어진다\)/);
   assert.match(probe, /`예전 실패 못 막음`\)이 오면 제안한 문구에 그 실패의 날짜 태그\(`\[AI 가정: 기록 M\/D\]`, 다른 저장소면 `\[AI 가정: 기록 M\/D <저장소>\]`\)를 달아 `## 검수 기준`에 더한다/);
