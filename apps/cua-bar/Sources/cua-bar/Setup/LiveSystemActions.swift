@@ -266,30 +266,24 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         // there: on a Mac where the app's engine was never unpacked, a new conversation would get a server that
         // cannot start. It then waits with the engine step.
         let mcpCanGoIn = !waiting.contains(.status) || claude.defaultLauncherExists
-        // Into each of Claude Code's folders: the default one, and the company one when it is there. One that fails
-        // does not keep the others from getting it.
-        var failed = false
-        for folder in claude.folders() {
-            let mcp = folder.mcpState(launcher: launcher)
-            switch mcp {
-            case .missing, .outdated:
-                guard mcpCanGoIn else { break }
-                switch await putMCP(launcher: launcher, replacing: mcp == .outdated, in: folder) {
-                case .succeeded:
-                    changed = true
-                case .cannotStart:
-                    // Not something another try fixes by itself: it is said in the check tab, and the next start tries again.
-                    return Run(outcome: engineOutcome(), waiting: waiting, claudeCodeUnusable: true, changed: changed || repaired)
-                case .failed:
-                    failed = true
-                }
-            case .conflict:
-                conflict = true
-            case .ready, .unknown:
-                break
+        let mcp = claude.mcpState(launcher: launcher)
+        switch mcp {
+        case .missing, .outdated:
+            guard mcpCanGoIn else { break }
+            switch await putMCP(launcher: launcher, replacing: mcp == .outdated) {
+            case .succeeded:
+                changed = true
+            case .cannotStart:
+                // Not something another try fixes by itself: it is said in the check tab, and the next start tries again.
+                return Run(outcome: engineOutcome(), waiting: waiting, claudeCodeUnusable: true, changed: changed || repaired)
+            case .failed:
+                return .failure(InstallMessages.mcpFailed, waiting: waiting, changed: changed || repaired)
             }
+        case .conflict:
+            conflict = true
+        case .ready, .unknown:
+            break
         }
-        if failed { return .failure(InstallMessages.mcpFailed, waiting: waiting, changed: changed || repaired) }
 
         let outcome: ActionOutcome
         if conflict {
@@ -414,13 +408,13 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
 
     /// The server is added (after the app's out-of-date one is removed), and then read back from the file: the
     /// command's word is not enough.
-    private func putMCP(launcher: String?, replacing: Bool, in folder: ClaudeIntegration) async -> ClaudeIntegration.CommandResult {
+    private func putMCP(launcher: String?, replacing: Bool) async -> ClaudeIntegration.CommandResult {
         if replacing {
-            let removed = await folder.removeMCP()
+            let removed = await claude.removeMCP()
             guard removed == .succeeded else { return removed }
         }
-        let added = await folder.addMCP(command: folder.expectedLauncher(launcher))
+        let added = await claude.addMCP(command: claude.expectedLauncher(launcher))
         guard added == .succeeded else { return added }
-        return folder.mcpState(launcher: launcher) == .ready ? .succeeded : .failed
+        return claude.mcpState(launcher: launcher) == .ready ? .succeeded : .failed
     }
 }

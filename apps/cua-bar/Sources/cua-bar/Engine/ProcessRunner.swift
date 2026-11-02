@@ -24,24 +24,12 @@ protocol ProcessRunning: Sendable {
     /// The same, with these folders put in front of PATH: a `claude` that npm, nvm or bun put somewhere is a
     /// script for the `node` beside it, which the app's own PATH does not reach.
     func run(_ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String]) async throws -> ProcessOutput
-    /// The same, with these variables set (a nil value takes the variable away): `claude` is told which settings
-    /// folder (`CLAUDE_CONFIG_DIR`) a command is for.
-    func run(
-        _ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String], setting: [String: String?]
-    ) async throws -> ProcessOutput
 }
 
 extension ProcessRunning {
     /// A stand-in that does not care about PATH runs the command as it would without.
     func run(_ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String]) async throws -> ProcessOutput {
         try await run(executable, arguments: arguments, timeout: timeout)
-    }
-
-    /// A stand-in that does not care about the variables runs the command as it would without.
-    func run(
-        _ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String], setting: [String: String?]
-    ) async throws -> ProcessOutput {
-        try await run(executable, arguments: arguments, timeout: timeout, pathFirst: pathFirst)
     }
 }
 
@@ -81,20 +69,6 @@ struct SystemProcessRunner: ProcessRunning {
     func run(_ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String]) async throws -> ProcessOutput {
         try await SystemProcessRunner(environment: Self.environment(environment, pathFirst: pathFirst))
             .run(executable, arguments: arguments, timeout: timeout)
-    }
-
-    /// `environment` with `changes` made: a value is set, a nil one taken away.
-    static func environment(_ environment: [String: String], setting changes: [String: String?]) -> [String: String] {
-        var changed = environment
-        for (name, value) in changes { changed[name] = value }
-        return changed
-    }
-
-    func run(
-        _ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String], setting: [String: String?]
-    ) async throws -> ProcessOutput {
-        try await SystemProcessRunner(environment: Self.environment(environment, setting: setting))
-            .run(executable, arguments: arguments, timeout: timeout, pathFirst: pathFirst)
     }
 
     func run(_ executable: URL, arguments: [String], timeout: Duration) async throws -> ProcessOutput {
