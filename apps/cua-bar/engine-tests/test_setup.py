@@ -273,6 +273,7 @@ class SetupTests(unittest.TestCase):
         with patch.object(setup, 'install_command', return_value=Path('/fixture/codex-cua')), \
              patch.object(setup, 'install_login_environment', return_value='ready'), \
              patch.object(setup, 'install_shell_environment', return_value=('ready', Path('/fixture/.zshenv'))), \
+             patch('claude_hook_setup.claude_available', return_value=False), \
              patch.object(setup, 'relay_status', return_value='ready'), contextlib.redirect_stdout(output):
             self.assertEqual(setup.main(['setup']), 0)
         self.assertIn('Shell startup file: ready (/fixture/.zshenv)', output.getvalue().splitlines())

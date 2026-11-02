@@ -5,6 +5,7 @@ import re
 import shutil
 import unittest
 
+import claude_hook_setup
 import engine_records
 import engine_status
 from engine_core import iso
@@ -46,7 +47,8 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['host'], {'state': 'missing', 'since': None, 'started_before_setup': False,
                                           'engine_version': None, 'relay_reason': None, 'restart_adds_relay': False})
         self.assertEqual(list(status['setup']), ['command', 'dependencies', 'login_environment', 'shell_environment',
-                                                 'shell_file', 'wrapper', 'relay'])
+                                                 'shell_file', 'wrapper', 'relay', 'claude_hooks'])
+        self.assertEqual(status['setup']['claude_hooks'], 'not_installed')
         self.assertEqual(status['connections'], [])
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': [], 'release_blocked': False})
         self.assertEqual(status['other_tools'], [])
@@ -70,7 +72,7 @@ class ShapeTests(StatusCase):
                                           'engine_version': self.engine_version(), 'relay_reason': None, 'restart_adds_relay': False})
         self.assertEqual(status['setup'], {'command': 'ready', 'dependencies': 'ready', 'login_environment': 'ready',
                                            'shell_environment': 'ready', 'shell_file': str(self.home/'.zshenv'),
-                                           'wrapper': 'ready', 'relay': 'active'})
+                                           'wrapper': 'ready', 'relay': 'active', 'claude_hooks': 'not_installed'})
         for connection in status['connections']:
             self.assertEqual(list(connection), CONNECTION_KEYS)
             self.assertIn(connection['agent'], ('claude', 'codex'))
@@ -100,7 +102,30 @@ class ShapeTests(StatusCase):
         setup_section = self.status(checks=broken)['setup']
         self.assertEqual(setup_section, {'command': 'missing', 'dependencies': 'missing', 'login_environment': 'unknown',
                                          'shell_environment': 'unknown', 'shell_file': None, 'wrapper': 'broken',
-                                         'relay': 'unavailable'})
+                                         'relay': 'unavailable', 'claude_hooks': 'not_installed'})
+
+    def test_hook_readiness_uses_the_fake_claude_cli_and_the_selected_private_profile(self):
+        self.machine.add(5, 1, '/bin/x')
+        profile = self.home/'chosen-claude-profile'
+        environment = {'CLAUDE_CONFIG_DIR': str(profile)}
+        self.assertEqual(self.status(environment=environment)['setup']['claude_hooks'], 'not_installed')
+        cli = self.home/'.local/bin/claude'
+        cli.parent.mkdir(parents=True, mode=0o700)
+        cli.write_text('#!/bin/sh\nexit 0\n')
+        cli.chmod(0o700)
+        self.assertEqual(self.status(environment=environment)['setup']['claude_hooks'], 'missing')
+        self.assertFalse(profile.exists(), 'status only inspects hooks; it never installs them')
+        self.assertEqual(claude_hook_setup.configure_hooks(home=self.home, config_dir=profile)['state'], 'ready')
+        settings = profile/'settings.json'
+        before = settings.stat()
+        self.assertEqual(self.status(environment=environment)['setup']['claude_hooks'], 'ready')
+        after = settings.stat()
+        self.assertEqual((before.st_ino, before.st_mtime_ns), (after.st_ino, after.st_mtime_ns))
+        content = json.loads(settings.read_text())
+        content['disableAllHooks'] = True
+        settings.write_text(json.dumps(content))
+        self.assertEqual(self.status(environment=environment)['setup']['claude_hooks'], 'disabled')
+        self.assertFalse((self.home/'.claude').exists(), 'the default profile is not scanned or created')
 
     def test_the_actions_do_not_run_the_setup_checks(self):
         import engine_actions

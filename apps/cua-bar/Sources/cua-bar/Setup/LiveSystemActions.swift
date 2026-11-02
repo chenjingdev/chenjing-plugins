@@ -242,6 +242,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
             guard let installed = await installEngine(from: bundle) else { return .failure(InstallMessages.engineFailed) }
             launcher = installed.launcher
             changed = true
+            unsettled = !installed.settled
         case .unknown:
             // It could not be asked in time, and the engine may be fine. The engine step waits for the first read
             // that works; the MCP server does not depend on it (the launcher is one path).
@@ -251,8 +252,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
 
         /// What the engine's part alone has to say, when Claude Code's part is not done.
         func engineOutcome() -> ActionOutcome {
-            if changed || repaired { return ActionOutcome(kind: .success, message: Self.engineOnly) }
             if unsettled { return ActionOutcome(kind: .warning, message: InstallMessages.notAllRepaired) }
+            if changed || repaired { return ActionOutcome(kind: .success, message: Self.engineOnly) }
             return InstallMessages.nothingToSay
         }
 
@@ -288,6 +289,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         let outcome: ActionOutcome
         if conflict {
             outcome = ActionOutcome(kind: .warning, message: InstallMessages.conflict)
+        } else if unsettled {
+            outcome = ActionOutcome(kind: .warning, message: InstallMessages.notAllRepaired)
         } else if changed {
             outcome = ActionOutcome(kind: .success, message: InstallMessages.installed)
         } else {
@@ -326,7 +329,7 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         /// The engine is the app's and nothing in its setup is broken; this is the launcher it reported (nil: it did not say).
         case current(String?)
         /// The engine is the app's but its status calls a part of the setup broken (the Python environment, the
-        /// login environment, the wrapper, the relay): the setup runs again.
+        /// login environment, the wrapper, the relay, Claude's automatic turn cleanup): the setup runs again.
         case needsSetup(String?)
         /// No engine, one of another version (or with none), or a command that cannot answer or start: the bundle's
         /// is put in.
@@ -402,7 +405,10 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
     /// went through.
     static func setupIsSettled(in stdout: Data) -> Bool {
         guard let setup = resultLine(in: stdout)?["setup"] as? [String: Any] else { return true }
-        let settled: [String: Set<String>] = ["command": ["ready"], "login_environment": ["ready", "conflict"], "relay": ["ready"]]
+        let settled: [String: Set<String>] = [
+            "command": ["ready"], "login_environment": ["ready", "conflict"], "relay": ["ready"],
+            "claude_hooks": ["ready", "not_installed"],
+        ]
         return settled.allSatisfy { key, words in (setup[key] as? String).map { words.contains($0) } ?? true }
     }
 

@@ -1,14 +1,14 @@
 # Codex CUA 개발용 테스트
 
-CUA Bar에 담는 연결 엔진 `apps/cua-bar/engine`(0.8.15)의 회귀 시험이다. Python 시험 963개와 Node 시험 108개가 있고, 둘 다 저장소 루트에서 실행한다. Python 시험과 `node --test`는 1분쯤 걸리고, `node apps/cua-bar/engine-tests/relay`로 직접 돌리면 네 파일이 한 프로세스에서 차례로 돌아 1분 20초쯤 걸린다.
+CUA Bar에 담는 연결 엔진 `apps/cua-bar/engine`(0.8.16)의 회귀 시험이다. Python 시험 1064개와 Node 시험 115개가 있고, 둘 다 저장소 루트에서 실행한다. Python 시험과 `node --test`는 1분쯤 걸리고, `node apps/cua-bar/engine-tests/relay`로 직접 돌리면 다섯 파일이 한 프로세스에서 차례로 돌아 1분 20초쯤 걸린다.
 
 ```sh
-python3 apps/cua-bar/engine-tests/run.py       # Python 시험 963개
-node --test apps/cua-bar/engine-tests/relay    # Node 시험 108개 (중계기)
+python3 apps/cua-bar/engine-tests/run.py       # Python 시험 1064개
+node --test apps/cua-bar/engine-tests/relay    # Node 시험 115개 (중계기)
 ```
 
 - Python 시험은 표준 라이브러리의 `unittest`만 쓰고 Python 3.9 이상이면 된다. `run.py`가 `apps/cua-bar/engine`을 모듈 검색 경로에 추가한 뒤 이 폴더의 `test_*.py`를 찾아 실행한다. `bridge_case.py`, `fake_host.py`, `engine_support.py`, `fake_native_cli.py`, `toml_subset.py`는 시험이 쓰는 도우미라 수집되지 않는다.
-- Node 시험은 `node:test`만 쓴다. 이 맥의 Node 26.8.1에서 확인했다. `relay/index.js`는 네 시험 파일을 한 프로세스에서 불러오는 입구다. `node apps/cua-bar/engine-tests/relay`로 직접 돌리면 어느 판에서나 이 입구를 거친다. `node --test apps/cua-bar/engine-tests/relay`는 폴더를 모듈 경로로 읽는 판(22, 24)에서만 이 입구를 거치고, 폴더를 직접 펼치는 판(이 맥의 26)에서는 `index.js` 없이 네 파일을 각각 따로 돌린다.
+- Node 시험은 `node:test`만 쓴다. 이 맥의 Node 26.8.1에서 확인했다. `relay/index.js`는 다섯 시험 파일을 한 프로세스에서 불러오는 입구다. `node apps/cua-bar/engine-tests/relay`로 직접 돌리면 어느 판에서나 이 입구를 거친다. `node --test apps/cua-bar/engine-tests/relay`는 폴더를 모듈 경로로 읽는 판(22, 24)에서만 이 입구를 거치고, 폴더를 직접 펼치는 판(이 맥의 26)에서는 `index.js` 없이 다섯 파일을 각각 따로 돌린다.
 
 ## CUA를 쓰지 않을 때 돌린다
 
@@ -59,6 +59,13 @@ Node 시험도 같은 출력과 종료 코드를 시험 프로세스가 낸다. 
 | `guard.test.mjs`(14) | 위의 보호 장치(`harness.mjs`)와 종료 코드 0·1·2. |
 
 `harness.mjs`는 가짜 `node_repl`, 중계기 stdio 클라이언트, 제어 소켓 클라이언트를 모은 도우미다. `RELAY_DIR_UNDER_TEST`로 고의로 고장 낸 중계기 복사본을 가리켜 시험이 그 고장을 잡는지 확인할 수 있다.
+
+## 0.8.16 작업 종료·취소 검증
+
+- `test_claude_lifecycle`, `test_registered_lifecycle`, `test_agent_kernels`: CLI 프로세스·대화·에이전트·프롬프트별 소유권, 부모·자식의 별도 커널, 종료와 부팅·취소의 경합, 다른 연결 보존, 호스트를 다시 켜지 않는 정리.
+- `test_claude_hook_setup`, `test_claude_hook_profiles`: 다른 설정과 비활성화 정책 보존, 명시한 프로필만 설치·기록·제거, 충돌 때 엔진 보존.
+- `test_bridge_cancel`, `relay/cancel.test.mjs`: 요청 UUID와 네이티브 MCP ID의 정확한 취소 연결, 잘못되거나 오래된 요청·다른 소유자 거절, 원본 동작 재실행 방지.
+- Swift `ClaudeLifecycleStatusTests`와 설치 시험: 훅 상태의 이전 엔진 호환성, 고장·비활성화 안내, 준비되지 않은 설치를 성공으로 표시하지 않는지 확인.
 
 ## 격리
 

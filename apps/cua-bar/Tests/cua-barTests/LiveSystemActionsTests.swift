@@ -328,6 +328,7 @@ struct LiveSystemActionsTests {
     nonisolated static let brokenParts: [(String, String)] = [
         ("command", "missing"), ("dependencies", "missing"), ("login_environment", "missing"), ("login_environment", "stale"),
         ("wrapper", "missing"), ("wrapper", "broken"), ("relay", "unavailable"),
+        ("claude_hooks", "missing"), ("claude_hooks", "conflict"), ("claude_hooks", "failed"), ("claude_hooks", "disabled"),
     ]
 
     private func engineWith(_ field: String, _ value: String, home: TempHome) throws -> EngineStatus {
@@ -337,6 +338,7 @@ struct LiveSystemActionsTests {
         case "dependencies": status.setup.dependencies = value
         case "login_environment": status.setup.loginEnvironment = value
         case "wrapper": status.setup.wrapper = value
+        case "claude_hooks": status.setup.claudeHooks = value
         default: status.setup.relay = value
         }
         return status
@@ -392,6 +394,24 @@ struct LiveSystemActionsTests {
         #expect(await rig.actions.setUp() == ActionOutcome(kind: .success, message: "연결 설정을 마쳤어요"))
         #expect(LiveSystemActions.setupIsSettled(in: Data(#"{"setup": {"command": "ready", "login_environment": "conflict", "relay": "ready"}}"#.utf8)))
         #expect(!LiveSystemActions.setupIsSettled(in: Data(#"{"setup": {"command": "ready", "login_environment": "failed", "relay": "ready"}}"#.utf8)))
+    }
+
+    @Test func anInstallOrRepairWithDisabledCleanupHooksDoesNotClaimEverythingIsReady() async throws {
+        for repair in [false, true] {
+            let rig = try rig(installedSetup: #"{"command":"ready","claude_hooks":"disabled"}"#)
+            defer { rig.home.remove() }
+            try rig.home.installClaudeCode()
+            if repair {
+                rig.engine.setStatus(try engineWith("claude_hooks", "missing", home: rig.home))
+                try rig.home.addMcp(command: rig.launcher)
+            }
+            let outcome = await rig.actions.setUp()
+            #expect(rig.runner.calls.contains(rig.installEngineCall))
+            #expect(outcome == ActionOutcome(kind: .warning, message: InstallMessages.notAllRepaired))
+        }
+        #expect(LiveSystemActions.setupIsSettled(in: Data(#"{"setup":{"claude_hooks":"ready"}}"#.utf8)))
+        #expect(LiveSystemActions.setupIsSettled(in: Data(#"{"setup":{"claude_hooks":"not_installed"}}"#.utf8)))
+        #expect(LiveSystemActions.setupIsSettled(in: Data(#"{"setup":{}}"#.utf8)), "older engines remain compatible")
     }
 
     // MARK: A claude that cannot start

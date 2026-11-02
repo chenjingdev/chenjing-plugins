@@ -141,6 +141,8 @@ struct SetupInfo: Equatable, Sendable {
     var shellFile: String?
     var wrapper: String?
     var relay: String?
+    /// The managed Claude lifecycle hooks. An older engine does not report this field.
+    var claudeHooks: String?
 }
 
 struct Connection: Equatable, Sendable, Identifiable {
@@ -335,6 +337,7 @@ extension SetupInfo: Decodable {
     private enum CodingKeys: String, CodingKey {
         case command, dependencies, loginEnvironment = "login_environment", wrapper, relay
         case shellEnvironment = "shell_environment", shellFile = "shell_file"
+        case claudeHooks = "claude_hooks"
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -345,6 +348,7 @@ extension SetupInfo: Decodable {
         shellFile = c.lenientString(.shellFile)
         wrapper = c.lenientString(.wrapper)
         relay = c.lenientString(.relay)
+        claudeHooks = c.lenientString(.claudeHooks)
     }
 }
 

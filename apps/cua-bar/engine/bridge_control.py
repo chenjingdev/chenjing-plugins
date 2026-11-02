@@ -37,6 +37,7 @@ class BridgeControl:
         self.in_flight_wait = self.IN_FLIGHT_WAIT if in_flight_wait is None else in_flight_wait
         self.pid = os.getpid()
         self.owner_pid = os.getppid()
+        self.owner_started_at = None
         self.cwd = os.getcwd()
         self.started_at = None
         self.writer_id = None
@@ -51,6 +52,7 @@ class BridgeControl:
         records.private_directory(self.state)
         root = records.private_directory(self.state/'bridges')
         self.started_at = records.process_started_at(self.pid)
+        self.owner_started_at = records.process_started_at(self.owner_pid)
         self.writer_id = 'bridge-%d-%d' % (self.pid, self.started_at)
         self.directory = Path(tempfile.mkdtemp(prefix='bridge-', dir=str(root)))
         try:
@@ -67,14 +69,23 @@ class BridgeControl:
         self.adapter.on_call = self.record_call
         self.adapter.on_browser_blocked = self.record_browser_blocked
         self.adapter.owner = self.writer_id
+        self.adapter.control_state = self.state
+        self.adapter.claude_owner = (self.owner_pid, self.owner_started_at)
 
     def record(self, **changes):
         view = self.adapter.snapshot()
         record = {'schema_version': 1, 'kind': 'bridge', 'pid': self.pid, 'started_at': self.started_at,
-                  'owner_pid': self.owner_pid, 'cwd': self.cwd, 'control_path': self.control_path,
+                  'owner_pid': self.owner_pid, 'owner_started_at': self.owner_started_at,
+                  'cwd': self.cwd, 'control_path': self.control_path,
                   'host': view['host'], 'session_id': view['session_id'], 'turn_id': view['turn_id'],
                   'connected_at': view['connected_at'], 'last_call_at': view['last_call_at'], 'busy': view['busy'],
                   'scopes': view['scopes'], 'cleanup': view['cleanup'], 'updated_at': records.utc_now()}
+        lifecycle = getattr(self.adapter, 'claude_lifecycle', None)
+        lifecycle_snapshot = getattr(self.adapter, 'lifecycle_snapshot', None)
+        if callable(lifecycle_snapshot):
+            record['claude_scopes'] = lifecycle_snapshot()
+        elif lifecycle is not None:
+            record['claude_scopes'] = lifecycle.snapshot()
         record.update(changes)
         return record
 
@@ -138,6 +149,13 @@ class BridgeControl:
             elif action == 'release':
                 async with self.release_lock:
                     reply = await self.adapter.release_scopes(wait=self.in_flight_wait)
+            elif action == 'claude_event':
+                lifecycle = getattr(self.adapter, 'claude_lifecycle', None)
+                end_event = getattr(self.adapter, 'end_claude_event', None)
+                if lifecycle is None and not callable(end_event):
+                    return
+                async with self.release_lock:
+                    reply = await end_event(request) if callable(end_event) else await lifecycle.end(request)
             else:
                 return
             writer.write((json.dumps(reply)+'\n').encode())

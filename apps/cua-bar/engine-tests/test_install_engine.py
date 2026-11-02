@@ -23,7 +23,7 @@ from engine_support import NOW, EngineCase
 ENGINE = Path(setup.__file__).resolve().parent
 REAL_ENSURE = setup.ensure_dependencies                  # before any test replaces it
 KEYS = ['version', 'root', 'launcher', 'removed', 'setup']
-SETUP_KEYS = ['command', 'login_environment', 'shell_environment', 'shell_file', 'relay']
+SETUP_KEYS = ['command', 'login_environment', 'shell_environment', 'shell_file', 'relay', 'claude_hooks']
 
 
 class FastClock:
@@ -304,8 +304,9 @@ class OutputTests(InstallCase):
                                   'removed': ['0.7.0'],
                                   'setup': {'command': 'ready', 'login_environment': 'ready',
                                             'shell_environment': 'ready', 'shell_file': str(self.shell_file),
-                                            'relay': 'ready'}})
+                                            'relay': 'ready', 'claude_hooks': 'not_installed'}})
         self.assertEqual(result['launcher'], str(self.support/'engine/current/start-mcp.sh'))
+        self.assertFalse((self.home/'.claude').exists(), 'a Mac without Claude gets no fabricated hook profile')
 
     def test_without_json_it_says_in_words_what_was_done(self):
         self.old_copy('0.7.0')
@@ -336,7 +337,7 @@ class OutputTests(InstallCase):
         self.shell.return_value = ('unsupported_shell', None)
         self.assertEqual(self.installed()['setup'], {'command': 'ready', 'login_environment': 'ready',
                                                      'shell_environment': 'unsupported_shell', 'shell_file': None,
-                                                     'relay': 'ready'})
+                                                     'relay': 'ready', 'claude_hooks': 'not_installed'})
         self.shell.reset_mock()
         self.login.return_value = 'conflict'
         self.assertEqual(self.installed()['setup']['login_environment'], 'conflict')
@@ -345,6 +346,18 @@ class OutputTests(InstallCase):
     def test_the_relay_files_are_reported_as_the_setup_finds_them(self):
         shutil.rmtree(self.bundle/'relay')
         self.assertEqual(self.installed()['setup']['relay'], 'missing')
+
+    def test_claude_hook_readiness_reflects_the_profile_after_engine_setup(self):
+        claude = self.home/'.local/bin/claude'
+        claude.parent.mkdir(parents=True)
+        claude.write_text('#!/bin/sh\nexit 0\n')
+        claude.chmod(0o700)
+        result = self.installed()
+        self.assertEqual(result['setup']['claude_hooks'], 'ready')
+        settings = json.loads((self.home/'.claude/settings.json').read_text())
+        self.assertIn('Stop', settings['hooks'])
+        self.assertTrue(all(group['hooks'][0]['command'] == str(self.engines/'current/claude-hook.sh')
+                            for groups in settings['hooks'].values() for group in groups))
 
 
 class FailureTests(InstallCase):

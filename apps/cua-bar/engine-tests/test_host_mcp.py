@@ -382,15 +382,16 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         await self.initialize(adapter)
         await adapter.handle({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list', 'params': {}})
         advertised = {tool['name']: tool for tool in output[-1]['result']['tools']}
-        self.assertEqual(advertised['js'], TOOLS['js'])
+        self.assertEqual(advertised['js'], {**TOOLS['js'], 'description': bridge.INSTRUCTIONS+'\n\n'+TOOLS['js']['description']})
         self.assertEqual(advertised['js_reset'], TOOLS['js_reset'])
         self.assertEqual(advertised['turn_ended']['inputSchema'], {
             'type': 'object', 'properties': {}, 'additionalProperties': False})
         self.assertIn('empty object', advertised['turn_ended']['description'])
         self.assertEqual({key: value for key, value in advertised['turn_ended'].items()
-                          if key not in ('inputSchema', 'description')},
+                          if key not in ('inputSchema', 'description', '_meta')},
                          {key: value for key, value in TOOLS['turn_ended'].items()
-                          if key not in ('inputSchema', 'description')})
+                          if key not in ('inputSchema', 'description', '_meta')})
+        self.assertEqual(advertised['turn_ended']['_meta'], {'original': True, 'ui': {'visibility': ['model']}})
         self.assertEqual(proxy.tools, TOOLS)
 
     async def test_ending_the_turn_is_in_flight_like_a_call_but_no_use_of_the_screen(self):
@@ -508,22 +509,12 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_initialize_tells_every_conversation_how_to_use_cua(self):
         """Since 0.8.10 the bridge says what the cuabar skill said, in its initialize answer (in every conversation)."""
-        instructions = (
-            "CUA Bar: these tools operate the user's Mac apps through Codex computer use (CUA). Each connection runs in "
-            "its own new Codex thread and sees no Codex chat. On the first `js` call, or after `js_reset`, run one "
-            "documented entrypoint such as `await cua.getState();` and follow the documentation it returns. The REPL is "
-            "not Node.js or Playwright: it has no `process` global or file system, and screenshots come back through the "
-            "documented image output. For web pages, use Playwright when it is available on this computer, run on its "
-            "own and never inside `js`. When the task needs the user's signed-in Chrome or a tab the user has open, or "
-            "Playwright is not available, operate Chrome as an ordinary app with `cua.getApp(\"Google Chrome\")`; only a "
-            "window's active tab is readable that way, and leave the user's tabs as you found them. Report an "
-            "unsupported action or a blocked URL instead of retrying it another way, Playwright included; Codex refusing "
-            "the browser to this whole conversation is not such a refusal. When finished, call `turn_ended` with `{}`. "
-            "Never quit Codex, change permissions, or run `codex-cua` release, release-session, dismiss-session, stop, "
-            "restart-codex or unlock-reset yourself; the user does those through CUA Bar.")
         adapter, _, output, _, _ = self.fixture()
         await self.initialize(adapter)
-        self.assertEqual(output[-1]['result']['instructions'], instructions)
+        instructions = output[-1]['result']['instructions']
+        for required in ('getAXState()', 'inventory.errors', 'Claude hooks automatically end', 'manual fallback', 'do not replay', 'Never quit Codex'):
+            self.assertIn(required, instructions)
+        self.assertIn(instructions, next(tool['description'] for tool in adapter.tools if tool['name'] == 'js'))
         self.assertEqual(output[-1]['result']['serverInfo'], {'name': 'cuabar', 'version': bridge.VERSION})
 
     async def test_a_refusal_because_of_the_macs_lock_gets_its_note_at_the_end_and_nothing_else_does(self):

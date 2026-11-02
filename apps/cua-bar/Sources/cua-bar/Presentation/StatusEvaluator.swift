@@ -273,8 +273,8 @@ enum StatusEvaluator {
         return [SetupIssue(name: "엔진", sentence: "연결 엔진이 앱과 판이 달라요", item: .engine)]
     }
 
-    /// The MCP server is missing or the app's own and out of date (Claude Code's side is the MCP server alone). Nothing is said without
-    /// Claude Code: it is not a problem of the Mac, and it is put off until Claude Code is there.
+    /// The MCP server is missing or the app's own and out of date. The engine's hook status is judged in setupIssues.
+    /// Nothing is said without Claude Code: it is not a problem of the Mac, and it is put off until Claude Code is there.
     static func claudeIssues(in claude: ClaudeSetupState) -> [SetupIssue] {
         guard claude.claudeCodeFound, !claude.claudeCodeUnusable else { return [] }
         var issues: [SetupIssue] = []
@@ -333,7 +333,22 @@ enum StatusEvaluator {
         default: break
         }
         if setup.relay == "unavailable" { issues.append(SetupIssue(name: "중계기", sentence: "중계기를 쓸 수 없어요", item: .relay)) }
+        if let issue = claudeHooksIssue(in: setup) { issues.append(issue) }
         return issues
+    }
+
+    /// The hooks belong to the same Claude connection shown on the MCP line. Older engines and Macs without
+    /// Claude Code report no hook state or `not_installed`, neither of which makes an existing connection broken.
+    static func claudeHooksIssue(in setup: SetupInfo) -> SetupIssue? {
+        let sentence: String
+        switch setup.claudeHooks {
+        case "missing": sentence = "Claude 작업 종료 자동 처리가 설정되지 않았어요"
+        case "conflict": sentence = "Claude 작업 종료 설정에 충돌이 있어요"
+        case "failed": sentence = "Claude 작업 종료 설정을 저장하지 못했어요"
+        case "disabled": sentence = "Claude 작업 종료 자동 처리가 꺼져 있어요"
+        default: return nil
+        }
+        return SetupIssue(name: "Claude 작업 종료", sentence: sentence, item: .mcp)
     }
 
     // MARK: Who is using the screen

@@ -221,6 +221,36 @@ class ProcessTests(unittest.TestCase):
         self.assertTrue((directory/'control.sock').exists())
         self.assertEqual(json.loads((directory/'bridge.json').read_text())['scopes'], record['scopes'])
 
+    def test_client_cancellation_is_read_while_a_call_runs_and_the_bridge_still_answers(self):
+        child = self.connected(hold='js')
+        messages = [
+            {'jsonrpc': '2.0', 'id': 50, 'method': 'tools/call', 'params': SECRET_CALL},
+            {'jsonrpc': '2.0', 'method': 'notifications/cancelled', 'params': {'requestId': 50}},
+            {'jsonrpc': '2.0', 'id': 51, 'method': 'ping', 'params': {}},
+        ]
+        child.process.stdin.write((json.dumps(messages[0])+'\n').encode())
+        child.process.stdin.flush()
+        deadline = time.monotonic()+5
+        while not [entry for entry in self.host_log() if entry.get('tool') == 'js']:
+            self.assertLess(time.monotonic(), deadline, 'the fake host should receive the original call')
+            threading.Event().wait(0.01)
+        child.process.stdin.write((''.join(json.dumps(message)+'\n' for message in messages[1:])).encode())
+        child.process.stdin.flush()
+        answers = {}
+        while len(answers) < 2:
+            reply = child.lines.get(timeout=5)
+            answers[reply['id']] = reply
+        self.assertEqual(answers[50]['error']['code'], -32800)
+        self.assertIn('may still be running', answers[50]['error']['message'])
+        self.assertEqual(answers[51]['result'], {})
+        self.assertEqual(len([entry for entry in self.host_log() if entry.get('tool') == 'js']), 1)
+        [directory] = self.records()
+        self.assertTrue(json.loads((directory/'bridge.json').read_text())['busy'],
+                        'without a cancellation relay the still-running native call stays tracked')
+        child.end_input()
+        self.assertEqual(child.finish(), 0)
+        self.assertNotIn('PRIVATE', child.stderr)
+
     def test_a_state_directory_with_the_wrong_mode_means_no_records_and_the_calls_still_work(self):
         self.state.mkdir(mode=0o755)
         self.state.chmod(0o755)

@@ -253,7 +253,16 @@ private struct Judge {
             line = waiting
         } else {
             switch claude.mcp {
-            case .ready: line = CheckLine(item: item, status: .ready, detail: "앱의 엔진에 연결돼 있어요", facts: "앱의 엔진에 연결됨")
+            case .ready:
+                if let setup = input.status?.setup, let issue = StatusEvaluator.claudeHooksIssue(in: setup) {
+                    let steps = setup.claudeHooks == "disabled"
+                        ? ["Claude Code의 훅 사용 설정을 확인한 뒤 고치기를 눌러 주세요"] : []
+                    line = broken(item, issue.sentence, steps: steps)
+                } else if input.status?.setup.claudeHooks == "ready" {
+                    line = CheckLine(item: item, status: .ready, detail: "앱 연결과 작업 종료 자동 처리가 준비됐어요", facts: "앱 연결·작업 종료 자동 처리 정상")
+                } else {
+                    line = CheckLine(item: item, status: .ready, detail: "앱의 엔진에 연결돼 있어요", facts: "앱의 엔진에 연결됨")
+                }
             case .missing: line = broken(item, "Claude Code에 CUA가 연결되지 않았어요")
             case .outdated: line = broken(item, "Claude Code의 CUA 연결이 옛 판이에요")
             case .conflict:
@@ -270,7 +279,7 @@ private struct Judge {
         return withLeftovers(line)
     }
 
-    /// What is left in Claude Code of CUA before, told on the MCP line (Claude Code's side is the MCP server alone), with
+    /// What is left in Claude Code of CUA before, told on the MCP line with
     /// the commands that remove them (F9): the old plugins and 0.8.0's `cua` server (a second CUA in a new Claude
     /// conversation), 0.8.0's `cua` skill, and the `cuabar` skill 0.8.x put in (the server says the same now). A skill
     /// folder without the app's mark is the person's own and is not told.

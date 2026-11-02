@@ -253,10 +253,12 @@ def install_engine(ctx, source_root):
         setup.private_directory(folder)
         root = setup.validated_plugin_root(folder, version)
         _, login, relay, (shell, shell_file) = setup.run_setup(root, ctx.home, ctx.environment)
+        from claude_hook_setup import lifecycle_hooks_state
         previous = linked_version(engines)
         point_current(engines, version)
         state = {'command': command_state(ctx, support), 'login_environment': login, 'shell_environment': shell,
-                 'shell_file': str(shell_file) if shell_file is not None else None, 'relay': relay}
+                 'shell_file': str(shell_file) if shell_file is not None else None, 'relay': relay,
+                 'claude_hooks': lifecycle_hooks_state(ctx.home, ctx.environment)}
         removed = prune(ctx, engines, version, previous)
     return {'version': version, 'root': str(root), 'launcher': ctx.engine_launcher(), 'removed': removed,
             'setup': state}

@@ -80,7 +80,7 @@ Codex 래퍼(`desktop_cli_wrapper.py`)는 호스트를 켤 때 상태 폴더(`~/
 
 0.8.10부터 Claude가 CUA를 쓰는 법은 브리지(`cuabar` MCP 서버)가 직접 말합니다. 0.8.9까지는 CUA Bar가 `~/.claude/skills/cuabar/`에 스킬을 깔았는데, 앱이 디스크에 바로 쓰는 스킬은 곧 새 판이 되고 이미 떠 있는 브리지는 `/mcp` 다시 연결 전까지 옛 판이라 한 대화에서 두 안내가 다른 말을 했습니다. 이제 안내는 한 곳에만 있습니다.
 
-- **연결할 때**: `initialize` 응답의 `instructions`. 모든 Claude 대화에 늘 실리는 글이라 짧게 둡니다. 연결마다 새 Codex 스레드에서 돌고 Codex 대화는 보이지 않는다는 것, 첫 `js` 호출(또는 `js_reset` 뒤)에 `await cua.getState();` 같은 문서화된 입구 하나를 부르고 돌아온 문서를 따를 것, REPL은 Node.js나 Playwright가 아니라 `process`와 파일 시스템이 없다는 것, 웹 페이지는 Playwright가 있으면 따로(`js` 안이 아니라) 쓰고 로그인된 Chrome이나 사용자가 연 탭이 필요하거나 Playwright가 없으면 Chrome을 일반 앱처럼(`cua.getApp("Google Chrome")`) 다룰 것, 막힌 URL이나 지원하지 않는 동작은 다른 길(Playwright 포함)로 다시 하지 말고 알릴 것(Codex가 이 대화의 브라우저를 막은 것은 그런 거절이 아님), 끝나면 `turn_ended`를 `{}`로 부를 것, Codex를 끄거나 권한을 바꾸거나 `codex-cua`의 `release`·`release-session`·`dismiss-session`·`stop`·`restart-codex`·`unlock-reset`을 직접 돌리지 말 것.
+- **연결할 때**: `initialize` 응답의 `instructions`. 모든 Claude 대화에 늘 실리는 글이라 짧게 둡니다. 연결마다 새 Codex 스레드에서 돌고 Codex 대화는 보이지 않는다는 것, 첫 `js` 호출(또는 `js_reset` 뒤)에 `await cua.getState();` 같은 문서화된 입구 하나를 부르고 돌아온 문서를 따를 것, REPL은 Node.js나 Playwright가 아니라 `process`와 파일 시스템이 없다는 것, 웹 페이지는 Playwright가 있으면 따로(`js` 안이 아니라) 쓰고 로그인된 Chrome이나 사용자가 연 탭이 필요하거나 Playwright가 없으면 Chrome을 일반 앱처럼(`cua.getApp("Google Chrome")`) 다룰 것, 막힌 URL이나 지원하지 않는 동작은 다른 길(Playwright 포함)로 다시 하지 말고 알릴 것(Codex가 이 대화의 브라우저를 막은 것은 그런 거절이 아님), 정상 완료 때는 Claude 훅이 자동 정리하고, 수동 정리가 필요할 때 보이는 `turn_ended`를 `{}`로 부를 것, Codex를 끄거나 권한을 바꾸거나 `codex-cua`의 `release`·`release-session`·`dismiss-session`·`stop`·`restart-codex`·`unlock-reset`을 직접 돌리지 말 것.
 - **그 오류가 났을 때만**: 브리지가 돌려주는 오류의 끝에 `CUA Bar note: `로 시작하는 영어 안내를 붙입니다(결과면 내용 끝에 글 하나, JSON-RPC 오류면 메시지 뒤). 오류 글이 이미 하는 말은 되풀이하지 않습니다. 기록(`activity.jsonl`의 오류 문구)에는 붙이지 않습니다.
   - 호스트 연결이 끊겨 호출이 실패: 다음 호출이 Codex를 뒤에서 열 수 있다는 것, 클릭·제출·전송을 다시 하지 말고 지금 상태를 먼저 볼 것, 다시 붙은 뒤 첫 `js`는 첫 호출처럼 다룰 것.
   - 연결이 없어 `turn_ended`가 끝내지 못함: 다시 부르지 말 것.
@@ -155,8 +155,20 @@ CUA Bar가 쓰는 명령을 직접 부를 수도 있습니다. 모두 `~/.local/
 - 원본 CUA의 접근 권한·브라우저 정책·파일 제한이 적용됩니다. 표준 form 승인만 전달하며, 지원하지 않는 승인 흐름은 실패를 알립니다.
 - Codex 26.1023부터 Codex는 브라우저를 부를 때마다 데스크톱 앱에 허락을 묻고(`browser/access`), 앱은 자기가 시작하거나 재개한 대화만 허락합니다. 이 엔진이 연 대화(Claude 연결의 대화, `release-session`이 일하는 대화)는 늘 거절되어 js 호출이 "Local browser use is disabled in Work settings"(앱에 물을 수 없으면 "The browser access host is unavailable")로 끝납니다. 사용자가 끈 설정이 아니라 Codex의 접근 통제라서 엔진은 돌아가지 않습니다(허락에 쓰는 환경값을 넣지 않고 허락 통로에 말하지도 않습니다). 데스크톱 앱 조작은 그대로 됩니다. 브리지는 이 오류를 담은 js 결과 끝에 안내 글(영어) 하나를 덧붙이고, 다른 결과는 그대로 둡니다. 안내는 (0.8.9부터) 웹 페이지는 이 컴퓨터에 Playwright가 있으면 그것으로 하고, 사용자의 로그인된 Chrome이나 사용자가 연 탭이 필요하거나 Playwright가 없으면 Chrome을 일반 데스크톱 앱처럼 CUA로 다루라(`cua.getApp("Google Chrome")`)고 하고, 둘 다 안 될 때만 사용자에게 Codex 앱에 직접 시키라고 하게 합니다. 사용자가 끈 설정도, 그 사이트나 동작의 거절도 아니며 같은 브라우저 호출을 다시 불러도 같은 거절이라는 말도 들어 있습니다. 0.8.10부터 `cuabar` 스킬은 없고, 브리지가 연결할 때 보내는 안내(`instructions`, 아래 [Claude에게 주는 안내](#claude에게-주는-안내))가 같은 순서를 적습니다. `release-session`은 이때 `browser_blocked`로 답합니다(0.8.7부터).
 - 엔진이 여는 대화에서는 다른 MCP 서버를 끕니다. 원격 큐레이트 플러그인(예: `chatgpt-meetings`)은 `plugins.<id>.enabled=false`만으로는 로컬 서버(약 50MB)가 뜨므로 `plugins.<id>.mcp_servers.<서버 이름>.enabled=false`도 함께 줍니다(0.8.7부터. 원격 플러그인의 서버 이름은 플러그인 이름입니다).
-- 내부 Codex 인터페이스를 사용하므로 Codex 앱 업데이트 뒤에 엔진 업데이트(CUA Bar의 새 판)나 재연결이 필요할 수 있습니다. Claude 매 턴 자동 종료와 MCP cancellation 중계는 지원하지 않습니다.
+- 내부 Codex 인터페이스를 사용하므로 Codex 앱 업데이트 뒤에 엔진 업데이트(CUA Bar의 새 판)나 재연결이 필요할 수 있습니다. 0.8.16부터 Claude 작업 종료 훅과 실행 중인 MCP 요청별 취소 중계를 지원합니다. 아래 작업 종료 설명의 범위와 제한이 적용됩니다.
 - Codex가 `cua_repl` 서버를 Codex의 번들 CUA 플러그인으로도, 이 엔진의 중계기로도 식별하지 못하면(설정으로 바꾼 다른 중계기 등) 연결하지 않고 오류를 알립니다.
 - 앱이 기본 위치에 없다면 `CODEX_CUA_APP_PATH`에 원본 `.app`의 절대 경로를 지정합니다. 상태 폴더를 `CODEX_HOST_CUA_STATE_DIR`로 바꾸는 경우 호스트와 MCP에 같은 값을 지정하고, 현재 사용자 소유의 비공개 폴더를 사용합니다.
 
 엔진 코드는 [MIT](LICENSE)로 제공됩니다. 원본 Codex·CUA는 포함하지 않으며 해당 소프트웨어와 서비스에는 각 제공자의 이용 조건이 적용됩니다. OpenAI 또는 Anthropic의 공식 제품이 아닙니다.
+
+## Claude 작업 종료 연동 (0.8.16)
+
+`claude-hook.sh`는 표준 라이브러리만 쓰며 Codex나 CUA를 켜지 않습니다. PreToolUse는 Claude가 전달하는 `claudecode/toolUseId`와 연결할 소유 정보를 비공개 파일에 적고, 브리지는 그 ID가 일치하는 호출에만 적용합니다. 종료 이벤트는 같은 CLI 프로세스(PID와 시작 시각) 소유의 비공개 제어 소켓으로 갑니다. CUA의 네이티브 세션·턴 ID를 훅 입력에서 받아 실행하지 않습니다.
+
+Stop·StopFailure는 해당 부모 범위, SubagentStop는 해당 하위 에이전트 범위만 끝냅니다. UserPromptSubmit은 이전 부모 프롬프트의 잔여 범위를 정리하고, SessionEnd는 이 Claude 대화가 연 범위를 정리합니다. 훅이 꺼졌거나 설정을 읽지 못하면 이를 알리며 다른 설정이나 권한을 덮지 않습니다.
+
+취소는 브리지가 생성한 호출별 UUID를 중계기의 대기 중인 네이티브 MCP ID에 연결해 `notifications/cancelled`로 보냅니다. 원격 취소 API가 없는 app-server에 지원하지 않는 메시지를 보내거나, `js_reset`·프로세스 종료·동작 재실행으로 대신하지 않습니다. 취소 알림 전송은 원격 동작 중단 확인과 다릅니다.
+
+Claude Code는 일반적인 Interrupt 훅을 제공하지 않으므로, 도구 실행이 없는 답변 생성 중 Esc의 즉시 정리는 보장하지 않습니다. 다음 질문이나 대화 종료가 그 범위를 정리합니다.
+
+부모와 각 하위 에이전트는 별도의 소유 Codex 스레드와 JS 커널을 사용합니다. 하위 에이전트의 `js_reset`이 부모나 형제의 변수·핸들을 초기화하지 않습니다.

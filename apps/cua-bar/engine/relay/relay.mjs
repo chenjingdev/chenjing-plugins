@@ -43,6 +43,9 @@ const ENV_STATE = 'CODEX_CUA_STATE_DIR';
 const ENV_RUNTIME_PATH = 'CUA_REPL_NODE_REPL_PATH';
 const ENV_OWNER = 'CODEX_CUA_OWNER';
 const OWNER = /^bridge-[0-9]{1,10}-[0-9]{1,12}$/;
+// A bridge-generated correlation value, never a caller's tool id and never written into records or activity.
+const REQUEST_TOKEN_META = 'cuabar/request-token';
+const REQUEST_TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 // The folder one of the engine's own short-lived threads works in (a connection test's or a targeted release's), named
 // like the engine's is_probe_folder (engine_core.py) names it.
 const PROBE_FOLDER = /^codex-cua-(?:probe|release)-[A-Za-z0-9_]{6,32}$/;
@@ -265,6 +268,7 @@ function relay(child) {
       runtime_pid: child.pid ?? null, root_pid: rootPid, app_server_pid: records.appServerPid, cwd, owner,
       ...(owner ? {owner_running: records.ownerRunning} : {}),
       control_path: records.controlPath, last_call_at: lastCallAt, busy: callsInFlight > 0,
+      cancel_by_request_token: true,
       scopes: [...scopes.values()].map(s => ({session_id: s.session_id, turn_id: s.turn_id, first_at: s.first_at,
         last_at: s.last_at, subagent: s.subagent})),
       cleanup: scopes.size === 0 ? 'none' : (releaseFailed || exited ? 'not_confirmed' : 'open'),
@@ -452,8 +456,12 @@ function relay(child) {
       if (key !== null) {
         callsInFlight += 1;
         const limit = message.params?.arguments?.timeout_ms;
+        const token = message.params?._meta?.[REQUEST_TOKEN_META];
+        const canCancel = owner && scope && name === 'js' && typeof token === 'string' && REQUEST_TOKEN.test(token)
+          && (typeof message.id === 'string' || (typeof message.id === 'number' && Number.isFinite(message.id)));
         pending.set(key, {kind: 'call', tool: name, sessionId: scope?.session_id ?? pair?.session_id ?? null, pair, routine,
-          started: Date.now(), limit: Number.isInteger(limit) && limit >= 1 ? limit : JS_TIMEOUT_MS});
+          started: Date.now(), limit: Number.isInteger(limit) && limit >= 1 ? limit : JS_TIMEOUT_MS,
+          requestId: message.id, requestToken: canCancel ? token : null, cancelSent: false});
       }
       if (scope) openScope(scope); else schedulePersist();
     } else if (message.method === 'tools/list') {
@@ -642,6 +650,32 @@ function relay(child) {
   }
 
   // ---------------------------------------------------------------- control socket
+  function cancelRequest(request) {
+    if (!owner || request.owner !== owner) return {cancelled: false, reason: 'not_owned'};
+    if (typeof request.request_token !== 'string' || !REQUEST_TOKEN.test(request.request_token)) {
+      return {cancelled: false, reason: 'invalid_request'};
+    }
+    const matches = [...pending.values()].filter(entry => entry.kind === 'call' && entry.tool === 'js'
+      && entry.requestToken === request.request_token);
+    if (!matches.length) return {cancelled: false, reason: 'not_found'};
+    if (matches.length !== 1) return {cancelled: false, reason: 'ambiguous_request'};
+    const [entry] = matches;
+    if (entry.cancelSent) return {cancelled: false, reason: 'already_cancelled'};
+    if (exited || child.stdin.destroyed || !child.stdin.writable) {
+      return {cancelled: false, reason: 'runtime_unavailable'};
+    }
+    try {
+      // A notification has no acknowledgement. Keep the original call pending/busy until its actual response:
+      // accepting this write is not proof that the native operation stopped, and never undoes an earlier action.
+      child.stdin.write(JSON.stringify({jsonrpc: '2.0', method: 'notifications/cancelled',
+        params: {requestId: entry.requestId, reason: 'Client canceled request'}}) + '\n');
+      entry.cancelSent = true;
+      return {cancelled: true, reason: null};
+    } catch {
+      return {cancelled: false, reason: 'runtime_unavailable'};
+    }
+  }
+
   let server = null;
   function startControl() {
     if (!records) return;
@@ -662,6 +696,9 @@ function relay(child) {
         try {
           if (request.action === 'status') {
             reply = {ok: true, busy: callsInFlight > 0, open_scopes: scopes.size};
+          } else if (request.action === 'cancel') {
+            // Do not queue behind a scope release or wait for the call this request is meant to cancel.
+            reply = cancelRequest(request);
           } else if (request.action === 'release') {
             reply = await release({limit: RELEASE_DEADLINE_MS});
           } else if (request.action === 'release-session') {
@@ -669,7 +706,8 @@ function relay(child) {
               : {released: false, reason: 'no_trusted_scope', scope_count: 0};
           } else {socket.destroy(); return;}
         } catch {
-          reply = {released: false, reason: 'cleanup_not_confirmed', scope_count: 0};
+          reply = request.action === 'cancel' ? {cancelled: false, reason: 'runtime_unavailable'}
+            : {released: false, reason: 'cleanup_not_confirmed', scope_count: 0};
         }
         socket.end(JSON.stringify(reply) + '\n');
       };

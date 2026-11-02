@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.15'
+VERSION = '0.8.16'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -38,20 +38,35 @@ TURN_ENDED_WITHOUT_HOST = ('The Codex host connection was lost, so the CUA turn 
                            'turn_ended never connects to Codex again; the next CUA tool call does.')
 NOTHING_TO_END = 'No CUA turn of this connection is open, so there was nothing to end.'
 STOPPING = 'This owned CUA connection is stopping.'
+CANCEL_BEFORE_SEND = 'This CUA request was cancelled before it was sent, so it did not run.'
+CANCEL_SENT = ('Cancellation was sent to this CUA request\'s native runtime. Actions already performed are not undone, '
+               'and its final outcome is not confirmed. Look at the current state before continuing; do not replay it.')
+CANCEL_UNAVAILABLE = ('This CUA request was cancelled by its client, but its native runtime could not be notified through '
+                      'a verified cancellation relay. The operation may still be running. Do not replay it.')
 # What every Claude conversation is told when it connects (initialize): how to use CUA through this bridge. It is in every
 # conversation, so it stays this short; what only matters when something fails is a note at the end of that failure.
-# Since 0.8.10 it replaces the cuabar skill, which the app wrote at once while a running bridge kept its old text.
+# Since 0.8.10 it replaces the cuabar skill. The same guidance is attached to js so deferred tool discovery also
+# gets the workflow even when a client does not retain initialize.instructions.
 INSTRUCTIONS = (
     'CUA Bar: these tools operate the user\'s Mac apps through Codex computer use (CUA). Each connection runs in its own '
     'new Codex thread and sees no Codex chat. On the first `js` call, or after `js_reset`, run one documented entrypoint '
-    'such as `await cua.getState();` and follow the documentation it returns. The REPL is not Node.js or Playwright: it '
+    'such as `await cua.getState();` and follow the documentation it returns. For a named app, prefer '
+    '`await cua.getApp("App Name");`; choose the documented entrypoint matching the user\'s target. '
+    'Use the documented CUA APIs for native GUI interaction, not shell UI automation or private OS functions unless '
+    'the user explicitly requests another method. After an action, read fresh getAXState() before choosing the next '
+    'action or reusing element indices. Check inventory.errors as well as whether the tool returned. '
+    'The REPL is not Node.js or Playwright: it '
     'has no `process` global or file system, and screenshots come back through the documented image output. For web '
     'pages, use Playwright when it is available on this computer, run on its own and never inside `js`. When the task '
     'needs the user\'s signed-in Chrome or a tab the user has open, or Playwright is not available, operate Chrome as an '
     'ordinary app with `cua.getApp("Google Chrome")`; only a window\'s active tab is readable that way, and leave the '
     'user\'s tabs as you found them. Report an unsupported action or a blocked URL instead of retrying it another way, '
-    'Playwright included; Codex refusing the browser to this whole conversation is not such a refusal. When finished, '
-    'call `turn_ended` with `{}`. Never quit Codex, change permissions, or run `codex-cua` release, release-session, '
+    'Playwright included; Codex refusing the browser to this whole conversation is not such a refusal. '
+    'CUA Bar\'s Claude hooks automatically end the matching parent or subagent CUA scope at normal completion or '
+    'session exit; the next prompt also cleans an interrupted previous parent turn. '
+    'The visible `turn_ended` tool with `{}` is a manual fallback to end your own scope between tasks. '
+    'An interrupted running CUA request is canceled individually when the verified relay supports it; do not replay '
+    'an action whose cancellation or outcome is unconfirmed. Never quit Codex, change permissions, or run `codex-cua` release, release-session, '
     'dismiss-session, stop, restart-codex or unlock-reset yourself; the user does those through CUA Bar.')
 # Notes the bridge puts at the end of the errors they are about (0.8.10, from the cuabar skill). Facts only, and only what
 # the error itself does not say.
@@ -478,6 +493,9 @@ class HostMcp:
         self.approvals = {}
         self.next_approval = 0
         self.supports_elicitation = False
+        # Only this MCP client's active js requests are cancellable. Tokens are authored here and stay in memory.
+        self.client_calls = {}
+        self.client_tasks = {}
         # Scopes and lifecycle. A scope is the exact (session, turn) pair a tool call was sent under; it stays open
         # until the runtime confirmed turn_ended for that pair. Calls register their scope and turn_ended runs under
         # turn_lock, so a call never goes out under a pair that is being ended.
@@ -515,7 +533,23 @@ class HostMcp:
             pass
 
     def reply(self, ident, result=None, error=None):
+        try:
+            task = asyncio.current_task()
+        except RuntimeError:
+            task = None
+        call = self.client_tasks.get(task)
+        if call is not None and ident_key(ident) == ident_key(call['id']):
+            return self.reply_call(call, result, error)
         message = {'jsonrpc': '2.0', 'id': ident}
+        message['error' if error is not None else 'result'] = error if error is not None else result
+        self.emit(message)
+
+    def reply_call(self, call, result=None, error=None):
+        """One response wins a result/cancellation race, even if the host answers after cancellation."""
+        if call['replied']:
+            return
+        call['replied'] = True
+        message = {'jsonrpc': '2.0', 'id': call['id']}
         message['error' if error is not None else 'result'] = error if error is not None else result
         self.emit(message)
 
@@ -704,9 +738,16 @@ class HostMcp:
             if tool['name'] == 'turn_ended':
                 # Caller-authored lifecycle identities are never accepted. The
                 # client schema must describe that contract, not the native one.
+                meta = dict(tool['_meta']) if isinstance(tool.get('_meta'), dict) else {}
+                ui = dict(meta['ui']) if isinstance(meta.get('ui'), dict) else {}
+                ui['visibility'] = ['model']
+                meta['ui'] = ui
                 original.append({**tool,
                     'description': 'End this connection\'s current CUA tool lifecycle. Call with an empty object; the bridge supplies its owned session and turn scope.',
-                    'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}})
+                    'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}, '_meta': meta})
+            elif tool['name'] == 'js':
+                description = tool.get('description')
+                original.append({**tool, 'description': INSTRUCTIONS+'\n\n'+(description if isinstance(description, str) else '')})
             else:
                 original.append(tool)
         if not {'js', 'js_reset'}.issubset(names):
@@ -739,6 +780,72 @@ class HostMcp:
         self.log('original_owned_thread_elicitation_forwarded')
 
     async def handle(self, message):
+        params = message.get('params') if isinstance(message, dict) else None
+        ident = message.get('id') if isinstance(message, dict) else None
+        tracked = (isinstance(message, dict) and message.get('jsonrpc') == '2.0'
+                   and message.get('method') == 'tools/call' and (type(ident) is int or isinstance(ident, str))
+                   and isinstance(params, dict) and params.get('name') == 'js')
+        if not tracked:
+            return await self._handle(message)
+        key = ident_key(ident)
+        if key in self.client_calls:
+            self.log('duplicate_active_request_ignored')
+            return
+        call = {'id': ident, 'token': str(uuid.uuid4()), 'task': asyncio.current_task(), 'sent': False,
+                'cancel_requested': False, 'replied': False, 'finished': False}
+        self.client_calls[key] = call
+        self.client_tasks[call['task']] = call
+        try:
+            return await self._handle(message)
+        except asyncio.CancelledError:
+            if not call['cancel_requested']:
+                raise
+            self.reply_call(call, error={'code': -32800, 'message': CANCEL_SENT if call['sent'] else CANCEL_BEFORE_SEND})
+        finally:
+            call['finished'] = True
+            if self.client_calls.get(key) is call:
+                self.client_calls.pop(key)
+            self.client_tasks.pop(call['task'], None)
+
+    async def cancel_native_request(self, call):
+        """Only a relay of the request's original owned host can address the native MCP request."""
+        from bridge_cancel import cancel_request
+        if (not call.get('relay') or call.get('rpc') is not self.rpc or not self.connected):
+            return {'cancelled': False, 'reason': 'relay_unavailable'}
+        return await cancel_request(call.get('owner'), call.get('host_pid'), call['token'],
+                                    state=getattr(self, 'control_state', None))
+
+    async def cancel_client_call(self, params):
+        if not isinstance(params, dict):
+            return
+        ident = params.get('requestId')
+        if type(ident) is not int and not isinstance(ident, str):
+            return
+        call = self.client_calls.get(ident_key(ident))
+        if call is None or call['finished'] or call['replied'] or call['cancel_requested']:
+            return
+        call['cancel_requested'] = True
+        if not call['sent']:
+            call['task'].cancel()
+            return
+        try:
+            result = await self.cancel_native_request(call)
+        except Exception:
+            result = {'cancelled': False}
+        if call['finished'] or call['replied']:
+            return
+        notified = isinstance(result, dict) and result.get('cancelled') is True
+        self.reply_call(call, error={'code': -32800, 'message': CANCEL_SENT if notified else CANCEL_UNAVAILABLE})
+        if notified:
+            # A native MCP server may omit the original response after cancellation. Stop only this local waiter;
+            # the scope remains unconfirmed until the ordinary turn-end cleanup confirms it.
+            self.cleanup_unconfirmed = True
+            self.changed()
+            call['task'].cancel()
+        # With no verified relay the original request is still tracked as busy until the host answers. Its late
+        # response cannot become a second client response, and no reset, interrupt or retry substitutes for cancel.
+
+    async def _handle(self, message):
         if not isinstance(message, dict) or message.get('jsonrpc') != '2.0':
             self.reply(None, error={'code': -32600, 'message': 'Invalid MCP JSON-RPC request.'})
             return
@@ -760,7 +867,8 @@ class HostMcp:
             return
         method = message.get('method')
         if 'id' not in message:
-            # No action is executed from notifications, including cancellation.
+            if method == 'notifications/cancelled':
+                await self.cancel_client_call(message.get('params'))
             return
         ident = message['id']
         params = message.get('params', {})
@@ -920,6 +1028,9 @@ class HostMcp:
                 raise BridgeFailure(LOST_BEFORE_SEND)
             rpc, scope = self.rpc, self.current_scope()
             relay = bool(self.host and self.host.get('relay'))
+            call = self.client_tasks.get(asyncio.current_task()) if name == 'js' else None
+            if call is not None and call['cancel_requested']:
+                raise asyncio.CancelledError
             self.open_scope(scope)
             started = time.monotonic()
             self.begin_call()
@@ -927,9 +1038,19 @@ class HostMcp:
             self.turn_lock.release()
         ok, answer = False, None
         try:
-            answer = await rpc.request('mcpServer/tool/call', self.tool_request(name, arguments, scope))
+            request = self.tool_request(name, arguments, scope)
+            if call is not None:
+                call.update(sent=True, rpc=rpc, relay=relay, owner=self.owner,
+                            host_pid=self.host.get('pid') if isinstance(self.host, dict) else None)
+                if relay:
+                    from bridge_cancel import TOKEN_META
+                    request['_meta'][TOKEN_META] = call['token']
+            answer = await rpc.request('mcpServer/tool/call', request)
             ok = isinstance(answer, dict) and not answer.get('isError') and not inventory_lock_errors(name, answer)
             return answer
+        except asyncio.CancelledError:
+            answer = {'message': CANCEL_SENT if call is not None and call['cancel_requested'] else 'The CUA connection is stopping.'}
+            raise
         except RpcFailure as refusal:
             answer = refusal.error
             raise

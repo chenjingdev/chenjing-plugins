@@ -26,7 +26,7 @@ from fake_host import TOOLS, write_registry
 from test_runtime_paths import fake_app
 
 REAL_START_IN_BACKGROUND = host_autostart.start_in_background
-RECORD_KEYS = {'schema_version', 'kind', 'pid', 'started_at', 'owner_pid', 'cwd', 'control_path', 'host', 'session_id',
+RECORD_KEYS = {'schema_version', 'kind', 'pid', 'started_at', 'owner_pid', 'owner_started_at', 'cwd', 'control_path', 'host', 'session_id',
                'turn_id', 'connected_at', 'last_call_at', 'busy', 'scopes', 'cleanup', 'updated_at'}
 
 
@@ -47,6 +47,9 @@ class RecordTests(BridgeCase):
         self.assertEqual(record['pid'], os.getpid())
         self.assertEqual(record['started_at'], bridge_records.process_started_at(os.getpid()))
         self.assertEqual(record['owner_pid'], os.getppid())
+        self.assertIs(type(record['owner_started_at']), int)
+        self.assertGreater(record['owner_started_at'], 0)
+        self.assertEqual(record['owner_started_at'], bridge_records.process_started_at(os.getppid()))
         self.assertEqual(record['cwd'], os.getcwd())
         self.assertEqual(record['control_path'], str(directory/'control.sock'))
         # Not connected yet: nothing about a host, a session or a call.

@@ -719,6 +719,7 @@ class View:
                 'app_version': inv.app_version, 'running': bool(inv.app_pids), 'pids': list(inv.app_pids)}
 
     def _setup(self):
+        from claude_hook_setup import lifecycle_hooks_state
         checks, host = self.inv.checks, self.inv.host
         launcher = self.ctx.setup.support_root(self.ctx.home)/'relay'/'node-repl-relay'
         if host.state == 'ready' and host.relay and host.relay_launcher == str(launcher):
@@ -730,7 +731,8 @@ class View:
         return {'command': checks.get('command', 'missing'), 'dependencies': checks.get('dependencies', 'missing'),
                 'login_environment': checks.get('login_environment', 'unknown'),
                 'shell_environment': checks.get('shell_environment', 'unknown'), 'shell_file': checks.get('shell_file'),
-                'wrapper': checks.get('wrapper', 'broken'), 'relay': relay}
+                'wrapper': checks.get('wrapper', 'broken'), 'relay': relay,
+                'claude_hooks': lifecycle_hooks_state(self.ctx.home, self.ctx.environment)}
 
     def _other_tools(self):
         inv, ctx = self.inv, self.ctx

@@ -280,6 +280,11 @@ def run_setup(plugin_root, home=None, environment=None):
     the login shell's startup file (state and file, as shell_environment_status says them)."""
     target = install_command(plugin_root, home, environment)
     login, shell = install_login(home, environment)
+    from claude_hook_setup import claude_available
+    from claude_hook_profiles import configure_profile
+    hook_environment = os.environ if environment is None else environment
+    if claude_available(home, hook_environment):
+        configure_profile(home, hook_environment)
     return target, login, relay_status(home), shell
 
 
@@ -729,6 +734,10 @@ def uninstall(home=None, environment=None):
     binding = private_json(root/'source.json')
     if binding.get('plugin_id') != PLUGIN_ID:
         raise RuntimeError('The support installation is not authored by this plugin.')
+    from claude_hook_profiles import remove_profiles
+    hook_result = remove_profiles(home, environment)
+    if hook_result['state'] != 'removed':
+        raise RuntimeError('Claude lifecycle settings could not be restored; support files were preserved.')
     remove_login_environment(home, environment)
     target = home/'.local/bin/codex-cua'
     if target.exists() or target.is_symlink():
