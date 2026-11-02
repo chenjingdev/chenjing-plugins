@@ -24,7 +24,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.14'
+VERSION = '0.8.15'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -133,6 +133,35 @@ def error_texts(answer):
     return [text for text in (answer.get('message'), first) if isinstance(text, str)]
 
 
+def inventory_errors(answer):
+    """Errors in the original CUA inventory, which resolves even when a surface could not be read.
+
+    Only complete JSON text blocks with the inventory's three arrays count. Arbitrary successful text, page
+    contents and console lines mentioning a lock must not cause the app to restart the computer-use service.
+    """
+    content = answer.get('content') if isinstance(answer, dict) else None
+    errors = []
+    for item in content if isinstance(content, list) else []:
+        if not isinstance(item, dict) or item.get('type') != 'text' or not isinstance(item.get('text'), str):
+            continue
+        try:
+            inventory = json.loads(item['text'])
+        except (ValueError, RecursionError):
+            continue
+        if (isinstance(inventory, dict)
+                and all(isinstance(inventory.get(key), list) for key in ('apps', 'browsers', 'errors'))):
+            errors.extend(error for error in inventory['errors'] if isinstance(error, str))
+    return errors
+
+
+def inventory_lock_errors(name, answer):
+    """Native-app lock refusals inside a successful js inventory; browser inventory errors are unrelated."""
+    if name != 'js':
+        return []
+    return [error for error in inventory_errors(answer)
+            if error.startswith('Native apps: ') and any(marker in error for marker in LOCKED_MARKERS)]
+
+
 def with_browser_note(name, answer):
     """The answer of a js call, with one text added at its end when it is Codex's refusal of the browser to this
     conversation (BROWSER_BLOCKED_MARKER). Every other answer is returned as it is."""
@@ -145,22 +174,25 @@ def with_browser_note(name, answer):
 
 def lock_note(texts):
     """The note for a refusal because of the Mac's lock, from what the answer says went wrong (error_texts), or None."""
+    refusals = [text for text in texts if UNLOCK_FAILED_MARKER not in text
+                and any(marker in text for marker in LOCKED_MARKERS)]
+    if refusals:
+        return LOCKED_NOTE_SHORT if any(ASK_TO_UNLOCK_MARKER in text for text in refusals) else LOCKED_NOTE
     if any(UNLOCK_FAILED_MARKER in text for text in texts):
         return UNLOCK_FAILED_NOTE
-    if any(marker in text for text in texts for marker in LOCKED_MARKERS):
-        return LOCKED_NOTE_SHORT if any(ASK_TO_UNLOCK_MARKER in text for text in texts) else LOCKED_NOTE
     return None
 
 
 def with_notes(name, answer):
     """The answer of a tool call with the notes it is about at the end: the browser note (with_browser_note), and for
-    a failed call (isError) refused because of the Mac's lock, the lock note. A result that did not fail, or says
-    nothing of these, is returned as it is."""
+    a failed call or partial inventory refused because of the Mac's lock, the lock note. The native result and its
+    isError flag stay as they came; the activity log separately records a partial inventory as a failed read."""
     answer = with_browser_note(name, answer)
     content = answer.get('content') if isinstance(answer, dict) else None
-    if not isinstance(content, list) or answer.get('isError') is not True:
+    partial = inventory_lock_errors(name, answer)
+    if not isinstance(content, list) or (answer.get('isError') is not True and not partial):
         return answer
-    note = lock_note(error_texts(answer))
+    note = lock_note(partial or error_texts(answer))
     return {**answer, 'content': [*content, {'type': 'text', 'text': note}]} if note else answer
 
 
@@ -195,7 +227,10 @@ def failure(name, arguments, answer, ms):
     unlock the Mac, `screen_locked` when it says the Mac's lock stopped the call otherwise (a person's input paused
     the automatic unlock, or there was nothing to unlock for), `timeout` when js ran for all the time it had, else
     `error`, also when there was no answer at all."""
-    texts = answer_texts(answer)
+    partial = inventory_lock_errors(name, answer)
+    if any(UNLOCK_FAILED_MARKER not in text for text in partial):
+        return 'screen_locked'       # a pause/refusal in the same call must not be undone by recovery
+    texts = partial or answer_texts(answer)
     if any(UNLOCK_FAILED_MARKER in text for text in texts):
         return 'unlock_failed'
     if any(marker in text for text in texts for marker in LOCKED_MARKERS):
@@ -893,7 +928,7 @@ class HostMcp:
         ok, answer = False, None
         try:
             answer = await rpc.request('mcpServer/tool/call', self.tool_request(name, arguments, scope))
-            ok = isinstance(answer, dict) and not answer.get('isError')
+            ok = isinstance(answer, dict) and not answer.get('isError') and not inventory_lock_errors(name, answer)
             return answer
         except RpcFailure as refusal:
             answer = refusal.error
@@ -908,7 +943,7 @@ class HostMcp:
         finally:
             ms = int((time.monotonic()-started)*1000)
             self.finish_call(name, ok, started, scope, relay, None if ok else failure(name, arguments, answer, ms),
-                             () if ok else error_texts(answer))
+                             () if ok else (inventory_lock_errors(name, answer) or error_texts(answer)))
 
     async def end_scope(self, scope, timeout=None):
         """Ask the runtime to end one exact (session, turn) pair; returns (confirmed, result).

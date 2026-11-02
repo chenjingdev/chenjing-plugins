@@ -356,6 +356,76 @@ test('activity lines hold the tool name, success and duration, and nothing of wh
 const activityLines = fixture => fs.readFileSync(path.join(fixture.state, 'activity.jsonl'), 'utf8')
   .split('\n').filter(Boolean).map(line => JSON.parse(line));
 
+// The fake runtime emits this response verbatim, including its whitespace. Classification only changes the log.
+async function relayResult(client, result, name = 'js') {
+  const id = client.seq + 1;
+  const raw = Buffer.from(`{ "jsonrpc" : "2.0", "id":${id}, "result": ${JSON.stringify(result)} }\r\n`);
+  const before = client.raw.length;
+  const answer = await client.request('tools/call', {name, arguments: {code: 'emit:' + raw.toString('base64')},
+    _meta: {'x-codex-turn-metadata': turn('s-inventory', 't1')}});
+  assert.equal(sha(client.raw.subarray(before)), sha(raw), 'the result reaches the client byte for byte');
+  return answer;
+}
+
+const inventoryText = errors => ({type: 'text', text: JSON.stringify({apps: [], browsers: [], errors})});
+const UNLOCK_ERROR = 'Native apps: SkyComputerUseError: The Mac is locked and automatic unlock could not unlock it. '
+  + 'Ask the user to unlock the Mac manually before continuing.';
+
+test('a partial inventory records automatic unlock failure even without an isError flag, preserving every byte', async t => {
+  const {fixture, client} = await boot(t);
+  const settings = path.join(fixture.state, 'settings.json');
+  await relayResult(client, {content: [inventoryText([UNLOCK_ERROR])]});
+  fs.writeFileSync(settings, JSON.stringify({schema_version: 1, error_text: true}), {mode: 0o600});
+  const answer = await relayResult(client, {content: [inventoryText([UNLOCK_ERROR]), {type: 'text', text: 'console output'}], isError: false});
+  assert.equal(answer.result.isError, false);
+  assert.deepEqual(activityLines(fixture).map(line => [line.ok, line.error, line.error_text]), [
+    [false, 'unlock_failed', undefined], [false, 'unlock_failed', UNLOCK_ERROR]]);
+});
+
+test('a partial inventory paused by physical input records screen_locked, so it never asks for unlock recovery', async t => {
+  const {fixture, client} = await boot(t);
+  const paused = 'Native apps: SkyComputerUseError: The Mac is locked and automatic unlock is paused because physical input '
+    + 'was detected. Ask the user to unlock the Mac manually before continuing.';
+  await relayResult(client, {content: [inventoryText([paused])], isError: false});
+  assert.deepEqual(activityLines(fixture).map(line => [line.ok, line.error]), [[false, 'screen_locked']]);
+});
+
+test('a mixed partial inventory never requests recovery when any native-app lock refusal cannot be recovered', async t => {
+  const {fixture, client} = await boot(t);
+  for (const refusal of [
+    'Native apps: The Mac is locked and automatic unlock is paused because physical input was detected.',
+    'Native apps: The Mac is locked and this Computer Use request cannot be associated with a ChatGPT thread.',
+    'Native apps: SkyComputerUseError: screenLocked',
+  ]) {
+    await relayResult(client, {content: [inventoryText([UNLOCK_ERROR, refusal])]});
+    await relayResult(client, {content: [inventoryText([refusal]), inventoryText([UNLOCK_ERROR])]});
+  }
+  assert.deepEqual(activityLines(fixture).map(line => [line.ok, line.error]),
+    Array(6).fill([false, 'screen_locked']));
+});
+
+test('lock markers in successful text, other JSON, browser errors and non-js calls stay successful', async t => {
+  const {fixture, client} = await boot(t);
+  for (const content of [
+    [{type: 'text', text: UNLOCK_ERROR}],
+    [{type: 'text', text: JSON.stringify({errors: [UNLOCK_ERROR]})}],
+    [inventoryText([UNLOCK_ERROR.replace('Native apps: ', 'Browser: ')])],
+    [inventoryText([UNLOCK_ERROR.replace('Native apps: ', 'Native apps:')])],
+    [{type: 'image', text: inventoryText([UNLOCK_ERROR]).text}],
+    [{type: 'text', text: JSON.stringify({apps: {}, browsers: [], errors: [UNLOCK_ERROR]})}],
+  ]) await relayResult(client, {content});
+  await relayResult(client, {content: [inventoryText([UNLOCK_ERROR])]}, 'js_reset');
+  assert.ok(activityLines(fixture).every(line => line.ok && line.error === undefined));
+});
+
+test('a successful inventory stays successful with its original content and flags', async t => {
+  const {fixture, client} = await boot(t);
+  const inventory = {apps: [{name: 'TextEdit'}], browsers: [{name: 'Chrome'}], errors: []};
+  const result = {content: [{type: 'text', text: JSON.stringify(inventory)}], isError: false};
+  assert.deepEqual((await relayResult(client, result)).result, result);
+  assert.deepEqual(activityLines(fixture).map(line => [line.ok, line.error]), [[true, undefined]]);
+});
+
 test('a failed call\'s line says why in one word: the Mac\'s lock, all of js\'s time, or something else', async t => {
   const {fixture, client} = await boot(t);
   await client.call('locked', turn('s-why', 't1'));

@@ -479,11 +479,31 @@ function relay(child) {
     return [response.error?.message, ...content.map(item => item?.text)].filter(value => typeof value === 'string');
   }
 
+  // getState can return a partial inventory as a successful tool result while native apps failed. Only its
+  // structured native-app errors count: console text, guidance and other JSON are still ordinary output.
+  function inventoryLockErrors(response) {
+    const content = Array.isArray(response.result?.content) ? response.result.content : [];
+    const errors = [];
+    for (const item of content) {
+      if (item?.type !== 'text' || typeof item.text !== 'string') continue;
+      let inventory;
+      try {inventory = JSON.parse(item.text);} catch {continue;}
+      if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)
+          || !['apps', 'browsers', 'errors'].every(key => Array.isArray(inventory[key]))) continue;
+      errors.push(...inventory.errors.filter(value => typeof value === 'string' && value.startsWith('Native apps: ')
+        && LOCKED_MARKERS.some(marker => value.includes(marker))));
+    }
+    return errors;
+  }
+
   // Why a call failed, as one word. `unlock_failed` when the answer (a result, or a JSON-RPC error) says the service's
   // automatic unlock could not unlock the Mac, `screen_locked` when it says the Mac's lock stopped the call otherwise,
   // `timeout` when js ran for all the time it had, else `error`.
-  function failure(entry, response, ms) {
-    const texts = answerTexts(response);
+  function failure(entry, response, ms, inventoryErrors = []) {
+    const texts = inventoryErrors.length ? inventoryErrors : answerTexts(response);
+    // A partial inventory may combine several native-app refusals. Any refusal that recovery cannot fix wins,
+    // especially physical input that paused automatic unlock; do not restart the service for that inventory.
+    if (inventoryErrors.some(value => !value.includes(UNLOCK_FAILED_MARKER))) return 'screen_locked';
     if (texts.some(value => value.includes(UNLOCK_FAILED_MARKER))) return 'unlock_failed';
     if (texts.some(value => LOCKED_MARKERS.some(marker => value.includes(marker)))) return 'screen_locked';
     if (entry.tool === 'js' && ms >= entry.limit) return 'timeout';
@@ -501,8 +521,9 @@ function relay(child) {
 
   // What a failed call's line keeps of its answer while the person asked for it: one line, at most ERROR_TEXT_LIMIT
   // characters, or undefined (no text, or not asked).
-  function errorText(response) {
-    const joined = errorTexts(response).map(value => value.split(/\s+/).filter(Boolean).join(' ')).filter(Boolean).join(' ');
+  function errorText(response, inventoryErrors = []) {
+    const texts = inventoryErrors.length ? inventoryErrors : errorTexts(response);
+    const joined = texts.map(value => value.split(/\s+/).filter(Boolean).join(' ')).filter(Boolean).join(' ');
     if (!joined || !keepsErrorText()) return undefined;
     const characters = [...joined];
     return characters.length <= ERROR_TEXT_LIMIT ? joined : characters.slice(0, ERROR_TEXT_LIMIT - 1).join('') + '…';
@@ -531,12 +552,14 @@ function relay(child) {
     pending.delete(key);
     if (entry.kind === 'call') {
       callsInFlight -= 1;
-      const ok = confirmed(message);
+      const inventoryErrors = entry.tool === 'js' ? inventoryLockErrors(message) : [];
+      const ok = confirmed(message) && inventoryErrors.length === 0;
       if (!entry.routine) {
         if (entry.tool !== 'turn_ended') lastCallAt = iso();
         const ms = Date.now() - entry.started;
-        activity({sessionId: entry.sessionId, tool: entry.tool, ok, ms, error: ok ? undefined : failure(entry, message, ms),
-          errorText: ok ? undefined : errorText(message)});
+        activity({sessionId: entry.sessionId, tool: entry.tool, ok, ms,
+          error: ok ? undefined : failure(entry, message, ms, inventoryErrors),
+          errorText: ok ? undefined : errorText(message, inventoryErrors)});
       }
       if (ok && entry.pair) closeScope(entry.pair);
       schedulePersist();

@@ -613,6 +613,74 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                 await adapter.handle(self.call())
                 self.assertEqual([(values[0], values[1], values[5]) for values in seen], [('js', word is None, word)])
 
+    async def test_partial_native_inventory_records_the_lock_failure_and_keeps_the_original_result(self):
+        for message, word, note in (
+                ('The Mac is locked and automatic unlock could not unlock it.', 'unlock_failed', bridge.UNLOCK_FAILED_NOTE),
+                ('The Mac is locked and automatic unlock is paused because physical input was detected. '
+                 'Ask the user to unlock the Mac manually before continuing.', 'screen_locked', bridge.LOCKED_NOTE_SHORT),
+                ('The Mac is locked and this Computer Use request cannot be associated with a ChatGPT thread. '
+                 'Ask the user to unlock the Mac manually before continuing.', 'screen_locked', bridge.LOCKED_NOTE_SHORT)):
+            for flag in ({}, {'isError': False}):
+                with self.subTest(word=word, flag=flag):
+                    error = 'Native apps: SkyComputerUseError: ' + message
+                    inventory = {'apps': [], 'browsers': [{'id': 'available-browser'}], 'errors': [error]}
+                    result = {'content': [{'type': 'text', 'text': '## Computer Use'},
+                                          {'type': 'text', 'text': json.dumps(inventory)}], '_meta': {'original': 1}, **flag}
+                    original = copy.deepcopy(result)
+                    adapter, _, output, _, _ = self.fixture(result=result)
+                    seen = []
+                    adapter.on_call = lambda *values: seen.append(values)
+                    await self.initialize(adapter)
+                    await adapter.handle(self.call())
+                    self.assertEqual([(values[1], values[5], list(values[6])) for values in seen],
+                                     [(False, word, [error])])
+                    self.assertEqual(output[-1]['result'],
+                                     {**original, 'content': [*original['content'], {'type': 'text', 'text': note}]})
+                    self.assertEqual(result, original, 'the vendor result is never mutated')
+
+    async def test_successful_text_and_non_inventory_json_never_trigger_lock_recovery(self):
+        message = 'The Mac is locked and automatic unlock could not unlock it.'
+        for text in (message, json.dumps({'errors': ['Native apps: ' + message]}),
+                     json.dumps({'apps': [], 'browsers': [], 'errors': ['Browsers: ' + message]}),
+                     json.dumps({'apps': [{'displayName': message}], 'browsers': [], 'errors': []}),
+                     'console: ' + json.dumps({'apps': [], 'browsers': [], 'errors': ['Native apps: ' + message]})):
+            with self.subTest(text=text):
+                result = {'content': [{'type': 'text', 'text': text}]}
+                adapter, _, output, _, _ = self.fixture(result=result)
+                seen = []
+                adapter.on_call = lambda *values: seen.append(values)
+                await self.initialize(adapter)
+                await adapter.handle(self.call())
+                self.assertEqual([(values[1], values[5]) for values in seen], [(True, None)])
+                self.assertEqual(output[-1]['result'], result)
+
+    async def test_partial_inventory_detection_is_js_only(self):
+        result = {'content': [{'type': 'text', 'text': json.dumps({'apps': [], 'browsers': [], 'errors':
+                  ['Native apps: Error: The Mac is locked and automatic unlock could not unlock it.']})}]}
+        adapter, _, output, _, _ = self.fixture(result=result)
+        seen = []
+        adapter.on_call = lambda *values: seen.append(values)
+        await self.initialize(adapter)
+        await adapter.handle(self.call(name='js_reset'))
+        self.assertEqual([(values[1], values[5]) for values in seen], [(True, None)])
+        self.assertEqual(output[-1]['result'], result)
+
+    async def test_a_pause_supersedes_an_unlock_failure_in_the_same_js_call(self):
+        failure = 'Native apps: Error: The Mac is locked and automatic unlock could not unlock it.'
+        paused = ('Native apps: Error: The Mac is locked and automatic unlock is paused because physical input '
+                  'was detected. Ask the user to unlock the Mac manually before continuing.')
+        for errors in ([failure, paused], [paused, failure]):
+            with self.subTest(errors=errors):
+                result = {'content': [{'type': 'text', 'text': json.dumps(
+                    {'apps': [], 'browsers': [], 'errors': [error]})} for error in errors]}
+                adapter, _, output, _, _ = self.fixture(result=result)
+                seen = []
+                adapter.on_call = lambda *values: seen.append(values)
+                await self.initialize(adapter)
+                await adapter.handle(self.call())
+                self.assertEqual([(values[1], values[5]) for values in seen], [(False, 'screen_locked')])
+                self.assertEqual(output[-1]['result']['content'][-1]['text'], bridge.LOCKED_NOTE_SHORT)
+
     async def test_a_failed_call_hands_the_activity_log_what_its_answer_says_went_wrong(self):
         failed = {'content': [{'type': 'text', 'text': 'TypeError: nope'}, {'type': 'text', 'text': 'a console line'},
                               {'type': 'text', 'text': '## Computer Use'}], 'isError': True}

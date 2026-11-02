@@ -82,12 +82,16 @@ def worked(line):
 
 def this_lock(lines, locked_at):
     """(restarts, failures) of this lock: the restarts made since it began, and the `unlock_failed` calls after the last
-    of them. Without the lock's start, the lock is what came after the last call that worked."""
+    of them. A later `screen_locked` refusal supersedes an earlier unlock failure: the native service may have paused
+    for physical input, or refused the request's thread, and restarting must not undo that refusal. Only a new unlock
+    failure after it can ask for a restart. Without the lock's start, the lock is what came after the last call that
+    worked."""
     since = locked_at
     if since is None:
         since = max((line['at'] for line in lines if worked(line)), default=0)
     restarts = [line for line in lines if is_restart(line) and line['at'] >= since]
-    after = max([since]+[line['at'] for line in restarts])
+    refused = [line['at'] for line in lines if line['error'] == 'screen_locked' and line['at'] >= since]
+    after = max([since]+[line['at'] for line in restarts]+refused)
     failures = [line for line in lines if line['error'] == 'unlock_failed' and line['at'] > after]
     return restarts, failures
 

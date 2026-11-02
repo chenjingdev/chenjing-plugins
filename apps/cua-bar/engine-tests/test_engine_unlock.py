@@ -126,6 +126,28 @@ class WhenTests(UnlockCase):
         answer = self.reset()
         self.assertEqual((answer['ok'], answer['restarts']), (True, 2))
 
+    def test_a_later_native_lock_refusal_supersedes_an_unlock_failure(self):
+        # The coarse screen_locked word includes a physical-input pause and a request without a permitted thread.
+        # Neither is an automatic-unlock failure, and a restart must not undo the native service's newer refusal.
+        refused = State.line(BRIDGE, 100, SESSION_A, ok=False, ms=200, error='screen_locked')
+        self.state.activity([self.restart(400), self.failed(200), refused])
+        self.assertUntouched(self.reset(), 'not_needed', restarts=1)
+        self.assertEqual(len(self.restarts_written()), 1, 'the earlier restart still counts, but no new one is made')
+
+    def test_a_new_unlock_failure_after_a_native_lock_refusal_can_restart(self):
+        refused = State.line(BRIDGE, 200, SESSION_A, ok=False, ms=200, error='screen_locked')
+        self.state.activity([self.restart(500), self.failed(300), refused, self.failed(100)])
+        answer = self.reset()
+        self.assertEqual((answer['ok'], answer['restarts']), (True, 2))
+        self.assertEqual(self.machine.signals, [(SERVICE_PID, signal.SIGTERM)])
+
+    def test_a_lock_refusal_at_the_same_recorded_time_blocks_an_unlock_failure(self):
+        # Activity has second precision, so equal timestamps cannot establish a new failure after the refusal.
+        refused = State.line(BRIDGE, 100, SESSION_A, ok=False, ms=200, error='screen_locked')
+        for lines in ([self.failed(100), refused], [refused, self.failed(100)]):
+            self.state.activity(lines)
+            self.assertUntouched(self.reset(), 'not_needed')
+
     def test_at_most_five_restarts_in_one_lock(self):
         self.state.activity([self.restart(500), self.restart(450), self.restart(400), self.restart(350, ok=False),
                              self.restart(300), self.failed(200)])

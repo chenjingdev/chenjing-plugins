@@ -189,6 +189,34 @@ class ProbeCase(EngineCase):
 
 
 class ProbeRunTests(ProbeCase):
+    def test_partial_inventory_errors_fail_the_probe_even_when_js_succeeded(self):
+        for error in ('Native apps: SkyComputerUseError: The Mac is locked and automatic unlock could not unlock it.',
+                      'Browsers: PRIVATE_INVENTORY_ERROR', 'Browsers: Error: The browser access host is unavailable'):
+            with self.subTest(error=error):
+                self.js_result = {'content': [{'type': 'text', 'text': json.dumps(
+                    {'apps': [], 'browsers': [], 'errors': [error]})}], 'isError': False}
+                report = self.run_probe()
+                self.assertEqual((report['status'], report['is_error'], report['inventory_error_count']),
+                                 ('failed', False, 1))
+                self.assertNotIn(error, json.dumps(report), 'inventory contents stay out of diagnostics')
+
+    def test_complete_inventory_passes_the_probe(self):
+        self.js_result = {'content': [{'type': 'text', 'text': json.dumps(
+            {'apps': [{'id': 'native-app'}], 'browsers': [], 'errors': []})}]}
+        report = self.run_probe()
+        self.assertEqual((report['status'], report['inventory_error_count']), ('checked', 0))
+
+    def test_known_owned_thread_browser_refusal_does_not_hide_a_native_lock_failure(self):
+        browser = 'Browsers: Error: Local browser use is disabled in Work settings'
+        for errors, status in (([browser], 'checked'),
+                               ([browser, 'Native apps: Error: The Mac is locked.'], 'failed')):
+            with self.subTest(errors=errors):
+                self.js_result = {'content': [{'type': 'text', 'text': json.dumps(
+                    {'apps': [], 'browsers': [], 'errors': errors})}]}
+                report = self.run_probe()
+                self.assertEqual((report['status'], report['browser_access_refused']), (status, True))
+                self.assertEqual(report['inventory_error_count'], len(errors))
+
     def test_one_call_of_getState_with_its_title_on_a_thread_that_leaves_when_it_is_done(self):
         report = self.run_probe()
         self.assertEqual((report['status'], report['response_count'], report['is_error']), ('checked', 1, False))

@@ -470,9 +470,10 @@ async def probe_host(registry, timeout, folder=None, cut=None):
     to the endpoint of a host that is ready, and it asks nothing of an app that is closed.
     `cut` is a Cut that says the test is being ended before it is done (run_probe sets it on SIGTERM; a test that is
     cancelled sets it here): the host is then given CUT_CLOSE_SECONDS to take the thread back, not the rest of `timeout`."""
-    from host_mcp import HostMcp
+    from host_mcp import HostMcp, inventory_errors
     from runtime_paths import installation_from_native_cli, InstallationError
-    observed = {'status': 'failed', 'tool_names': [], 'response_count': 0,
+    observed = {'status': 'failed', 'tool_names': [], 'response_count': 0, 'inventory_error_count': 0,
+                'browser_access_refused': False,
                 'approval_required': False, 'operational_readiness': 'not_checked'}
     cua_root = None
     try:
@@ -511,8 +512,14 @@ async def probe_host(registry, timeout, folder=None, cut=None):
                     if re.search(r'(?im)^\s*(?:Error running code|(?:[A-Za-z.]*Error|Exception):)', item['text']):
                         text_failure = True
         observed['text_error_marker'] = text_failure
+        errors = inventory_errors(result)
+        blocked_browser = [error for error in errors if error.startswith('Browsers: ')
+                           and 'Local browser use is disabled in Work settings' in error]
+        observed['inventory_error_count'] = len(errors)
+        observed['browser_access_refused'] = bool(blocked_browser)
         observed['status'] = ('approval_required' if observed['approval_required'] else
-                              'checked' if isinstance(result, dict) and not observed['is_error'] and not text_failure and observed['response_count'] else 'failed')
+                              'checked' if isinstance(result, dict) and not observed['is_error'] and not text_failure
+                              and len(errors) == len(blocked_browser) and observed['response_count'] else 'failed')
     except asyncio.CancelledError:
         if cut is not None:
             cut.set()
