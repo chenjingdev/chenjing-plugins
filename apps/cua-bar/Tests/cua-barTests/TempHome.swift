@@ -59,15 +59,26 @@ struct TempHome {
     var claudeConfig: URL { url.appendingPathComponent(".claude.json") }
 
     /// `~/.claude.json` with other things in it, as a used Claude Code leaves it, and `cuabar` among the user's MCP servers.
-    func addMcp(command: String, args: [String] = [], others: [String: Any] = [:], type: String = "stdio") throws {
+    func addMcp(command: String, args: [String] = [], others: [String: Any] = [:], type: String = "stdio", in config: URL? = nil) throws {
         var servers = others
         servers["cuabar"] = ["type": type, "command": command, "args": args, "env": [String: String]()] as [String: Any]
-        try writeClaudeConfig(["numStartups": 7, "projects": ["/x": ["history": []]], "mcpServers": servers])
+        try writeClaudeConfig(["numStartups": 7, "projects": ["/x": ["history": []]], "mcpServers": servers], to: config)
     }
 
-    func writeClaudeConfig(_ object: [String: Any]) throws {
+    func writeClaudeConfig(_ object: [String: Any], to config: URL? = nil) throws {
         let data = try JSONSerialization.data(withJSONObject: object)
-        try write(String(decoding: data, as: UTF8.self), to: claudeConfig)
+        try write(String(decoding: data, as: UTF8.self), to: config ?? claudeConfig)
+    }
+
+    // MARK: The company's Claude Code folder (CLAUDE_CONFIG_DIR)
+
+    /// `~/.claude-ubion`, the folder tool-env-split makes.
+    var companyFolder: URL { url.appendingPathComponent(".claude-ubion", isDirectory: true) }
+    /// Its `.claude.json`, inside it.
+    var companyConfig: URL { companyFolder.appendingPathComponent(".claude.json") }
+
+    func makeCompanyFolder() throws {
+        try FileManager.default.createDirectory(at: companyFolder, withIntermediateDirectories: true)
     }
 
     /// Where 0.8.1 to 0.8.9 put the `cuabar` skill; since 0.8.10 the app only tells of one it finds there.

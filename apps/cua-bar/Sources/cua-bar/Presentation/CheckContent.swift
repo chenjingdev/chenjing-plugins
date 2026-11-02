@@ -119,6 +119,14 @@ struct CheckContent: Equatable, Sendable {
     static let agentFile = "~/Library/LaunchAgents/com.chenjingdev.codex-cua.env.plist"
     /// Where the one rule goes (R26): the user settings, so it holds in every folder.
     static let allowRuleStep = "Claude Code에서 /permissions를 열고 허용(Allow)에 아래 규칙을 더한 뒤 User settings에 저장하면 어느 폴더에서든 묻지 않아요. 그러면 CUA 호출은 auto 모드 검사를 건너뛰어요"
+    /// The same for another of Claude Code's folders: its own `/permissions` saves to its own user settings.
+    static func allowRuleStep(in folder: ClaudeConfigFolder) -> String {
+        "\(folder.shown)의 Claude Code에서도 /permissions를 열고 같은 규칙을 User settings에 저장해 주세요(\(folder.shown)/settings.json)"
+    }
+    /// TK-587: CUA runs in the Codex desktop app, with `~/.codex`'s account, whichever Claude Code calls it.
+    static func codexAccountStep(_ folder: ClaudeConfigFolder) -> String {
+        "회사용 Claude Code(\(folder.shown))에서 CUA를 불러도 데스크톱 Codex(~/.codex 계정)로 돌아요 — 사용량도 그 계정에서 빠져요"
+    }
     static let allowRuleHelp = "규칙을 복사해요. Claude Code의 /permissions에 붙여 넣어 주세요. 앱이 설정 파일을 고치지 않아요"
 
     func line(_ item: CheckItem) -> CheckLine? { lines.first { $0.item == item } }
@@ -162,11 +170,11 @@ private struct Judge {
 
     func line(for item: CheckItem) -> CheckLine {
         if codexMissing, !showsConflict(item), let waiting = codexWaiting(item) {
-            return item == .mcp ? withLeftovers(waiting) : waiting
+            return item == .mcp ? withCodexAccount(withLeftovers(waiting)) : waiting
         }
         return switch item {
         case .claudeCode: claudeCodeLine()
-        case .mcp: mcpLine()
+        case .mcp: withCodexAccount(mcpLine())
         case .permissions: permissionsLine()
         case .engine: engineLine()
         case .python: pythonLine()
@@ -192,7 +200,7 @@ private struct Judge {
     /// either way, so waiting for Codex would not put it right, and the line has the command that does.
     private func showsConflict(_ item: CheckItem) -> Bool {
         guard claudeWaiting(item) == nil else { return false }
-        return item == .mcp && claude.mcp == .conflict
+        return item == .mcp && claude.everyFolder.contains { $0.mcp == .conflict }
     }
 
     /// What follows the command on a conflict line: the card's fix, or, while the card is the one that says there is
@@ -252,46 +260,89 @@ private struct Judge {
         if let waiting = claudeWaiting(item) {
             line = waiting
         } else {
-            switch claude.mcp {
-            case .ready: line = CheckLine(item: item, status: .ready, detail: "앱의 엔진에 연결돼 있어요", facts: "앱의 엔진에 연결됨")
-            case .missing: line = broken(item, "Claude Code에 CUA가 연결되지 않았어요")
-            case .outdated: line = broken(item, "Claude Code의 CUA 연결이 옛 판이에요")
-            case .conflict:
-                line = CheckLine(
-                    item: item, status: .problem, detail: "앱이 깔지 않은 cuabar MCP가 있어요 — 그대로 뒀어요", facts: "앱이 깔지 않은 cuabar MCP",
-                    steps: [
-                        "지우려면 터미널에서 아래 명령을 실행해 주세요. 앱은 남이 둔 설정을 지우지 않아요",
-                        afterConflict("지운 뒤", "앱이 연결해요"),
-                    ],
-                    commands: [CheckCommand(CheckContent.removeMCPCommand, on: item)])
-            case .unknown: line = undecided(item, "~/.claude.json을 읽지 못했어요")
-            }
+            line = Self.joined(claude.everyFolder.map(mcpLine(of:)), folders: claude.everyFolder.map(\.folder))
         }
         return withLeftovers(line)
+    }
+
+    /// The MCP line of one of Claude Code's folders. The default folder's sentences say no folder.
+    private func mcpLine(of state: ClaudeFolderState) -> CheckLine {
+        let item = CheckItem.mcp
+        let folder = state.folder
+        let place = folder.isStandard ? "" : "\(folder.shown)에 "
+        switch state.mcp {
+        case .ready: return CheckLine(item: item, status: .ready, detail: "앱의 엔진에 연결돼 있어요", facts: "앱의 엔진에 연결됨")
+        case .missing: return broken(item, StatusEvaluator.mcpMissingSentence(folder))
+        case .outdated: return broken(item, StatusEvaluator.mcpOutdatedSentence(folder))
+        case .conflict:
+            return CheckLine(
+                item: item, status: .problem, detail: "\(place)앱이 깔지 않은 cuabar MCP가 있어요 — 그대로 뒀어요",
+                facts: "\(place)앱이 깔지 않은 cuabar MCP",
+                steps: [
+                    "지우려면 터미널에서 아래 명령을 실행해 주세요. 앱은 남이 둔 설정을 지우지 않아요",
+                    afterConflict("지운 뒤", "앱이 연결해요"),
+                ],
+                commands: [CheckCommand(folder.command(CheckContent.removeMCPCommand), on: item)])
+        case .unknown:
+            let file = folder.isStandard ? "~/.claude.json" : "\(folder.shown)/.claude.json"
+            return undecided(item, "\(file)을 읽지 못했어요")
+        }
+    }
+
+    /// The lines of several folders as one: with one folder, its line. Else the first that is not ready speaks, the
+    /// sentences of the other ones that are not ready are steps, the commands are all of them, and the facts name
+    /// each folder.
+    private static func joined(_ lines: [CheckLine], folders: [ClaudeConfigFolder]) -> CheckLine {
+        guard lines.count > 1 else { return lines[0] }
+        let rank: (CheckStatus) -> Int = { [.problem: 0, .unknown: 1, .advice: 2, .waiting: 3, .ready: 4][$0] ?? 4 }
+        let order = lines.indices.sorted { rank(lines[$0].status) < rank(lines[$1].status) }
+        var line = lines[order[0]]
+        for index in order.dropFirst() where lines[index].status != .ready {
+            line.steps.append(lines[index].facts ?? lines[index].detail)
+            line.steps += lines[index].steps
+        }
+        line.commands = lines.flatMap(\.commands)
+        line.facts = zip(folders, lines).map { "\($0.shown) \($1.facts ?? $1.detail)" }.joined(separator: ", ")
+        if line.status == .ready { line.detail += " · " + folders.map(\.shown).joined(separator: ", ") }
+        return line
+    }
+
+    /// What the company folder's Claude Code should know (TK-587): CUA runs in the Codex desktop app, which has one
+    /// account, `~/.codex`'s, whichever Claude Code calls it. Told on the MCP line while the company folder is there.
+    private func withCodexAccount(_ line: CheckLine) -> CheckLine {
+        guard let company = claude.otherFolders.first(where: { $0.folder == .company }) else { return line }
+        var changed = line
+        changed.steps.append(CheckContent.codexAccountStep(company.folder))
+        return changed
     }
 
     /// What is left in Claude Code of CUA before, told on the MCP line (Claude Code's side is the MCP server alone), with
     /// the commands that remove them (F9): the old plugins and 0.8.0's `cua` server (a second CUA in a new Claude
     /// conversation), 0.8.0's `cua` skill, and the `cuabar` skill 0.8.x put in (the server says the same now). A skill
-    /// folder without the app's mark is the person's own and is not told.
+    /// folder without the app's mark is the person's own and is not told. Each of Claude Code's folders is looked at;
+    /// what is in another than the default one is told with the folder's name.
     private func withLeftovers(_ line: CheckLine) -> CheckLine {
         var told: [Leftover] = []
         var commands: [CheckCommand] = []
-        if claude.legacyPlugin {
-            told.append(Leftover(notice: LegacyPlugin.notice, fact: "옛 cua 플러그인 있음"))
-            commands += claude.legacyPlugins.map { CheckCommand(LegacyPlugin.uninstallCommand(for: $0), on: .mcp) }
-        }
-        if claude.oldServer {
-            told.append(Leftover(notice: OldName.serverNotice, fact: "옛 이름 cua MCP 있음"))
-            commands.append(CheckCommand(OldName.removeServerCommand, on: .mcp))
-        }
-        if claude.oldSkill {
-            told.append(Leftover(notice: OldName.skillNotice, fact: "옛 이름 cua 스킬 있음"))
-            commands.append(CheckCommand(OldName.removeSkillCommand, on: .mcp))
-        }
-        if claude.retiredSkill {
-            told.append(Leftover(notice: RetiredSkill.notice, fact: "0.8.x cuabar 스킬 있음"))
-            commands.append(CheckCommand(RetiredSkill.removeCommand, on: .mcp))
+        for state in claude.everyFolder {
+            let folder = state.folder
+            let place = folder.isStandard ? "" : "\(folder.shown): "
+            if !state.legacyPlugins.isEmpty {
+                told.append(Leftover(notice: place + LegacyPlugin.notice, fact: place + "옛 cua 플러그인 있음"))
+                commands += state.legacyPlugins.map { CheckCommand(folder.command(LegacyPlugin.uninstallCommand(for: $0)), on: .mcp) }
+            }
+            if state.oldServer {
+                told.append(Leftover(notice: place + OldName.serverNotice, fact: place + "옛 이름 cua MCP 있음"))
+                commands.append(CheckCommand(folder.command(OldName.removeServerCommand), on: .mcp))
+            }
+            if state.oldSkill {
+                told.append(Leftover(notice: place + OldName.skillNotice, fact: place + "옛 이름 cua 스킬 있음"))
+                commands.append(CheckCommand(OldName.removeSkillCommand(in: folder), on: .mcp))
+            }
+            if state.retiredSkill {
+                told.append(Leftover(notice: place + RetiredSkill.notice, fact: place + "0.8.x cuabar 스킬 있음"))
+                commands.append(CheckCommand(RetiredSkill.removeCommand(in: folder), on: .mcp))
+            }
         }
         return with(told, commands, on: line)
     }
@@ -330,46 +381,62 @@ private struct Judge {
     private func permissionsLine() -> CheckLine {
         let item = CheckItem.permissions
         if let waiting = claudeWaiting(item) { return waiting }
+        let folders = claude.everyFolder
         guard let reading = claude.permissions else { return undecided(item, "설정 파일을 아직 읽지 않았어요") }
         if reading.unreadable {
             return CheckLine(item: item, status: .unknown, detail: "~/.claude/settings.json을 읽지 못했어요", facts: "사용자 설정을 읽지 못함")
         }
+        // Each folder's user settings: the default one's as before, the others with their name.
+        let readings = folders.compactMap { state in state.permissions.map { (state.folder, $0) } }
+        if let (folder, _) = readings.first(where: { $0.1.unreadable }) {
+            return CheckLine(
+                item: item, status: .unknown, detail: "\(folder.shown)/settings.json을 읽지 못했어요",
+                facts: "\(folder.shown) 사용자 설정을 읽지 못함")
+        }
         // Names, counts and modes only: the files' paths stay out of the copied diagnosis.
         var steps: [String] = []
         var facts: [String] = []
-        // A rule for the old names changes nothing once CUA is not asked about (R25).
-        let ruleFiles = reading.skipsAsking ? [] : reading.oldRuleFiles
+        // A rule for the old names changes nothing once CUA is not asked about (R25). A project's file may be listed
+        // by more than one folder: it is told once.
+        let ruleFiles = Self.once(readings.flatMap { $0.1.skipsAsking ? [] : $0.1.oldRuleFiles })
+        let hookFiles = Self.once(readings.flatMap(\.1.oldHookFiles))
         if !ruleFiles.isEmpty {
             steps.append("옛 이름의 허락 규칙: " + Self.listed(ruleFiles))
             steps.append("그 규칙은 지우거나 mcp__cuabar로 바꿔 주세요")
             facts.append("옛 이름 규칙 \(ruleFiles.count)곳")
         }
-        if !reading.oldHookFiles.isEmpty {
-            steps.append("옛 이름의 훅: " + Self.listed(reading.oldHookFiles))
+        if !hookFiles.isEmpty {
+            steps.append("옛 이름의 훅: " + Self.listed(hookFiles))
             steps.append("훅의 matcher에 적힌 mcp__cua__·mcp__plugin_cua_cua__를 mcp__cuabar__로 바꿔 주세요")
-            facts.append("옛 이름 훅 \(reading.oldHookFiles.count)곳")
+            facts.append("옛 이름 훅 \(hookFiles.count)곳")
         }
         var commands: [CheckCommand] = []
-        if reading.needsAllowRule {
-            steps.append(CheckContent.allowRuleStep)
+        let wanting = readings.filter { $0.1.needsAllowRule }.map(\.0)
+        if !wanting.isEmpty {
+            if wanting.contains(.standard) { steps.append(CheckContent.allowRuleStep) }
+            for folder in wanting where !folder.isStandard { steps.append(CheckContent.allowRuleStep(in: folder)) }
             commands.append(CheckCommand(CuabarRule.allowAll, on: item, help: CheckContent.allowRuleHelp))
         }
-        let rule = switch reading.userRule {
-        case .allowed: "사용자 설정이 cuabar 허용"
-        case .askedOrDenied: "사용자 설정에 cuabar 묻기·막기 규칙"
-        case .none: "사용자 설정에 cuabar 규칙 없음"
+        for (folder, one) in readings {
+            let place = folder.isStandard ? "" : "\(folder.shown) "
+            let rule = switch one.userRule {
+            case .allowed: "사용자 설정이 cuabar 허용"
+            case .askedOrDenied: "사용자 설정에 cuabar 묻기·막기 규칙"
+            case .none: "사용자 설정에 cuabar 규칙 없음"
+            }
+            facts += [place + rule, place + "기본 모드 " + (one.defaultMode ?? "정하지 않음")]
         }
-        facts += [rule, "기본 모드 " + (reading.defaultMode ?? "정하지 않음")]
         let said = facts.joined(separator: ", ")
-        if reading.hasOldNames {
+        if readings.contains(where: { $0.1.hasOldNames }) {
             return CheckLine(
                 item: item, status: .problem, detail: "옛 도구 이름이 적힌 설정이 있어요 — 지금 CUA에는 맞지 않아요",
                 facts: said, steps: steps, commands: commands)
         }
-        if reading.needsAllowRule {
-            return CheckLine(
-                item: item, status: .advice, detail: "auto 모드에서도 CUA를 부를 때마다 물을 수 있어요",
-                facts: said, steps: steps, commands: commands)
+        if !wanting.isEmpty {
+            let detail = wanting.contains(.standard)
+                ? "auto 모드에서도 CUA를 부를 때마다 물을 수 있어요"
+                : "\(wanting[0].shown)의 Claude Code는 auto 모드에서도 CUA를 부를 때마다 물을 수 있어요"
+            return CheckLine(item: item, status: .advice, detail: detail, facts: said, steps: steps, commands: commands)
         }
         let detail = switch reading.userRule {
         case .allowed: "CUA를 부를 때 묻지 않아요"
@@ -377,6 +444,11 @@ private struct Judge {
         case .none: "권한 확인을 건너뛰는 모드라 묻지 않아요"
         }
         return CheckLine(item: item, status: .ready, detail: detail, facts: said)
+    }
+
+    /// Each once, in the order first met.
+    private static func once(_ files: [String]) -> [String] {
+        files.reduce(into: [String]()) { kept, file in if !kept.contains(file) { kept.append(file) } }
     }
 
     /// Up to two of the files, and how many more.

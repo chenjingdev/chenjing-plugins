@@ -33,13 +33,80 @@ struct ClaudeSetupState: Equatable, Sendable {
     var retiredSkill = false
     /// What Claude Code's settings say of CUA's tools; nil when not looked at (F9).
     var permissions: PermissionReading?
+    /// The fields above are of Claude Code's default folder (`~/.claude`, `~/.claude.json`). These are the other
+    /// settings folders (`CLAUDE_CONFIG_DIR`) the app also puts CUA in, the company one among them, when they are there.
+    var otherFolders: [ClaudeFolderState] = []
 
     static let none = ClaudeSetupState()
 
     var legacyPlugin: Bool { !legacyPlugins.isEmpty }
 
-    /// Something of CUA's old names is left in Claude Code (F9): told after an update, and on the 점검 tab.
-    var hasOldNames: Bool { legacyPlugin || oldServer || oldSkill || permissions?.hasOldNames == true }
+    /// The default folder, the way the other folders are told.
+    var defaultFolder: ClaudeFolderState {
+        ClaudeFolderState(
+            folder: .standard, mcp: mcp, legacyPlugins: legacyPlugins, oldServer: oldServer, oldSkill: oldSkill,
+            retiredSkill: retiredSkill, permissions: permissions)
+    }
+
+    /// The default folder first, then the others.
+    var everyFolder: [ClaudeFolderState] { [defaultFolder] + otherFolders }
+
+    /// Something of CUA's old names is left in Claude Code (F9), in any of its folders: told after an update, and on the
+    /// 점검 tab.
+    var hasOldNames: Bool { everyFolder.contains(where: \.hasOldNames) }
+
+    /// The `cuabar` skill 0.8.x put in is left in some folder.
+    var anyRetiredSkill: Bool { everyFolder.contains(where: \.retiredSkill) }
+}
+
+/// One of Claude Code's settings folders, as Claude Code finds it: the default one without `CLAUDE_CONFIG_DIR`
+/// (`~/.claude`, with `~/.claude.json` beside it in the home folder), or one that `CLAUDE_CONFIG_DIR` names (with its
+/// `.claude.json` inside it: Claude Code 2.1.316 writes there, checked 2026-11-02).
+struct ClaudeConfigFolder: Hashable, Sendable {
+    /// The folder under the home folder; nil for the default one.
+    var name: String?
+
+    static let standard = ClaudeConfigFolder(name: nil)
+
+    /// The company's folder (tool-env-split's `claude-ubion`). Put CUA in it only when it is there.
+    static let company = ClaudeConfigFolder(name: ".claude-ubion")
+
+    /// The folders besides the default one that are looked for.
+    static let others = [company]
+
+    var isStandard: Bool { name == nil }
+
+    /// As the 점검 tab names it.
+    var shown: String { "~/" + (name ?? ".claude") }
+
+    func directory(in home: URL) -> URL { home.appendingPathComponent(name ?? ".claude", isDirectory: true) }
+
+    func configURL(in home: URL) -> URL {
+        name == nil ? home.appendingPathComponent(".claude.json") : directory(in: home).appendingPathComponent(".claude.json")
+    }
+
+    /// What `CLAUDE_CONFIG_DIR` is for a `claude` command of this folder: nil (taken away) for the default one, since
+    /// with the variable Claude Code would write `~/.claude/.claude.json` instead of `~/.claude.json`.
+    func environmentValue(in home: URL) -> String? { name == nil ? nil : directory(in: home).path }
+
+    /// A command the person runs for this folder: as it is for the default one, else with the variable in front.
+    func command(_ text: String) -> String {
+        guard let name else { return text }
+        return "CLAUDE_CONFIG_DIR=\"$HOME/\(name)\" " + text
+    }
+}
+
+/// What one of Claude Code's folders has of CUA.
+struct ClaudeFolderState: Equatable, Sendable {
+    var folder: ClaudeConfigFolder
+    var mcp: ClaudeSetupState.Part = .unknown
+    var legacyPlugins: [String] = []
+    var oldServer = false
+    var oldSkill = false
+    var retiredSkill = false
+    var permissions: PermissionReading?
+
+    var hasOldNames: Bool { !legacyPlugins.isEmpty || oldServer || oldSkill || permissions?.hasOldNames == true }
 }
 
 /// The old cua plugins. The app never removes them: it tells, and gives the command to run.
@@ -61,6 +128,8 @@ enum OldName {
     static let removeServerCommand = "claude mcp remove -s user cua"
     static let skillNotice = "0.8.0이 깐 옛 이름 cua 스킬이 남아 있어요 — 이제 MCP가 안내해요"
     static let removeSkillCommand = "rm -rf ~/.claude/skills/cua"
+
+    static func removeSkillCommand(in folder: ClaudeConfigFolder) -> String { "rm -rf \(folder.shown)/skills/cua" }
 }
 
 /// The `cuabar` skill 0.8.x installed. Since 0.8.10 the MCP server gives the guidance (its `instructions`, and a note at
@@ -68,6 +137,8 @@ enum OldName {
 enum RetiredSkill {
     static let notice = "0.8.9까지 깐 cuabar 스킬이 남아 있어요 — 이제 MCP가 안내해요"
     static let removeCommand = "rm -rf ~/.claude/skills/cuabar"
+
+    static func removeCommand(in folder: ClaudeConfigFolder) -> String { "rm -rf \(folder.shown)/skills/cuabar" }
 }
 
 /// The app's way into Claude Code: the `cuabar` MCP server in `~/.claude.json`. The server itself tells Claude how to
@@ -76,21 +147,28 @@ enum RetiredSkill {
 /// The MCP server is changed only with `claude mcp add -s user` and `claude mcp remove -s user`, and read
 /// from the file (`claude mcp list` and `get` start the servers). `.cua-bar.json` is the mark 0.8.x left in the skill
 /// folders it put there. What the app did not put there is never changed or removed.
+///
+/// One value works on one of Claude Code's settings folders (`folder`); `folders()` gives one for each folder that is
+/// there, the default first. Its `claude` commands are run with `CLAUDE_CONFIG_DIR` set for that folder (and taken
+/// away for the default one).
 struct ClaudeIntegration: Sendable, ClaudeRemoving {
     static let serverName = "cuabar"
     static let markerName = ".cua-bar.json"
 
     var home: URL
+    /// The settings folder this value reads and changes.
+    var folder: ClaudeConfigFolder = .standard
     var claude: ClaudeCLILocator
     var runner: any ProcessRunning
     /// One `claude mcp …` command.
     var commandTimeout: Duration
     /// How long the look at the project folders' settings files is kept (R25).
     var folderRescan: TimeInterval
-    /// What was last read of `~/.claude.json`. The file can be large and is read at every status read; it is
-    /// parsed again only when it changed. A copy of this struct shares it.
-    private let configCache = ConfigCache()
-    private let folderCache = FolderScanCache()
+    /// What was last read of each folder's `.claude.json`, and of its project folders. The file can be large and is
+    /// read at every status read; it is parsed again only when it changed. A copy of this struct shares them.
+    private let shelf = CacheShelf()
+    private var configCache: ConfigCache { shelf.config(for: folder) }
+    private var folderCache: FolderScanCache { shelf.folders(for: folder) }
 
     init(
         home: URL = FileManager.default.homeDirectoryForCurrentUser, claude: ClaudeCLILocator? = nil,
@@ -107,39 +185,71 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     /// The `claude` command is installed.
     var claudeCodeFound: Bool { claude.locate() != nil }
 
-    var configURL: URL { home.appendingPathComponent(".claude.json") }
+    /// The same, on another of Claude Code's folders. It shares what was read.
+    func inFolder(_ other: ClaudeConfigFolder) -> ClaudeIntegration {
+        var copy = self
+        copy.folder = other
+        return copy
+    }
+
+    /// One for each of Claude Code's folders the app puts CUA in: the default one always, the others when they are
+    /// there (a folder, or a link to one).
+    func folders() -> [ClaudeIntegration] {
+        [inFolder(.standard)] + ClaudeConfigFolder.others.filter { other in
+            var isFolder: ObjCBool = false
+            return FileManager.default.fileExists(atPath: other.directory(in: home).path, isDirectory: &isFolder) && isFolder.boolValue
+        }.map(inFolder)
+    }
+
+    private var settingsFolder: URL { folder.directory(in: home) }
+
+    var configURL: URL { folder.configURL(in: home) }
     /// Where 0.8.1 to 0.8.9 put the `cuabar` skill.
-    var retiredSkillFolder: URL { home.appendingPathComponent(".claude/skills/cuabar", isDirectory: true) }
+    var retiredSkillFolder: URL { settingsFolder.appendingPathComponent("skills/cuabar", isDirectory: true) }
     /// Where 0.8.0 put the skill, under the old name.
-    var oldSkillFolder: URL { home.appendingPathComponent(".claude/skills/cua", isDirectory: true) }
-    var legacyRegistryURL: URL { home.appendingPathComponent(".claude/plugins/installed_plugins.json") }
-    var userSettingsURL: URL { home.appendingPathComponent(".claude/settings.json") }
+    var oldSkillFolder: URL { settingsFolder.appendingPathComponent("skills/cua", isDirectory: true) }
+    var legacyRegistryURL: URL { settingsFolder.appendingPathComponent("plugins/installed_plugins.json") }
+    var userSettingsURL: URL { settingsFolder.appendingPathComponent("settings.json") }
 
     /// Where the app's engine copies are; a server command under it is the app's.
     private var engineCopies: URL { home.appendingPathComponent(".local/share/codex-cua/engine", isDirectory: true) }
 
     // MARK: Reading
 
-    /// Everything the card and the check need, from files only. `launcher` is the one the engine reported
-    /// (status or install result); the MCP command is compared with it.
+    /// Everything the card and the check need, from files only, of every folder. `launcher` is the one the engine
+    /// reported (status or install result); the MCP command is compared with it.
     func inspect(launcher: String?) -> ClaudeSetupState {
         let found = claude.locate()
         var state = leftovers()
         state.claudeCodeFound = found != nil
         state.claudeCodePath = found?.path
-        state.mcp = mcpState(launcher: launcher)
+        state.mcp = inFolder(.standard).mcpState(launcher: launcher)
+        for index in state.otherFolders.indices {
+            state.otherFolders[index].mcp = inFolder(state.otherFolders[index].folder).mcpState(launcher: launcher)
+        }
         return state
     }
 
-    /// The old names and what the settings say of CUA's tools (F9), the part the update's notification needs too.
+    /// The old names and what the settings say of CUA's tools (F9), the part the update's notification needs too, of
+    /// every folder.
     func leftovers(now: Date = Date()) -> ClaudeSetupState {
+        let all = folders()
+        let standard = all[0].folderLeftovers(now: now)
         var state = ClaudeSetupState()
-        state.legacyPlugins = recordedLegacyPlugins()
-        state.oldServer = config().oldServer
-        state.oldSkill = oldSkillPresent()
-        state.retiredSkill = retiredSkillPresent()
-        state.permissions = permissionReading(now: now)
+        state.legacyPlugins = standard.legacyPlugins
+        state.oldServer = standard.oldServer
+        state.oldSkill = standard.oldSkill
+        state.retiredSkill = standard.retiredSkill
+        state.permissions = standard.permissions
+        state.otherFolders = all.dropFirst().map { $0.folderLeftovers(now: now) }
         return state
+    }
+
+    /// The same of this value's folder alone.
+    func folderLeftovers(now: Date = Date()) -> ClaudeFolderState {
+        ClaudeFolderState(
+            folder: folder, legacyPlugins: recordedLegacyPlugins(), oldServer: config().oldServer, oldSkill: oldSkillPresent(),
+            retiredSkill: retiredSkillPresent(), permissions: permissionReading(now: now))
     }
 
     /// The launcher of the engine's current version: one path whatever the version, because `current` is a link
@@ -209,6 +319,31 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         }
     }
 
+    /// A `ConfigCache` and a `FolderScanCache` for each folder, made the first time the folder is read.
+    private final class CacheShelf: @unchecked Sendable {
+        private let lock = NSLock()
+        private var configs: [ClaudeConfigFolder: ConfigCache] = [:]
+        private var scans: [ClaudeConfigFolder: FolderScanCache] = [:]
+
+        func config(for folder: ClaudeConfigFolder) -> ConfigCache {
+            lock.withLock {
+                if let known = configs[folder] { return known }
+                let made = ConfigCache()
+                configs[folder] = made
+                return made
+            }
+        }
+
+        func folders(for folder: ClaudeConfigFolder) -> FolderScanCache {
+            lock.withLock {
+                if let known = scans[folder] { return known }
+                let made = FolderScanCache()
+                scans[folder] = made
+                return made
+            }
+        }
+    }
+
     private final class ConfigCache: @unchecked Sendable {
         private let lock = NSLock()
         private var signature: FileSignature?
@@ -230,7 +365,7 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         var parseCount: Int { lock.withLock { parsed } }
     }
 
-    /// How many times `~/.claude.json` was parsed. For tests.
+    /// How many times this folder's `.claude.json` was parsed. For tests.
     var configParseCount: Int { configCache.parseCount }
 
     private func config() -> ConfigReading {
@@ -335,8 +470,8 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
     /// Drive and other apps' data under Library): a look there would put a permission window in front of the person.
     static let askedFolders = ["Desktop", "Documents", "Downloads", "Library", ".Trash"]
 
-    /// `.claude/settings.json` and `.claude/settings.local.json` of each folder `~/.claude.json` lists inside the home
-    /// folder, and of the top of its git repository, where "다시 묻지 않기" saves. Folders outside the home folder (a
+    /// `.claude/settings.json` and `.claude/settings.local.json` of each folder this folder's `.claude.json` lists
+    /// inside the home folder, and of the top of its git repository, where "다시 묻지 않기" saves. Folders outside the home folder (a
     /// network drive among them) are left alone: a look there can hang. So are `askedFolders` (R25).
     func projectSettingsFiles() -> [URL] {
         let homePath = home.standardizedFileURL.path
@@ -400,26 +535,30 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         case cannotStart
     }
 
-    /// `claude mcp add -s user cuabar -- <command>`.
+    /// `claude mcp add -s user cuabar -- <command>`, into this value's folder.
     func addMCP(command: String) async -> CommandResult {
         await runClaude(["mcp", "add", "-s", "user", Self.serverName, "--", command])
     }
 
-    /// `claude mcp remove -s user cuabar`.
+    /// `claude mcp remove -s user cuabar`, from this value's folder.
     func removeMCP() async -> CommandResult {
         await runClaude(["mcp", "remove", "-s", "user", Self.serverName])
     }
+
+    static let configDirVariable = "CLAUDE_CONFIG_DIR"
 
     /// Exit code of `/usr/bin/env` when the interpreter of a script (here `node`) cannot be found.
     static let cannotStartExitCode: Int32 = 127
 
     /// The folder of the `claude` found goes first in PATH: npm, nvm and bun put a script there that runs the
-    /// `node` beside it.
+    /// `node` beside it. `CLAUDE_CONFIG_DIR` names this value's folder, and is taken away for the default one (the
+    /// app may have been started from a terminal that set it).
     private func runClaude(_ arguments: [String]) async -> CommandResult {
         guard let cli = claude.locate() else { return .cannotStart }
         do {
             let output = try await runner.run(
-                cli, arguments: arguments, timeout: commandTimeout, pathFirst: [cli.deletingLastPathComponent().path])
+                cli, arguments: arguments, timeout: commandTimeout, pathFirst: [cli.deletingLastPathComponent().path],
+                setting: [Self.configDirVariable: folder.environmentValue(in: home)])
             switch output.exitCode {
             case 0: return .succeeded
             case Self.cannotStartExitCode: return .cannotStart
@@ -442,9 +581,21 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         var retiredSkillStays = false
     }
 
-    /// Takes away what the app put into Claude Code: the MCP server, only when its command is the app's. Anything else
-    /// is left as it is, the skill 0.8.x put in too (its command goes into the result).
+    /// Takes away what the app put into Claude Code, in every folder: the MCP server, only when its command is the
+    /// app's. Anything else is left as it is, the skill 0.8.x put in too (its command goes into the result).
     func removeAppOwned() async -> Removal {
+        var removal = Removal()
+        for one in folders() {
+            let done = await one.removeAppOwnedHere()
+            removal.mcpStays = removal.mcpStays || done.mcpStays
+            removal.removedAnything = removal.removedAnything || done.removedAnything
+        }
+        // Only the default folder's: 0.8.x put the skill there alone, and the result's command names it.
+        removal.retiredSkillStays = inFolder(.standard).retiredSkillPresent()
+        return removal
+    }
+
+    private func removeAppOwnedHere() async -> Removal {
         var removal = Removal()
         switch config().entry {
         case .unreadable:
@@ -459,7 +610,6 @@ struct ClaudeIntegration: Sendable, ClaudeRemoving {
         case .server, .absent:
             break
         }
-        removal.retiredSkillStays = retiredSkillPresent()
         return removal
     }
 }

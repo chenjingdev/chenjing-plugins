@@ -29,6 +29,7 @@ Apple Silicon Mac, macOS 14 이상에서 돌아요. Computer Use를 쓸 수 있�
 
      셸 시작 파일(zsh는 `~/.zshenv`, `$ZDOTDIR`이 있으면 그 폴더의 `.zshenv`, bash는 `~/.bash_profile`·`~/.bash_login`·`~/.profile` 중 먼저 있는 것)에는 `# >>> codex-cua (CUA Bar) >>>`로 시작하는 몇 줄을 넣어요(0.8.11부터). 재부팅 뒤 macOS가 다시 연 Codex는 로그인 설정이 적용되기 전(10월 30일에는 19초 전)에 떠서 연결 없이 켜졌는데, Codex는 켜질 때 로그인 셸의 환경을 읽으니 이 줄이 그때 래퍼를 알려 줘요. Codex가 연 셸에서만 값을 내놓고 터미널에서는 아무것도 하지 않으며, 그 블록 밖은 한 글자도 바꾸지 않고, 앱을 지우면 블록만 지워요. 다른 셸(fish 등)은 이 파일 없이 로그인 설정만 써요.
    - **Claude Code의 MCP**: `claude mcp add -s user cuabar -- ~/.local/share/codex-cua/engine/current/start-mcp.sh`로 한 번 등록해요. 판이 바뀌어도 `current` 링크가 새 판을 가리키니 다시 등록하지 않아요. CUA를 쓰는 법은 이 MCP가 Claude 대화에 붙을 때(`instructions`) 알려 주고, 그때만 필요한 안내는 그 오류 끝에 붙여요. 0.8.9까지는 `~/.claude/skills/cuabar/`에 스킬도 깔았는데, 앱이 디스크에 바로 쓰는 스킬과 이미 떠 있는 MCP가 서로 다른 판의 말을 할 수 있어서 0.8.10부터 깔지 않아요(남아 있으면 점검 탭이 알려요).
+   - **회사용 설정 폴더**(0.8.13부터): `~/.claude-ubion`(tool-env-split이 만드는 `CLAUDE_CONFIG_DIR` 폴더)이 있으면 거기에도 같은 MCP를 `CLAUDE_CONFIG_DIR=~/.claude-ubion claude mcp add -s user …`로 등록하고, 점검·허락 규칙·옛 이름 찾기도 그 폴더의 `.claude.json`·`settings.json`·`skills/`·`plugins/`에서 따로 해요. 기본 폴더 명령은 `CLAUDE_CONFIG_DIR`을 빼고 실행해요(넣으면 Claude Code가 `~/.claude/.claude.json`에 써요). 회사 Claude에서 불러도 CUA는 데스크톱 Codex(`~/.codex` 계정) 하나로 돌고, 점검 탭 MCP 줄이 그걸 알려요.
 
    바뀐 것이 있으면 "새 Claude 대화부터 CUA가 붙어요"라고 한 번 알려요. 이미 열려 있는 Claude 대화에는 붙지 않아요. 실패하면 카드에 "연결 설정에 실패했어요"와 **다시 하기** 버튼이 떠요. 저절로 하는 것은 앱을 켤 때마다 한 번과, 켤 때 없어서 미룬 것이 나중에 생겼을 때 한 번이에요. 그 밖에는 버튼을 누를 때만 해요.
 2. **없는 것은 미뤄요.**
@@ -86,7 +87,7 @@ Apple Silicon Mac, macOS 14 이상에서 돌아요. Computer Use를 쓸 수 있�
 
   Codex가 꺼져 있으면 연결 시험을 건너뛰고 "Claude 대화를 열면 켜져요"라고만 해요. 점검이 Codex를 켜지는 않아요. 켜져 있으면 마지막 결과와 시각, **연결 시험** 버튼이 있어요. 시험은 숨은 스레드에서 `cua.getState()`만 한 번 부르고 바로 정리해서, 연결 목록·기록·작업 중 표시·끝난 연결에 남지 않아요. 켜질 때는 시험하지 않고, 이 버튼을 누를 때와 설치나 업데이트가 무언가를 바꾼 직후 한 번만 해요.
 
-  점검은 `~/.claude.json`, 옛 스킬 폴더, Claude Code 설정 파일을 읽기만 해요. 서버를 띄워 시험하는 `claude mcp list`는 쓰지 않아요.
+  점검은 `~/.claude.json`(회사용 폴더가 있으면 `~/.claude-ubion/.claude.json`도), 옛 스킬 폴더, Claude Code 설정 파일을 읽기만 해요. 서버를 띄워 시험하는 `claude mcp list`는 쓰지 않아요.
 
 목록이 비어 있으면 "연결 없음", "기록 없음"처럼 한 줄로 말해요.
 

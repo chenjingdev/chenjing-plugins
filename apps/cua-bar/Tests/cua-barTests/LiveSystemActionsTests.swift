@@ -9,6 +9,8 @@ final class StepRunner: ProcessRunning, @unchecked Sendable {
         var executable: String
         var arguments: [String]
         var timeout: Duration
+        /// `CLAUDE_CONFIG_DIR` as the command was given it: nil when it was taken away or not asked about.
+        var configDir: String? = nil
 
         var isClaude: Bool { executable.hasSuffix("/claude") }
         var isDeveloperToolsCheck: Bool { executable == "/usr/bin/xcode-select" && arguments == ["-p"] }
@@ -43,6 +45,25 @@ final class StepRunner: ProcessRunning, @unchecked Sendable {
     func run(_ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String]) async throws -> ProcessOutput {
         lock.withLock { recordedPathFirst.append((executable.path, pathFirst)) }
         return try await run(executable, arguments: arguments, timeout: timeout)
+    }
+
+    /// What each call that set or took away variables asked for, with its executable.
+    private var recordedSetting: [(String, [String: String?])] = []
+    var setting: [(String, [String: String?])] { lock.withLock { recordedSetting } }
+
+    func run(
+        _ executable: URL, arguments: [String], timeout: Duration, pathFirst: [String], setting: [String: String?]
+    ) async throws -> ProcessOutput {
+        lock.withLock {
+            recordedPathFirst.append((executable.path, pathFirst))
+            recordedSetting.append((executable.path, setting))
+        }
+        let call = Call(
+            executable: executable.path, arguments: arguments, timeout: timeout,
+            configDir: setting[ClaudeIntegration.configDirVariable] ?? nil)
+        lock.withLock { recorded.append(call) }
+        await gateFor(call)?.wait()
+        return try handler(call)
     }
 
     static func ok(_ stdout: String = "") -> ProcessOutput {
@@ -114,6 +135,17 @@ struct LiveSystemActionsTests {
         var mcpRemove: StepRunner.Call {
             .init(executable: claudePath, arguments: ["mcp", "remove", "-s", "user", "cuabar"], timeout: .seconds(120))
         }
+        /// The same, for the company folder.
+        func companyMcpAdd(_ command: String? = nil) -> StepRunner.Call {
+            var call = mcpAdd(command)
+            call.configDir = home.companyFolder.path
+            return call
+        }
+        var companyMcpRemove: StepRunner.Call {
+            var call = mcpRemove
+            call.configDir = home.companyFolder.path
+            return call
+        }
     }
 
     /// - engine: the status the engine answers with (an error: no engine); a current one says the app's version.
@@ -142,11 +174,13 @@ struct LiveSystemActionsTests {
             if let answer = try responses?(call) { return answer }
             if call.isDeveloperToolsCheck { return developerTools ? StepRunner.ok("/Library/Developer/CommandLineTools\n") : StepRunner.failed(code: 2) }
             if call.isInstallEngine { return StepRunner.ok(printed + "\n") }
+            // Into the folder the command was given, the way Claude Code does.
+            let config = call.configDir.map { URL(fileURLWithPath: $0).appendingPathComponent(".claude.json") } ?? home.claudeConfig
             if call.executable == claudePath, call.arguments.starts(with: ["mcp", "add"]), let command = call.arguments.last {
-                try home.addMcp(command: command)
+                try home.addMcp(command: command, in: config)
             }
             if call.executable == claudePath, call.arguments.starts(with: ["mcp", "remove"]) {
-                try home.writeClaudeConfig(["numStartups": 7, "mcpServers": [String: Any]()])
+                try home.writeClaudeConfig(["numStartups": 7, "mcpServers": [String: Any]()], to: config)
             }
             return StepRunner.ok()
         }

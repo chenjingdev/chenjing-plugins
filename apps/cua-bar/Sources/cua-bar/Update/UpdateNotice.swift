@@ -79,10 +79,12 @@ enum UpdateAdvice {
     /// picks in a conversation is not in any file, and a line on every update would be noise.
     static func line(for state: ClaudeSetupState) -> String? {
         if state.hasOldNames { return oldNames }
-        if state.retiredSkill { return retiredSkill }
-        if let reading = state.permissions, reading.needsAllowRule, reading.defaultMode == PermissionReading.autoMode {
-            return allowRule
+        if state.anyRetiredSkill { return retiredSkill }
+        let wantsRule = state.everyFolder.contains { folder in
+            guard let reading = folder.permissions else { return false }
+            return reading.needsAllowRule && reading.defaultMode == PermissionReading.autoMode
         }
+        if wantsRule { return allowRule }
         return nil
     }
 

@@ -221,7 +221,9 @@ enum StatusEvaluator {
             if facts.developerToolsNeeded { return developerToolsProblem }
             let title = issues.count == 1
                 ? issues[0].sentence
-                : "연결 설정에 문제가 있어요 — " + issues.map(\.name).joined(separator: " · ")
+                : "연결 설정에 문제가 있어요 — " + issues.map(\.name).reduce(into: [String]()) { names, name in
+                    if !names.contains(name) { names.append(name) }
+                }.joined(separator: " · ")
             return Problem(
                 kind: .setupIncomplete, title: title, nextStep: "고치기를 누르면 설정을 다시 맞춰요",
                 warning: nil, fix: .runSetup, fixLabel: "고치기")
@@ -275,20 +277,31 @@ enum StatusEvaluator {
 
     /// The MCP server is missing or the app's own and out of date (Claude Code's side is the MCP server alone). Nothing is said without
     /// Claude Code: it is not a problem of the Mac, and it is put off until Claude Code is there.
+    /// Each of Claude Code's folders is said on its own; the default one as before, another with its name.
     static func claudeIssues(in claude: ClaudeSetupState) -> [SetupIssue] {
         guard claude.claudeCodeFound, !claude.claudeCodeUnusable else { return [] }
         var issues: [SetupIssue] = []
-        switch claude.mcp {
-        case .missing: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code에 CUA가 연결되지 않았어요", item: .mcp))
-        case .outdated: issues.append(SetupIssue(name: "MCP", sentence: "Claude Code의 CUA 연결이 옛 판이에요", item: .mcp))
-        case .ready, .conflict, .unknown: break
+        for folder in claude.everyFolder {
+            switch folder.mcp {
+            case .missing: issues.append(SetupIssue(name: "MCP", sentence: mcpMissingSentence(folder.folder), item: .mcp))
+            case .outdated: issues.append(SetupIssue(name: "MCP", sentence: mcpOutdatedSentence(folder.folder), item: .mcp))
+            case .ready, .conflict, .unknown: break
+            }
         }
         return issues
     }
 
-    /// An MCP server named cuabar that is not the app's.
+    static func mcpMissingSentence(_ folder: ClaudeConfigFolder) -> String {
+        folder.isStandard ? "Claude Code에 CUA가 연결되지 않았어요" : "\(folder.shown)의 Claude Code에 CUA가 연결되지 않았어요"
+    }
+
+    static func mcpOutdatedSentence(_ folder: ClaudeConfigFolder) -> String {
+        folder.isStandard ? "Claude Code의 CUA 연결이 옛 판이에요" : "\(folder.shown)의 Claude Code의 CUA 연결이 옛 판이에요"
+    }
+
+    /// An MCP server named cuabar that is not the app's, in any of Claude Code's folders.
     static func conflictProblem(in claude: ClaudeSetupState) -> Problem? {
-        guard claude.claudeCodeFound, !claude.claudeCodeUnusable, claude.mcp == .conflict else { return nil }
+        guard claude.claudeCodeFound, !claude.claudeCodeUnusable, claude.everyFolder.contains(where: { $0.mcp == .conflict }) else { return nil }
         return Problem(
             kind: .claudeConflict, title: "Claude Code에 앱이 깔지 않은 cuabar MCP가 있어요", nextStep: "점검 탭에서 치우는 방법을 보세요", warning: nil, fix: nil, fixLabel: nil)
     }
