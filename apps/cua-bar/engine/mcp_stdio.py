@@ -9,7 +9,7 @@ import sys
 import uuid
 from bridge_control import BridgeControl
 from host_autostart import AutostartFailure, ensure_host, give_back_first_call, watch_first_call
-from host_mcp import (HostMcp, serve, BridgeFailure, RpcFailure, CANCEL_BEFORE_SEND, ident_key,
+from host_mcp import (HostMcp, serve, BridgeFailure, RpcFailure, CANCEL_BEFORE_SEND, UPDATE_CLOSING, ident_key,
                       error_with_note, failure_note)
 from runtime_paths import default_state, installation_from_native_cli, InstallationError
 from claude_lifecycle import ScopeRouter, END_EVENTS, source as claude_source
@@ -69,6 +69,8 @@ def build_adapter(state, **options):
             self.family_report = None
 
         async def handle(self, message):
+            if self.reject_updated_request(message):
+                return
             token = self.claude_lifecycle.enter(message)
             try:
                 if self.agent_key is None and isinstance(message, dict):
@@ -134,6 +136,7 @@ def build_adapter(state, **options):
                     setattr(child, attribute, getattr(self, attribute))
             child.thread_cwd = self.thread_cwd
             child.supports_elicitation = self.supports_elicitation
+            child.update_pending = self.update_pending
             child.on_change = self.changed
 
             def record_call(*values):
@@ -146,6 +149,11 @@ def build_adapter(state, **options):
 
             child.on_call, child.on_browser_blocked = record_call, browser_blocked
             return child
+
+        def mark_update_pending(self):
+            super().mark_update_pending()
+            for child in self.agent_children.values():
+                child.mark_update_pending()
 
         async def boot_agent(self, child):
             child.initializing = child.boot_attempted = True
@@ -338,6 +346,8 @@ def build_adapter(state, **options):
             await super().boot()
 
         async def call_tool(self, name, arguments):
+            if self.update_pending and name in ('js', 'js_reset'):
+                raise BridgeFailure(UPDATE_CLOSING)
             # A Codex this process opened in the background is watched again at the first tool call: the first screen
             # call of a fresh Codex brings it forward (S4). The front app is read before the call goes out, off the
             # event loop, so a Codex that comes forward within milliseconds is not taken for one in front already;
@@ -400,7 +410,7 @@ def build_adapter(state, **options):
 
 async def main():
     state = Path(os.environ.get('CODEX_HOST_CUA_STATE_DIR', str(DEFAULT_STATE)))
-    cleanup = await serve(build_adapter(state), control_factory=BridgeControl)
+    cleanup = await serve(build_adapter(state), control_factory=BridgeControl, watch_updates=True)
     return 0 if cleanup['owned_thread_unsubscribe'] != 'unconfirmed' and cleanup['connection_close'] == 'confirmed' else 1
 
 

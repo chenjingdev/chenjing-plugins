@@ -346,7 +346,7 @@ struct OldNameTests {
         let note = AppNotification.updated(version, advice: UpdateAdvice.oldNames)
         #expect(note.kind == .updatedCheck)
         #expect(note.key == "updated-0.8.6", "still the one notice of the update")
-        #expect(note.body == "새 Claude 대화부터 새 판이 쓰여요. Claude Code에 CUA의 옛 이름이 남아 있어요 — 점검 탭을 보세요")
+        #expect(note.body == "Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요. Claude Code에 CUA의 옛 이름이 남아 있어요 — 점검 탭을 보세요")
         #expect(NotificationResponse.make(tap: .body, kind: .updatedCheck, key: note.key) == .openPopover(.check))
         #expect(NotificationResponse.make(tap: .dismissed, kind: .updatedCheck, key: note.key) == nil)
         #expect(AppNotification.updated(version) == AppNotification.updated(version, advice: nil))
@@ -393,7 +393,7 @@ struct OldNameTests {
         let said = await rig.actions.setUp()
         #expect(said == ActionOutcome(
             kind: .success,
-            message: "CUA Bar를 0.7.0로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요. auto 모드에서도 묻지 않게 하는 규칙 한 줄이 점검 탭에 있어요"))
+            message: "CUA Bar를 0.7.0로 올렸어요. Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요. auto 모드에서도 묻지 않게 하는 규칙 한 줄이 점검 탭에 있어요"))
         #expect(rig.announcements.posted.first?.kind == .updatedCheck, "it was tried as the notification first")
     }
 }

@@ -4,8 +4,8 @@ import Foundation
 ///
 /// The app that replaces itself writes the new version here before it does, and takes the mark away when the
 /// update fails. The new app's install routine finds it when it has put the engine and the MCP server in
-/// line with the new version, tells "CUA Bar를 x.y.z로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요" (a notification, for
-/// the popover is closed and a banner there would pass unseen) instead of its own "새 Claude 대화부터 CUA가 붙어요", and
+/// line with the new version, tells "CUA Bar를 x.y.z로 올렸어요. Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요" (a notification, for
+/// the popover is closed and a banner there would pass unseen) instead of its own "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요", and
 /// takes the mark away: one notice, not two, and only once.
 struct UpdateNotice: Sendable {
     var file: URL
@@ -24,10 +24,10 @@ struct UpdateNotice: Sendable {
         "CUA Bar를 \(version)로 올렸어요"
     }
 
-    /// "새 Claude 대화부터 새 판이 쓰여요": the second half, in its body.
-    static let consequence = "새 Claude 대화부터 새 판이 쓰여요"
+    /// "Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요": the second half, in its body.
+    static let consequence = "Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요"
 
-    /// The whole line: "CUA Bar를 x.y.z로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요".
+    /// The whole line: "CUA Bar를 x.y.z로 올렸어요. Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요".
     static func line(for version: VersionNumber) -> String {
         headline(for: version) + ". " + consequence
     }

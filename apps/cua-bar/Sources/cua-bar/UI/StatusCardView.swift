@@ -10,6 +10,10 @@ struct StatusCardView: View {
     var fixHelp: String?
     /// What the button cuts off, beside it (하던 Codex 작업이 끊겨요): the press is the consent; nil for none.
     var fixNote: String? = nil
+    var restartIsRunning = false
+    var restartHelp: String?
+    var restartNote: String?
+    var restart: () -> Void = {}
     var fix: () -> Void
 
     /// Neutral until the first answer, so the card never says "ready" before it is known.
@@ -67,6 +71,28 @@ struct StatusCardView: View {
                             .help(fixHelp ?? "")
                     }
                     .padding(.top, 3)
+                }
+                if let restartAdvice = summary.auxiliaryRestart {
+                    Divider().padding(.vertical, 3)
+                    Text(restartAdvice.step)
+                        .font(.system(size: 11, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(StatusEvaluator.codexRestartOnly)
+                        .font(Theme.captionFont).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        if let restartNote {
+                            Text(restartNote).font(Theme.captionFont).foregroundStyle(Theme.orangeText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                        if restartIsRunning { ProgressView().controlSize(.small) }
+                        Button("Codex 다시 켜기", action: restart)
+                            .font(.system(size: 12, weight: .semibold))
+                            .buttonStyle(FixButtonStyle(fill: Theme.fixFill(for: summary.icon)))
+                            .disabled(restartIsRunning)
+                            .help(restartHelp ?? restartAdvice.warning)
+                    }
                 }
             }
         }

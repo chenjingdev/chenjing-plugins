@@ -101,6 +101,15 @@ struct EngineClientTests {
         ])
     }
 
+    @Test func disconnectOneStaleMCPHasItsOwnCommandAndNoForceOption() async throws {
+        let runner = ScriptedRunner(stdout: #"{"ok":true,"stopped":true,"disconnected":true,"released":false,"reason":null}"#)
+        let (client, home) = try client(runner)
+        defer { home.remove() }
+        let result = try await client.disconnectMCP(id: "claude-9-9")
+        #expect(result.stopped)
+        #expect(runner.calls.map(\.arguments) == [["disconnect", "--connection", "claude-9-9", "--json"]])
+    }
+
     @Test(arguments: StopGroup.allCases, [false, true])
     func stopAGroup(group: StopGroup, force: Bool) async throws {
         let runner = ScriptedRunner(stdout: #"{"ok": true, "stopped": 2, "failed": 1, "results": [{"connection_id": "a", "stopped": true, "released": true, "reason": null}]}"#)

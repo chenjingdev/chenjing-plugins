@@ -25,7 +25,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.17'
+VERSION = '0.8.18'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -39,6 +39,8 @@ TURN_ENDED_WITHOUT_HOST = ('The Codex host connection was lost, so the CUA turn 
                            'turn_ended never connects to Codex again; the next CUA tool call does.')
 NOTHING_TO_END = 'No CUA turn of this connection is open, so there was nothing to end.'
 STOPPING = 'This owned CUA connection is stopping.'
+UPDATE_CLOSING = ('CUA Bar was updated and this old MCP connection is closing. This request was not sent. '
+                  'Reconnect cuabar with `/mcp reconnect cuabar` to load the installed code.')
 CANCEL_BEFORE_SEND = 'This CUA request was cancelled before it was sent, so it did not run.'
 CANCEL_SENT = ('Cancellation was sent to this CUA request\'s native runtime. Actions already performed are not undone, '
                'and its final outcome is not confirmed. Look at the current state before continuing; do not replay it.')
@@ -69,7 +71,9 @@ INSTRUCTIONS = (
     'Use CUA Bar\'s local `status` tool to check the loaded code, installed update and Claude hooks. '
     'Transport Connected alone does not mean an update is loaded. The local `repair` tool can restore CUA Bar\'s '
     'own lifecycle hooks while preserving disabled hooks and other settings. It does not reload this MCP process; '
-    'if reconnect_required remains true, tell the user to reconnect cuabar in /mcp. '
+    'If an update is installed, this MCP closes after its accepted requests finish, so Claude can show it as '
+    'disconnected. Reconnect it with the exact command `/mcp reconnect cuabar`; `reconnect all` can leave a '
+    'Connected old server alone. '
     'An interrupted running CUA request is canceled individually when the verified relay supports it; do not replay '
     'an action whose cancellation or outcome is unconfirmed. Never quit Codex, change permissions, or run `codex-cua` release, release-session, '
     'dismiss-session, stop, restart-codex or unlock-reset yourself; the user does those through CUA Bar.')
@@ -146,7 +150,8 @@ def with_runtime_note(name, answer, enabled=True):
             '(running '+str(view['running_version'] or 'unknown')+', installed '
             +str(view['installed_version'])+'). The transport can still show Connected. '
             'Use status to inspect it and repair to restore managed hooks if needed. '
-            'Repair does not reload this process. Tell the user to reconnect cuabar in /mcp; '
+            'Repair does not reload this process. This old MCP closes after accepted requests finish. '
+            'Tell the user to run `/mcp reconnect cuabar`; '
             'do not report that the update is active or replay the action.')
     if 'content' in answer and isinstance(answer['content'], list):
         return {**answer, 'content': [*answer['content'], {'type': 'text', 'text': note}]}
@@ -245,7 +250,7 @@ def failure_note(message):
         return LOST_NOTE
     if message == TURN_ENDED_WITHOUT_HOST:
         return TURN_ENDED_NOTE
-    if message == STOPPING:
+    if message in (STOPPING, UPDATE_CLOSING):
         return None
     return HOST_NOTE
 
@@ -512,6 +517,7 @@ class HostMcp:
         self.turn_id = str(uuid.uuid4())
         self.active_tool_calls = 0
         self.stopping = False
+        self.update_pending = False
         self.thread_creation_requested = False
         self.tools = []
         self.tool_names = set()
@@ -817,6 +823,8 @@ class HostMcp:
         self.log('original_owned_thread_elicitation_forwarded')
 
     async def handle(self, message):
+        if self.reject_updated_request(message):
+            return
         params = message.get('params') if isinstance(message, dict) else None
         ident = message.get('id') if isinstance(message, dict) else None
         tracked = (isinstance(message, dict) and message.get('jsonrpc') == '2.0'
@@ -843,6 +851,21 @@ class HostMcp:
             if self.client_calls.get(key) is call:
                 self.client_calls.pop(key)
             self.client_tasks.pop(call['task'], None)
+
+    def mark_update_pending(self):
+        self.update_pending = True
+        self.changed()
+
+    def reject_updated_request(self, message):
+        if (not self.update_pending or not isinstance(message, dict) or message.get('jsonrpc') != '2.0'
+                or message.get('method') != 'tools/call'
+                or (type(message.get('id')) is not int and not isinstance(message.get('id'), str))):
+            return False
+        params = message.get('params')
+        if not isinstance(params, dict) or params.get('name') not in ('js', 'js_reset'):
+            return False
+        self.reply(message['id'], error={'code': -32004, 'message': UPDATE_CLOSING})
+        return True
 
     async def cancel_native_request(self, call):
         """Only a relay of the request's original owned host can address the native MCP request."""
@@ -999,6 +1022,8 @@ class HostMcp:
                 return
             if self.stopping:
                 raise BridgeFailure(STOPPING)
+            if self.update_pending:
+                raise BridgeFailure(UPDATE_CLOSING)
             await self.reconnect()
 
     async def reconnect(self):
@@ -1072,6 +1097,8 @@ class HostMcp:
         try:
             if self.stopping:
                 raise BridgeFailure(STOPPING)
+            if self.update_pending and name in ('js', 'js_reset'):
+                raise BridgeFailure(UPDATE_CLOSING)
             if not self.connected:
                 raise BridgeFailure(LOST_BEFORE_SEND)
             rpc, scope = self.rpc, self.current_scope()
@@ -1279,7 +1306,7 @@ class HostMcp:
             return report
 
 
-async def serve(adapter, control_factory=None, stdin=None):
+async def serve(adapter, control_factory=None, stdin=None, watch_updates=False):
     """Run the MCP session on stdin and stdout until stdin ends or a stop signal arrives.
 
     control_factory(adapter) makes the record and control endpoint of this bridge. They exist from the start, also
@@ -1327,6 +1354,10 @@ async def serve(adapter, control_factory=None, stdin=None):
 
     upstream = asyncio.create_task(incoming())
     signal_waiter = asyncio.create_task(stopped.wait())
+    update_watcher = None
+    if watch_updates:
+        from bridge_update import UpdateWatch
+        update_watcher = asyncio.create_task(UpdateWatch(adapter, stopped, lambda: bool(tasks)).run())
     cleanup = None
     try:
         done, _ = await asyncio.wait((upstream, signal_waiter), return_when=asyncio.FIRST_COMPLETED)
@@ -1335,7 +1366,10 @@ async def serve(adapter, control_factory=None, stdin=None):
     finally:
         upstream.cancel()
         signal_waiter.cancel()
-        await asyncio.gather(upstream, signal_waiter, return_exceptions=True)
+        if update_watcher is not None:
+            update_watcher.cancel()
+        await asyncio.gather(upstream, signal_waiter,
+                             *([update_watcher] if update_watcher is not None else []), return_exceptions=True)
         # Stop local request tasks before closing the connection, including a
         # pending initialization, so none can create resources after close.
         # This does not send remote action retries, approvals or turn interrupts.

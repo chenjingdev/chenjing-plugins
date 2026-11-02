@@ -22,8 +22,8 @@ enum ResultPlace: Hashable, Sendable {
 }
 
 /// Everything a button in the popover can ask for. A row has one button for its state: 탭 풀기 on a
-/// connection whose AI is alive and on a leftover lease, 정리 on an ended connection or a cmux-cua
-/// connection nobody owns any more. `CUABarViewModel.send(_:)` runs it unless what it is aimed at is
+/// connection whose AI is alive and on a leftover lease, 옛 MCP 끊기 on a stale Claude MCP, and 정리 on an ended
+/// connection or a cmux-cua connection nobody owns. `CUABarViewModel.send(_:)` runs it unless what it is aimed at is
 /// gone (it never asks), and `perform(_:)` runs it.
 enum CUAAction: Hashable, Sendable {
     // Engine actions (contract: "Actions").
@@ -32,6 +32,10 @@ enum CUAAction: Hashable, Sendable {
     case releaseConnection(String)
     /// 탭 풀기 again after the engine refused (R15). Never asks again.
     case retryRelease(String)
+    /// Disconnect one verified stale Claude MCP process. Never reconnects its client or stops Codex.
+    case disconnectMCP(String)
+    /// Copy the exact Claude command; copying does not reconnect anything.
+    case copyReconnectCommand
     /// 탭 풀기 on a leftover lease, by session id. `user` is true for a button press; a Codex
     /// thread's session is released only then.
     case releaseSession(String, user: Bool)
@@ -68,7 +72,7 @@ enum CUAAction: Hashable, Sendable {
     /// Where its answer is told; nil for the actions that answer under the status card, whose buttons are there.
     var resultPlace: ResultPlace? {
         switch self {
-        case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): .connection(id)
+        case .releaseConnection(let id), .retryRelease(let id), .disconnectMCP(let id), .tidy(let id): .connection(id)
         case .releaseSession(let id, _), .dismissSession(let id): .session(id)
         case .tidyAll: .tidyAll
         case .copyDiagnosis: .diagnosis
@@ -81,7 +85,7 @@ enum CUAAction: Hashable, Sendable {
     /// The connection the action is aimed at, so its row's buttons can wait for it.
     var connectionID: String? {
         switch self {
-        case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): id
+        case .releaseConnection(let id), .retryRelease(let id), .disconnectMCP(let id), .tidy(let id): id
         default: nil
         }
     }
@@ -98,7 +102,7 @@ enum CUAAction: Hashable, Sendable {
     /// only the ended ones, and a restart or a setup touches every row.
     func touches(_ connection: Connection) -> Bool {
         switch self {
-        case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): id == connection.id
+        case .releaseConnection(let id), .retryRelease(let id), .disconnectMCP(let id), .tidy(let id): id == connection.id
         case .tidyAll: connection.state == .ended
         case .restartCodex, .runSetup: true
         default: false

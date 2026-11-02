@@ -38,6 +38,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         case releaseSession(String, user: Bool)
         case dismissSession(String)
         case stopConnection(String, force: Bool)
+        case disconnectMCP(String)
         case stopGroup(StopGroup, force: Bool)
         case restartCodex
         case unlockReset
@@ -58,6 +59,7 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         /// nil: the session is dismissed, and the status no longer lists it from then on.
         var dismissSession: DismissResult?
         var stopConnection = StopResult(ok: true, stopped: true, released: true, reason: nil)
+        var disconnectMCP = StopResult(ok: true, stopped: true, released: true, reason: nil)
         /// Per-connection answers for `stopConnection`, before falling back to `stopConnection`.
         var stopConnectionByID: [String: StopResult] = [:]
         /// Answers to successive `stopConnection` calls, whichever connection and force, first one
@@ -160,6 +162,10 @@ final class FakeEngineClient: EngineClient, @unchecked Sendable {
         let queued = lock.withLock { self.script.stopConnectionQueue.isEmpty ? nil : self.script.stopConnectionQueue.removeFirst() }
         if let queued { return try queued.get() }
         return script.stopConnectionByID[id] ?? script.stopConnection
+    }
+
+    func disconnectMCP(id: String) async throws -> StopResult {
+        try await begin(.disconnectMCP(id), isAction: true).disconnectMCP
     }
 
     func stopGroup(_ group: StopGroup, force: Bool) async throws -> GroupStopResult {

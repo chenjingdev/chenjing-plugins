@@ -31,7 +31,8 @@ struct ReconnectStatusTests {
         #expect(summary.problem?.kind == .reconnectRequired)
         #expect(summary.headline == "재연결이 필요한 MCP 연결이 1개 있어요")
         #expect(summary.nextStep == StatusEvaluator.reconnectStep)
-        #expect(summary.fix == nil, "setup and process termination cannot reconnect a client")
+        #expect(summary.fix == .copyReconnectCommand, "copying the exact client command is explicit")
+        #expect(summary.fixLabel == "명령 복사")
     }
 
     @Test func reconnectRequirementStaysVisibleWhileAConnectionIsQuietOrBusy() throws {
@@ -44,9 +45,24 @@ struct ReconnectStatusTests {
             #expect(row.state.text == "재연결 필요")
             #expect(row.hint?.contains("실행 0.8.16 · 설치 0.8.17") == true)
             #expect(row.hint?.contains(StatusEvaluator.reconnectStep) == true)
-            #expect(row.button.action == .releaseConnection("claude-123-456"), "a live connection is never stopped")
+            #expect(row.button.action == .disconnectMCP("claude-123-456"))
+            #expect(row.button.title == "옛 MCP 끊기")
+            #expect(row.button.isEnabled == !busy)
             #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0").problem?.kind == .reconnectRequired)
         }
+    }
+
+    @Test func codexRestartAdviceStaysSeparateFromTheMCPReconnect() throws {
+        var status = try status()
+        status.host.startedBeforeSetup = true
+        let summary = StatusEvaluator.evaluate(status, appVersion: "0.7.0")
+        #expect(summary.problem?.kind == .reconnectRequired)
+        #expect(summary.fix == .copyReconnectCommand)
+        #expect(summary.auxiliaryRestart?.step == StatusEvaluator.restartAppliesStep)
+        #expect(summary.auxiliaryRestart?.warning == StatusEvaluator.restartAppliesWarning)
+        #expect(StatusEvaluator.codexRestartOnly.contains("Claude MCP"))
+        status.host.startedBeforeSetup = false
+        #expect(StatusEvaluator.evaluate(status, appVersion: "0.7.0").auxiliaryRestart == nil)
     }
 
     @Test func mcpRegistrationReadyDoesNotConcealAnOldLiveConnection() throws {

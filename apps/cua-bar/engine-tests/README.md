@@ -67,6 +67,10 @@ Node 시험도 같은 출력과 종료 코드를 시험 프로세스가 낸다. 
 - `test_bridge_cancel`, `relay/cancel.test.mjs`: 요청 UUID와 네이티브 MCP ID의 정확한 취소 연결, 잘못되거나 오래된 요청·다른 소유자 거절, 원본 동작 재실행 방지.
 - Swift `ClaudeLifecycleStatusTests`와 설치 시험: 훅 상태의 이전 엔진 호환성, 고장·비활성화 안내, 준비되지 않은 설치를 성공으로 표시하지 않는지 확인.
 
+## 0.8.18 실제 연결 종료와 재연결
+
+`test_disconnect_stale`, `test_bridge_update`, `test_bridge_update_process`는 오래된 Claude 브릿지 하나만 검증해서 끊는 명령, 진행 중 요청 보류, 코드 갱신 뒤 새 GUI 요청 거절, 이미 실행한 요청 결과 보존과 자기 범위 정리 후 실제 stdio EOF를 확인합니다. subprocess 시험도 임시 HOME·설치 사본·가짜 호스트만 사용하며 클라이언트 stdin을 열어 둬서 일반 EOF 정리와 구분합니다. `test_agent_kernels`는 업데이트 대기가 하위 에이전트에도 전파되는지 확인합니다.
+
 ## 격리
 
 `test_runtime_identity`, `test_claude_reconnect`, `test_mcp_health`, `test_mcp_health_tools`는 0.8.17의 실행·설치 코드 비교, 같은 판 내용 변경, 소유자별 1회 훅 경고, 로컬 상태 도구, 관리 훅만 복구하는 고정 helper를 검증합니다. 재연결 필요와 훅 수리 성공을 별도로 확인하고, 비활성화 정책·다른 프로필·실행 중 요청을 보존하는지 검사합니다.

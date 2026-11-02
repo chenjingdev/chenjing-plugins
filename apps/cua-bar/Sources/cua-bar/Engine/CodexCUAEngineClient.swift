@@ -90,6 +90,10 @@ struct CodexCUAEngineClient: EngineClient {
         return try await json(StopResult.self, arguments, timeout: timeouts.stop)
     }
 
+    func disconnectMCP(id: String) async throws -> StopResult {
+        try await json(StopResult.self, ["disconnect", "--connection", id, "--json"], timeout: timeouts.stop)
+    }
+
     func stopGroup(_ group: StopGroup, force: Bool) async throws -> GroupStopResult {
         let arguments = ["stop", "--group", group.rawValue] + (force ? ["--force"] : []) + ["--json"]
         return try await json(GroupStopResult.self, arguments, timeout: timeouts.groupStop)

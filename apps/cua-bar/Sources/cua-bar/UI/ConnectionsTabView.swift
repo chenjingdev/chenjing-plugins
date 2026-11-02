@@ -159,7 +159,7 @@ struct ConnectionRowView: View {
                         .font(Theme.captionFont)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    if refused {
+                    if refused && !row.needsReconnect {
                         Label(ConnectionRow.refusedNote, systemImage: "hourglass")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Theme.orangeText)
@@ -178,7 +178,8 @@ struct ConnectionRowView: View {
                     }
                     HStack(spacing: 4) {
                         if waiting { ProgressView().controlSize(.small) }
-                        SpecButton(spec: refused ? row.retryButton : row.button, waiting: waiting, waitingHelp: waitingHelp, send: send)
+                        SpecButton(spec: refused && !row.needsReconnect ? row.retryButton : row.button,
+                                   waiting: waiting, waitingHelp: waitingHelp, send: send)
                     }
                 }
             }

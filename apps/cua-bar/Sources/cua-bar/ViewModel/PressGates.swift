@@ -26,6 +26,14 @@ enum PressGates {
         case .releaseConnection(let id), .tidy(let id):
             guard content != nil else { return .refuse(readStatusFirst) }
             return targetExists(id, in: content) ? .run : .refuse(targetGone)
+        case .disconnectMCP(let id):
+            guard let content else { return .refuse(readStatusFirst) }
+            guard let row = content.connections.row(withID: id) else { return .refuse(targetGone) }
+            guard row.agent == .claude, row.needsReconnect, row.contractState != .ended else {
+                return .refuse("옛 Claude MCP로 확인된 연결만 끊을 수 있어요")
+            }
+            guard !row.isBusy else { return .refuse("CUA 요청이 실행 중이라 끊지 않았어요") }
+            return row.canStop ? .run : .refuse("이 연결의 신원을 확인하지 못해 끊을 수 없어요")
         default:
             return .run
         }

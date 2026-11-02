@@ -21,7 +21,7 @@ MAX_REPLY = 16384
 HELPER_KIND = 'cuabar_hook_repair'
 SAFE_CODE = re.compile(r'^[a-z][a-z0-9_]{0,79}$')
 RECONNECT = ('The MCP transport may still show Connected while this bridge runs an older CUA Bar engine. '
-             'Reconnect cuabar from the Claude /mcp menu; restart Claude Code if Reconnect is unavailable. '
+             'Run /mcp reconnect cuabar in Claude Code; restart Claude Code if that command is unavailable. '
              'Do not replay an action whose outcome is uncertain.')
 
 TOOL_SPECS = (

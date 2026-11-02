@@ -46,6 +46,8 @@ protocol EngineClient: Sendable {
     func dismissSession(id: String) async throws -> DismissResult
     /// `stop --connection <id> [--force]`
     func stopConnection(id: String, force: Bool) async throws -> StopResult
+    /// `disconnect --connection <id>`: only a verified stale, idle Claude MCP; no force or client reconnect.
+    func disconnectMCP(id: String) async throws -> StopResult
     /// `stop --group all|claude|codex [--force]`
     func stopGroup(_ group: StopGroup, force: Bool) async throws -> GroupStopResult
     /// `restart-codex`: a normal quit (never a force quit), then Codex is opened again.

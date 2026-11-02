@@ -28,8 +28,8 @@ enum InstallMessages {
     static let mcpFailed = "Claude Code에 CUA를 연결하지 못했어요"
     /// An MCP server named cuabar that the app did not put there: left as it is.
     static let conflict = "Claude Code에 앱이 깔지 않은 cuabar가 있어서 그대로 뒀어요 — 점검 탭에서 치우는 방법을 보세요"
-    /// A new Claude conversation is where the connection shows up.
-    static let installed = "새 Claude 대화부터 CUA가 붙어요"
+    /// A new registration may require a Claude restart; an existing MCP can be reconnected explicitly.
+    static let installed = "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요"
     /// The engine's setup ran again and still reports a part that is not ready.
     static let notAllRepaired = "다시 설정했지만 고쳐지지 않은 곳이 있어요 — 점검 탭에서 보세요"
     static let developerToolsOpened = "개발자 도구 설치 창을 열었어요 — 끝나면 설치를 한 번 더 눌러 주세요"
@@ -186,8 +186,8 @@ final class LiveSystemActions: SystemActions, @unchecked Sendable {
         return (result.outcome, probe)
     }
 
-    /// Right after the app replaced itself with a newer version (F4), "새 Claude 대화부터 CUA가 붙어요" is not said. The
-    /// update's own line is, "CUA Bar를 x.y.z로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요", as a notification: the popover
+    /// Right after the app replaced itself with a newer version (F4), "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요" is not said. The
+    /// update's own line is, "CUA Bar를 x.y.z로 올렸어요. Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요", as a notification: the popover
     /// is closed when the new app starts, and a banner in it would pass unseen. So the person hears one thing, once, and
     /// the update's mark is taken away. Where no notification went out (they are off), the line is the banner's.
     /// The line of an install that had no Claude Code to tell about stays as it is, and the mark goes with it. Any other

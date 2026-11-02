@@ -14,7 +14,11 @@ struct PopoverView: View {
                 summary: model.summary,
                 fixIsRunning: model.fixIsBusy,
                 fixHelp: model.fixHelp,
-                fixNote: model.fixNote
+                fixNote: model.fixNote,
+                restartIsRunning: model.auxiliaryRestartIsBusy,
+                restartHelp: model.auxiliaryRestartHelp,
+                restartNote: model.auxiliaryRestartNote,
+                restart: { model.send(.restartCodex) }
             ) {
                 if let fix = model.summary.fix { model.send(fix) }
             }

@@ -696,6 +696,22 @@ final class CUABarViewModel: ObservableObject {
     private func execute(_ action: CUAAction) async -> ActionResult {
         do {
             switch action {
+            case .disconnectMCP(let id):
+                guard let connection = lastStatus?.connection(withID: id), connection.agent == .claude,
+                      connection.needsReconnect, connection.canStop else {
+                    return ActionResult(outcome: ActionOutcome(kind: .info,
+                        message: "옛 Claude MCP로 확인된 연결만 끊을 수 있어요"), reason: "not_stale")
+                }
+                guard !connection.busy else {
+                    return ActionResult(outcome: ActionOutcome(kind: .info,
+                        message: "CUA 요청이 실행 중이라 끊지 않았어요"), reason: "request_in_flight")
+                }
+                let result = try await engine.disconnectMCP(id: id)
+                return ActionResult(outcome: ActionMessages.disconnectMCP(result), reason: result.reason)
+            case .copyReconnectCommand:
+                pasteboard.copy(StatusEvaluator.reconnectCommand)
+                return ActionResult(outcome: ActionOutcome(kind: .success,
+                    message: "재연결 명령을 복사했어요. Claude 입력창에 붙여 넣고 실행해 주세요"), reason: nil)
             case .releaseConnection(let id), .retryRelease(let id):
                 let result = try await engine.releaseConnection(id: id, earlierSessions: earlierSessions(of: id))
                 noteBrowserBlocked(result.reason)
@@ -923,6 +939,8 @@ final class CUABarViewModel: ObservableObject {
     private static func failureLead(for action: CUAAction) -> String {
         switch action {
         case .releaseConnection, .retryRelease, .releaseSession: "탭을 풀지 못했어요"
+        case .disconnectMCP: "옛 MCP를 끊지 못했어요"
+        case .copyReconnectCommand: "재연결 명령을 복사하지 못했어요"
         case .dismissSession: "지우지 못했어요"
         case .tidy, .tidyAll: "정리하지 못했어요"
         case .restartCodex: "Codex를 다시 켜지 못했어요"
@@ -993,7 +1011,7 @@ final class CUABarViewModel: ObservableObject {
         guard isCleaningUp else { return false }
         switch action {
         case .tidyAll: return true
-        case .releaseConnection(let id), .retryRelease(let id), .tidy(let id): return cleaningIDs.contains(id)
+        case .releaseConnection(let id), .retryRelease(let id), .disconnectMCP(let id), .tidy(let id): return cleaningIDs.contains(id)
         case .releaseSession(let id, _): return isClaudeSession(id)
         default: return false
         }
@@ -1005,6 +1023,18 @@ final class CUABarViewModel: ObservableObject {
     var fixIsBusy: Bool {
         guard let fix = summary.fix else { return false }
         return inFlight.contains(fix) || waitsForQuit(fix)
+    }
+
+    var auxiliaryRestartIsBusy: Bool {
+        inFlight.contains(.restartCodex) || waitsForQuit(.restartCodex)
+    }
+
+    var auxiliaryRestartHelp: String? {
+        waitsForQuit(.restartCodex) ? Self.quitWaitHelp : nil
+    }
+
+    var auxiliaryRestartNote: String {
+        content?.claudeWorksThroughCodex == true ? StatusEvaluator.restartCutsOffWithClaude : StatusEvaluator.restartCutsOff
     }
 
     /// Nothing is in the way of the app replacing itself with a newer version (F4, R8): the popover (and the verify

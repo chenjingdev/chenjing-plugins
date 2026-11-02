@@ -15,7 +15,7 @@ import signal
 import subprocess
 
 from engine_core import CONNECTION_ID, REASON
-from engine_inventory import (app_pids, cmux_mode, find_installation, is_cua_repl, lookup, read_host, same_process,
+from engine_inventory import (app_pids, cmux_mode, find_installation, is_bridge, is_cua_repl, lookup, read_host, same_process,
                               snapshot)
 from engine_records import ControlError, control_request, release_timeout
 from engine_release import book_release, release_sessions
@@ -34,6 +34,7 @@ REASON_MAP = {'cleanup_tool_unavailable': 'cleanup_not_confirmed'}
 # second: the release was confirmed only when it was asked again (see release_one).
 Release = namedtuple('Release', 'released reason count nothing second', defaults=(False,))
 Runtime = namedtuple('Runtime', 'pid started')       # the cua-repl of a stopped Claude connection's thread
+StaleBridge = namedtuple('StaleBridge', 'pid started')  # only this verified MCP transport is disconnected
 NO_RELEASE = Release(False, None, 0, False)      # a connection without a release step: nothing was asked, nothing failed
 
 
@@ -206,6 +207,8 @@ def _same(ctx, conn, proc):
         return False
     if isinstance(conn, CmuxConnection):
         return cmux_mode(proc.command) == 'mcp'
+    if isinstance(conn, StaleBridge):
+        return is_bridge(proc.command, ctx.plugin_root)
     return not isinstance(conn, Runtime) or is_cua_repl(proc.command)
 
 
@@ -314,6 +317,64 @@ def stop_connection(ctx, wanted, force=False):
     result = stop_connections(ctx, [conn], force, protected, view.records)[0]
     return {'ok': result['stopped'], 'stopped': result['stopped'], 'released': result['released'],
             'reason': result['reason']}
+
+
+def disconnect_stale_connection(ctx, wanted):
+    """Close one old Claude MCP transport so its client stops claiming it is connected.
+
+    This is a distinct user action from stop: a busy bridge is left running, no
+    force option exists, and no runtime or another client is signalled here.
+    The bridge's ordinary SIGTERM path releases its own scopes before exiting.
+    """
+    def reply(disconnected=False, released=False, reason=None):
+        return {'ok': disconnected, 'stopped': disconnected, 'disconnected': disconnected,
+                'released': released, 'reason': reason}
+
+    view, conn = find_connection(ctx, wanted)
+    if conn is None:
+        return reply(reason='not_found')
+    if (isinstance(conn, CmuxConnection) or conn.agent != 'claude'
+            or (conn.record is not None and conn.record.kind != 'bridge')):
+        return reply(reason='unsupported')
+    if not conn.reconnect_required:
+        return reply(reason='not_stale')
+    protected = view.protected_pids()
+    if not conn.can_stop or conn.pid <= 1 or conn.pid == ctx.pid or conn.pid in protected:
+        return reply(reason='protected')
+    if conn.busy:
+        return reply(reason='request_in_flight')
+    target = StaleBridge(conn.pid, conn.started)
+    try:
+        if not _same(ctx, target, lookup(ctx, conn.pid)):
+            return reply(reason='unverified')
+    except (OSError, subprocess.TimeoutExpired):
+        return reply(reason='unverified')
+    release = release_one(ctx, conn)
+    if release.reason == 'request_in_flight':
+        return reply(released=release.released, reason=release.reason)
+    book_connection(ctx, view.records, conn, release)
+    # A call or installation switch may have happened while release waited.
+    fresh_view, fresh = find_connection(ctx, wanted)
+    if fresh is None:
+        return reply(True, release.released, None if release.released else release.reason)
+    if (fresh.agent != 'claude' or (fresh.record is not None and fresh.record.kind != 'bridge')
+            or not fresh.reconnect_required):
+        return reply(released=release.released, reason='not_stale')
+    if fresh.busy:
+        return reply(released=release.released, reason='request_in_flight')
+    if fresh.pid in fresh_view.protected_pids() or not fresh.can_stop:
+        return reply(released=release.released, reason='protected')
+    try:
+        if not _same(ctx, target, lookup(ctx, target.pid)):
+            return reply(released=release.released, reason='unverified')
+    except (OSError, subprocess.TimeoutExpired):
+        return reply(released=release.released, reason='unverified')
+    sent = _signal(ctx, target, signal.SIGTERM)
+    if sent in ('denied', 'unverified'):
+        return reply(released=release.released, reason='permission_denied' if sent == 'denied' else 'unverified')
+    if sent == 'sent' and _wait_gone(ctx, [target], STOP_GRACE):
+        return reply(released=release.released, reason='timeout')
+    return reply(True, release.released, None if release.released else release.reason)
 
 
 def stop_group(ctx, group, force=False):

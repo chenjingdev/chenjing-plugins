@@ -34,9 +34,9 @@ struct UpdateNoticeTests {
     }
 
     @Test func theLineSaysTheVersionAndWhereTheNewOneIsUsed() {
-        #expect(UpdateNotice.line(for: VersionNumber(0, 8, 1)) == "CUA Bar를 0.8.1로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요")
+        #expect(UpdateNotice.line(for: VersionNumber(0, 8, 1)) == "CUA Bar를 0.8.1로 올렸어요. Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요")
         #expect(UpdateNotice.headline(for: VersionNumber(0, 8, 1)) == "CUA Bar를 0.8.1로 올렸어요")
-        #expect(UpdateNotice.consequence == "새 Claude 대화부터 새 판이 쓰여요")
+        #expect(UpdateNotice.consequence == "Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요")
     }
 
     @Test func theLineIsToldOnlyToTheAppOfTheVersionTheUpdateWasTo() throws {
@@ -45,7 +45,7 @@ struct UpdateNoticeTests {
         let notice = UpdateNotice(home: home.url)
         #expect(notice.lineIfJustUpdated(to: seven) == nil, "no mark, no line")
         try notice.leave(version: VersionNumber(0, 8, 0))
-        #expect(notice.lineIfJustUpdated(to: VersionNumber(0, 8, 0)) == "CUA Bar를 0.8.0로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요")
+        #expect(notice.lineIfJustUpdated(to: VersionNumber(0, 8, 0)) == "CUA Bar를 0.8.0로 올렸어요. Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요")
         #expect(notice.lineIfJustUpdated(to: nil) == nil, "an app without a version has nothing to compare")
         // The update that is under way is the mark of an app this one is about to give way to: it is not touched.
         #expect(notice.lineIfJustUpdated(to: seven) == nil)
@@ -62,10 +62,10 @@ struct UpdateNoticeTests {
         await rig.actions.setUp()
     }
 
-    private let installed = ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요")
+    private let installed = ActionOutcome(kind: .success, message: "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요")
     /// Nothing for the banner: what there was to say went out as a notification.
     private let nothingForTheBanner = InstallMessages.nothingToSay
-    private let updatedLine = "CUA Bar를 0.7.0로 올렸어요. 새 Claude 대화부터 새 판이 쓰여요"
+    private let updatedLine = "CUA Bar를 0.7.0로 올렸어요. Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요"
 
     @MainActor @Test func theInstallAfterAnUpdateAnnouncesTheUpdateInsteadOfItsOwnLineAndOnlyOnce() async throws {
         let rig = try LiveSystemActionsTests().rig()
@@ -121,7 +121,7 @@ struct UpdateNoticeTests {
         #expect(await install(rig) == nothingForTheBanner)
         let posted = rig.announcements.posted
         #expect(posted == [AppNotification.updated(seven).appending(probe: .failed)])
-        #expect(posted.first?.body == "새 Claude 대화부터 새 판이 쓰여요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
+        #expect(posted.first?.body == "Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
         #expect(posted.first?.key == "updated-0.7.0")
     }
 

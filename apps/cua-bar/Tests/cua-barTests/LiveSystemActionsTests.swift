@@ -195,7 +195,7 @@ struct LiveSystemActionsTests {
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall, rig.mcpAdd()])
         #expect(rig.claude.mcpState(launcher: rig.launcher) == .ready)
         #expect(!FileManager.default.fileExists(atPath: rig.home.skillFolder.path), "since 0.8.10 the MCP server says how to use CUA")
-        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(outcome == ActionOutcome(kind: .success, message: "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요"))
         #expect(rig.setup.phase == .idle)
         #expect(rig.setup.waitingFor.isEmpty && !rig.setup.developerToolsNeeded)
     }
@@ -264,7 +264,7 @@ struct LiveSystemActionsTests {
         try rig.home.addMcp(command: rig.launcher)
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.installEngineCall], "the launcher is the same whatever the version")
-        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(outcome == ActionOutcome(kind: .success, message: "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요"))
     }
 
     @Test(arguments: [EngineError.engineMissing, .setupNeeded(installPath: "/x"), .commandFailed(exitCode: 2, message: "usage"), .launchFailed("x"),
@@ -294,7 +294,7 @@ struct LiveSystemActionsTests {
         let outcome = await rig.actions.setUp()
         #expect(rig.runner.calls == [rig.developerToolsCheck, rig.mcpAdd(rig.launcher)], "no install-engine")
         #expect(rig.claude.mcpState(launcher: nil) == .ready)
-        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(outcome == ActionOutcome(kind: .success, message: "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요"))
         #expect(rig.setup.waitingFor == [.status], "the engine step comes back with the first read that works")
         #expect(rig.setup.phase == .idle)
     }

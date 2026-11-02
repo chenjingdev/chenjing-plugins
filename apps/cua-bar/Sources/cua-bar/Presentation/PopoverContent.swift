@@ -38,6 +38,14 @@ struct ButtonSpec: Equatable, Identifiable, Sendable {
 }
 
 extension ButtonSpec {
+    static func disconnectMCP(_ connection: Connection) -> ButtonSpec {
+        ButtonSpec(
+            title: "옛 MCP 끊기", action: .disconnectMCP(connection.id), isDestructive: true,
+            isEnabled: connection.canStop && !connection.busy,
+            help: connection.busy ? "이 연결의 CUA 요청이 끝나면 끊을 수 있어요"
+                : !connection.canStop ? "이 연결의 신원을 확인하지 못해 끊을 수 없어요"
+                : "이 연결만 끊어요. 끊는 순간 새 CUA 요청이 겹치면 그 작업도 끊길 수 있어요. Claude에서 /mcp reconnect cuabar를 실행해 다시 연결해 주세요")
+    }
     /// 탭 풀기 on a connection whose AI is alive: only the tabs it holds, the connection stays.
     /// `working`: the connection may still be in the middle of something (사용 중, or 알 수 없음). The press asks
     /// nothing, so the help says what it cuts off.
@@ -109,13 +117,14 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
     var isBusy: Bool
     var canRelease: Bool
     var canStop: Bool
-    /// The row's one button: 탭 풀기 when its AI is alive, 정리 when it ended.
+    var needsReconnect: Bool
+    /// The row's one button: disconnect a stale Claude MCP, otherwise 탭 풀기 while alive or 정리 after it ended.
     var button: ButtonSpec
     /// Said on the line itself, so the reason is not only on hover: an ended connection the app cannot
     /// tidy, or one whose tabs it already released and can do no more with.
     var hint: String?
     /// After the engine refused a release twice (R15): the same 탭 풀기, which does not ask again. A
-    /// live AI is never stopped from here.
+    /// live AI is not stopped by the release retry.
     var retryButton: ButtonSpec
 
     /// The line a row shows after a refused release.
@@ -139,13 +148,16 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         isBusy = connection.busy
         canRelease = connection.canRelease
         canStop = connection.canStop
+        needsReconnect = connection.needsReconnect
         let way = TidyPlan.way(for: connection)
         let settled = TidyPlan.isSettled(connection, tabsReleased: tabsReleased)
-        button = connection.state == .ended
+        button = connection.needsReconnect && connection.agent == .claude
+            ? .disconnectMCP(connection)
+            : connection.state == .ended
             ? .tidy(connection.id, way: way, settled: settled)
             : .releaseTabs(of: connection.id, isEnabled: connection.canRelease, working: connection.state != .idle)
         hint = connection.needsReconnect
-            ? "\(StatusEvaluator.reconnectVersions(of: connection)) · \(StatusEvaluator.reconnectStep)"
+            ? "\(StatusEvaluator.reconnectVersions(of: connection)) · 이 연결만 끊거나 \(StatusEvaluator.reconnectStep)"
             : connection.state != .ended ? nil : settled ? Self.tabsReleasedHint : way == nil ? Self.cannotTidyHint : nil
         retryButton = ButtonSpec(
             title: "탭 풀기", action: .retryRelease(connection.id), isEnabled: connection.canRelease,

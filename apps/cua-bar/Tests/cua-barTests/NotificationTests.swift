@@ -493,7 +493,7 @@ struct NotificationViewModelTests {
         #expect(note.kind == .updated)
         #expect(note.key == "updated-0.8.1")
         #expect(note.title == "CUA Bar를 0.8.1로 올렸어요")
-        #expect(note.body == "새 Claude 대화부터 새 판이 쓰여요")
+        #expect(note.body == "Claude에서 /mcp reconnect cuabar를 실행해 새 판을 적용해 주세요")
         #expect(note.title + ". " + note.body == UpdateNotice.line(for: version))
         #expect(note.buttons.isEmpty)
         #expect(NotificationResponse.make(tap: .body, kind: .updated, key: note.key) == .openPopover(nil))

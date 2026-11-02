@@ -101,6 +101,21 @@ struct TidyStep: Equatable, Sendable {
 /// Plain Korean for what the engine answered. Nothing here shows text the command printed: the
 /// only words that reach the person are these.
 enum ActionMessages {
+    static func disconnectMCP(_ result: StopResult) -> ActionOutcome {
+        if result.stopped {
+            return ActionOutcome(kind: .success,
+                message: "옛 MCP 연결을 끊었어요. Claude에서 /mcp reconnect cuabar를 실행해 주세요")
+        }
+        switch result.reason {
+        case "not_stale": return ActionOutcome(kind: .info, message: "이미 최신 연결이라 끊지 않았어요")
+        case "not_found": return ActionOutcome(kind: .info, message: "그 연결은 이미 없어졌어요")
+        case "request_in_flight": return ActionOutcome(kind: .info, message: "CUA 요청이 실행 중이라 끊지 않았어요")
+        case "unsupported": return ActionOutcome(kind: .failure, message: "옛 Claude MCP로 확인된 연결만 끊을 수 있어요")
+        case "timeout": return ActionOutcome(kind: .warning, message: "옛 MCP의 종료를 확인하지 못했어요. Claude에서 /mcp reconnect cuabar를 실행해 주세요")
+        default: return ActionOutcome(kind: .failure, message: "옛 MCP를 끊지 못했어요 — \(reason(result.reason))")
+        }
+    }
+
     static let unknownReason = "확인되지 않음"
 
     /// Since Codex 26.1023 the desktop app lets only the conversations it started itself use the browser, so the

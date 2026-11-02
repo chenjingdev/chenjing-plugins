@@ -114,6 +114,22 @@ class AgentKernelTests(BridgeCase):
         self.assertEqual(prepared.call_count, 1)
         self.assertEqual(adapter.scopes, {})
 
+    async def test_update_pending_propagates_and_rejects_another_agent_before_lazy_boot(self):
+        _, adapter, prepared = await self.registered()
+        self.kernel('native-existing-agent')
+        await self.run_tool(adapter, 'set:shared=existing', agent='existing-agent')
+        child = next(iter(adapter.agent_children.values()))
+        before = len(self.connects)
+        adapter.mark_update_pending()
+        self.assertTrue(adapter.update_pending)
+        self.assertTrue(child.update_pending)
+        answer = await self.run_tool(adapter, 'set:shared=not-sent', agent='new-agent')
+        self.assertEqual(answer['error']['code'], -32004)
+        self.assertIn('/mcp reconnect cuabar', answer['error']['message'])
+        self.assertEqual(len(adapter.agent_children), 1)
+        self.assertEqual(len(self.connects), before)
+        self.assertEqual(prepared.call_count, 2)
+
     async def test_an_agent_gets_its_own_lazy_thread_and_reset_cannot_clear_parent_or_sibling_bindings(self):
         parent, adapter, _ = await self.registered()
         self.assertEqual(adapter.agent_children, {})

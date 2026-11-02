@@ -10,12 +10,12 @@ import sys
 
 from engine_core import Context
 
-COMMANDS = ('status', 'release', 'release-session', 'dismiss-session', 'stop', 'restart-codex', 'unlock-reset', 'settings',
+COMMANDS = ('status', 'release', 'release-session', 'dismiss-session', 'stop', 'disconnect', 'restart-codex', 'unlock-reset', 'settings',
             'diagnose')
 # Which of the option flags each command accepts.
 OPTIONS = {'status': (), 'release': ('connection', 'ended', 'connections_only'), 'release-session': ('session', 'user'),
            'dismiss-session': ('session',),
-           'stop': ('connection', 'group', 'force'), 'restart-codex': (), 'unlock-reset': (),
+           'stop': ('connection', 'group', 'force'), 'disconnect': ('connection',), 'restart-codex': (), 'unlock-reset': (),
            'settings': ('error_text',), 'diagnose': ()}
 
 
@@ -35,6 +35,8 @@ def validate(args, error):
         error('%s needs --session ID' % args.command)
     if args.command == 'stop' and bool(args.connection) == bool(args.group):
         error('stop needs exactly one of --connection ID or --group all|claude|codex')
+    if args.command == 'disconnect' and not args.connection:
+        error('disconnect needs --connection ID')
     if args.command == 'settings' and getattr(args, 'error_text', None) not in ('on', 'off'):
         error('settings needs --error-text on|off')
 
@@ -56,6 +58,9 @@ def execute(ctx, args):
     if args.command == 'settings':
         from engine_records import write_settings
         return write_settings(ctx.state_dir, ctx.uid, args.error_text == 'on')
+    if args.command == 'disconnect':
+        from engine_actions import disconnect_stale_connection
+        return disconnect_stale_connection(ctx, args.connection)
     if args.command == 'release-session':
         from engine_release import release_session_command
         return release_session_command(ctx, args.session, user=args.user)

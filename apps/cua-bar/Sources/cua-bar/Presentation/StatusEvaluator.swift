@@ -62,9 +62,16 @@ struct StatusSummary: Equatable, Sendable {
     /// Nothing is broken, but a restart of Codex would bring something (`restartNotice`): the card offers 다시 켜기
     /// for the person to press when Codex is free. The app never restarts it on its own for this.
     var restartOffered = false
+    /// A separate Codex configuration update while Claude MCPs need their own reconnect.
+    var auxiliaryRestart: CodexRestartAdvice?
 
     var fix: CUAAction? { problem?.fix ?? (restartOffered ? .restartCodex : nil) }
     var fixLabel: String? { problem?.fixLabel ?? (restartOffered ? StatusEvaluator.restartLabel : nil) }
+}
+
+struct CodexRestartAdvice: Equatable, Sendable {
+    var step: String
+    var warning: String
 }
 
 /// What the app knows by itself besides the engine's answer: what Claude Code has of CUA, whether the
@@ -83,13 +90,17 @@ enum StatusEvaluator {
     static func evaluate(
         _ status: EngineStatus, appVersion: String?, tabsReleased: Set<String> = [], facts: LocalFacts = LocalFacts()
     ) -> StatusSummary {
+        let restart = restartNotice(in: status)
         if let problem = problem(in: status, appVersion: appVersion, tabsReleased: tabsReleased, facts: facts) {
-            return summary(for: problem)
+            var result = summary(for: problem)
+            if problem.kind == .reconnectRequired, let restart {
+                result.auxiliaryRestart = CodexRestartAdvice(step: restart.step, warning: restart.warning)
+            }
+            return result
         }
         // Not a problem (nothing is broken and the icon stays ready), but nothing else would say why
         // the connections of a Codex from before the update cannot be released. Said while working
         // too, or the card would drop it each time an AI uses the screen.
-        let restart = restartNotice(in: status)
         if let use = screenUse(in: status) {
             let sentence = "\(use.subject)가 화면을 쓰는 중"
             return StatusSummary(
@@ -239,7 +250,7 @@ enum StatusEvaluator {
         if !reconnect.isEmpty {
             return Problem(
                 kind: .reconnectRequired, title: "재연결이 필요한 MCP 연결이 \(reconnect.count)개 있어요",
-                nextStep: reconnectStep, warning: nil, fix: nil, fixLabel: nil)
+                nextStep: reconnectStep, warning: nil, fix: .copyReconnectCommand, fixLabel: "명령 복사")
         }
         let ended = status.connections.filter { $0.state == .ended }
         if !ended.isEmpty {
@@ -315,8 +326,10 @@ enum StatusEvaluator {
 
     // MARK: Setup
 
-    static let reconnectStep = "/mcp에서 cuabar를 골라 Reconnect를 눌러 주세요"
-    static let reconnectFallback = "재연결 항목이 없으면 Claude Code를 다시 시작해 주세요"
+    static let reconnectCommand = "/mcp reconnect cuabar"
+    static let reconnectStep = "/mcp reconnect cuabar를 실행해 주세요"
+    static let reconnectFallback = "명령이 지원되지 않으면 Claude Code를 다시 시작해 주세요"
+    static let codexRestartOnly = "Codex 설정만 갱신해요. Claude MCP는 위 명령으로 따로 재연결해 주세요"
 
     static func reconnectVersions(of connection: Connection) -> String {
         "실행 \(nonEmpty(connection.runningVersion) ?? "판 알 수 없음") · 설치 \(nonEmpty(connection.installedVersion) ?? "판 알 수 없음")"

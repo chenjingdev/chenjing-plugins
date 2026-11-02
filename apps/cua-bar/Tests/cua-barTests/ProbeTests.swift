@@ -68,8 +68,8 @@ struct ProbeClientTests {
     }
 
     @Test func theFailureSentenceIsAddedOnlyAfterATestThatFailed() {
-        let said = "새 Claude 대화부터 CUA가 붙어요"
-        #expect(ProbeMessages.attach(.failed, to: said) == "새 Claude 대화부터 CUA가 붙어요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
+        let said = "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요"
+        #expect(ProbeMessages.attach(.failed, to: said) == "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
         #expect(ProbeMessages.attach(.timeout, to: said).hasSuffix("연결 시험이 실패했어요 — 점검 탭을 보세요"))
         #expect(ProbeMessages.attach(.checked, to: said) == said)
         #expect(ProbeMessages.attach(.hostUnavailable, to: said) == said)
@@ -78,7 +78,7 @@ struct ProbeClientTests {
         #expect(ProbeMessages.attach(.failed, to: "") == "연결 시험이 실패했어요 — 점검 탭을 보세요")
 
         let answer = ProbeMessages.attach(.failed, to: ActionOutcome(kind: .success, message: said))
-        #expect(answer.kind == .warning && answer.message == "새 Claude 대화부터 CUA가 붙어요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
+        #expect(answer.kind == .warning && answer.message == "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
         #expect(ProbeMessages.attach(.failed, to: ActionOutcome(kind: .failure, message: "x")).kind == .failure)
         #expect(ProbeMessages.attach(.checked, to: ActionOutcome(kind: .success, message: said)) == ActionOutcome(kind: .success, message: said))
     }
@@ -469,7 +469,7 @@ struct InstallProbeTests {
         let outcome = await rig.actions.setUp()
         #expect(hook.calls == 1)
         #expect(hook.commandsBefore == [rig.runner.calls.count], "the test comes after everything the install ran")
-        #expect(outcome.message == "새 Claude 대화부터 CUA가 붙어요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
+        #expect(outcome.message == "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
         #expect(outcome.kind == .warning)
     }
 
@@ -481,7 +481,7 @@ struct InstallProbeTests {
             let hook = hook(for: rig, answer: answer)
             let outcome = await rig.actions.setUp()
             #expect(hook.calls == 1, "\(String(describing: answer))")
-            #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+            #expect(outcome == ActionOutcome(kind: .success, message: "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요"))
         }
     }
 
@@ -528,11 +528,11 @@ struct InstallProbeTests {
         try rig.home.installClaudeCode()
         let hook = hook(for: rig, answer: .failed)
         let done = await rig.actions.setUpAndTest()
-        #expect(done.outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"), "the install's own words")
+        #expect(done.outcome == ActionOutcome(kind: .success, message: "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요"), "the install's own words")
         #expect(done.probe == .failed)
         #expect(hook.calls == 1)
         let sentence = ProbeMessages.attach(done.probe, to: done.outcome.message)
-        #expect(sentence == "새 Claude 대화부터 CUA가 붙어요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
+        #expect(sentence == "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요. 연결 시험이 실패했어요 — 점검 탭을 보세요")
     }
 
     @Test func aSecondInstallWhileOneRunsIsBusyAndTestsNothing() async throws {
@@ -555,7 +555,7 @@ struct InstallProbeTests {
         defer { rig.home.remove() }
         try rig.home.installClaudeCode()
         let outcome = await rig.actions.setUp()
-        #expect(outcome == ActionOutcome(kind: .success, message: "새 Claude 대화부터 CUA가 붙어요"))
+        #expect(outcome == ActionOutcome(kind: .success, message: "Claude를 다시 시작하거나 /mcp reconnect cuabar를 실행해 주세요"))
     }
 }
 

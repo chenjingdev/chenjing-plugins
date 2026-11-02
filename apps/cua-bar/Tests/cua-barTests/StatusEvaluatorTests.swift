@@ -237,7 +237,7 @@ struct StatusEvaluatorTests {
         ProblemCase(name: "login_environment_conflict", kind: .loginEnvironmentConflict, title: "Codex 로그인 설정이 다른 값과 겹쳐요",
              nextStep: "점검 탭에서 겹치는 값과 치우는 방법을 보세요", fix: nil, fixLabel: nil),
         ProblemCase(name: "reconnect_required", kind: .reconnectRequired, title: "재연결이 필요한 MCP 연결이 1개 있어요",
-             nextStep: "/mcp에서 cuabar를 골라 Reconnect를 눌러 주세요", fix: nil, fixLabel: nil),
+             nextStep: StatusEvaluator.reconnectStep, fix: .copyReconnectCommand, fixLabel: "명령 복사"),
         // One line's problem: the card says what to do, the button is on that line.
         ProblemCase(name: "ended_connections", kind: .endedConnections, title: "끝난 연결이 1개 남아 있어요",
              nextStep: "목록 맨 위의 정리를 눌러 주세요", fix: nil, fixLabel: nil),
@@ -596,11 +596,15 @@ struct StatusEvaluatorTests {
         }
     }
 
-    @Test func onlyAProblemOfTheWholeAppHasAFixButton() throws {
+    @Test func wholeAppProblemsHaveFixesAndMCPReconnectOffersOnlyItsCommandCopy() throws {
         for kind in ProblemKind.allCases where kind != .engineUnreadable {
             let problem = try #require(evaluate(try status(causing: kind), facts: facts(causing: kind)).problem)
             let wholeApp: Set<ProblemKind> = [.codexMissing, .developerToolsNeeded, .setupIncomplete, .codexWithoutHost]
-            #expect((problem.fix != nil) == wholeApp.contains(kind), "\(kind)")
+            if kind == .reconnectRequired {
+                #expect(problem.fix == .copyReconnectCommand)
+            } else {
+                #expect((problem.fix != nil) == wholeApp.contains(kind), "\(kind)")
+            }
             #expect((problem.fixLabel != nil) == (problem.fix != nil), "\(kind)")
         }
     }

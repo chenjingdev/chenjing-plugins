@@ -103,7 +103,7 @@ def _message(statuses, installed):
     else:
         reason = '이 Claude의 cuabar MCP가 설치된 코드와 달라 재연결이 필요합니다'
     details = ', '.join((['연결 '+', '.join(versions)] if versions else [])+[target])
-    return ('CUA Bar: '+reason+' ('+details+'). /mcp에서 cuabar를 재연결해 주세요. '
+    return ('CUA Bar: '+reason+' ('+details+'). Claude에서 /mcp reconnect cuabar를 실행해 주세요. '
             'Connected 표시는 연결 여부만 나타냅니다.')
 
 
@@ -150,4 +150,4 @@ def hook_output(state, owner, payload, read_record, process_identity, installed=
             'update is loaded. Use the cuabar status tool to compare the running code, installed code, and hooks. '
             'The cuabar repair tool can restore managed hooks for the explicitly selected Claude profile; it does '
             'not reconnect this MCP process. If status still requires reconnection, tell the user to reconnect '
-            'cuabar in /mcp. Do not report the connection as up to date.'}}
+            'cuabar with /mcp reconnect cuabar. Do not report the connection as up to date.'}}

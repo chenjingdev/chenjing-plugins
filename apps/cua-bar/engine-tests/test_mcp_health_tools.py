@@ -80,7 +80,7 @@ class RuntimeReplyTests(unittest.TestCase):
         self.assertEqual(result['content'][:-1], original['content'])
         self.assertEqual({key: value for key, value in result.items() if key != 'content'},
                          {key: value for key, value in original.items() if key != 'content'})
-        self.assertIn('reconnect cuabar in /mcp', result['content'][-1]['text'])
+        self.assertIn('/mcp reconnect cuabar', result['content'][-1]['text'])
 
     def test_rpc_errors_keep_the_original_code_and_lifecycle_results_get_no_update_note(self):
         error = {'code': -1234, 'message': 'native refusal', 'data': {'native': True}}
