@@ -43,10 +43,10 @@ test('출처 이름은 머리줄에 쓰는 말이다', () => {
   assert.equal(name, 'pact 기록');
 });
 
-test('날짜 있는 .pact 판과 옛 docs/pact 판이 같은 슬러그면 날짜 있는 판 하나만 남는다', async () => {
+test('같은 슬러그의 .pact 판이 여럿이면 최신 판 하나만 남는다', async () => {
   const root = tmp();
   put(path.join(root, 'repoA/.pact/2026-10-20-선택지-질문/spec.md'), spec({ topic: '선택지 질문' }));
-  put(path.join(root, 'repoA/docs/pact/2026-10-19-선택지-질문.md'), spec({ topic: '선택지 질문', created: '2026-10-19' }));
+  put(path.join(root, 'repoA/.pact/2026-10-19-선택지-질문/spec.md'), spec({ topic: '선택지 질문', created: '2026-10-19' }));
   put(path.join(root, 'repoA/.pact/다른-일/spec.md'), spec({ topic: '선택지 다른 일' }));
   const { items } = await run(root, ['선택지']);
   const attempts = of(items, 'attempts');
@@ -88,19 +88,6 @@ test('깊이 4를 넘는 폴더와 심볼릭 링크는 따라가지 않는다', 
   assert.deepEqual(of(items, 'attempts').map((i) => i.text.split(' — ')[0]), ['얕음 주제']);
 });
 
-test('옛 꼴 docs/pact/*.md를 읽고, 같은 이름의 .pact 폴더에서 results.json을 찾는다', async () => {
-  const root = tmp();
-  put(path.join(root, 'old/docs/pact/2026-10-21-대시보드.md'), spec({ topic: '대시보드', created: '2026-10-21', status: 'done' }));
-  put(
-    path.join(root, 'old/.pact/대시보드/results.json'),
-    JSON.stringify({ scenarios: [{ title: '한도 차트', result: 'fail', summary: '점선이 안 그려짐' }] }),
-  );
-  const { items } = await run(root, ['대시보드']);
-  const attempt = of(items, 'attempts')[0];
-  assert.equal(attempt.path, path.join(root, 'old/docs/pact/2026-10-21-대시보드.md'));
-  assert.equal(attempt.date, '2026-10-21');
-  assert.match(of(items, 'failures')[0].text, /한도 차트/);
-});
 
 test('results.json의 fail·doubt는 실패 묶음으로 오고 pass는 오지 않는다', async () => {
   const root = tmp();
@@ -249,10 +236,10 @@ test('RECALL_ROOTS를 하나도 읽지 못하면 던진다(머리줄에 못 읽�
   await assert.rejects(() => run('/no/such/root', ['주제']), /RECALL_ROOTS/);
 });
 
-test('하지 않는 것의 `기록에서 뺌: 요지 (M/D)` 줄은 주제와 상관없이 모든 명세(옛 꼴 포함)에서 excluded로 모인다', async () => {
+test('하지 않는 것의 `기록에서 뺌: 요지 (M/D)` 줄은 주제와 상관없이 모든 명세에서 excluded로 모인다', async () => {
   const root = tmp();
   const a = path.join(root, 'repoA/.pact/2026-10-20-로그인/spec.md');
-  const b = path.join(root, 'repoB/docs/pact/2026-10-01-결제.md');
+  const b = path.join(root, 'repoB/.pact/2026-10-01-결제/spec.md');
   put(a, spec({ topic: '로그인', notNow: '- 기록에서 뺌: 팀원 기억 (11/2)\n- 기록에서 뺌 : 판이 끝날 때 기억에 따로 적기 (2025/12/3)\n- 다음 판 후보: 가 아이디어\n- 기록에서 뺌: 날짜 없는 줄\n기록에서 뺌: 줄 머리 - 없음 (1/2)\n  - 기록에서 뺌: 들여쓴 줄 (1/2)' }));
   put(b, spec({ topic: '결제', notNow: '- 기록에서 뺌: 괄호 (안) 있는 요지 (10/9)' }));
   const { items, excluded } = await run(root, ['로그인']);

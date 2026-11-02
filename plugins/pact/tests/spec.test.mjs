@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseSpec, lintSpec, riskUnits, explainError, setStatus, slugify, newSpecPath, specRunDir, decisionRulings, specLocation, migrateSpecs, openSize, OPEN_LINES_MAX, OPEN_ASSUMPTIONS_MAX } from '../scripts/spec.mjs';
+import { parseSpec, lintSpec, riskUnits, explainError, setStatus, slugify, newSpecPath, specRunDir, decisionRulings, specLocation, openSize, OPEN_LINES_MAX, OPEN_ASSUMPTIONS_MAX } from '../scripts/spec.mjs';
 import { PACT_GITIGNORE, ensureRunDir } from '../scripts/paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -98,7 +98,7 @@ test('newSpecPath does not overwrite an existing spec of the same day and topic'
   assert.equal(newSpecPath(d, '출결', '2026-10-10'), path.join(d, '.pact', '2026-10-10-출결-2', 'spec.md'));
 });
 
-test('ensureRunDir creates .pact/<slug>/ with a .pact/.gitignore that keeps only wt/ and scratch/ out of git, idempotently, and replaces the old `*`', () => {
+test('ensureRunDir creates .pact/<slug>/ with a .pact/.gitignore that keeps only wt/ and scratch/ out of git, idempotently', () => {
   const d = tmp();
   const run = ensureRunDir(d, '출결');
   assert.equal(run, path.join(d, '.pact', '출결'));
@@ -107,10 +107,6 @@ test('ensureRunDir creates .pact/<slug>/ with a .pact/.gitignore that keeps only
   assert.equal(ensureRunDir(d, '출결'), run);
   assert.match(PACT_GITIGNORE, /^\*\/wt\/$/m);
   assert.match(PACT_GITIGNORE, /^\*\/scratch\/$/m);
-  // 0.6까지 pact가 쓴 `*`는 새 내용으로 바뀌고, 사람이 고친 것은 그대로다
-  writeFileSync(path.join(d, '.pact', '.gitignore'), '*\n');
-  ensureRunDir(d, '출결');
-  assert.equal(readFileSync(path.join(d, '.pact', '.gitignore'), 'utf8'), PACT_GITIGNORE);
   writeFileSync(path.join(d, '.pact', '.gitignore'), '*/wt/\n*/shots/\n');
   ensureRunDir(d, '출결');
   assert.equal(readFileSync(path.join(d, '.pact', '.gitignore'), 'utf8'), '*/wt/\n*/shots/\n');
@@ -196,30 +192,7 @@ test('different dates for the same topic have independent run directories', () =
   assert.equal(existsSync(path.join(secondRun, 'results.json')), false);
 });
 
-test('completed legacy artifacts stay untouched while a dated run is created', () => {
-  const d = tmp();
-  const legacy = ensureRunDir(d, '출결');
-  writeFileSync(path.join(legacy, 'report.html'), 'old report');
-  const run = specRunDir(path.join(d, '.pact', '2026-10-11-출결', 'spec.md'));
-  assert.equal(run, path.join(d, '.pact', '2026-10-11-출결'));
-  assert.equal(readFileSync(path.join(legacy, 'report.html'), 'utf8'), 'old report');
-});
 
-test('CLI refuses an unverified legacy worktree without reusing or moving it', () => {
-  const d = tmp();
-  const legacy = ensureRunDir(d, '출결');
-  mkdirSync(path.join(legacy, 'wt'));
-  writeFileSync(path.join(legacy, 'wt', 'keep.txt'), 'legacy source');
-  const spec = path.join(d, '.pact', '2026-10-11-출결', 'spec.md');
-  const r = spawnSync('node', [CLI, 'run-dir', spec], { encoding: 'utf8' });
-  assert.equal(r.status, 1);
-  assert.equal(r.stdout, '');
-  assert.match(r.stderr, /기존.*작업 공간/);
-  assert.ok(r.stderr.includes(path.join(legacy, 'wt')));
-  assert.match(r.stderr, /원래 명세/);
-  assert.equal(readFileSync(path.join(legacy, 'wt', 'keep.txt'), 'utf8'), 'legacy source');
-  assert.equal(existsSync(path.join(d, '.pact', '2026-10-11-출결')), false);
-});
 
 // ---------- 위험 표시 [위험: …]와 태그 읽기 ----------
 
@@ -459,69 +432,19 @@ Ruling: 글머리 없는 줄은 Ruling 줄이 아니다
   assert.deepEqual(decisionRulings(`## 결정 기록\r\n- Ruling: 윈도우 줄바꿈 — a — b\r\n`), ['Ruling: 윈도우 줄바꿈 — a — b']);
 });
 
-// ---------- 0.7.0: 명세는 .pact/<run-id>/spec.md 한 자리, 옛 자리는 migrate가 옮긴다 ----------
+// ---------- 0.7.0: 명세는 .pact/<run-id>/spec.md 한 자리 ----------
 
 test('specLocation reads the project, run-id and run-dir from a spec path, and refuses any other shape with where the spec belongs', () => {
   const d = tmp();
   const spec = path.join(d, '.pact', '2026-11-01-출결', 'spec.md');
   assert.deepEqual(specLocation(spec), { spec, project: d, runId: '2026-11-01-출결', runDir: path.join(d, '.pact', '2026-11-01-출결') });
   for (const wrong of [path.join(d, 'docs', 'pact', '2026-11-01-출결.md'), path.join(d, '.pact', 'spec.md'), path.join(d, '.pact', 'x', 'notes.md'), path.join(d, 'x', 'spec.md')]) {
-    assert.throws(() => specLocation(wrong), /명세는 <프로젝트>\/\.pact\/<run-id>\/spec\.md에 둡니다.*spec\.mjs migrate/, wrong);
+    assert.throws(() => specLocation(wrong), /명세는 <프로젝트>\/\.pact\/<run-id>\/spec\.md에 둡니다/, wrong);
   }
   assert.equal(existsSync(path.join(d, '.pact')), false, '찾기만 하고 만들지 않는다');
 });
 
-test('migrate moves docs/pact/<run-id>.md into .pact/<run-id>/spec.md, rewrites the old `*` ignore file, removes the empty docs folders, and is safe to run again', () => {
-  const d = tmp();
-  mkdirSync(path.join(d, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(d, 'docs', 'pact', '2026-10-25-출결.md'), GOOD);
-  writeFileSync(path.join(d, 'docs', 'pact', '2026-10-26-메모.md'), GOOD.replace('출결', '메모'));
-  mkdirSync(path.join(d, '.pact', '출결'), { recursive: true }); // 날짜 없는 옛 실행 폴더는 그대로 둔다
-  writeFileSync(path.join(d, '.pact', '출결', 'report.html'), 'old');
-  writeFileSync(path.join(d, '.pact', '.gitignore'), '*\n');
-  const first = migrateSpecs(d);
-  assert.deepEqual(first.moved, [
-    [path.join(d, 'docs', 'pact', '2026-10-25-출결.md'), path.join(d, '.pact', '2026-10-25-출결', 'spec.md')],
-    [path.join(d, 'docs', 'pact', '2026-10-26-메모.md'), path.join(d, '.pact', '2026-10-26-메모', 'spec.md')],
-  ]);
-  assert.deepEqual(first.skipped, []);
-  assert.deepEqual(first.removed, [path.join(d, 'docs', 'pact'), path.join(d, 'docs')]);
-  assert.equal(readFileSync(path.join(d, '.pact', '2026-10-25-출결', 'spec.md'), 'utf8'), GOOD);
-  assert.equal(existsSync(path.join(d, 'docs')), false);
-  assert.equal(readFileSync(path.join(d, '.pact', '.gitignore'), 'utf8'), PACT_GITIGNORE, '옛 `*`는 새 내용으로');
-  assert.equal(readFileSync(path.join(d, '.pact', '출결', 'report.html'), 'utf8'), 'old');
-  assert.equal(specRunDir(path.join(d, '.pact', '2026-10-25-출결', 'spec.md')), path.join(d, '.pact', '2026-10-25-출결'));
-  // 다시 돌리면 아무것도 안 한다
-  assert.deepEqual(migrateSpecs(d), { moved: [], skipped: [], removed: [] });
-  // 새 자리에 이미 있으면 건너뛰고 옛 파일을 그대로 둔다
-  mkdirSync(path.join(d, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(d, 'docs', 'pact', '2026-10-25-출결.md'), 'older copy');
-  const again = migrateSpecs(d);
-  assert.deepEqual(again.moved, []);
-  assert.equal(again.skipped.length, 1);
-  assert.match(again.skipped[0][1], /이미 있습니다/);
-  assert.equal(readFileSync(path.join(d, 'docs', 'pact', '2026-10-25-출결.md'), 'utf8'), 'older copy');
-  assert.equal(existsSync(path.join(d, 'docs', 'pact')), true, '비지 않은 폴더는 지우지 않는다');
-});
 
-test('migrate keeps git history with git mv when the spec is tracked, and the CLI prints one line per move', () => {
-  const d = tmp();
-  const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: d, encoding: 'utf8' });
-  git('init', '-q', '-b', 'main');
-  mkdirSync(path.join(d, 'docs', 'pact'), { recursive: true });
-  writeFileSync(path.join(d, 'docs', 'pact', '2026-10-25-출결.md'), GOOD);
-  git('add', '.');
-  git('commit', '-q', '-m', 'spec');
-  const r = spawnSync('node', [CLI, 'migrate', d], { encoding: 'utf8' });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^옮김: .*docs\/pact\/2026-10-25-출결\.md → .*\.pact\/2026-10-25-출결\/spec\.md$/m);
-  assert.match(r.stdout, /^지움\(빈 폴더\): .*docs\/pact$/m);
-  const status = git('-c', 'core.quotePath=false', 'status', '--porcelain').stdout;
-  assert.match(status, /^R  docs\/pact\/2026-10-25-출결\.md -> \.pact\/2026-10-25-출결\/spec\.md$/m, status);
-  assert.match(status, /^\?\? \.pact\/\.gitignore$/m, status);
-  const none = spawnSync('node', [CLI, 'migrate', d], { encoding: 'utf8' });
-  assert.equal(none.stdout.trim(), '옮길 옛 명세(docs/pact/*.md)가 없습니다');
-});
 
 // ---------- 0.7.0: 검수 기준(A)과 크기 검사는 pact: 3부터 ----------
 
@@ -588,14 +511,14 @@ test('lint counts the open lines and the open [AI 가정] items from pact: 3, an
   assert.deepEqual(lintSpec(V3.replace('## 검수 기준', `<details><summary>그 밖의 AI 가정</summary>\n\n${many}\n</details>\n\n## 검수 기준`)), []);
 });
 
-test('the .pact/.gitignore keeps the records and drops only the scratch: worktree, scratch/, and where old editions put their temporary files', () => {
+test('the .pact/.gitignore keeps the records and drops the worktree and scratch/', () => {
   const d = tmp();
   const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: d, encoding: 'utf8' });
   git('init', '-q', '-b', 'main');
   const run = ensureRunDir(d, '2026-11-01-출결');
   const files = {
     keep: ['spec.md', 'approvals.jsonl', 'verification.json', 'results.json', 'results-round1.json', 'summary.json', 'report.html', 'plan.md', 'checklist.txt', 'log/subagents.jsonl', 'shots/S1-1.jpg', 'sketches/A.html', 'tasks/1-report.md', 'tasks/2-brief.md'],
-    drop: ['wt/src/index.js', 'wt/.pact/2026-11-01-출결/spec.md', 'scratch/test.db', 'scratch/leftover/dist.js', 'tasks/big.log', 'tasks/db.sqlite', 'tasks/sub/x.txt', 'leftover/dist.js', 'verify-tmp/a', 'verify-scratch/b', 'verify-logs/c', 'node_modules/x/index.js', '.DS_Store'],
+    drop: ['wt/src/index.js', 'wt/.pact/2026-11-01-출결/spec.md', 'scratch/test.db', 'scratch/leftover/dist.js', 'node_modules/x/index.js', '.DS_Store'],
   };
   for (const list of Object.values(files)) for (const rel of list) { mkdirSync(path.dirname(path.join(run, rel)), { recursive: true }); writeFileSync(path.join(run, rel), 'x'); }
   const listed = git('ls-files', '--others', '--exclude-standard', '-z').stdout.split('\0').filter(Boolean).map((f) => f.replace('.pact/2026-11-01-출결/', '')).sort();

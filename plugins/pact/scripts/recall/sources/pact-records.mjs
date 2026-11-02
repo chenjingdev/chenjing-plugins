@@ -42,11 +42,7 @@ function findRecords(root) {
       if (e.name === '.pact') {
         for (const run of readDir(child)) {
           const file = path.join(child, run.name, 'spec.md');
-          if (run.isDirectory() && isFile(file) && !excluded(path.relative(root, file))) found.push({ repoRoot: dir, file, base: run.name, legacy: false });
-        }
-      } else if (e.name === 'pact' && path.basename(dir) === 'docs') {
-        for (const doc of readDir(child)) {
-          if (doc.isFile() && doc.name.endsWith('.md')) found.push({ repoRoot: path.dirname(dir), file: path.join(child, doc.name), base: doc.name.slice(0, -3), legacy: true });
+          if (run.isDirectory() && isFile(file) && !excluded(path.relative(root, file))) found.push({ repoRoot: dir, file, base: run.name });
         }
       } else if (!e.name.startsWith('.') && depth < MAX_DEPTH) {
         visit(child, depth + 1);
@@ -58,7 +54,7 @@ function findRecords(root) {
 }
 
 function dedupe(records) {
-  const rank = (r) => (r.legacy ? 0 : DATE_PREFIX.test(r.base) ? 2 : 1);
+  const rank = (r) => (DATE_PREFIX.test(r.base) ? 2 : 1);
   const best = new Map();
   for (const r of records) {
     r.slug = r.base.replace(DATE_PREFIX, '');
@@ -119,13 +115,12 @@ function nextVersionIdeas(lines = []) {
   return ideas;
 }
 
-function readJson(dirs, file) {
-  for (const dir of dirs) {
-    try {
-      return JSON.parse(readFileSync(path.join(dir, file), 'utf8'));
-    } catch {}
+function readJson(dir, file) {
+  try {
+    return JSON.parse(readFileSync(path.join(dir, file), 'utf8'));
+  } catch {
+    return null;
   }
-  return null;
 }
 const EXCLUDED_LINE = /^기록에서 뺌\s*[:：]\s*(.+?)\s*\(((?:\d{4}\/)?\d{1,2}\/\d{1,2})\)$/;
 const excludedOf = (record, sections) =>
@@ -145,9 +140,8 @@ function dateOf(record, fm) {
 function itemsOf(record, { fm, sections }, overlap, sameRepo) {
   const head = { overlap, same_repo: sameRepo, date: dateOf(record, fm), source: 'pact', repo: path.basename(record.repoRoot), path: record.file };
   const make = (bucket, text) => ({ bucket, ...head, text });
-  const runDirs = [...new Set([record.legacy ? null : path.dirname(record.file), path.join(record.repoRoot, '.pact', record.base), path.join(record.repoRoot, '.pact', record.slug)].filter(Boolean))];
-  const summary = readJson(runDirs, 'summary.json');
-  const results = readJson(runDirs, 'results.json');
+  const summary = readJson(path.dirname(record.file), 'summary.json');
+  const results = readJson(path.dirname(record.file), 'results.json');
 
   const needs = bullets(sections['확인 필요']).filter((n) => !n.startsWith('확인함'));
   const headline = oneLine(summary?.headline) || oneLine(results?.headline);

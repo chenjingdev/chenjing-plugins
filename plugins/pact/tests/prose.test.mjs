@@ -638,10 +638,10 @@ test('the refusals the scripts and the hook print tell only the standard-input w
   assert.match(approval, /const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';/);
 });
 
-test('plugin.json is at 0.8.1', () => {
+test('plugin.json is at 0.8.2', () => {
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
   assert.equal(manifest.name, 'pact');
-  assert.equal(manifest.version, '0.8.1');
+  assert.equal(manifest.version, '0.8.2');
 });
 
 test('the README lists what 0.6.0 changed in one short section, and says how the hook hands the worker worries to the reviewer, in the brief and in a message', () => {
@@ -737,18 +737,15 @@ test('README and probe.md say that a delegation never takes an AskUserQuestion a
   assert.match(readme, /이 줄은 맨 위 상자에도 늘 있다\. 메인 세션이 `summary\.json`에 쓴 headline과 상관없이 스크립트가 붙이고, 새 판에는 없다\./);
 });
 
-// ---------- 0.7.0: 한 폴더, git에 남는 기록, RFP 틀(검수 기준, 구현은 build로), 메모 파일 금지 ----------
+// ---------- 0.7.0: 한 폴더, git에 남는 기록, RFP 틀(검수 기준, 구현은 build로) ----------
 
-test('0.7.0: the spec lives in .pact/<run-id>/spec.md, the folder goes into git, and nothing is written to docs/', () => {
+test('0.7.0: the spec lives in .pact/<run-id>/spec.md, and the folder goes into git', () => {
   const skill = read('skills/pact/SKILL.md');
   assert.match(skill, /## 남기는 파일/);
   assert.match(skill, /판 하나의 모든 것은 `<프로젝트>\/\.pact\/<run-id>\/` 한 폴더에 둔다\. 명세는 그 안의 `spec\.md`다\. 이 폴더는 git에 들어간다\. `wt\/`\(worktree\)·`scratch\/`\(임시 파일\)·`spec\.html`\(명세에서 다시 만드는 파일\)만 `\.pact\/\.gitignore`가 뺀다/);
-  assert.match(skill, /조사 메모, 사용자 원문 모음, 진행 메모 같은 파일을 실행 폴더에도 프로젝트에도 따로 만들지 않는다/);
   assert.match(skill, /대상 프로젝트의 `\.pact\/\*\/spec\.md`에서 status가 `done`이 아닌 명세를 찾는다/);
-  assert.match(skill, /`docs\/pact\/\*\.md`가 있으면 0\.7\.0 전의 자리다\. `node <pact>\/scripts\/spec\.mjs migrate <프로젝트>`로/);
   const probe = read('skills/pact/probe.md');
   assert.match(probe, /출력된 경로\(`<프로젝트>\/\.pact\/<run-id>\/spec\.md`\)가 이번 명세이고, 명세가 든 그 폴더가 실행 폴더\(`<run-dir>`\)다/);
-  assert.match(probe, /조사 메모, 사용자 원문 모음 같은 파일은 만들지 않는다/);
   const build = read('skills/pact/build.md');
   assert.match(build, /git add \.pact\/\.gitignore \.pact\/<run-id> && git commit -m "docs\(pact\): <주제> 명세"/);
   assert.match(build, /worktree 안에도 커밋된 `\.pact\/` 사본이 들어 있는데 거기에는 아무도 쓰지 않는다/);
@@ -759,7 +756,7 @@ test('0.7.0: the spec lives in .pact/<run-id>/spec.md, the folder goes into git,
   assert.match(verify, /`<run-dir>\/scratch\/leftover\/`/);
   assert.match(read('agents/worker.md'), /임시 파일\(시험용 스크립트, 데이터베이스\)은 `<run-dir>\/scratch\/`에 둔다/);
   assert.match(read('agents/verifier.md'), /그 밖의 임시 파일\(시험용 스크립트, 받아 둔 응답, 로그\)은 `scratch\/`에 둔다/);
-  for (const file of PROSE) assert.doesNotMatch(readFileSync(file, 'utf8').replace(/`docs\/pact\/\*\.md`가 있으면 0\.7\.0 전의 자리다[^\n]*/, ''), /docs\/pact/, `${rel(file)}: 옛 자리를 말하지 않는다`);
+  for (const file of PROSE) assert.doesNotMatch(readFileSync(file, 'utf8'), /docs\/pact/, `${rel(file)}: 옛 자리를 말하지 않는다`);
   const readme = read('README.md');
   assert.match(readme, /\| `\.pact\/<날짜>-<주제>\/spec\.md` \| 명세\./);
   assert.match(readme, /`wt\/`\(worktree\)·`scratch\/`\(임시 파일\)·`spec\.html`\(명세에서 다시 만드는 파일\)만 `\.pact\/\.gitignore`가 뺀다 \|/);
@@ -791,7 +788,7 @@ test('0.7.0: the spec is an RFP — what, why, limits and acceptance criteria; h
   const readme = read('README.md');
   const section = /^## 0\.7\.0에서 바뀐 것\n([\s\S]*?)(?=\n## )/m.exec(readme)?.[1] ?? '';
   const bullets = section.split('\n').filter((line) => line.startsWith('- '));
-  const names = ['한 폴더', 'git에 남는 기록', 'RFP 틀', 'spec-checker', 'verifier', '남기는 파일'];
+  const names = ['한 폴더', 'git에 남는 기록', 'RFP 틀', 'spec-checker', 'verifier'];
   assert.equal(bullets.length, names.length, section);
   names.forEach((name, i) => assert.ok(bullets[i].startsWith(`- ${name}: `), `${i + 1}번째는 ${name}: ${bullets[i]}`));
   assert.ok(readme.indexOf('## 0.7.0에서 바뀐 것') < readme.indexOf('## 0.6.0에서 바뀐 것'));
@@ -799,7 +796,7 @@ test('0.7.0: the spec is an RFP — what, why, limits and acceptance criteria; h
 
 // ---------- 0.8.0: recall 스킬로 기록 읽기, 출처 태그, 실패 → 검수 기준, 명세 HTML ----------
 
-test('0.8.0: probe reads the past through pact:recall as a received document, says "기록 없음" when there is none, and keeps the result out of files', () => {
+test('0.8.0: probe reads the past through pact:recall as a received document, says "기록 없음" when there is none', () => {
   const probe = read('skills/pact/probe.md');
   assert.ok(probe.includes('`pact:recall`'));
   assert.match(probe, /Skill 도구 목록에 `pact:recall`이 있으면 불러서/);
@@ -809,7 +806,6 @@ test('0.8.0: probe reads the past through pact:recall as a received document, sa
   assert.match(probe, /첫 메시지에 "기록 없음" 한 줄을 쓴다/);
   assert.match(probe, /recall을 부르기 전에 무엇을 읽는지 한 줄 알린다/);
   assert.ok(!probe.includes('1분쯤'), '도중에 알 수 없는 일은 쓰지 않는다');
-  assert.match(probe, /recall 결과도 파일로 남기지 않는다/);
   assert.ok(!probe.includes('메모리 도구가 있으면'), '옛 문구: 메모리 도구로 찾는다');
   // 첫 메시지 2와 기능 지도, 체크리스트
   assert.match(probe, /"예전 시도와 그 끝" 묶음으로 지난번엔 어디까지 하고 왜 멈췄나를 쓴다\. 끝난 판이면 명세 요지와 남긴 할 일, 버린 판이면 까닭이다/);
@@ -835,8 +831,6 @@ test('0.8.0: probe 5 teaches the source tags, failures as acceptance items, the 
   assert.ok(!probe.includes('케이스는 결과를 바꾸는 것만 더한다'), '바로 위 "결과를 바꾸는 것만 펼친다"와 같은 말');
   assert.match(probe, /기록에서 온 줄에 답한 것이면 날짜 태그 대신 `\[사용자: 검수 n\]`만 단다\(지금 한 말이 우선이라 날짜는 떨어진다\)/);
   assert.match(probe, /`예전 실패 못 막음`\)이 오면 제안한 문구에 그 실패의 날짜 태그\(`\[AI 가정: 기록 M\/D\]`, 다른 저장소면 `\[AI 가정: 기록 M\/D <저장소>\]`\)를 달아 `## 검수 기준`에 더한다/);
-  // 조사 메모 금지는 그대로
-  assert.match(probe, /조사 메모, 사용자 원문 모음 같은 파일은 만들지 않는다/);
 });
 
 test('0.8.0: the approval question opens the spec as an HTML page after saying so in the chat, and shows the record and other-repo lines apart', () => {
@@ -847,7 +841,6 @@ test('0.8.0: the approval question opens the spec as an HTML page after saying s
   assert.ok(probe.indexOf('spec.mjs html') < probe.indexOf('승인을 한 번 받는다'));
   assert.match(probe, /이 질문은 spec-checker가 끝난 뒤에 한다/);
   const skill = read('skills/pact/SKILL.md');
-  assert.match(skill, /recall 결과는 파일로 남기지 않는다/);
   assert.ok(!skill.includes('따로 뺀다'), 'spec.html은 첫 문단의 목록에 든다');
 });
 

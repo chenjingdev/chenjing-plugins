@@ -24,17 +24,15 @@ test('SKILL.md: 도구 위치(pact 폴더 밑 scripts/recall), 명령, 전하는
   assert.match(skill, /node <pact>\/scripts\/recall\/recall\.mjs <주제 낱말…> --project <지금 프로젝트 절대 경로>/);
   assert.match(skill, /2~5개/);
   assert.match(skill, /못 읽음/);
-  assert.match(skill, /파일을 만들지 않는다/);
   assert.match(skill, /다른 스킬이 불렀으면/);
 });
 
-test('README: recall 스킬 칸에 환경 변수 표와 파일을 만들지 않는다는 말을 담고, 옛 설치 줄이 없다', () => {
+test('README: recall 스킬 칸에 환경 변수 표를 담고, 옛 설치 줄이 없다', () => {
   const readme = read('README.md');
   assert.match(readme, /^## recall 스킬$/m);
   for (const v of ['HONCHO_BASE_URL', 'HONCHO_WORKSPACE_ID', 'HONCHO_USER_NAME', 'HONCHO_API_BEARER_TOKEN', 'HONCHO_ENV_FILE', 'RECALL_ROOTS', 'RECALL_BUDGET_MS', 'RECALL_REQUEST_MS', 'CLAUDE_PROJECTS_DIR']) {
     assert.ok(readme.includes(`| \`${v}\` |`), v);
   }
-  assert.match(readme, /^### 파일을 만들지 않는다$/m);
   assert.match(readme, /node plugins\/pact\/scripts\/recall\/recall\.mjs/);
   assert.ok(!readme.includes('plugin install recall'));
   assert.ok(!readme.includes('recall:recall'));

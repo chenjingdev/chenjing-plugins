@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { renderSpecHtml } from '../scripts/spec-html.mjs';
-import { PACT_GITIGNORE, ensureIgnoreLine } from '../scripts/paths.mjs';
+import { PACT_GITIGNORE } from '../scripts/paths.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(ROOT, 'scripts', 'spec.mjs');
@@ -177,18 +177,6 @@ test('CLI: html writes spec.html into the run dir, prints that path, and the new
   assert.equal(count(p.ignore), 1, '다시 돌려도 줄이 두 번 붙지 않는다');
 });
 
-test('CLI: html appends */spec.html to a .pact/.gitignore written before this line existed, and leaves a hand-edited file otherwise as it was', () => {
-  const old = PACT_GITIGNORE.replace('# 명세에서 다시 만드는 파일\n*/spec.html\n', '');
-  assert.ok(!old.includes('spec.html'));
-  const p = project(old);
-  assert.equal(html_(p.spec).status, 0);
-  assert.equal(readFileSync(p.ignore, 'utf8'), `${old}*/spec.html\n`);
-  html_(p.spec);
-  assert.equal(count(p.ignore), 1);
-  const hand = project('*/wt/\n*/shots/'); // 끝에 줄바꿈이 없는 사람이 고친 파일
-  assert.equal(html_(hand.spec).status, 0);
-  assert.equal(readFileSync(hand.ignore, 'utf8'), '*/wt/\n*/shots/\n*/spec.html\n');
-});
 
 test('git ignores .pact/<run-id>/spec.html through the line, and still keeps spec.md', () => {
   const p = project();
@@ -210,17 +198,6 @@ test('CLI: html on a spec outside .pact/<run-id>/ fails with a line saying where
   assert.equal(spawnSync(process.execPath, [CLI, 'html'], { encoding: 'utf8' }).status, 2, '명세를 안 주면 사용법');
 });
 
-test('ensureIgnoreLine appends a missing line once, keeps what is there, and creates the file when there is none', () => {
-  const dir = tmp();
-  ensureIgnoreLine(dir, 'a/');
-  assert.equal(readFileSync(path.join(dir, '.gitignore'), 'utf8'), 'a/\n');
-  ensureIgnoreLine(dir, 'a/');
-  ensureIgnoreLine(dir, 'b/');
-  assert.equal(readFileSync(path.join(dir, '.gitignore'), 'utf8'), 'a/\nb/\n');
-  writeFileSync(path.join(dir, '.gitignore'), 'x\r\ny\r\n');
-  ensureIgnoreLine(dir, 'y');
-  assert.equal(readFileSync(path.join(dir, '.gitignore'), 'utf8'), 'x\r\ny\r\n');
-});
 
 test('줄 가운데의 위험 표시도 위험으로 센다 (delegate의 riskItems와 같은 눈)', () => {
   const html = renderSpecHtml(SPEC.replace('- F1 오늘 수업 보기 [사용자]', '- F1 지난 자료 비우기 [위험: 지우기] 가운데 [사용자]'));
