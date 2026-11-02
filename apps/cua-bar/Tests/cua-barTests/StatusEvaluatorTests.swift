@@ -236,6 +236,8 @@ struct StatusEvaluatorTests {
         // The setup leaves somebody else's launchd value alone, so 고치기 could not change it: no button.
         ProblemCase(name: "login_environment_conflict", kind: .loginEnvironmentConflict, title: "Codex 로그인 설정이 다른 값과 겹쳐요",
              nextStep: "점검 탭에서 겹치는 값과 치우는 방법을 보세요", fix: nil, fixLabel: nil),
+        ProblemCase(name: "reconnect_required", kind: .reconnectRequired, title: "재연결이 필요한 MCP 연결이 1개 있어요",
+             nextStep: "/mcp에서 cuabar를 골라 Reconnect를 눌러 주세요", fix: nil, fixLabel: nil),
         // One line's problem: the card says what to do, the button is on that line.
         ProblemCase(name: "ended_connections", kind: .endedConnections, title: "끝난 연결이 1개 남아 있어요",
              nextStep: "목록 맨 위의 정리를 눌러 주세요", fix: nil, fixLabel: nil),
@@ -257,6 +259,8 @@ struct StatusEvaluatorTests {
             status.host.state = .closed
         case .loginEnvironmentConflict:
             status.setup.loginEnvironment = "conflict"
+        case .reconnectRequired:
+            status.connections[0].reconnectRequired = true
         case .endedConnections:
             status.connections[0].state = .ended
         case .leasesMaybeLeft:

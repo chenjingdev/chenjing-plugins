@@ -98,7 +98,8 @@ def build_adapter(state, **options):
                             self.log('duplicate_active_request_ignored')
                             return
                         bound = self.claude_lifecycle.context.get()
-                        if bound and bound['agent_id']:
+                        if (bound and bound['agent_id']
+                                and (params.get('name') if isinstance(params, dict) else None) not in ('status', 'repair')):
                             return await self.route_agent_call(message, bound)
                 return await super().handle(message)
             finally:

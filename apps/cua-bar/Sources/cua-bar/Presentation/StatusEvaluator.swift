@@ -27,6 +27,8 @@ enum ProblemKind: String, CaseIterable, Sendable {
     /// The login environment value the wrapper needs is set to somebody else's: the setup leaves it alone, so only
     /// the person can clear it (the check tab says how).
     case loginEnvironmentConflict = "login_environment_conflict"
+    /// A connected MCP process still runs the engine from before an update. Setup cannot reconnect its client.
+    case reconnectRequired = "reconnect_required"
     case endedConnections = "ended_connections"
     case leasesMaybeLeft = "leases_maybe_left"
     /// Not in the spec's list: the app could not read the engine's answer at all.
@@ -233,6 +235,12 @@ enum StatusEvaluator {
         }
         if status.setup.loginEnvironment == "conflict" { return loginEnvironmentConflictProblem }
         if let conflict = conflictProblem(in: facts.claude) { return conflict }
+        let reconnect = status.connections.filter(\.needsReconnect)
+        if !reconnect.isEmpty {
+            return Problem(
+                kind: .reconnectRequired, title: "재연결이 필요한 MCP 연결이 \(reconnect.count)개 있어요",
+                nextStep: reconnectStep, warning: nil, fix: nil, fixLabel: nil)
+        }
         let ended = status.connections.filter { $0.state == .ended }
         if !ended.isEmpty {
             // Still a problem for the icon, but with no button: the line itself has 정리. 정리 has
@@ -306,6 +314,13 @@ enum StatusEvaluator {
     }
 
     // MARK: Setup
+
+    static let reconnectStep = "/mcp에서 cuabar를 골라 Reconnect를 눌러 주세요"
+    static let reconnectFallback = "재연결 항목이 없으면 Claude Code를 다시 시작해 주세요"
+
+    static func reconnectVersions(of connection: Connection) -> String {
+        "실행 \(nonEmpty(connection.runningVersion) ?? "판 알 수 없음") · 설치 \(nonEmpty(connection.installedVersion) ?? "판 알 수 없음")"
+    }
 
     struct SetupIssue: Equatable {
         /// Short name used when several things are wrong at once.

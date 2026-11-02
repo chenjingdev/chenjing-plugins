@@ -490,7 +490,8 @@ async def probe_host(registry, timeout, folder=None, cut=None):
             observed['approval_required'] = True
     replies = []
     adapter = HostMcp(None, Path(registry['socket_path']), native_cua_root=cua_root,
-                      emit=replies.append, log=event, startup_timeout=max(0.1, timeout-3), cleanup_timeout=1)
+                      emit=replies.append, log=event, startup_timeout=max(0.1, timeout-3), cleanup_timeout=1,
+                      local_health_tools=False)
     if folder is not None:
         adapter.thread_cwd = str(folder)
     deadline = asyncio.get_running_loop().time()+timeout

@@ -167,11 +167,18 @@ struct Connection: Equatable, Sendable, Identifiable {
     /// It holds something its 탭 풀기 could let go of: a scope of a turn its AI has not ended, or a session it may
     /// have left in Chrome. nil where the engine cannot tell (a runtime without a relay, an older engine).
     var holds: Bool?
+    /// The process is connected, but still runs the engine from before an update.
+    var reconnectRequired = false
+    var runningVersion: String?
+    var installedVersion: String?
+
+    var needsReconnect: Bool { reconnectRequired && state != .ended }
 
     /// Running, with no call in flight and nothing to let go of: the AI has ended its turn, or never called. The 연결
-    /// list and the card's count leave it out. Where the engine cannot tell what it holds, only one that never called is.
+    /// list and the card's count leave it out, unless it needs reconnection. Where the engine cannot tell what it
+    /// holds, only one that never called is.
     var isQuiet: Bool {
-        if busy || state == .ended { return false }
+        if busy || state == .ended || needsReconnect { return false }
         if let holds { return !holds }
         return state == .active && lastCallAt == nil && idleSeconds == nil
     }
@@ -360,6 +367,7 @@ extension Connection: Decodable {
         case lastCallAt = "last_call_at", idleSeconds = "idle_seconds"
         case sessionID = "session_id", busy
         case canRelease = "can_release", canStop = "can_stop", holds
+        case reconnectRequired = "reconnect_required", runningVersion = "running_version", installedVersion = "installed_version"
     }
 
     /// A connection without an id cannot be acted on, so it is the one thing that fails.
@@ -381,6 +389,9 @@ extension Connection: Decodable {
         canRelease = c.lenientBool(.canRelease) ?? false
         canStop = c.lenientBool(.canStop) ?? false
         holds = c.lenientBool(.holds)
+        reconnectRequired = c.lenientBool(.reconnectRequired) ?? false
+        runningVersion = c.lenientString(.runningVersion)
+        installedVersion = c.lenientString(.installedVersion)
     }
 }
 

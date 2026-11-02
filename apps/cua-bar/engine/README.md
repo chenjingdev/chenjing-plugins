@@ -161,6 +161,14 @@ CUA Bar가 쓰는 명령을 직접 부를 수도 있습니다. 모두 `~/.local/
 
 엔진 코드는 [MIT](LICENSE)로 제공됩니다. 원본 Codex·CUA는 포함하지 않으며 해당 소프트웨어와 서비스에는 각 제공자의 이용 조건이 적용됩니다. OpenAI 또는 Anthropic의 공식 제품이 아닙니다.
 
+## 업데이트 상태와 AI의 수리 도구 (0.8.17)
+
+`status {}`는 이 MCP가 처음 불러온 코드의 판·내용 지문을 설치된 `engine/current`와 비교하고, 훅 상태·원본 호스트 연결 여부·실행 중 여부·열린 범위 수를 반환합니다. 화면이나 대화 내용은 읽지 않습니다. MCP 통신의 `Connected`와 설치 업데이트가 적용됐다는 판단은 별개입니다.
+
+`repair {}`는 현재 설치 엔진의 별도 표준 라이브러리 helper로 앱 관리 훅만 복구합니다. 명시한 Claude 프로필만 쓰고 다른 설정·권한·훅 비활성화 정책은 보존합니다. CUA 요청이 실행 중이면 미루며 Codex 재시작·REPL 초기화·MCP 재연결은 하지 않습니다. `hook_repair`와 `repaired`는 훅 수리 결과이고 `runtime.reconnect_required`는 별개로 남을 수 있습니다. 이때 `/mcp → cuabar → Reconnect`, 메뉴가 없으면 Claude Code 재시작이 필요합니다.
+
+현재 훅은 `UserPromptSubmit`·cuabar `PreToolUse`에서 자신이 소유한 실제 브릿지 PID와 시작 시각을 확인하고, 오래되거나 판을 검증할 수 없는 연결을 사용자 경고와 AI context로 한 번 알립니다. 새 MCP는 `js`·`js_reset` 응답에도 설치 코드와 다르면 안내를 붙입니다. 코드 갱신을 위해 이미 실행한 GUI 동작을 다시 보내지는 않습니다.
+
 ## Claude 작업 종료 연동 (0.8.16)
 
 `claude-hook.sh`는 표준 라이브러리만 쓰며 Codex나 CUA를 켜지 않습니다. PreToolUse는 Claude가 전달하는 `claudecode/toolUseId`와 연결할 소유 정보를 비공개 파일에 적고, 브리지는 그 ID가 일치하는 호출에만 적용합니다. 종료 이벤트는 같은 CLI 프로세스(PID와 시작 시각) 소유의 비공개 제어 소켓으로 갑니다. CUA의 네이티브 세션·턴 ID를 훅 입력에서 받아 실행하지 않습니다.

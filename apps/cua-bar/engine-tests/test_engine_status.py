@@ -8,14 +8,17 @@ import unittest
 import claude_hook_setup
 import engine_records
 import engine_status
+import runtime_identity
 from engine_core import iso
 from engine_support import (ABSENT, APP_VERSION, ENGINE_PID, NOW, SESSION_A, SESSION_B, SESSION_C, SESSION_D, UID,
                             EngineCase, State, at)
+from test_runtime_identity import write_engine
 
 TOP_KEYS = ['schema_version', 'generated_at', 'plugin', 'engine', 'codex', 'host', 'setup', 'connections', 'leases',
             'other_tools', 'screen', 'settings', 'activity']
 CONNECTION_KEYS = ['id', 'agent', 'state', 'pid', 'owner_pid', 'owner_alive', 'cwd', 'started_at', 'memory_bytes',
-                   'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop', 'holds']
+                   'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop', 'holds',
+                   'reconnect_required', 'running_version', 'installed_version']
 CMUX_CLIENT_KEYS = ['id', 'pid', 'mcp_pid', 'agent', 'cwd', 'started_at', 'can_stop']
 TIME = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
 
@@ -27,6 +30,68 @@ class StatusCase(EngineCase):
     @staticmethod
     def find(status, connection_id):
         return next(item for item in status['connections'] if item['id'] == connection_id)
+
+
+class ReconnectTests(StatusCase):
+    def setUp(self):
+        super().setUp()
+        engines = self.home/'.local/share/codex-cua/engine'
+        engines.mkdir(parents=True, mode=0o700)
+        self.installed = write_engine(engines/'0.8.17')
+        (engines/'current').symlink_to(self.installed.name)
+        self.identity = runtime_identity.engine_identity(self.installed)
+        self.start_world()
+        self.add_claude()
+
+    def bridge(self, **fields):
+        self.add_bridge(4242, start=NOW-900, command=self.commands.engine_bridge.replace('0.8.0', '0.8.16'))
+        return self.state.bridge('freshness', 4242, NOW-900, **fields)
+
+    def connection(self):
+        return self.find(self.status(), 'claude-4242-%d' % (NOW-900))
+
+    def test_legacy_loaded_version_is_visible_and_requires_reconnection(self):
+        self.bridge()
+        connection = self.connection()
+        self.assertIs(connection['reconnect_required'], True)
+        self.assertEqual((connection['running_version'], connection['installed_version']), ('0.8.16', '0.8.17'))
+        self.assertEqual(connection['state'], 'active', 'liveness and update freshness are different states')
+        self.assertEqual(self.machine.signals, [], 'observing an update does not stop the existing connection')
+
+    def test_same_version_repaired_code_requires_reconnect_until_the_bridge_records_the_new_digest(self):
+        directory = self.bridge(version='0.8.17', runtime_revision='b'*64)
+        self.assertTrue(self.connection()['reconnect_required'])
+        self.update(directory, 'bridge', runtime_revision=self.identity['revision'])
+        current = self.connection()
+        self.assertFalse(current['reconnect_required'])
+        self.assertEqual((current['running_version'], current['installed_version']), ('0.8.17', '0.8.17'))
+
+    def test_record_without_revision_is_unverifiable_even_if_its_version_matches(self):
+        self.bridge(version='0.8.17')
+        self.assertTrue(self.connection()['reconnect_required'])
+
+    def test_missing_installed_engine_does_not_invent_a_reconnect_requirement(self):
+        self.bridge(version='0.8.16')
+        (self.installed.parent/'current').unlink()
+        connection = self.connection()
+        self.assertFalse(connection['reconnect_required'])
+        self.assertIsNone(connection['installed_version'])
+        self.assertEqual(connection['running_version'], '0.8.16')
+
+    def test_stale_bridge_whose_owner_ended_needs_cleanup_instead_of_reconnect(self):
+        self.bridge(version='0.8.16')
+        self.machine.remove(500)
+        ended = self.connection()
+        self.assertEqual(ended['state'], 'ended')
+        self.assertFalse(ended['reconnect_required'])
+        self.assertEqual(ended['running_version'], '0.8.16')
+
+    def test_unrecorded_bridge_is_still_checked_by_its_actual_engine_path(self):
+        self.add_bridge(4242, start=NOW-900, command=self.commands.engine_bridge.replace('0.8.0', '0.8.16'))
+        connection = self.connection()
+        self.assertTrue(connection['reconnect_required'])
+        self.assertEqual(connection['running_version'], '0.8.16')
+        self.assertFalse(connection['can_release'], 'freshness does not fabricate a control endpoint')
 
 
 class ShapeTests(StatusCase):
@@ -542,7 +607,8 @@ class AttributionTests(StatusCase):
             'id': 'codex-4000-%d' % (NOW-5000), 'agent': 'codex', 'state': 'active', 'pid': 4000, 'owner_pid': 1100,
             'owner_alive': True, 'cwd': '/work/unrecorded', 'started_at': iso(NOW-5000),
             'memory_bytes': (1000+2000)*1024, 'last_call_at': None, 'idle_seconds': None, 'session_id': None,
-            'busy': False, 'can_release': False, 'can_stop': True, 'holds': None})
+            'busy': False, 'can_release': False, 'can_stop': True, 'holds': None,
+            'reconnect_required': False, 'running_version': None, 'installed_version': None})
 
     def test_what_a_connection_holds_is_a_scope_it_still_serves_or_a_session_left_with_it(self):
         """holds: an AI that called and has not ended its turn holds its scope; once the turn ended (or was released) it

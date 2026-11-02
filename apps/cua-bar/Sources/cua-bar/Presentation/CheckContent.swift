@@ -263,6 +263,19 @@ private struct Judge {
                 } else {
                     line = CheckLine(item: item, status: .ready, detail: "앱의 엔진에 연결돼 있어요", facts: "앱의 엔진에 연결됨")
                 }
+                if let reconnect = input.status?.connections.filter(\.needsReconnect), !reconnect.isEmpty {
+                    let versions = Array(Set(reconnect.map { StatusEvaluator.reconnectVersions(of: $0) })).sorted()
+                    let reconnectFacts = "재연결 필요 \(reconnect.count)개 · " + versions.joined(separator: "; ")
+                    if let setup = input.status?.setup, StatusEvaluator.claudeHooksIssue(in: setup) != nil {
+                        line.facts = (line.facts ?? line.detail) + " · " + reconnectFacts
+                        line.steps.append("기존 MCP 연결에도 재연결이 필요해요")
+                    } else {
+                        line.status = .problem
+                        line.detail = "기존 MCP 연결에 재연결이 필요해요"
+                        line.facts = reconnectFacts
+                    }
+                    line.steps += versions + [StatusEvaluator.reconnectStep, StatusEvaluator.reconnectFallback]
+                }
             case .missing: line = broken(item, "Claude Code에 CUA가 연결되지 않았어요")
             case .outdated: line = broken(item, "Claude Code의 CUA 연결이 옛 판이에요")
             case .conflict:
@@ -656,7 +669,7 @@ extension StatusEvaluator {
             return items
         case .codexMissing, .codexWithoutHost:
             return [.host]
-        case .loginEnvironmentConflict, .claudeConflict, .endedConnections, .leasesMaybeLeft, .engineUnreadable:
+        case .loginEnvironmentConflict, .claudeConflict, .reconnectRequired, .endedConnections, .leasesMaybeLeft, .engineUnreadable:
             return []
         }
     }

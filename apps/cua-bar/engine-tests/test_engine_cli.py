@@ -374,7 +374,7 @@ class RealProcessTests(unittest.TestCase):
         for connection in status['connections']:
             self.assertEqual(sorted(connection), sorted(['id', 'agent', 'state', 'pid', 'owner_pid', 'owner_alive', 'cwd',
                 'started_at', 'memory_bytes', 'last_call_at', 'idle_seconds', 'session_id', 'busy', 'can_release', 'can_stop',
-                'holds']))
+                'holds', 'reconnect_required', 'running_version', 'installed_version']))
         self.assertLess(seconds, 5)
         self.assertEqual(sorted(item.name for item in self.home.rglob('*') if item.name != 'Applications'
                                 and 'Applications' not in item.parts), [])      # nothing was written into the home

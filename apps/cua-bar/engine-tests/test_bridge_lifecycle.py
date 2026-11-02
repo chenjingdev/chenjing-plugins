@@ -21,13 +21,15 @@ import host_autostart
 import host_mcp
 import mcp_stdio
 import relay_install
+import runtime_identity
 from bridge_case import BridgeCase, ISO
 from fake_host import TOOLS, write_registry
 from test_runtime_paths import fake_app
+from test_runtime_identity import write_engine
 
 REAL_START_IN_BACKGROUND = host_autostart.start_in_background
 RECORD_KEYS = {'schema_version', 'kind', 'pid', 'started_at', 'owner_pid', 'owner_started_at', 'cwd', 'control_path', 'host', 'session_id',
-               'turn_id', 'connected_at', 'last_call_at', 'busy', 'scopes', 'cleanup', 'updated_at'}
+               'turn_id', 'connected_at', 'last_call_at', 'busy', 'scopes', 'cleanup', 'updated_at', 'version', 'runtime_revision'}
 
 
 class RecordTests(BridgeCase):
@@ -44,6 +46,9 @@ class RecordTests(BridgeCase):
         record = self.record(control)
         self.assertEqual(set(record), RECORD_KEYS)
         self.assertEqual((record['schema_version'], record['kind']), (1, 'bridge'))
+        self.assertEqual(record['version'], bridge_control.RUNNING_IDENTITY['version'])
+        self.assertEqual(record['runtime_revision'], bridge_control.RUNNING_IDENTITY['revision'])
+        self.assertRegex(record['runtime_revision'], r'^[a-f0-9]{64}$')
         self.assertEqual(record['pid'], os.getpid())
         self.assertEqual(record['started_at'], bridge_records.process_started_at(os.getpid()))
         self.assertEqual(record['owner_pid'], os.getppid())
@@ -56,6 +61,19 @@ class RecordTests(BridgeCase):
         self.assertEqual([record[key] for key in ('host', 'session_id', 'turn_id', 'connected_at', 'last_call_at')], [None]*5)
         self.assertEqual((record['busy'], record['scopes'], record['cleanup']), (False, [], 'none'))
         self.assertRegex(record['updated_at'], ISO)
+
+    async def test_refresh_keeps_the_loaded_identity_after_an_installation_update(self):
+        control = await self.start_control(self.plain_adapter())
+        before = self.record(control)
+        engines = self.home/'.local/share/codex-cua/engine'
+        engines.mkdir(parents=True, mode=0o700)
+        installed = write_engine(engines/'99.0.0', version='99.0.0')
+        (engines/'current').symlink_to(installed.name)
+        self.assertEqual(runtime_identity.installed_identity(self.home)['version'], '99.0.0')
+        control.refresh()
+        after = self.record(control)
+        self.assertEqual((after['version'], after['runtime_revision']), (before['version'], before['runtime_revision']))
+        self.assertNotEqual(after['version'], '99.0.0', 'a record describes loaded code, not the new on-disk manifest')
 
     async def test_record_follows_the_connection_and_each_call(self):
         host = self.add_host(thread_id='thread-A')
@@ -852,7 +870,7 @@ class ReconnectTests(RegisteredCase):
         self.assertEqual(len(self.connects), 1)
         # The catalogue stays available without a host, and asking for it connects to nothing.
         await adapter.handle({'jsonrpc': '2.0', 'id': 9, 'method': 'tools/list', 'params': {}})
-        self.assertEqual(sorted(tool['name'] for tool in self.reply(9)['result']['tools']), ['js', 'js_reset', 'turn_ended'])
+        self.assertEqual(sorted(tool['name'] for tool in self.reply(9)['result']['tools']), ['js', 'js_reset', 'repair', 'status', 'turn_ended'])
         self.assertEqual(len(self.connects), 1)
         # Codex quits and is reopened in the background by the next call, exactly as at a conversation start.
         (self.host_state/'host.json').unlink()
@@ -913,7 +931,7 @@ class ReconnectTests(RegisteredCase):
         self.assertEqual(len(self.connects), 2)
         self.assertEqual(host2.calls, [])
         await adapter.handle({'jsonrpc': '2.0', 'id': 9, 'method': 'tools/list', 'params': {}})
-        self.assertEqual(sorted(tool['name'] for tool in self.reply(9)['result']['tools']), ['js', 'js_reset', 'turn_ended'])
+        self.assertEqual(sorted(tool['name'] for tool in self.reply(9)['result']['tools']), ['js', 'js_reset', 'repair', 'status', 'turn_ended'])
         # The connection to the new host stays; the next call needs no other connect.
         self.assertEqual((await self.run_call(adapter))['result']['content'][0]['text'], 'PRIVATE_RESULT')
         self.assertEqual(len(self.connects), 2)
@@ -936,7 +954,7 @@ class ReconnectTests(RegisteredCase):
         self.assertEqual((record['host'], record['session_id']), (None, 'thread-A'))
         self.assertEqual(len(record['scopes']), 1)
         await adapter.handle({'jsonrpc': '2.0', 'id': 9, 'method': 'tools/list', 'params': {}})
-        self.assertEqual(sorted(tool['name'] for tool in self.reply(9)['result']['tools']), ['js', 'js_reset', 'turn_ended'])
+        self.assertEqual(sorted(tool['name'] for tool in self.reply(9)['result']['tools']), ['js', 'js_reset', 'repair', 'status', 'turn_ended'])
         # The next call tries again, and now works.
         write_registry(self.host_state, self.socket())
         self.assertEqual((await self.run_call(adapter))['result']['content'][0]['text'], 'PRIVATE_RESULT')

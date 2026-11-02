@@ -17,6 +17,7 @@ import stat
 import sys
 import time
 import uuid
+from runtime_identity import RUNNING_IDENTITY, installed_identity, runtime_status
 
 try:
     from websockets import unix_connect
@@ -24,7 +25,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.16'
+VERSION = '0.8.17'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -65,6 +66,10 @@ INSTRUCTIONS = (
     'CUA Bar\'s Claude hooks automatically end the matching parent or subagent CUA scope at normal completion or '
     'session exit; the next prompt also cleans an interrupted previous parent turn. '
     'The visible `turn_ended` tool with `{}` is a manual fallback to end your own scope between tasks. '
+    'Use CUA Bar\'s local `status` tool to check the loaded code, installed update and Claude hooks. '
+    'Transport Connected alone does not mean an update is loaded. The local `repair` tool can restore CUA Bar\'s '
+    'own lifecycle hooks while preserving disabled hooks and other settings. It does not reload this MCP process; '
+    'if reconnect_required remains true, tell the user to reconnect cuabar in /mcp. '
     'An interrupted running CUA request is canceled individually when the verified relay supports it; do not replay '
     'an action whose cancellation or outcome is unconfirmed. Never quit Codex, change permissions, or run `codex-cua` release, release-session, '
     'dismiss-session, stop, restart-codex or unlock-reset yourself; the user does those through CUA Bar.')
@@ -123,6 +128,29 @@ LOCKED_NOTE_SHORT = 'CUA Bar note: never try to unlock the Mac or restart the co
 
 def utc_now():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def with_runtime_note(name, answer, enabled=True):
+    """Expose an update on ordinary CUA replies too; preserve the native result and error flags."""
+    if not enabled or name not in ('js', 'js_reset') or not isinstance(answer, dict):
+        return answer
+    try:
+        view = runtime_status({'version': RUNNING_IDENTITY['version'],
+                               'runtime_revision': RUNNING_IDENTITY['revision']}, installed_identity())
+    except Exception:
+        # This advisory must never replace a completed native result with a local error.
+        return answer
+    if not view['reconnect_required']:
+        return answer
+    note = ('CUA Bar update: this MCP process has not loaded the installed code '
+            '(running '+str(view['running_version'] or 'unknown')+', installed '
+            +str(view['installed_version'])+'). The transport can still show Connected. '
+            'Use status to inspect it and repair to restore managed hooks if needed. '
+            'Repair does not reload this process. Tell the user to reconnect cuabar in /mcp; '
+            'do not report that the update is active or replay the action.')
+    if 'content' in answer and isinstance(answer['content'], list):
+        return {**answer, 'content': [*answer['content'], {'type': 'text', 'text': note}]}
+    return error_with_note(answer, note)
 
 
 def answer_texts(answer):
@@ -459,10 +487,11 @@ class ProxyRpc:
 class HostMcp:
     def __init__(self, cli_path, socket_path, server='cua_repl', emit=None, log=None,
                  startup_timeout=15.0, cleanup_timeout=5.0,
-                 expected_plugin_id=NATIVE_PLUGIN_ID, native_cua_root=None):
+                 expected_plugin_id=NATIVE_PLUGIN_ID, native_cua_root=None, local_health_tools=True):
         self.emit = emit or self.emit_stdout
         self.log = log or self.log_stderr
         self.server = server
+        self.local_health_tools = local_health_tools
         # None is an explicit mock-fixture injection point, never a CLI option.
         self.expected_plugin_id = expected_plugin_id
         # The registered-host entry point derives this from the installed CLI.
@@ -752,6 +781,14 @@ class HostMcp:
                 original.append(tool)
         if not {'js', 'js_reset'}.issubset(names):
             raise BridgeFailure('The selected host server does not advertise the original CUA js and js_reset tools.')
+        if self.local_health_tools:
+            from mcp_health import tool_specs
+            local_tools = tool_specs()
+            local_names = {tool['name'] for tool in local_tools}
+            if names & local_names:
+                raise BridgeFailure('The host CUA catalogue conflicts with CUA Bar local health tools.')
+            original.extend(local_tools)
+            names |= local_names
         self.tools, self.tool_names = original, names
         self.initialized = True
         self.mark_connected()
@@ -914,6 +951,15 @@ class HostMcp:
                 if not isinstance(arguments, dict):
                     self.reply(ident, error={'code': -32602, 'message': 'Tool arguments must be an object.'})
                     return
+                if self.local_health_tools and name in ('status', 'repair'):
+                    if arguments:
+                        self.reply(ident, error={'code': -32602, 'message': 'CUA Bar health tools accept only an empty object.'})
+                        return
+                    from mcp_health import read_health, repair_health
+                    health = await repair_health(self) if name == 'repair' else read_health(self)
+                    self.reply(ident, {'content': [{'type': 'text', 'text': json.dumps(health, ensure_ascii=False)}],
+                                       'structuredContent': health})
+                    return
                 if name == 'turn_ended' and arguments:
                     self.reply(ident, error={'code': -32602,
                         'message': 'This host adapter accepts only empty turn_ended arguments; caller session or turn scope is not accepted.'})
@@ -929,15 +975,17 @@ class HostMcp:
                 answer = await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments))
                 if browser_refused(name, answer):
                     self.browser_blocked()
-                self.reply(ident, with_notes(name, answer))
+                self.reply(ident, with_runtime_note(name, with_notes(name, answer), enabled=self.local_health_tools))
             else:
                 self.reply(ident, error={'code': -32601, 'message': 'Unsupported MCP method.'})
         except RpcFailure as error:
             # Codex's own error, with the lock note when the Mac's lock refused the call.
-            self.reply(ident, error=error_with_note(error.error, lock_note(error_texts(error.error))))
+            self.reply(ident, error=with_runtime_note(params.get('name'),
+                error_with_note(error.error, lock_note(error_texts(error.error))), enabled=self.local_health_tools))
             self.log('original_codex_rpc_error_forwarded')
         except BridgeFailure as error:
-            self.reply(ident, error=error_with_note({'code': -32001, 'message': str(error)}, failure_note(str(error))))
+            self.reply(ident, error=with_runtime_note(params.get('name'),
+                error_with_note({'code': -32001, 'message': str(error)}, failure_note(str(error))), enabled=self.local_health_tools))
             self.log('connection_or_catalogue_unavailable')
         except Exception:
             self.reply(ident, error={'code': -32603, 'message': 'The Codex host CUA adapter could not complete this request.'})

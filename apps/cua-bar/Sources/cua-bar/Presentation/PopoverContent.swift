@@ -131,7 +131,9 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         path = connection.cwd
         startedText = Format.startTime(connection.startedAt, now: now, calendar: calendar)
         memoryText = Format.memory(connection.memoryBytes)
-        state = StateDisplay.make(state: connection.state, idleSeconds: connection.idleSeconds)
+        state = connection.needsReconnect
+            ? StateDisplay(kind: .unknown, text: "재연결 필요")
+            : StateDisplay.make(state: connection.state, idleSeconds: connection.idleSeconds)
         contractState = connection.state
         sessionID = connection.sessionID
         isBusy = connection.busy
@@ -142,7 +144,9 @@ struct ConnectionRow: Equatable, Identifiable, Sendable {
         button = connection.state == .ended
             ? .tidy(connection.id, way: way, settled: settled)
             : .releaseTabs(of: connection.id, isEnabled: connection.canRelease, working: connection.state != .idle)
-        hint = connection.state != .ended ? nil : settled ? Self.tabsReleasedHint : way == nil ? Self.cannotTidyHint : nil
+        hint = connection.needsReconnect
+            ? "\(StatusEvaluator.reconnectVersions(of: connection)) · \(StatusEvaluator.reconnectStep)"
+            : connection.state != .ended ? nil : settled ? Self.tabsReleasedHint : way == nil ? Self.cannotTidyHint : nil
         retryButton = ButtonSpec(
             title: "탭 풀기", action: .retryRelease(connection.id), isEnabled: connection.canRelease,
             help: "한 번 더 풀어 봐요. AI가 하던 조작이 끝나야 풀 수 있어요")
@@ -337,8 +341,8 @@ struct ConnectionsContent: Equatable, Sendable {
     var screen: ScreenLine
     /// nil when there is nothing to tidy.
     var tidy: TidyContent?
-    /// The connections whose AI is alive and that are working or hold something, Claude then Codex: a 탭 풀기 on each
-    /// line. One that holds nothing is left out (`Connection.isQuiet`).
+    /// The connections whose AI is alive and that are working, hold something, or need reconnection, Claude then
+    /// Codex: a 탭 풀기 on each line. Other quiet connections are left out (`Connection.isQuiet`).
     var groups: [ConnectionGroup]
     var tools: [OtherToolRow]
     /// R21: no connection of any kind.

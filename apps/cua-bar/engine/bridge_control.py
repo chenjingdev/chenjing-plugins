@@ -24,6 +24,7 @@ import subprocess
 import tempfile
 
 import bridge_records as records
+from runtime_identity import RUNNING_IDENTITY
 
 
 class BridgeControl:
@@ -75,6 +76,7 @@ class BridgeControl:
     def record(self, **changes):
         view = self.adapter.snapshot()
         record = {'schema_version': 1, 'kind': 'bridge', 'pid': self.pid, 'started_at': self.started_at,
+                  'version': RUNNING_IDENTITY['version'], 'runtime_revision': RUNNING_IDENTITY['revision'],
                   'owner_pid': self.owner_pid, 'owner_started_at': self.owner_started_at,
                   'cwd': self.cwd, 'control_path': self.control_path,
                   'host': view['host'], 'session_id': view['session_id'], 'turn_id': view['turn_id'],

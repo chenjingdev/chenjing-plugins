@@ -69,6 +69,8 @@ Node 시험도 같은 출력과 종료 코드를 시험 프로세스가 낸다. 
 
 ## 격리
 
+`test_runtime_identity`, `test_claude_reconnect`, `test_mcp_health`, `test_mcp_health_tools`는 0.8.17의 실행·설치 코드 비교, 같은 판 내용 변경, 소유자별 1회 훅 경고, 로컬 상태 도구, 관리 훅만 복구하는 고정 helper를 검증합니다. 재연결 필요와 훅 수리 성공을 별도로 확인하고, 비활성화 정책·다른 프로필·실행 중 요청을 보존하는지 검사합니다.
+
 시험은 임시 폴더, fake CLI, mock 호스트를 사용한다. 실제 Codex·CUA·Chrome·GUI·계정이나 credential을 호출하지 않는다. 소켓과 subprocess를 사용하는 시험도 격리된 fake 대상만 생성하고 정리한다. 설치 시험은 가짜 앱을 쓰므로 이 맥에 설치된 Codex 앱을 읽지 않는다.
 
 코드는 지원 폴더를 홈에서 찾는다. 그래서 `run.py`와 Node 도우미는 시험 전체를 버리는 HOME에서 돌린다. 시험이 자기 폴더를 주입하는 것을 잊으면 거기에 쓰게 되고, 거기에 뭔가 생기면 실패한다(종료 코드 1). 시험 파일과 fixture 코드는 앱에 담기는 엔진 폴더(`apps/cua-bar/engine`)에 포함하지 않는다.

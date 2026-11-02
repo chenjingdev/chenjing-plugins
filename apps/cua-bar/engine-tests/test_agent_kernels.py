@@ -94,6 +94,26 @@ class AgentKernelTests(BridgeCase):
     def value(reply):
         return reply['result']['content'][0]['text']
 
+    async def test_subagent_health_tools_stay_on_the_parent_and_do_not_boot_a_child(self):
+        _, adapter, prepared = await self.registered()
+        before = len(self.connects)
+        bound = {'claude_session_id': 'claude-session', 'agent_id': 'agent-health', 'prompt_id': 'prompt-1'}
+        with patch('mcp_health.read_health', return_value={'local': True}), \
+                patch.object(claude_lifecycle, 'read_binding', return_value=bound), \
+                patch('mcp_health.repair_health', new=AsyncMock(return_value={'local': True})):
+            for name in ('status', 'repair'):
+                request = self.call(name)
+                request['params']['arguments'] = {}
+                request['params']['_meta'] = {'claudecode/toolUseId': 'tool-health'}
+                await adapter.handle(request)
+                answer = self.reply(request['id'])
+                self.assertEqual(answer['result']['structuredContent'], {'local': True})
+        self.assertEqual(adapter.agent_children, {})
+        self.assertEqual(adapter.agent_boots, {})
+        self.assertEqual(len(self.connects), before)
+        self.assertEqual(prepared.call_count, 1)
+        self.assertEqual(adapter.scopes, {})
+
     async def test_an_agent_gets_its_own_lazy_thread_and_reset_cannot_clear_parent_or_sibling_bindings(self):
         parent, adapter, _ = await self.registered()
         self.assertEqual(adapter.agent_children, {})

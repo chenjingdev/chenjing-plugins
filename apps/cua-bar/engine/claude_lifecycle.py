@@ -299,6 +299,16 @@ def main():
         if not isinstance(payload, dict) or owner is None:
             return 0
         state = state_dir()
+        # The stable launcher runs the newly installed hook even while this conversation's bridge is still old.
+        # A notice failure must not skip the existing ownership binding or cleanup.
+        try:
+            from claude_reconnect import forget_notices, hook_output
+            notice = hook_output(state, owner, payload, private_json, identity)
+            if notice is not None:
+                print(json.dumps(notice, ensure_ascii=False))
+            forget_notices(state, owner, payload)
+        except Exception:
+            pass
         if payload.get('hook_event_name') == 'PreToolUse':
             bind_call(state, owner, payload)
         else:

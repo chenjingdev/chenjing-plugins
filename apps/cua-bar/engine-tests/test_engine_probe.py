@@ -189,6 +189,18 @@ class ProbeCase(EngineCase):
 
 
 class ProbeRunTests(ProbeCase):
+    def test_native_probe_skips_local_health_catalogue_and_update_notes(self):
+        # Doctor checks the original CUA response, independently of any already-loaded Claude MCP process.
+        forbidden = AssertionError('internal native probes do not inspect or repair Claude MCP health')
+        with patch.object(host_mcp, 'installed_identity', side_effect=forbidden) as identity, \
+                patch('mcp_health.tool_specs', side_effect=forbidden) as catalogue:
+            report = self.run_probe()
+        self.assertEqual(report['status'], 'checked')
+        self.assertEqual(report['tool_names'], ['js', 'js_reset', 'turn_ended'])
+        self.assertEqual((report['response_count'], len(self.calls)), (1, 1))
+        identity.assert_not_called()
+        catalogue.assert_not_called()
+
     def test_partial_inventory_errors_fail_the_probe_even_when_js_succeeded(self):
         for error in ('Native apps: SkyComputerUseError: The Mac is locked and automatic unlock could not unlock it.',
                       'Browsers: PRIVATE_INVENTORY_ERROR', 'Browsers: Error: The browser access host is unavailable'):

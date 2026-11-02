@@ -26,6 +26,7 @@ from engine_inventory import (collect, is_app_server, is_cua_repl, mark_live, wo
 from engine_records import (WRITER, bridge_name, control_socket, forget_released, load_records, prune, read_activity,
                             read_released, read_settings)
 from bridge_records import read_browser_blocked
+from runtime_identity import installed_identity, runtime_status
 
 PRUNE_MIN_AGE = 60
 VERSION_NAME = re.compile(r'^[0-9A-Za-z._+-]{1,64}$')     # a Codex version, safe as a folder name
@@ -65,6 +66,8 @@ class Connection:
         self.idle_seconds = None
         # Whether it holds anything a release could let go of; None where no record tells (see View._holdings).
         self.holds = None
+        self.reconnect_required = False
+        self.running_version = self.installed_version = None
 
     @property
     def id(self):
@@ -86,7 +89,9 @@ class Connection:
                 'started_at': iso(self.started), 'memory_bytes': self.memory_bytes,
                 'last_call_at': iso(self.last_call), 'idle_seconds': self.idle_seconds,
                 'session_id': self.session_id, 'busy': self.busy, 'can_release': self.can_release,
-                'can_stop': self.can_stop, 'holds': self.holds}
+                'can_stop': self.can_stop, 'holds': self.holds,
+                'reconnect_required': self.reconnect_required, 'running_version': self.running_version,
+                'installed_version': self.installed_version}
 
 
 class CmuxConnection:
@@ -212,6 +217,7 @@ class View:
         tests = {record.writer for record in records if of_a_connection_test(record)}
         activity = [line for line in activity if line['writer'] not in tests]
         self.now = ctx.clock()
+        self.installed_identity = installed_identity(ctx.home)
         self.connections = []
         self.cmux = []                 # CmuxConnection, one per `cmux-cua mcp` process; not in `connections`
         self.revived = []              # RevivedRuntime: counted in the diagnosis, in no list
@@ -273,6 +279,7 @@ class View:
             conn.last_call = bridge.time('last_call_at')
             conn.busy = bridge.data.get('busy') is True
             conn.can_release = control_socket(bridge, self.ctx.uid) is not None
+            self._runtime_status(conn, bridge.data, proc.command)
             self.by_writer[bridge.writer] = conn
             self.connections.append(conn)
         for pid in inv.bridges:
@@ -281,8 +288,15 @@ class View:
                 conn = Connection('claude', pid, proc.start)
                 conn.owner_pid = proc.ppid if proc.ppid > 1 else None
                 conn.owner_alive = _owner_alive(inv, conn.owner_pid, proc.start)
+                self._runtime_status(conn, {}, proc.command)
                 self.unrecorded[pid] = conn
                 self.connections.append(conn)
+
+    def _runtime_status(self, conn, record, command):
+        freshness = runtime_status(record, self.installed_identity, command)
+        conn.running_version = freshness['running_version']
+        conn.installed_version = freshness['installed_version']
+        conn.reconnect_required = conn.owner_alive and freshness['reconnect_required']
 
     def _running(self, name):
         """The process of the bridge called `name` while it still runs, else None."""
