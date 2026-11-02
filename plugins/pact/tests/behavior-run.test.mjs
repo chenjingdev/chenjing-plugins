@@ -190,7 +190,7 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', session_id: 's'
 const callsOf = (dir) => readFileSync(path.join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 const pluginDirs = (args) => args.flatMap((a, i) => (args[i - 1] === '--plugin-dir' ? [a] : []));
 
-test('the pact variant loads recall next to pact and points recall at the work dir, a dead server and an empty memory dir', () => {
+test('the pact variant loads pact (recall inside) and points recall at the work dir, a dead server and an empty memory dir', () => {
   const { dir, env } = world();
   const recorded = {
     ...env,
@@ -203,7 +203,7 @@ test('the pact variant loads recall next to pact and points recall at the work d
   assert.equal(res.status, 1, res.stderr); // 가짜 답이라 검사는 실패하지만 끝까지 돈다
   const [call] = callsOf(dir);
   const pact = path.resolve(here, '..');
-  assert.deepEqual(pluginDirs(call.args), [pact, path.resolve(pact, '..', 'recall')]);
+  assert.deepEqual(pluginDirs(call.args), [pact]);
   const { RECALL_ROOTS, HONCHO_BASE_URL, CLAUDE_PROJECTS_DIR } = call.env;
   assert.equal(RECALL_ROOTS, realpathSync(RECALL_ROOTS)); // claude가 보는 작업 폴더 경로와 같은 모양
   assert.ok(existsSync(path.join(RECALL_ROOTS, '.pact', '2026-10-20-회의-일정-앱', 'spec.md')), '작업 폴더에 심어 둔 판이 있다');
@@ -213,23 +213,12 @@ test('the pact variant loads recall next to pact and points recall at the work d
   assert.notEqual(CLAUDE_PROJECTS_DIR, path.join(homedir(), '.claude', 'projects'));
 });
 
-test('the control variant loads no plugin, and a missing recall folder is not passed to claude', () => {
+test('the control variant loads no plugin', () => {
   const { dir, env } = world();
   const recorded = { ...env, PACT_TEST_CLAUDE: recordingClaude(dir) };
   const control = spawnSync('node', [run, 'first-message', '--runs', '1', '--variant', 'control', '--concurrency', '1'], { encoding: 'utf8', env: recorded });
   assert.equal(control.status, 0, control.stderr);
   assert.deepEqual(pluginDirs(callsOf(dir)[0].args), []);
-
-  // recall이 없는 pact 모양: 시험 장치와 scripts만 옮기면 PACT의 이웃에 recall이 없다.
-  const lonely = path.join(dir, 'lonely');
-  mkdirSync(path.join(lonely, 'skills'), { recursive: true });
-  mkdirSync(path.join(lonely, 'agents'));
-  cpSync(path.join(here, 'behavior'), path.join(lonely, 'tests', 'behavior'), { recursive: true, filter: (src) => path.basename(src) !== 'out' });
-  cpSync(path.join(here, '..', 'scripts'), path.join(lonely, 'scripts'), { recursive: true });
-  writeFileSync(path.join(dir, 'calls.jsonl'), '');
-  const pact = spawnSync('node', [path.join(lonely, 'tests', 'behavior', 'run.mjs'), 'first-message', '--runs', '1', '--variant', 'pact', '--concurrency', '1'], { encoding: 'utf8', env: recorded });
-  assert.match(pact.stderr, /판 저장/); // 가짜 답이라 검사는 실패하지만 끝까지 돈다
-  assert.deepEqual(pluginDirs(callsOf(dir).at(-1).args), [realpathSync(lonely)]);
 });
 
 test('an expired login ends the run with exit 2 and saves neither a record nor a round', () => {

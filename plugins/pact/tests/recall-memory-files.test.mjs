@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { collect, name, projectDirName } from '../scripts/sources/memory-files.mjs';
+import { collect, name, projectDirName } from '../scripts/recall/sources/memory-files.mjs';
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'recall-mem-'));
 

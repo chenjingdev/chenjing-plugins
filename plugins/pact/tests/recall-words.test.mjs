@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { wordPattern, overlapOf } from '../scripts/sources/words.mjs';
+import { wordPattern, overlapOf } from '../scripts/recall/sources/words.mjs';
 
 test('wordPattern: 영문·숫자로 시작하거나 끝나는 낱말은 이웃에 영숫자가 붙으면 안 맞고, 한글은 부분 일치다', () => {
   assert.ok(wordPattern('pact').test('pact를 쓴다'));

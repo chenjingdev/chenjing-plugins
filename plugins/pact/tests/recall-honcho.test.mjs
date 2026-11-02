@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { collect, name } from '../scripts/sources/honcho.mjs';
-import { projectDirName } from '../scripts/sources/memory-files.mjs';
+import { collect, name } from '../scripts/recall/sources/honcho.mjs';
+import { projectDirName } from '../scripts/recall/sources/memory-files.mjs';
 
-const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'recall.mjs');
+const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'recall', 'recall.mjs');
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'recall-honcho-'));
 const NO_ENV_FILE = path.join(tmpdir(), 'recall-honcho-no-such-env-file');
 const TOPIC = ['pact', '선택지'];

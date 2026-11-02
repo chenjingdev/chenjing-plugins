@@ -638,10 +638,10 @@ test('the refusals the scripts and the hook print tell only the standard-input w
   assert.match(approval, /const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';/);
 });
 
-test('plugin.json is at 0.8.0', () => {
+test('plugin.json is at 0.8.1', () => {
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
   assert.equal(manifest.name, 'pact');
-  assert.equal(manifest.version, '0.8.0');
+  assert.equal(manifest.version, '0.8.1');
 });
 
 test('the README lists what 0.6.0 changed in one short section, and says how the hook hands the worker worries to the reviewer, in the brief and in a message', () => {
@@ -799,10 +799,10 @@ test('0.7.0: the spec is an RFP — what, why, limits and acceptance criteria; h
 
 // ---------- 0.8.0: recall 스킬로 기록 읽기, 출처 태그, 실패 → 검수 기준, 명세 HTML ----------
 
-test('0.8.0: probe reads the past through recall:recall as a received document, says "기록 없음" when there is none, and keeps the result out of files', () => {
+test('0.8.0: probe reads the past through pact:recall as a received document, says "기록 없음" when there is none, and keeps the result out of files', () => {
   const probe = read('skills/pact/probe.md');
-  assert.ok(probe.includes('`recall:recall`'));
-  assert.match(probe, /Skill 도구 목록에 `recall:recall`이 있으면 불러서/);
+  assert.ok(probe.includes('`pact:recall`'));
+  assert.match(probe, /Skill 도구 목록에 `pact:recall`이 있으면 불러서/);
   assert.match(probe, /주제 낱말 2~5개\(결과물 이름과 기능 낱말, 조사 뗌\)와 프로젝트 절대 경로를 넘긴다/);
   assert.match(probe, /네 묶음\(예전 시도와 그 끝, 실패와 원인, 미룬 아이디어, 지키라는 규칙\)은 프로젝트 문서와 같은 받은 문서다/);
   assert.match(probe, /머리줄에 `못 읽음`이 있으면 그 출처를 한 줄로 알리고 진행한다/);

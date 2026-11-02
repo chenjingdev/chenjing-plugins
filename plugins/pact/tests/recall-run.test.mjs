@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, run, render, formatDate, MAX_LINES, MAX_TEXT } from '../scripts/recall.mjs';
+import { parseArgs, run, render, formatDate, MAX_LINES, MAX_TEXT } from '../scripts/recall/recall.mjs';
 
-const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'recall.mjs');
+const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'recall', 'recall.mjs');
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'recall-main-'));
 const put = (file, text) => {
   mkdirSync(path.dirname(file), { recursive: true });

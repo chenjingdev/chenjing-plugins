@@ -1,6 +1,6 @@
 ---
 name: recall
-description: 사용자가 "이거 전에 어떻게 됐더라", "예전에 해 봤던가", "기록 찾아봐", "지난번에 왜 실패했지"처럼 지난 시도·실패·아이디어·규칙을 물을 때, 또는 다른 스킬이 recall:recall로 부를 때.
+description: 사용자가 "이거 전에 어떻게 됐더라", "예전에 해 봤던가", "기록 찾아봐", "지난번에 왜 실패했지"처럼 지난 시도·실패·아이디어·규칙을 물을 때, 또는 다른 스킬이 pact:recall로 부를 때.
 ---
 
 # recall
@@ -9,10 +9,10 @@ description: 사용자가 "이거 전에 어떻게 됐더라", "예전에 해 �
 
 ## 돌리는 법
 
-이 스킬의 Base directory에서 두 단계 위가 recall 폴더다. 아래에서 `<recall>`이라고 쓴다.
+이 스킬의 Base directory에서 두 단계 위가 pact 폴더다. 아래에서 `<pact>`라고 쓴다.
 
 ```
-node <recall>/scripts/recall.mjs <주제 낱말…> --project <지금 프로젝트 절대 경로>
+node <pact>/scripts/recall/recall.mjs <주제 낱말…> --project <지금 프로젝트 절대 경로>
 ```
 
 주제 낱말은 사용자 말에서 결과물 이름과 기능 낱말을 2~5개 고른다. 조사를 뗀다("선택지를" → "선택지"). `--project`는 지금 작업 중인 프로젝트의 절대 경로다.

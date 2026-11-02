@@ -1,8 +1,0 @@
-{
-  "name": "recall",
-  "description": "쌓인 기억(Honcho 대화·pact 기록·Claude 메모리 파일)에서 예전 시도와 끝·실패와 원인·미룬 아이디어·지키라는 규칙을 뽑아 준다",
-  "version": "0.1.0",
-  "author": {
-    "name": "chenjing"
-  }
-}

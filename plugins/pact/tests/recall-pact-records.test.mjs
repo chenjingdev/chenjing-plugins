@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { collect, name } from '../scripts/sources/pact-records.mjs';
+import { collect, name } from '../scripts/recall/sources/pact-records.mjs';
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'recall-pact-'));
 const put = (file, text) => {

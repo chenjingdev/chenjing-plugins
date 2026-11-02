@@ -8,7 +8,7 @@
   "checks": [
     {
       "kind": "skillInvoked",
-      "name": "recall:recall"
+      "name": "pact:recall"
     },
     {
       "kind": "replyMatch",

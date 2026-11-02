@@ -31,12 +31,12 @@ const roundsDir = (outDir) => path.join(outDir, 'runs');
 function guidelineFiles(pactDir) {
   const walk = (dir) =>
     readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
-  const recall = path.resolve(pactDir, '..', 'recall');
-  const recallFiles = [path.join(recall, '.claude-plugin', 'plugin.json'), path.join(recall, 'skills', 'recall', 'SKILL.md'), ...treeFiles(path.join(recall, 'scripts')).filter((f) => f.endsWith('.mjs'))].filter((f) => existsSync(f));
+  const recallScripts = path.join(pactDir, 'scripts', 'recall');
+  const recallFiles = existsSync(recallScripts) ? treeFiles(recallScripts).filter((f) => f.endsWith('.mjs')) : [];
   return [...walk(path.join(pactDir, 'skills')), ...walk(path.join(pactDir, 'agents')), ...recallFiles].sort();
 }
 
-// pact 지침(skills, agents)과 함께 싣는 recall(plugin.json, SKILL.md, scripts)만의 지문. 판끼리 "지침 바뀜"을 가릴 때 쓴다.
+// pact 지침(skills — recall 스킬 포함 —, agents)과 recall 스크립트(scripts/recall)만의 지문. 판끼리 "지침 바뀜"을 가릴 때 쓴다.
 export function guidelineHash(pactDir) {
   const h = createHash('sha256');
   for (const f of guidelineFiles(pactDir)) h.update(readFileSync(f));
@@ -71,7 +71,8 @@ export function fingerprint(pactDir, scenario, variant, { execution = {}, fixtur
     path.join(pactDir, 'tests', 'behavior', 'run.mjs'),
     path.join(pactDir, 'tests', 'behavior', 'runs.mjs'),
     path.join(pactDir, '.claude-plugin', 'plugin.json'),
-    ...treeFiles(path.join(pactDir, 'scripts')),
+    // scripts/recall은 pact 변형에서만 실리므로 지침 지문 쪽(guidelineFiles)에서 센다
+    ...treeFiles(path.join(pactDir, 'scripts')).filter((f) => !f.startsWith(path.join(pactDir, 'scripts', 'recall') + path.sep)),
   ]);
   if (variant === 'pact') hashFiles(h, pactDir, guidelineFiles(pactDir));
   return `${EXECUTION_CONTRACT}:${h.digest('hex')}`;
