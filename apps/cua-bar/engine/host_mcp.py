@@ -28,7 +28,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.9.0'
+VERSION = '0.9.1'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -575,6 +575,9 @@ class HostMcp:
     # How settle_unlock reads the Mac's lock: None (probes, fixtures) never waits for an unlock; the registered MCP
     # host reads the real console session (mac_locked).
     lock_reader = None
+    # The glow while js calls run (overlay.Overlay), shared by a bridge and its agents' children: None (probes,
+    # fixtures) shows none; the registered MCP host sets it.
+    overlay = None
 
     def __init__(self, cli_path, socket_path, server='cua_repl', emit=None, log=None,
                  startup_timeout=15.0, cleanup_timeout=5.0,
@@ -1081,8 +1084,17 @@ class HostMcp:
                     # The catalogue of the new host does not have this tool any more.
                     self.reply(ident, error={'code': -32601, 'message': 'The tool is not advertised by the owned host CUA server.'})
                     return
-                answer = await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments))
-                answer, unlocked = await self.settle_unlock(name, arguments, answer)
+                glowing = self.overlay is not None and name == 'js'
+                if glowing:
+                    self.overlay.begin()
+                try:
+                    answer = await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments))
+                    answer, unlocked = await self.settle_unlock(name, arguments, answer)
+                finally:
+                    if glowing:
+                        self.overlay.end()
+                if name == 'turn_ended' and self.overlay is not None:
+                    self.overlay.clear()
                 if browser_refused(name, answer):
                     self.browser_blocked()
                 if unlocked == 'resent':

@@ -7,12 +7,14 @@ from pathlib import Path
 import stat
 import sys
 import uuid
+import bridge_records
 from bridge_control import BridgeControl
 from host_autostart import AutostartFailure, ensure_host, give_back_first_call, watch_first_call
 from host_mcp import (HostMcp, serve, BridgeFailure, RpcFailure, CANCEL_BEFORE_SEND, UPDATE_CLOSING, ident_key,
                       error_with_note, failure_note, mac_locked)
 from runtime_paths import default_state, installation_from_native_cli, InstallationError
 from claude_lifecycle import ScopeRouter, END_EVENTS, source as claude_source
+from overlay import Overlay
 
 DEFAULT_STATE = default_state()
 
@@ -298,6 +300,8 @@ def build_adapter(state, **options):
                 members = [self, *self.agent_children.values()]
                 reports = await asyncio.gather(*(HostMcp.close(member) for member in members))
                 self.agent_approvals.clear()
+                if self.overlay is not None:
+                    await self.overlay.close()
                 self.family_report = {
                     'owned_thread_unsubscribe': ('unconfirmed' if any(report['owned_thread_unsubscribe'] == 'unconfirmed' for report in reports)
                         else 'confirmed' if any(report['owned_thread_unsubscribe'] == 'confirmed' for report in reports) else 'not_created'),
@@ -412,7 +416,11 @@ def build_adapter(state, **options):
 
 async def main():
     state = Path(os.environ.get('CODEX_HOST_CUA_STATE_DIR', str(DEFAULT_STATE)))
-    cleanup = await serve(build_adapter(state), control_factory=BridgeControl, watch_updates=True)
+    adapter = build_adapter(state)
+    records_state = bridge_records.state_dir()
+    type(adapter).overlay = Overlay(records_state, enabled=lambda: bridge_records.shows_overlay(records_state),
+                                    log=adapter.log)
+    cleanup = await serve(adapter, control_factory=BridgeControl, watch_updates=True)
     return 0 if cleanup['owned_thread_unsubscribe'] != 'unconfirmed' and cleanup['connection_close'] == 'confirmed' else 1
 
 

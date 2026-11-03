@@ -6,7 +6,7 @@ and tools/list (empty) until Claude closes stdin.
 import json
 import sys
 
-VERSION = '0.9.0'
+VERSION = '0.9.1'
 REASONS = {
     'app_mcp': ('cuabar plugin: CUA Bar handles CUA on this Mac through its own `cuabar` MCP (tools `mcp__cuabar__…`), '
                 'so this plugin stands by and has no tools. To use the plugin instead, the user quits CUA Bar, turns off '

@@ -449,30 +449,38 @@ def prune(state_dir, uid, record, droppable=(), now=None, min_age=0):
 
 
 def read_settings(state_dir, uid):
-    """{"error_text": bool}: whether a failed call's activity line keeps its error text. Off unless the file says so."""
-    settings = {'error_text': False}
+    """{"error_text": bool, "overlay": bool}: whether a failed call's activity line keeps its error text (off unless the
+    file says so), and whether the glow shows while CUA works (on unless the file says "overlay": false)."""
+    settings = {'error_text': False, 'overlay': True}
+    data = _settings_file(state_dir, uid)
+    settings['error_text'] = data.get('error_text') is True
+    settings['overlay'] = data.get('overlay') is not False
+    return settings
+
+
+def _settings_file(state_dir, uid):
     if not private_directory(state_dir, uid):
-        return settings
+        return {}
     try:
         descriptor = os.open(state_dir/SETTINGS_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
                              | getattr(os, 'O_NONBLOCK', 0))
     except OSError:
-        return settings
+        return {}
     try:
         info = os.fstat(descriptor)
         if not _private(info, uid, stat.S_ISREG) or info.st_size > SETTINGS_MAX_BYTES:
-            return settings
+            return {}
         data = json.loads(os.read(descriptor, SETTINGS_MAX_BYTES+1).decode('utf-8'))
     except (OSError, ValueError, UnicodeError):
-        return settings
+        return {}
     finally:
         os.close(descriptor)
-    settings['error_text'] = isinstance(data, dict) and data.get('error_text') is True
-    return settings
+    return data if isinstance(data, dict) else {}
 
 
-def write_settings(state_dir, uid, error_text):
-    """`codex-cua settings --error-text on|off`: what the bridges and relays read at their next failure.
+def write_settings(state_dir, uid, error_text=None, overlay=None):
+    """`codex-cua settings [--error-text on|off] [--overlay on|off]`: what the bridges and relays read at their next
+    failure (error_text) or call (overlay). A setting not given keeps its value.
 
     The state directory is made (0700) when there is none yet; one that is not this user's private directory is left
     alone and the answer says `unwritable`."""
@@ -484,10 +492,15 @@ def write_settings(state_dir, uid, error_text):
         return {'ok': False, 'reason': 'unwritable'}
     try:
         with state_lock(state_dir):
-            _write_atomic(state_dir/SETTINGS_FILE, {'schema_version': 1, 'error_text': bool(error_text)})
+            settings = read_settings(state_dir, uid)
+            if error_text is not None:
+                settings['error_text'] = bool(error_text)
+            if overlay is not None:
+                settings['overlay'] = bool(overlay)
+            _write_atomic(state_dir/SETTINGS_FILE, {'schema_version': 1, **settings})
     except OSError:
         return {'ok': False, 'reason': 'unwritable'}
-    return {'ok': True, 'reason': None, 'error_text': bool(error_text)}
+    return {'ok': True, 'reason': None, **settings}
 
 
 def read_activity(state_dir, uid):

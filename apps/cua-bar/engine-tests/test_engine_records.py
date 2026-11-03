@@ -5,6 +5,7 @@ import stat
 import time
 import unittest
 
+import bridge_records
 import engine_records as records
 from engine_core import iso
 from engine_support import NOW, SESSION_A, SESSION_B, SESSION_C, UID, EngineCase, State, at
@@ -183,29 +184,29 @@ class SettingsTests(EngineCase):
         return records.read_settings(self.state.root, UID)
 
     def test_error_text_is_off_until_the_person_turns_it_on(self):
-        self.assertEqual(self.read(), {'error_text': False})
-        self.assertEqual(records.write_settings(self.state.root, UID, True), {'ok': True, 'reason': None, 'error_text': True})
-        self.assertEqual(self.read(), {'error_text': True})
+        self.assertEqual(self.read(), {'error_text': False, 'overlay': True})
+        self.assertEqual(records.write_settings(self.state.root, UID, True), {'ok': True, 'reason': None, 'error_text': True, 'overlay': True})
+        self.assertEqual(self.read(), {'error_text': True, 'overlay': True})
         path = self.state.root/records.SETTINGS_FILE
         self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
-        self.assertEqual(json.loads(path.read_text()), {'schema_version': 1, 'error_text': True})
-        self.assertEqual(records.write_settings(self.state.root, UID, False), {'ok': True, 'reason': None, 'error_text': False})
-        self.assertEqual(self.read(), {'error_text': False})
+        self.assertEqual(json.loads(path.read_text()), {'schema_version': 1, 'error_text': True, 'overlay': True})
+        self.assertEqual(records.write_settings(self.state.root, UID, False), {'ok': True, 'reason': None, 'error_text': False, 'overlay': True})
+        self.assertEqual(self.read(), {'error_text': False, 'overlay': True})
         self.assertEqual([item.name for item in self.state.root.iterdir() if item.name.startswith('.')], [])
 
     def test_a_damaged_foreign_or_unsafe_file_reads_as_off(self):
         for content in ('{broken', '[]', 'true', json.dumps({'error_text': 'yes'}), json.dumps({'error_text': 1}),
                         '{"error_text": true, "x": "%s"}' % ('y'*records.SETTINGS_MAX_BYTES)):
             self.state.settings(content)
-            self.assertEqual(self.read(), {'error_text': False}, content[:40])
+            self.assertEqual(self.read(), {'error_text': False, 'overlay': True}, content[:40])
         self.state.settings({'error_text': True}, mode=0o644)
-        self.assertEqual(self.read(), {'error_text': False})           # others could have written it
+        self.assertEqual(self.read(), {'error_text': False, 'overlay': True})           # others could have written it
         self.state.settings({'error_text': True})
-        self.assertEqual(self.read(), {'error_text': True})
+        self.assertEqual(self.read(), {'error_text': True, 'overlay': True})
         path = self.state.root/records.SETTINGS_FILE
         path.rename(self.state.root/'real.json')
         path.symlink_to(self.state.root/'real.json')
-        self.assertEqual(self.read(), {'error_text': False})           # a link is not followed
+        self.assertEqual(self.read(), {'error_text': False, 'overlay': True})           # a link is not followed
 
     def test_a_state_directory_that_cannot_be_trusted_is_not_written_and_a_missing_one_is_made(self):
         self.state.root.chmod(0o755)
@@ -215,7 +216,23 @@ class SettingsTests(EngineCase):
         fresh = self.root/'fresh-state'
         self.assertTrue(records.write_settings(fresh, UID, True)['ok'])
         self.assertEqual(stat.S_IMODE(os.stat(fresh).st_mode), 0o700)
-        self.assertEqual(records.read_settings(fresh, UID), {'error_text': True})
+        self.assertEqual(records.read_settings(fresh, UID), {'error_text': True, 'overlay': True})
+
+    def test_the_glow_is_on_until_the_person_turns_it_off_and_each_setting_keeps_the_other(self):
+        self.assertTrue(self.read()['overlay'])
+        self.assertEqual(records.write_settings(self.state.root, UID, error_text=True),
+                         {'ok': True, 'reason': None, 'error_text': True, 'overlay': True})
+        self.assertEqual(records.write_settings(self.state.root, UID, overlay=False),
+                         {'ok': True, 'reason': None, 'error_text': True, 'overlay': False})
+        self.assertEqual(self.read(), {'error_text': True, 'overlay': False})
+        self.assertFalse(bridge_records.shows_overlay(self.state.root))
+        self.assertTrue(bridge_records.keeps_error_text(self.state.root))
+        for content in ('{broken', json.dumps({'overlay': 0}), json.dumps({'overlay': 'off'})):
+            self.state.settings(content)
+            self.assertTrue(self.read()['overlay'], content)
+            self.assertTrue(bridge_records.shows_overlay(self.state.root), content)
+        self.state.settings({'overlay': False}, mode=0o644)
+        self.assertTrue(bridge_records.shows_overlay(self.state.root))   # others could have written it
 
 
 class ControlTests(EngineCase):

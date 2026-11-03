@@ -121,25 +121,37 @@ def read_browser_blocked(state, uid=None):
     return {'app_version': data['app_version'], 'at': data.get('at') if isinstance(data.get('at'), str) else None}
 
 
-def keeps_error_text(state):
-    """Whether the person asked that a failed call's line keep its error text (settings.json, "error_text": true).
-
-    Read at each failure, so a change counts from the next one. A missing, foreign or unreadable file is a no."""
+def read_settings(state):
+    """settings.json as this user wrote it (a dict), or None when it is missing, foreign or unreadable."""
     try:
         descriptor = os.open(state/SETTINGS_FILE, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
     except OSError:
-        return False
+        return None
     try:
         info = os.fstat(descriptor)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077
                 or info.st_size > SETTINGS_MAX_BYTES):
-            return False
+            return None
         value = json.loads(os.read(descriptor, SETTINGS_MAX_BYTES+1).decode('utf-8'))
     except (OSError, ValueError, UnicodeError):
-        return False
+        return None
     finally:
         os.close(descriptor)
-    return isinstance(value, dict) and value.get('error_text') is True
+    return value if isinstance(value, dict) else None
+
+
+def keeps_error_text(state):
+    """Whether the person asked that a failed call's line keep its error text (settings.json, "error_text": true).
+
+    Read at each failure, so a change counts from the next one. A missing, foreign or unreadable file is a no."""
+    return (read_settings(state) or {}).get('error_text') is True
+
+
+def shows_overlay(state):
+    """Whether the glow shows while CUA works (overlay.py): yes unless settings.json says "overlay": false.
+
+    Read when a bridge's calls start after a pause, so a change counts from the next call."""
+    return (read_settings(state) or {}).get('overlay') is not False
 
 
 def error_text(texts):

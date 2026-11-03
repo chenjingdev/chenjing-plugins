@@ -118,7 +118,7 @@ class ShapeTests(StatusCase):
         self.assertEqual(status['leases'], {'readable': False, 'items': [], 'maybe_left': [], 'release_blocked': False})
         self.assertEqual(status['other_tools'], [])
         self.assertEqual(status['screen'], {'active_connection_id': None, 'last_call_at': None})
-        self.assertEqual(status['settings'], {'error_text': False})
+        self.assertEqual(status['settings'], {'error_text': False, 'overlay': True})
         self.assertEqual(status['activity'], [])
         json.dumps(status)
 
@@ -1488,11 +1488,11 @@ class ActivityAndScreenTests(StatusCase):
         self.state.activity([State.line(writer, 30, SESSION_A, ok=False, error='error', error_text='ReferenceError: y'),
                              State.line(writer, 20, SESSION_A, ok=False, error='timeout')])
         status = self.status()
-        self.assertEqual(status['settings'], {'error_text': False})
+        self.assertEqual(status['settings'], {'error_text': False, 'overlay': True})
         self.assertEqual([item['error_text'] for item in status['activity']], [None, None])
         self.state.settings({'schema_version': 1, 'error_text': True})
         status = self.status()
-        self.assertEqual(status['settings'], {'error_text': True})
+        self.assertEqual(status['settings'], {'error_text': True, 'overlay': True})
         self.assertEqual([item['error_text'] for item in status['activity']], [None, 'ReferenceError: y'])
         # Turned off again, what was kept is not shown either.
         self.state.settings({'schema_version': 1, 'error_text': False})

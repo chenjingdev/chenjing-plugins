@@ -16,13 +16,14 @@ COMMANDS = ('status', 'release', 'release-session', 'dismiss-session', 'stop', '
 OPTIONS = {'status': (), 'release': ('connection', 'ended', 'connections_only'), 'release-session': ('session', 'user'),
            'dismiss-session': ('session',),
            'stop': ('connection', 'group', 'force'), 'disconnect': ('connection',), 'restart-codex': (), 'unlock-reset': (),
-           'settings': ('error_text',), 'diagnose': ()}
+           'settings': ('error_text', 'overlay'), 'diagnose': ()}
 
 
 def validate(args, error):
     """error(message) must not return (argparse's parser.error ends the process with status 2)."""
     given = {'connection': args.connection, 'ended': args.ended, 'session': args.session, 'user': args.user,
              'group': args.group, 'force': args.force, 'error_text': getattr(args, 'error_text', None),
+             'overlay': getattr(args, 'overlay', None),
              'connections_only': getattr(args, 'connections_only', False)}
     for name, value in given.items():
         if value and name not in OPTIONS[args.command]:
@@ -37,8 +38,8 @@ def validate(args, error):
         error('stop needs exactly one of --connection ID or --group all|claude|codex')
     if args.command == 'disconnect' and not args.connection:
         error('disconnect needs --connection ID')
-    if args.command == 'settings' and getattr(args, 'error_text', None) not in ('on', 'off'):
-        error('settings needs --error-text on|off')
+    if args.command == 'settings' and getattr(args, 'error_text', None) is None and getattr(args, 'overlay', None) is None:
+        error('settings needs --error-text on|off or --overlay on|off')
 
 
 def execute(ctx, args):
@@ -57,7 +58,8 @@ def execute(ctx, args):
         return unlock_reset(ctx)
     if args.command == 'settings':
         from engine_records import write_settings
-        return write_settings(ctx.state_dir, ctx.uid, args.error_text == 'on')
+        given = {'error_text': getattr(args, 'error_text', None), 'overlay': getattr(args, 'overlay', None)}
+        return write_settings(ctx.state_dir, ctx.uid, **{key: value == 'on' for key, value in given.items() if value})
     if args.command == 'disconnect':
         from engine_actions import disconnect_stale_connection
         return disconnect_stale_connection(ctx, args.connection)
