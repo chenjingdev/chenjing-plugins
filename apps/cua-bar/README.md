@@ -1,5 +1,7 @@
 # CUA Bar
 
+> 0.9.0부터 같은 엔진을 앱 없이 Claude Code 플러그인 `cuabar`(chenjing-plugins 마켓플레이스)로도 써요. 한 Mac에는 하나만 붙고, CUA Bar가 떠 있거나 앱이 등록한 `cuabar` MCP가 있으면 플러그인이 비켜 서요. 플러그인은 [engine/README.md](engine/README.md#cuabar-플러그인-090)를 보세요. 받는 곳의 앱 판은 아직 0.8.x예요.
+
 앱 하나만 깔면 Claude Code에서 CUA(화면 조작)를 쓸 수 있어요. CUA Bar가 Claude Code에 CUA 연결(MCP)을 깔고 지우고, 환경이 잘 설정됐는지 점검하고, 새 판이 나오면 스스로 올려요. Claude 플러그인은 따로 깔지 않아요. 메뉴 막대에서 상태를 보여 주고, AI가 정리 없이 끝나며 남긴 브라우저 점유를 풀어 주는 맥 메뉴 막대 앱이기도 해요. 이름은 가칭이에요.
 
 연결 자체는 앱에 담긴 엔진(`engine/`, 설명은 [engine/README.md](engine/README.md))이 해요. 앱은 켜질 때 엔진을 `~/.local/share/codex-cua/engine/<판>/`에 풀어 두고, 엔진의 `codex-cua` 명령을 불러 상태를 읽고, 돌려받은 것을 보여 줄 뿐이에요.

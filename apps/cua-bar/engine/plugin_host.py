@@ -100,8 +100,9 @@ def run_plugin_mcp(plugin_root, setup_module=None):
     reason = standby_reason()
     if reason is not None:
         stand_by(plugin_root, reason)
+    # The setup below runs for the plugin as well (its hooks state), and so does the bridge it starts.
+    os.environ[cuabar_host.HOST_ENV] = cuabar_host.PLUGIN
     environment = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-    environment[cuabar_host.HOST_ENV] = cuabar_host.PLUGIN
     from engine_core import Context
     from engine_install import reason as failure_reason
     # stdout is the MCP stream. Until the bridge runs, whatever setup, pip or venv print goes to stderr, which Claude

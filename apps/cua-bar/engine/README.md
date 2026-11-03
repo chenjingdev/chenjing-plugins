@@ -1,15 +1,19 @@
 # CUA 연결 엔진
 
-CUA Bar에 담겨 다니는 연결 엔진입니다. Claude Code가 Mac의 앱과 브라우저를 Codex CUA로 조작하게 이어 주는 코드(MCP 서버, Codex 래퍼, 중계기, 상태·정리 명령)입니다. **macOS 전용 · 비공식 실험 버전**입니다. 이 문서는 0.8.0 기준입니다.
+Claude Code가 Mac의 앱과 브라우저를 Codex CUA로 조작하게 이어 주는 코드(MCP 서버, Codex 래퍼, 중계기, 상태·정리 명령)입니다. **macOS 전용 · 비공식 실험 버전**입니다. 이 문서는 0.8.0 기준이고, 0.9.0부터는 아래 [cuabar 플러그인](#cuabar-플러그인-090) 절이 더해집니다.
 
-플러그인이 아닙니다. Claude 플러그인이나 마켓플레이스로 나누어 주지 않고, 앱 하나(CUA Bar)가 이 엔진을 번들에 담아 깔고 부립니다. 쓰는 방법과 화면은 [앱 README](../README.md)에 있고, 이 문서는 엔진이 어떻게 깔리고 무엇을 하는지 적습니다. 폴더 안의 `.claude-plugin/plugin.json`은 엔진 매니페스트(이름 `cua`와 판)로 그대로 씁니다.
+0.9.0부터 이 폴더는 그대로 Claude Code 플러그인 `cuabar`(chenjing-plugins 마켓플레이스)이기도 하고, 메뉴 막대 앱 CUA Bar가 번들에 담아 부리는 엔진이기도 합니다. 둘은 같은 코드 한 벌입니다. 앱의 쓰는 방법과 화면은 [앱 README](../README.md)에 있습니다. `.claude-plugin/plugin.json`은 플러그인 매니페스트이자 엔진 매니페스트(이름 `cuabar`와 판)입니다.
+
+```sh
+claude plugin install cuabar@chenjing-plugins --scope user
+```
 
 ## 준비
 
 - Claude Code와 Computer Use를 사용할 수 있는 Codex 데스크톱 앱이 필요합니다.
 - Python 3.9 이상이 필요합니다(`/usr/bin/python3`는 개발자 도구에 들어 있습니다). 첫 설정에서 필요한 패키지를 전용 환경에 내려받습니다.
 - macOS 접근성·화면 기록 권한은 원본 Codex 앱의 안내에 따라 설정합니다.
-- 엔진을 까는 것은 CUA Bar입니다. 앱 없이 엔진만 따로 까는 길은 제공하지 않습니다. 아래 명령은 개발과 진단에 씁니다.
+- 엔진을 까는 것은 cuabar 플러그인의 MCP(새 Claude 대화가 띄울 때)나 CUA Bar(켜질 때)입니다. 아래 명령은 개발과 진단에 씁니다.
 
 ## 사본과 current 링크
 
@@ -182,3 +186,15 @@ Stop·StopFailure는 해당 부모 범위, SubagentStop는 해당 하위 에이�
 Claude Code는 일반적인 Interrupt 훅을 제공하지 않으므로, 도구 실행이 없는 답변 생성 중 Esc의 즉시 정리는 보장하지 않습니다. 다음 질문이나 대화 종료가 그 범위를 정리합니다.
 
 부모와 각 하위 에이전트는 별도의 소유 Codex 스레드와 JS 커널을 사용합니다. 하위 에이전트의 `js_reset`이 부모나 형제의 변수·핸들을 초기화하지 않습니다.
+
+## cuabar 플러그인 (0.9.0)
+
+메뉴 막대 앱 없이 Claude Code 플러그인만으로 씁니다. 앱이 저절로 하던 일은 플러그인이 하고, 사람이 누르던 버튼은 `cuabar` 스킬이 사용자의 말을 받아 `codex-cua` 명령으로 합니다. 메뉴 아이콘·팝오버·알림·앱 자동 업데이트는 없고, 새 판은 마켓플레이스(`claude plugin update cuabar@chenjing-plugins`)로 받습니다.
+
+- **시작(`plugin-mcp.sh` → `setup.py plugin-mcp`, `plugin_host.py`)**: Claude Code가 플러그인 캐시 폴더에서 MCP를 띄우면 `install-engine`을 해서(앱이 켤 때와 같은 사본·파이썬 환경·`codex-cua`·Codex 래퍼와 로그인 환경·중계기·`current`) 그 사본의 `start-mcp.sh`로 브리지를 띄웁니다. CUA Bar의 관리 훅은 설정에 더하지 않습니다(플러그인이 훅을 싣습니다). `current`가 이 플러그인보다 높은 판이면 내리지 않고 그 사본을 씁니다. 업데이트 뒤에도 열려 있던 옛 대화가 다시 연결하면서 `current`를 되돌리고, 그 전환이 새 대화의 브리지를 닫는(0.8.18) 핑퐁을 막으려는 것입니다. 끝난 연결의 점유는 뒤에서 `release --ended --connections-only`로 풉니다. 이 단계에서 setup·pip이 내는 말은 MCP 통로(stdout)가 아니라 stderr로 갑니다.
+- **앱과 겹치지 않기**: CUA Bar가 떠 있거나 Claude Code에 user MCP `cuabar`(앱이 등록한 것)가 있으면 플러그인은 설치하지 않고 도구 없는 대기 MCP(`plugin_standby.py`)로 뜹니다. 연결할 때의 안내가 까닭과 옮기는 법을 말합니다. 앱이 우선인 까닭은 앱을 지우지 않고 되돌릴 길로 남기기 때문입니다. 앱을 다시 켜면 앱이 자기 엔진·MCP·훅을 다시 깔고, 플러그인은 다음 대화부터 비켜 섭니다. 설치가 실패해도 대기 MCP가 까닭을 말합니다.
+- **도구 이름**: Claude Code가 플러그인 MCP의 도구를 `mcp__plugin_cuabar_cuabar__js`처럼 이름 붙이고 서버는 `/mcp`에 `plugin:cuabar:cuabar`로 보입니다. 브리지는 CUABAR_HOST=plugin으로 떠서 재연결 안내를 `/mcp reconnect plugin:cuabar:cuabar`로 하고, `repair` 도구는 없습니다(고칠 앱 훅이 없음). `status`의 `hooks`는 `plugin`입니다(훅이 꺼진 설정이면 `disabled`).
+- **훅**: `plugin.json`에 앱과 같은 여섯 이벤트를 `claude-hook.sh plugin`으로 겁니다. PreToolUse의 matcher는 `^mcp__plugin_cuabar_cuabar__.*$`입니다. 엔진의 훅 코드는 두 도구 이름을 다 알아봅니다. 설정에 CUA Bar의 관리 훅이 남아 있으면 끝 이벤트는 그 훅에 맡기고 플러그인 훅은 아무것도 하지 않습니다(같은 범위를 두 번 끝내지 않게). 앱 훅의 PreToolUse matcher는 앱 도구만 가리키므로 플러그인 도구의 PreToolUse는 플러그인 훅이 맡습니다.
+- **잠긴 Mac 자동 복구**: 플러그인으로 뜬 브리지는 `unlock_failed`를 기록하면 2초 뒤 자기 엔진의 `unlock-reset`을 따로 부릅니다. 앱이 기록을 보고 부르던 것과 같은 명령이라 조건(지금 잠김, 마지막 재시작 뒤의 실패, 도는 호출 없음, 잠금 한 번에 다섯 번)은 엔진이 정합니다. Codex 대화에서 난 실패는 브리지가 보지 못해서 플러그인만으로는 다시 켜지 않습니다.
+- **스킬 `cuabar`**: 상태 보기(`status` 도구와 `codex-cua status --json`), 사용자가 부탁할 때만 하는 탭·점유 정리(`release --ended`, Codex 대화는 `release-session --user`), Codex 다시 켜기(`restart-codex`, 하던 Codex 작업이 끊긴다고 먼저 말함), 앱과 플러그인 사이 옮기기를 적습니다. CUA를 쓰는 법은 전처럼 MCP가 연결할 때 말합니다.
+- **앱에서 플러그인으로**: CUA Bar를 끝내고 로그인 항목을 끈 뒤 `claude mcp remove -s user cuabar`, `claude plugin install cuabar@chenjing-plugins --scope user`, 새 Claude 대화. 앱 훅은 남아도 겹치지 않지만 치우려면 `~/.claude/settings.json`에서 `engine/current/claude-hook.sh` 항목을 지웁니다.

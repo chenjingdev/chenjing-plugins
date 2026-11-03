@@ -11,6 +11,8 @@ import stat
 import shutil
 import tempfile
 
+import cuabar_host
+
 
 HOOK_TIMEOUT = 10
 MAX_SETTINGS_BYTES = 8 * 1024 * 1024
@@ -210,7 +212,26 @@ def claude_available(home=None, environment=None):
                    (home/'.local/bin/claude', home/'.claude/local/claude')))
 
 
+def plugin_enabled(home=None, config_dir=None):
+    """True when the selected profile's settings enable the cuabar plugin (`enabledPlugins`, any marketplace)."""
+    try:
+        home = Path.home() if home is None else Path(home)
+        settings, _, _ = _read(_directory(home, config_dir)/'settings.json')
+    except (SettingsConflict, OSError, ValueError, TypeError, RecursionError):
+        return False
+    enabled = settings.get('enabledPlugins')
+    return isinstance(enabled, dict) and any(isinstance(key, str) and key.split('@')[0] == 'cuabar' and value is True
+                                             for key, value in enabled.items())
+
+
 def lifecycle_hooks_state(home=None, environment=None):
+    """`not_installed` without Claude Code, else the state of CUA Bar's managed hooks, or `plugin` when there are none
+    because the cuabar plugin brings its own (it is enabled, or this runs for it)."""
     environment = os.environ if environment is None else environment
-    return (inspect_hooks(home, environment.get('CLAUDE_CONFIG_DIR', ''))
-            if claude_available(home, environment) else 'not_installed')
+    if not claude_available(home, environment):
+        return 'not_installed'
+    config_dir = environment.get('CLAUDE_CONFIG_DIR', '')
+    state = inspect_hooks(home, config_dir)
+    if state == 'missing' and (cuabar_host.plugin(environment) or plugin_enabled(home, config_dir)):
+        return 'plugin'
+    return state

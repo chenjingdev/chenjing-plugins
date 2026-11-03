@@ -211,6 +211,41 @@ class HealthTests(unittest.TestCase):
                 self.assertEqual(mcp_health._hooks(Path('/h'), {}), state)
 
 
+class SetupHooksTests(unittest.TestCase):
+    """`setup.claude_hooks` of `codex-cua status`, which runs outside the bridge and is not told about the plugin."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.home = Path(temporary.name)
+        (self.home/'.claude').mkdir(mode=0o700)
+        self.settings = self.home/'.claude/settings.json'
+        available = patch.object(claude_hook_setup, 'claude_available', return_value=True)
+        available.start()
+        self.addCleanup(available.stop)
+
+    def state(self, environment=None):
+        return claude_hook_setup.lifecycle_hooks_state(self.home, environment or {})
+
+    def write(self, settings):
+        self.settings.write_text(json.dumps(settings))
+        self.settings.chmod(0o600)
+
+    def test_an_enabled_cuabar_plugin_of_any_marketplace_brings_the_hooks(self):
+        self.assertEqual(self.state(), 'missing')
+        for key in ('cuabar@chenjing-plugins', 'cuabar@local-test'):
+            with self.subTest(key=key):
+                self.write({'enabledPlugins': {key: True, 'pact@chenjing-plugins': True}})
+                self.assertEqual(self.state(), 'plugin')
+        self.write({'enabledPlugins': {'cuabar@chenjing-plugins': False, 'cuabarx@x': True}})
+        self.assertEqual(self.state(), 'missing')
+
+    def test_running_for_the_plugin_is_enough_and_the_apps_hooks_still_count_first(self):
+        self.assertEqual(self.state(PLUGIN), 'plugin')
+        self.write({'enabledPlugins': {'cuabar@chenjing-plugins': True}})
+        claude_hook_setup.configure_hooks(self.home, '')
+        self.assertEqual(self.state(), 'ready')
+
+
 class UnlockTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory(dir='/tmp', prefix='pu')
