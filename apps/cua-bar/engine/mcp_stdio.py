@@ -10,7 +10,7 @@ import uuid
 from bridge_control import BridgeControl
 from host_autostart import AutostartFailure, ensure_host, give_back_first_call, watch_first_call
 from host_mcp import (HostMcp, serve, BridgeFailure, RpcFailure, CANCEL_BEFORE_SEND, UPDATE_CLOSING, ident_key,
-                      error_with_note, failure_note)
+                      error_with_note, failure_note, mac_locked)
 from runtime_paths import default_state, installation_from_native_cli, InstallationError
 from claude_lifecycle import ScopeRouter, END_EVENTS, source as claude_source
 
@@ -56,6 +56,8 @@ def build_adapter(state, **options):
     # Resolve on initialize, and again whenever the host connection was lost. A closed app is opened as the
     # original host; a failure stays a real MCP error instead of an independent CUA process.
     class RegisteredHost(HostMcp):
+        lock_reader = staticmethod(mac_locked)
+
         def __init__(self, *args, agent_key=None, **kwargs):
             super().__init__(*args, **kwargs)
             self.claude_lifecycle = ScopeRouter(self)

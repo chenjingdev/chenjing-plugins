@@ -11,9 +11,11 @@ import json
 import logging
 import os
 from pathlib import Path
+import plistlib
 import re
 import signal
 import stat
+import subprocess
 import sys
 import time
 import uuid
@@ -151,6 +153,20 @@ UNLOCK_FAILED_NOTE = ('CUA Bar note: CUA Bar restarts the computer-use service s
                       'again with a call that only looks, such as `await cua.getState();`, at most five times, and go on '
                       'with the task once one works. If the last one still fails, stop and ask the user to unlock the '
                       'Mac. Never try to unlock the Mac or restart the service yourself.')
+# 0.9.0: the service may answer an unlock failure a moment before the unlock it started completes (2026-11-03 on this
+# Mac: twice 0.1 s before, after the display had slept for over a minute). When the Mac is unlocked within this long, a
+# call that only looks is sent once more at once; any other call is not replayed, and the AI is told to look now.
+UNLOCKED_SOON_SECONDS = 2.0
+# What a look-only js may call: the documented entry points and reads, and output. Anything else (click, typeText,
+# createBrowserTab, setTimeout …) makes it a call that is never sent again.
+LOOK_ONLY_CALLS = frozenset(('getState', 'getApp', 'getAXState', 'getScreenshot', 'getAXStateAndScreenshot', 'write',
+                             'emitImage', 'stringify'))
+CALLED = re.compile(r'([A-Za-z_$][\w$]*)\s*\(')
+UNLOCKED_RESENT_NOTE = ('CUA Bar note: the first try of this call was refused as locked, and the Mac unlocked a moment '
+                        'later, so CUA Bar sent this look-only call once more; this is the answer of that second try.')
+UNLOCKED_NOW_NOTE = ('CUA Bar note: the Mac unlocked a moment after this call was refused as locked, so there is no need '
+                     'to wait. Look at the current state now with a call that only looks, then decide; do not replay '
+                     'clicks, typing or sends blindly. Never try to unlock the Mac or restart the service yourself.')
 # Any other lock refusal (physical input paused the automatic unlock, no ChatGPT thread to tie the request to, or only
 # that the Mac is locked): nothing tries again, a person has to unlock.
 LOCKED_NOTE = ('CUA Bar note: stop and ask the user to unlock the Mac. Never try to unlock it or restart the computer-use '
@@ -318,6 +334,44 @@ def failure(name, arguments, answer, ms):
         if ms >= limit:
             return 'timeout'
     return 'error'
+
+
+def look_only(code):
+    """True when a js call's code only reads: every call in it is one of LOOK_ONLY_CALLS, and it calls something."""
+    if not isinstance(code, str) or '`' in code:
+        return False
+    called = CALLED.findall(code)
+    return bool(called) and all(name in LOOK_ONLY_CALLS for name in called)
+
+
+def mac_locked():
+    """Whether this user's console session has its screen locked now: True, False, or None when unreadable."""
+    try:
+        output = subprocess.run(['/usr/sbin/ioreg', '-n', 'Root', '-d1', '-a'], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=3).stdout
+        users = plistlib.loads(output).get('IOConsoleUsers')
+    except Exception:
+        return None
+    for user in users if isinstance(users, list) else []:
+        if (isinstance(user, dict) and user.get('kCGSSessionUserIDKey') == os.getuid()
+                and user.get('kCGSSessionOnConsoleKey') is True):
+            return user.get('CGSSessionScreenIsLocked') is True
+    return None
+
+
+async def unlocked_soon(seconds=UNLOCKED_SOON_SECONDS, locked=mac_locked, poll=0.2):
+    deadline = time.monotonic() + seconds
+    while True:
+        if await asyncio.get_running_loop().run_in_executor(None, locked) is False:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(poll)
+
+
+def with_text(answer, text):
+    content = answer.get('content') if isinstance(answer, dict) else None
+    return {**answer, 'content': [*content, {'type': 'text', 'text': text}]} if isinstance(content, list) else answer
 
 
 class BridgeFailure(Exception):
@@ -518,6 +572,10 @@ class ProxyRpc:
 
 
 class HostMcp:
+    # How settle_unlock reads the Mac's lock: None (probes, fixtures) never waits for an unlock; the registered MCP
+    # host reads the real console session (mac_locked).
+    lock_reader = None
+
     def __init__(self, cli_path, socket_path, server='cua_repl', emit=None, log=None,
                  startup_timeout=15.0, cleanup_timeout=5.0,
                  expected_plugin_id=NATIVE_PLUGIN_ID, native_cua_root=None, local_health_tools=True):
@@ -1024,9 +1082,16 @@ class HostMcp:
                     self.reply(ident, error={'code': -32601, 'message': 'The tool is not advertised by the owned host CUA server.'})
                     return
                 answer = await (self.end_turn_tool() if name == 'turn_ended' else self.call_tool(name, arguments))
+                answer, unlocked = await self.settle_unlock(name, arguments, answer)
                 if browser_refused(name, answer):
                     self.browser_blocked()
-                self.reply(ident, with_runtime_note(name, with_notes(name, answer), enabled=self.local_health_tools))
+                if unlocked == 'resent':
+                    noted = with_text(with_notes(name, answer), UNLOCKED_RESENT_NOTE)
+                elif unlocked == 'unlocked':
+                    noted = with_text(with_browser_note(name, answer), UNLOCKED_NOW_NOTE)
+                else:
+                    noted = with_notes(name, answer)
+                self.reply(ident, with_runtime_note(name, noted, enabled=self.local_health_tools))
             else:
                 self.reply(ident, error={'code': -32601, 'message': 'Unsupported MCP method.'})
         except RpcFailure as error:
@@ -1041,6 +1106,18 @@ class HostMcp:
         except Exception:
             self.reply(ident, error={'code': -32603, 'message': 'The Codex host CUA adapter could not complete this request.'})
             self.log('local_request_failure')
+
+    async def settle_unlock(self, name, arguments, answer):
+        """(answer, what happened) after a js call the service refused with its unlock failure: when the Mac is unlocked
+        within UNLOCKED_SOON_SECONDS, a look-only call is sent once more ('resent', its answer), any other is left as it
+        is ('unlocked'). An unlocked Mac uses none of the service's unlock tries. Otherwise (answer, None)."""
+        if (self.lock_reader is None or name != 'js' or failure(name, arguments, answer, 0) != 'unlock_failed'
+                or not await unlocked_soon(locked=self.lock_reader)):
+            return answer, None
+        if not look_only(arguments.get('code')):
+            return answer, 'unlocked'
+        self.log('unlock_completed_after_refusal_resent')
+        return await self.call_tool(name, arguments), 'resent'
 
     async def ensure_connected(self):
         if self.connected:

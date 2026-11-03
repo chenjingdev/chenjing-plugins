@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import bridge_control
 import claude_hook_setup
@@ -271,6 +271,67 @@ class UnlockTests(unittest.IsolatedAsyncioTestCase):
     async def test_nothing_else_and_no_app_bridge_asks(self):
         self.assertEqual(await self.calls(PLUGIN, 'screen_locked'), [])
         self.assertEqual(await self.calls({cuabar_host.HOST_ENV: ''}, 'unlock_failed'), [])
+
+
+LOCKED_ANSWER = {'content': [{'type': 'text', 'text': json.dumps({'apps': [], 'browsers': [], 'errors': [
+    'Native apps: Error: The Mac is locked and automatic unlock could not unlock it. Ask the user to unlock the Mac.']})}]}
+OK_ANSWER = {'content': [{'type': 'text', 'text': '{"apps": 43}'}]}
+
+
+class UnlockedSoonTests(unittest.IsolatedAsyncioTestCase):
+    def bridge(self, answers):
+        bridge = host_mcp.HostMcp.__new__(host_mcp.HostMcp)
+        bridge.log = lambda event: None
+        bridge.lock_reader = lambda: False
+        bridge.sent = []
+        async def call_tool(name, arguments):
+            bridge.sent.append(arguments['code'])
+            return answers.pop(0)
+        bridge.call_tool = call_tool
+        return bridge
+
+    def test_only_reads_count_as_look_only(self):
+        for code in ('await cua.getState();', 'let app = await cua.getApp("Finder");',
+                     'const s = await cua.getState(); nodeRepl.write(JSON.stringify(s.apps));',
+                     'await nodeRepl.emitImage(await app.getScreenshot({ emit: false }));'):
+            self.assertTrue(host_mcp.look_only(code), code)
+        for code in ('await app.click(3);', 'await cua.getState(); await app.typeText("x");',
+                     'await cua.createBrowserTab("chrome", u);', 'await new Promise(r => setTimeout(r, 9));',
+                     'nodeRepl.write(`${x}`)', '', None, 'x = 1;'):
+            self.assertFalse(host_mcp.look_only(code), code)
+
+    async def test_a_look_only_call_is_sent_once_more_when_the_mac_unlocks_at_once(self):
+        bridge = self.bridge([OK_ANSWER])
+        with patch.object(host_mcp, 'unlocked_soon', new=AsyncMock(return_value=True)):
+            answer, what = await bridge.settle_unlock('js', {'code': 'await cua.getState();'}, LOCKED_ANSWER)
+        self.assertEqual((answer, what), (OK_ANSWER, 'resent'))
+        self.assertEqual(bridge.sent, ['await cua.getState();'])
+
+    async def test_any_other_call_is_never_replayed(self):
+        bridge = self.bridge([])
+        with patch.object(host_mcp, 'unlocked_soon', new=AsyncMock(return_value=True)):
+            answer, what = await bridge.settle_unlock('js', {'code': 'await app.click(4);'}, LOCKED_ANSWER)
+        self.assertEqual((answer, what, bridge.sent), (LOCKED_ANSWER, 'unlocked', []))
+
+    async def test_a_mac_that_stays_locked_or_another_refusal_changes_nothing(self):
+        bridge = self.bridge([])
+        with patch.object(host_mcp, 'unlocked_soon', new=AsyncMock(return_value=False)):
+            self.assertEqual(await bridge.settle_unlock('js', {'code': 'await cua.getState();'}, LOCKED_ANSWER),
+                             (LOCKED_ANSWER, None))
+        paused = {'isError': True, 'content': [{'type': 'text', 'text': 'The Mac is locked; physical input was detected.'}]}
+        with patch.object(host_mcp, 'unlocked_soon', new=AsyncMock()) as soon:
+            self.assertEqual(await bridge.settle_unlock('js', {'code': 'await cua.getState();'}, paused), (paused, None))
+            self.assertEqual(await bridge.settle_unlock('js', {'code': 'x'}, OK_ANSWER), (OK_ANSWER, None))
+            bridge.lock_reader = None
+            self.assertEqual(await bridge.settle_unlock('js', {'code': 'await cua.getState();'}, LOCKED_ANSWER),
+                             (LOCKED_ANSWER, None))
+            soon.assert_not_called()
+        self.assertEqual(bridge.sent, [])
+
+    async def test_unlocked_soon_waits_for_the_unlock_only_so_long(self):
+        states = iter([True, None, False])
+        self.assertTrue(await host_mcp.unlocked_soon(1.0, lambda: next(states), poll=0.01))
+        self.assertFalse(await host_mcp.unlocked_soon(0.05, lambda: True, poll=0.01))
 
 
 class HookTests(unittest.TestCase):
