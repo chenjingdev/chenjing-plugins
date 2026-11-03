@@ -1,6 +1,6 @@
 {
   "name": "cuabar",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Mac 전용 Codex CUA 연결기. Claude Code가 설치된 Codex의 앱·브라우저 제어 기능(CUA)을 부릅니다. 메뉴 막대 앱 CUA Bar 없이 플러그인만으로 쓰고, CUA Bar가 떠 있거나 앱이 등록한 cuabar MCP가 있으면 비켜 섭니다. 비공식 실험 버전이며 Codex 앱이 필요합니다.",
   "author": {
     "name": "chenjing"

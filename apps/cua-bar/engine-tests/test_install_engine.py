@@ -291,6 +291,49 @@ class OldCopyTests(InstallCase):
                 self.assertEqual(result['setup']['command'], 'ready')
 
 
+class GlowRetirementTests(InstallCase):
+    """0.9.2 took 0.9.1's edge glow out: an install ends its helpers and removes its socket and setting."""
+
+    def state_dir(self):
+        folder = self.state.root
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return folder
+
+    def test_glow_helpers_of_this_user_that_run_from_an_engine_copy_are_ended_and_nothing_else(self):
+        self.old_copy('0.9.1')
+        helper = '%s/0.9.1/overlay-helper/cuabar-overlay %s/overlay.sock' % (self.engines, self.state.root)
+        self.machine.add(4400, 1, helper)
+        self.machine.add(4401, 1, helper, uid=os.getuid() + 1)                       # another user's
+        self.machine.add(4402, 1, '/tmp/elsewhere/overlay-helper/cuabar-overlay /tmp/x.sock')
+        self.machine.add(4403, 1, '%s/0.9.1/mcp_stdio.py' % self.engines)          # a 0.9.1 bridge stays
+        self.installed()
+        self.assertEqual([pid for pid, _ in self.machine.signals], [4400])
+
+    def test_the_glow_socket_and_setting_go_and_the_other_setting_stays(self):
+        import socket
+        state = self.state_dir()
+        server = socket.socket(socket.AF_UNIX)
+        self.addCleanup(server.close)
+        server.bind(str(state/'overlay.sock'))
+        settings = state/'settings.json'
+        settings.write_text(json.dumps({'schema_version': 1, 'error_text': True, 'overlay': False}))
+        settings.chmod(0o600)
+        self.installed()
+        self.assertFalse((state/'overlay.sock').exists())
+        self.assertEqual(json.loads(settings.read_text()), {'schema_version': 1, 'error_text': True})
+
+    def test_settings_without_the_glow_key_and_other_files_are_left_alone(self):
+        state = self.state_dir()
+        settings = state/'settings.json'
+        settings.write_text('{"schema_version": 1, "error_text": true}')
+        settings.chmod(0o600)
+        (state/'overlay.sock').write_text('not a socket')
+        before = settings.stat().st_mtime_ns
+        self.installed()
+        self.assertEqual((settings.read_text(), settings.stat().st_mtime_ns), ('{"schema_version": 1, "error_text": true}', before))
+        self.assertTrue((state/'overlay.sock').exists())
+
+
 class OutputTests(InstallCase):
     def test_json_is_one_object_on_one_line_with_these_keys(self):
         self.old_copy('0.7.0')

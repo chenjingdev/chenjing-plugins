@@ -187,15 +187,6 @@ Claude Code는 일반적인 Interrupt 훅을 제공하지 않으므로, 도구 �
 
 부모와 각 하위 에이전트는 별도의 소유 Codex 스레드와 JS 커널을 사용합니다. 하위 에이전트의 `js_reset`이 부모나 형제의 변수·핸들을 초기화하지 않습니다.
 
-## AI가 조작하는 동안의 표시 (0.9.1)
-
-앱과 플러그인 모두 같은 엔진이라 똑같이 보입니다.
-
-- **화면 가장자리 빛**: Claude가 cuabar로 `js`를 부르는 동안 모든 화면의 가장자리에 Codex 강조색(`~/.codex/computer-use/config.json`의 `accentColor`, 없으면 파랑)의 은은한 빛이 숨 쉬듯 켜집니다. 호출이 끝나면 1.2초 남았다가(짧은 호출이 이어져도 깜빡이지 않게) 사라지고, `turn_ended`면 바로, 취소·연결 끊김·대화 종료면 그 호출이 끝나는 대로 꺼집니다.
-- **도우미 `overlay-helper/cuabar-overlay`**: 빛은 엔진 사본 안의 작은 Swift 프로그램이 그립니다(소스와 빌드 스크립트가 같은 폴더에 있고, 사본은 빌드된 파일을 그대로 씁니다. 소스를 고치면 `build.sh`로 다시 빌드해 같이 커밋합니다). 사용자마다 하나가 `~/Library/Caches/codex-cua/overlay.sock`에서 모든 대화의 브리지를 받아, 하나라도 호출 중이면 켭니다(여러 대화가 동시에 돌아도 빛은 한 겹). 브리지는 처음 호출할 때 도우미를 띄우고, 연결이 모두 끊기면 도우미가 5초 뒤 스스로 끝나므로 엔진이 죽어도 혼자 남지 않습니다. 창은 클릭을 통과시키고, 모든 Space와 전체 화면 앱 위에 있으며, 화면 캡처에서 빠지므로(`sharingType = .none`) AI가 받는 스크린샷과 접근성 트리에 찍히지 않습니다.
-- **포인터**: Codex Computer Use 서비스가 이미 자기 가상 커서를 클릭·끌기·스크롤 자리로 움직이므로 엔진은 따로 그리지 않습니다. 실제 마우스 커서는 움직이지 않습니다.
-- **끄기**: `codex-cua settings --overlay off`(다시 켜기는 `on`, 기본은 켜짐). 다음 호출부터 적용되고 `status --json`의 `settings.overlay`로 보입니다.
-
 ## cuabar 플러그인 (0.9.0)
 
 메뉴 막대 앱 없이 Claude Code 플러그인만으로 씁니다. 앱이 저절로 하던 일은 플러그인이 하고, 사람이 누르던 버튼은 `cuabar` 스킬이 사용자의 말을 받아 `codex-cua` 명령으로 합니다. 메뉴 아이콘·팝오버·알림·앱 자동 업데이트는 없고, 새 판은 마켓플레이스(`claude plugin update cuabar@chenjing-plugins`)로 받습니다.
@@ -206,5 +197,6 @@ Claude Code는 일반적인 Interrupt 훅을 제공하지 않으므로, 도구 �
 - **훅**: `plugin.json`에 앱과 같은 여섯 이벤트를 `claude-hook.sh plugin`으로 겁니다. PreToolUse의 matcher는 `^mcp__plugin_cuabar_cuabar__.*$`입니다. 엔진의 훅 코드는 두 도구 이름을 다 알아봅니다. 설정에 CUA Bar의 관리 훅이 남아 있으면 끝 이벤트는 그 훅에 맡기고 플러그인 훅은 아무것도 하지 않습니다(같은 범위를 두 번 끝내지 않게). 앱 훅의 PreToolUse matcher는 앱 도구만 가리키므로 플러그인 도구의 PreToolUse는 플러그인 훅이 맡습니다.
 - **잠긴 Mac 자동 복구**: 플러그인으로 뜬 브리지는 `unlock_failed`를 기록하면 2초 뒤 자기 엔진의 `unlock-reset`을 따로 부릅니다. 앱이 기록을 보고 부르던 것과 같은 명령이라 조건(지금 잠김, 마지막 재시작 뒤의 실패, 도는 호출 없음, 잠금 한 번에 다섯 번)은 엔진이 정합니다. Codex 대화에서 난 실패는 브리지가 보지 못해서 플러그인만으로는 다시 켜지 않습니다.
 - **해제 직후 실패를 메우기**(앱과 플러그인 모두): 서비스가 "automatic unlock could not unlock it"으로 답했는데 2초 안에 Mac이 실제로 풀리면, 브리지는 보기만 하는 js(호출하는 것이 `getState`·`getApp`·`getAXState`·`getScreenshot`·`getAXStateAndScreenshot`·`nodeRepl.write`·`emitImage`·`JSON.stringify`뿐인 코드)를 한 번 바로 다시 보내고 그 답을 돌려줍니다. 그 밖의 js는 다시 보내지 않고, 이미 풀렸으니 기다리지 말고 상태부터 다시 보라는 안내를 붙입니다. 이미 풀린 Mac이라 서비스의 잠금 해제 시도를 더 쓰지 않습니다. 2026-11-03 이 맥에서 화면이 1분 넘게 꺼져 있다 잠긴 때 서비스가 해제를 끝내기 0.1초 전에 실패로 답하는 것을 두 번 봤습니다.
+- **0.9.1 글로우 정리**(0.9.2): 0.9.1에 잠깐 있던 화면 가장자리 빛(Swift 도우미 `cuabar-overlay`)은 요청을 잘못 알아듣고 넣은 것이라 0.9.2에서 통째로 뺐습니다. 새 엔진이 깔릴 때(`install-engine`) 엔진 사본에서 도는 이 사용자의 `cuabar-overlay`를 끝내고, 상태 폴더의 `overlay.sock`과 `settings.json`의 `overlay` 키를 지웁니다. 아직 열려 있는 0.9.1 브리지가 다음 호출에서 도우미를 다시 띄우면, 그 도우미는 브리지가 닫힌 뒤 몇 초 안에 스스로 끝납니다.
 - **스킬 `cuabar`**: 상태 보기(`status` 도구와 `codex-cua status --json`), 사용자가 부탁할 때만 하는 탭·점유 정리(`release --ended`, Codex 대화는 `release-session --user`), Codex 다시 켜기(`restart-codex`, 하던 Codex 작업이 끊긴다고 먼저 말함), 앱과 플러그인 사이 옮기기를 적습니다. CUA를 쓰는 법은 전처럼 MCP가 연결할 때 말합니다.
 - **앱에서 플러그인으로**: CUA Bar를 끝내고 로그인 항목을 끈 뒤 `claude mcp remove -s user cuabar`, `claude plugin install cuabar@chenjing-plugins --scope user`, 새 Claude 대화. 앱 훅은 남아도 겹치지 않지만 치우려면 `~/.claude/settings.json`에서 `engine/current/claude-hook.sh` 항목을 지웁니다.

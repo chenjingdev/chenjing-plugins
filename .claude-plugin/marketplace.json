@@ -56,7 +56,7 @@
     },
     {
       "name": "cuabar",
-      "description": "Mac에서 Claude Code가 Codex CUA로 앱·브라우저를 조작한다. Codex 래퍼·중계기 준비, 꺼진 Codex 뒤에서 켜기, 잠긴 Mac 자동 복구, 작업 끝 정리 훅을 플러그인이 하고, 조작하는 동안 화면 가장자리에 빛을 띄운다. 상태·탭 정리는 cuabar 스킬. Codex 앱 필요, 비공식 실험판.",
+      "description": "Mac에서 Claude Code가 Codex CUA로 앱·브라우저를 조작한다. Codex 래퍼·중계기 준비, 꺼진 Codex 뒤에서 켜기, 잠긴 Mac 자동 복구, 작업 끝 정리 훅을 플러그인이 한다. 상태·탭 정리는 cuabar 스킬. Codex 앱 필요, 비공식 실험판.",
       "source": "./apps/cua-bar/engine",
       "skills": [
         "./skills/cuabar"

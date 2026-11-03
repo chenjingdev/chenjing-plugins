@@ -832,13 +832,12 @@ def main(arguments=None):
     parser.add_argument('--group', choices=('all', 'claude', 'codex'))
     parser.add_argument('--force', action='store_true')
     parser.add_argument('--error-text', choices=('on', 'off'))
-    parser.add_argument('--overlay', choices=('on', 'off'))
     args, remainder = parser.parse_known_args(arguments)
     remainder += forwarded
     if not math.isfinite(args.timeout) or not 0 < args.timeout <= 60:
         parser.error('--timeout must be finite, positive and at most 60 seconds')
     if args.command not in ENGINE_COMMANDS and (args.connection or args.ended or args.session or args.user
-                                                or args.group or args.force or args.error_text or args.overlay
+                                                or args.group or args.force or args.error_text
                                                 or args.connections_only):
         parser.error('unrecognized arguments')
     if sys.version_info < (3, 9) or sys.platform != 'darwin':

@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import stat
 import sys
 import tempfile
@@ -238,6 +239,44 @@ def prune(ctx, engines, current, previous=None):
     return removed
 
 
+def retire_glow(ctx, engines):
+    """What 0.9.1's edge glow left goes (0.9.2 took it out): its helper processes of this user that run from an engine
+    copy, <state>/overlay.sock and the "overlay" key of settings.json. Returns how many helpers were stopped.
+
+    A 0.9.1 bridge that is still open can start the helper again at its next call; that one ends by itself a few
+    seconds after the bridge does."""
+    stopped = 0
+    try:
+        procs = snapshot(ctx).values()
+    except Exception:
+        procs = ()
+    helpers = re.compile('^(?:%s)/%s/overlay-helper/cuabar-overlay(?: |$)' % (
+        '|'.join(re.escape(str(folder)) for folder in {engines, engines.resolve()}), VERSION.pattern[1:-1]))
+    for proc in procs:
+        if proc.uid == ctx.uid and helpers.match(proc.command):
+            try:
+                ctx.kill(proc.pid, signal.SIGTERM)
+                stopped += 1
+            except OSError:
+                pass
+    from engine_records import private_directory, read_settings, write_settings
+    state = ctx.state_dir
+    try:
+        info = os.lstat(state/'overlay.sock')
+        if stat.S_ISSOCK(info.st_mode) and info.st_uid == ctx.uid:
+            os.unlink(state/'overlay.sock')
+    except OSError:
+        pass
+    try:
+        with open(state/'settings.json', 'rb') as file:
+            glow_setting = private_directory(state, ctx.uid) and 'overlay' in json.loads(file.read(65536))
+    except (OSError, ValueError, TypeError):
+        glow_setting = False
+    if glow_setting:
+        write_settings(state, ctx.uid, read_settings(state, ctx.uid)['error_text'])
+    return stopped
+
+
 def install_engine(ctx, source_root, claude_hooks=True):
     """Unpack, set up, point `current` at the copy and clean. Returns the result the command prints. The cuabar plugin
     passes claude_hooks=False: it brings its own hooks, so CUA Bar's managed ones are not added to the settings."""
@@ -260,6 +299,7 @@ def install_engine(ctx, source_root, claude_hooks=True):
         state = {'command': command_state(ctx, support), 'login_environment': login, 'shell_environment': shell,
                  'shell_file': str(shell_file) if shell_file is not None else None, 'relay': relay,
                  'claude_hooks': lifecycle_hooks_state(ctx.home, ctx.environment)}
+        retire_glow(ctx, engines)
         removed = prune(ctx, engines, version, previous)
     return {'version': version, 'root': str(root), 'launcher': ctx.engine_launcher(), 'removed': removed,
             'setup': state}
