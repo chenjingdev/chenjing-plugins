@@ -14,6 +14,7 @@ import stat
 import sys
 
 from claude_hook_setup import inspect_hooks
+import cuabar_host
 from runtime_identity import RUNNING_IDENTITY, installed_identity, installed_root, runtime_status
 
 REPAIR_SECONDS = 10.0
@@ -21,7 +22,7 @@ MAX_REPLY = 16384
 HELPER_KIND = 'cuabar_hook_repair'
 SAFE_CODE = re.compile(r'^[a-z][a-z0-9_]{0,79}$')
 RECONNECT = ('The MCP transport may still show Connected while this bridge runs an older CUA Bar engine. '
-             'Run /mcp reconnect cuabar in Claude Code; restart Claude Code if that command is unavailable. '
+             'Run '+cuabar_host.reconnect_command()+' in Claude Code; restart Claude Code if that command is unavailable. '
              'Do not replay an action whose outcome is uncertain.')
 
 TOOL_SPECS = (
@@ -43,12 +44,18 @@ TOOL_SPECS = (
 )
 
 
-def tool_specs():
-    return copy.deepcopy(TOOL_SPECS)
+def tool_specs(environment=None):
+    """The local tools. The plugin brings its hooks itself, so it has nothing for `repair` to restore."""
+    plugin = cuabar_host.plugin(environment)
+    return [copy.deepcopy(spec) for spec in TOOL_SPECS if not (plugin and spec['name'] == 'repair')]
 
 
 def _hooks(home, environment):
-    return inspect_hooks(home, environment.get('CLAUDE_CONFIG_DIR', ''))
+    state = inspect_hooks(home, environment.get('CLAUDE_CONFIG_DIR', ''))
+    if cuabar_host.plugin(environment) and state in ('ready', 'missing'):
+        # The plugin's hooks come with it; the app's managed entries in the settings neither add nor lack anything.
+        return 'plugin'
+    return state
 
 
 def read_health(adapter, home=None, environment=None):

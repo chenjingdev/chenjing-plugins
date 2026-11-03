@@ -80,7 +80,7 @@ def write_private(path, value):
 
 
 def validated_plugin_root(path, version=None):
-    """The real path of an engine folder (the manifest of `cua`, and the files every run needs), or RuntimeError."""
+    """The real path of an engine folder (the manifest of `cuabar`, and the files every run needs), or RuntimeError."""
     path = Path(path).expanduser()
     if not path.is_absolute():
         raise RuntimeError('The engine path must be absolute.')
@@ -88,7 +88,7 @@ def validated_plugin_root(path, version=None):
     manifest_path = path/'.claude-plugin/plugin.json'
     manifest = json.loads(manifest_path.read_text())
     if (path.stat().st_uid != os.getuid() or manifest_path.stat().st_uid != os.getuid()
-            or manifest.get('name') != 'cua'
+            or manifest.get('name') != 'cuabar'
             or not isinstance(manifest.get('version'), str)
             or (version is not None and manifest['version'] != version)
             or not all((path/name).is_file() for name in ('setup.py', 'runtime_paths.py', 'start-mcp.sh'))):
@@ -273,8 +273,9 @@ def relay_status(home=None):
         return 'invalid'
 
 
-def run_setup(plugin_root, home=None, environment=None):
-    """The usual `setup` for the engine folder `plugin_root`: its command, the login environment and the relay files.
+def run_setup(plugin_root, home=None, environment=None, claude_hooks=True):
+    """The usual `setup` for the engine folder `plugin_root`: its command, the login environment and the relay files,
+    and CUA Bar's managed Claude hooks unless `claude_hooks` is False (the cuabar plugin brings its own).
 
     Returns the command path, the login environment (ready, conflict or failed), the relay files state and the block in
     the login shell's startup file (state and file, as shell_environment_status says them)."""
@@ -283,7 +284,7 @@ def run_setup(plugin_root, home=None, environment=None):
     from claude_hook_setup import claude_available
     from claude_hook_profiles import configure_profile
     hook_environment = os.environ if environment is None else environment
-    if claude_available(home, hook_environment):
+    if claude_hooks and claude_available(home, hook_environment):
         configure_profile(home, hook_environment)
     return target, login, relay_status(home), shell
 
@@ -816,8 +817,8 @@ def main(arguments=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--control', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument(ROOT_RESOLVED_FLAG, action='store_true', help=argparse.SUPPRESS)
-    parser.add_argument('command', choices=('install', 'setup', 'install-engine', 'ensure', 'start', 'doctor',
-                                            'uninstall', *ENGINE_COMMANDS))
+    parser.add_argument('command', choices=('install', 'setup', 'install-engine', 'plugin-mcp', 'ensure', 'start',
+                                            'doctor', 'uninstall', *ENGINE_COMMANDS))
     parser.add_argument('--exec-mcp', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--exec-wrapper', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--probe', action='store_true')
@@ -875,6 +876,9 @@ def main(arguments=None):
     if args.command == 'install-engine':
         from engine_install import run_install_engine
         return run_install_engine(args, plugin_root, sys.modules[__name__])
+    if args.command == 'plugin-mcp':
+        from plugin_host import run_plugin_mcp
+        return run_plugin_mcp(plugin_root, sys.modules[__name__])
     if args.command in ENGINE_COMMANDS:
         from engine_cli import run_command
         return run_command(args, plugin_root, sys.modules[__name__], parser.error)

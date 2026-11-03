@@ -56,7 +56,7 @@ class DelegationBase(unittest.TestCase):
     def make_plugin(self, name, source, version='0.9.0'):
         path = self.home/'cache'/name
         (path/'.claude-plugin').mkdir(parents=True)
-        (path/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': version}))
+        (path/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cuabar', 'version': version}))
         for filename in ('runtime_paths.py', 'start-mcp.sh'):
             (path/filename).write_text('fixture')
         (path/'setup.py').write_text(source)

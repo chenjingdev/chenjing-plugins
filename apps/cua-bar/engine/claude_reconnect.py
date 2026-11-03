@@ -13,11 +13,11 @@ import stat
 import subprocess
 
 from bridge_records import private_directory
+import cuabar_host
 
 
 NOTICE_EVENTS = frozenset(('UserPromptSubmit', 'PreToolUse'))
-CUA_TOOLS = frozenset(('mcp__cuabar__js', 'mcp__cuabar__js_reset', 'mcp__cuabar__turn_ended',
-                       'mcp__cuabar__status', 'mcp__cuabar__repair'))
+CUA_TOOLS = frozenset(('js', 'js_reset', 'turn_ended', 'status', 'repair'))
 IDENT = re.compile(r'^[A-Za-z0-9_.:-]{1,200}$')
 VERSION = re.compile(r'^[0-9A-Za-z.+_-]{1,64}$')
 
@@ -103,7 +103,7 @@ def _message(statuses, installed):
     else:
         reason = '이 Claude의 cuabar MCP가 설치된 코드와 달라 재연결이 필요합니다'
     details = ', '.join((['연결 '+', '.join(versions)] if versions else [])+[target])
-    return ('CUA Bar: '+reason+' ('+details+'). Claude에서 /mcp reconnect cuabar를 실행해 주세요. '
+    return ('CUA Bar: '+reason+' ('+details+'). Claude에서 '+cuabar_host.reconnect_command()+'를 실행해 주세요. '
             'Connected 표시는 연결 여부만 나타냅니다.')
 
 
@@ -117,7 +117,7 @@ def hook_output(state, owner, payload, read_record, process_identity, installed=
     event, session = payload.get('hook_event_name'), _session(payload)
     if event not in NOTICE_EVENTS or session is None:
         return None
-    if event == 'PreToolUse' and payload.get('tool_name') not in CUA_TOOLS:
+    if event == 'PreToolUse' and cuabar_host.tool_name(payload.get('tool_name')) not in CUA_TOOLS:
         return None
     if installed is None or compare_runtime is None:
         from runtime_identity import installed_identity, runtime_status
@@ -150,4 +150,4 @@ def hook_output(state, owner, payload, read_record, process_identity, installed=
             'update is loaded. Use the cuabar status tool to compare the running code, installed code, and hooks. '
             'The cuabar repair tool can restore managed hooks for the explicitly selected Claude profile; it does '
             'not reconnect this MCP process. If status still requires reconnection, tell the user to reconnect '
-            'cuabar with /mcp reconnect cuabar. Do not report the connection as up to date.'}}
+            'cuabar with '+cuabar_host.reconnect_command()+'. Do not report the connection as up to date.'}}

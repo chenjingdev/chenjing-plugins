@@ -16,7 +16,7 @@ def write_engine(root, version='0.8.17'):
     root.chmod(0o700)
     manifest = root/'.claude-plugin/plugin.json'
     manifest.parent.mkdir(mode=0o700)
-    manifest.write_text(json.dumps({'name': 'cua', 'version': version}))
+    manifest.write_text(json.dumps({'name': 'cuabar', 'version': version}))
     manifest.chmod(0o600)
     for name, content in (('host_mcp.py', 'HOST = 1\n'), ('mcp_stdio.py', 'MCP = 1\n')):
         path = root/name

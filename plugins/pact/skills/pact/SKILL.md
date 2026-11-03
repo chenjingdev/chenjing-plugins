@@ -13,7 +13,7 @@ description: 사용자가 무언가를 만들거나 고치거나 바꿔 달라�
 
 이 스킬의 Base directory에서 두 단계 위가 pact 폴더다. 아래에서 `<pact>`라고 쓴다. 스크립트는 `node <pact>/scripts/<이름>.mjs`로 부른다. 하위 에이전트는 `pact:spec-checker`, `pact:worker`, `pact:reviewer`, `pact:verifier`다.
 
-화면 확인에는 Codex CUA의 `js` 도구를 쓴다. 도구 이름은 호스트마다 다르다: CUA Bar가 까는 `mcp__cua__js`, Codex 쪽의 `mcp__cua_repl.js`, 옛 플러그인의 `mcp__plugin_cua_cua__js`. 처음에 이름만 보이는 지연 도구일 수 있으니 `ToolSearch`로 CUA·JavaScript를 검색해 실제 이름을 찾는다. 첫 응답에 API 설명이 오니 그것을 따른다. 정말 없으면 화면으로만 확인할 수 있는 항목은 미검증으로 남긴다.
+화면 확인에는 Codex CUA의 `js` 도구를 쓴다. 도구 이름은 호스트마다 다르다: cuabar 플러그인의 `mcp__plugin_cuabar_cuabar__js`, CUA Bar 앱이 까는 `mcp__cuabar__js`, Codex 쪽의 `mcp__cua_repl.js`. 처음에 이름만 보이는 지연 도구일 수 있으니 `ToolSearch`로 CUA·JavaScript를 검색해 실제 이름을 찾는다. 첫 응답에 API 설명이 오니 그것을 따른다. 정말 없으면 화면으로만 확인할 수 있는 항목은 미검증으로 남긴다.
 
 페이지나 보고서를 사용자에게 열어 줄 때 macOS는 `open`, Linux는 `xdg-open`, Windows는 `start ""`를 쓴다. 아래에서 `open`이라고 쓴 곳은 모두 이것이다.
 

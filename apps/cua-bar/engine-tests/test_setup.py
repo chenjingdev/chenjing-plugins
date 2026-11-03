@@ -33,7 +33,7 @@ class SetupTests(unittest.TestCase):
     def make_plugin(self, directory, version):
         path = self.home/directory
         (path/'.claude-plugin').mkdir(parents=True)
-        (path/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': version}))
+        (path/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cuabar', 'version': version}))
         for name in ('runtime_paths.py', 'start-mcp.sh'):
             (path/name).write_text('fixture')
         (path/'setup.py').write_text(Path(setup.__file__).read_text())

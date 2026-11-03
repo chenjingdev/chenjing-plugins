@@ -409,16 +409,16 @@ test('spec size is given in numbers the behavior test checks, and the template s
   assert.match(read('skills/pact/spec-template.md'), /<details><summary>/);
 });
 
-const CUA = 'mcp__cua__js';
-const OLD_CUA = 'mcp__plugin_cua_cua__js';
+const CUA = 'mcp__plugin_cuabar_cuabar__js';
+const APP_CUA = 'mcp__cuabar__js';
 
 test('screens are checked with Codex CUA, not Playwright', () => {
   for (const file of PROSE) assert.ok(!/playwright\.mjs|Playwright 스크립트/.test(readFileSync(file, 'utf8')), `${rel(file)} still uses Playwright`);
   const verifier = read('agents/verifier.md');
   assert.ok(verifier.includes(CUA));
-  assert.ok(verifier.includes('mcp__cua_repl.js') && verifier.includes(OLD_CUA));
+  assert.ok(verifier.includes('mcp__cua_repl.js') && verifier.includes(APP_CUA));
   assert.match(verifier, /ToolSearch.*CUA·JavaScript/);
-  assert.ok(read('skills/pact/SKILL.md').includes(CUA) && read('skills/pact/SKILL.md').includes(OLD_CUA));
+  assert.ok(read('skills/pact/SKILL.md').includes(CUA) && read('skills/pact/SKILL.md').includes(APP_CUA));
   assert.match(verifier, /createBrowserTab\("<browsers에서 고른 이름>"/);
   assert.match(verifier, /getScreenshot\(\{ emit: false \}\)/);
   assert.match(verifier, /shots\/<시나리오 id>-<단계 번호>\.jpg/);
@@ -638,10 +638,10 @@ test('the refusals the scripts and the hook print tell only the standard-input w
   assert.match(approval, /const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';/);
 });
 
-test('plugin.json is at 0.8.2', () => {
+test('plugin.json is at 0.8.3', () => {
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
   assert.equal(manifest.name, 'pact');
-  assert.equal(manifest.version, '0.8.2');
+  assert.equal(manifest.version, '0.8.3');
 });
 
 test('the README lists what 0.6.0 changed in one short section, and says how the hook hands the worker worries to the reviewer, in the brief and in a message', () => {

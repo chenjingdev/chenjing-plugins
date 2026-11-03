@@ -20,6 +20,7 @@ import time
 import uuid
 
 from bridge_records import private_directory, process_started_at, state_dir, write_json_atomic
+import cuabar_host
 
 IDENT = re.compile(r'^[A-Za-z0-9_.:-]{1,200}$')
 END_EVENTS = frozenset(('Stop', 'StopFailure', 'SubagentStop', 'SessionEnd', 'UserPromptSubmit'))
@@ -93,7 +94,7 @@ def bind_call(state, owner, payload):
     bound, tool_id = source(payload), payload.get('tool_use_id')
     name = payload.get('tool_name', '')
     if (bound is None or not isinstance(tool_id, str) or not IDENT.fullmatch(tool_id)
-            or name not in ('mcp__cuabar__js', 'mcp__cuabar__js_reset', 'mcp__cuabar__turn_ended')):
+            or cuabar_host.tool_name(name) not in ('js', 'js_reset', 'turn_ended')):
         return False
     private_directory(Path(state))
     private_directory(Path(state)/'claude-hook-calls')
@@ -288,15 +289,30 @@ class ScopeRouter:
         return {'released': True, 'reason': None, 'scope_count': count}
 
 
-def main():
+def app_hooks_present(environment=None):
+    """CUA Bar's own hooks are in the Claude settings. They run for every end event, so the plugin's stay quiet there;
+    their PreToolUse matcher names only the app's tools, so the plugin's PreToolUse still binds the plugin's."""
+    from claude_hook_setup import inspect_hooks
+    environment = os.environ if environment is None else environment
+    return inspect_hooks(None, environment.get('CLAUDE_CONFIG_DIR', '')) == 'ready'
+
+
+def main(arguments=None):
     # Hook errors never block a user's message or approve an action. Only fixed diagnostics leave this process.
+    arguments = sys.argv[1:] if arguments is None else arguments
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT+1)
         if len(raw) > MAX_INPUT:
             return 0
         payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            return 0
+        if arguments == [cuabar_host.PLUGIN]:
+            if payload.get('hook_event_name') != 'PreToolUse' and app_hooks_present():
+                return 0
+            os.environ[cuabar_host.HOST_ENV] = cuabar_host.PLUGIN
         owner = hook_owner()
-        if not isinstance(payload, dict) or owner is None:
+        if owner is None:
             return 0
         state = state_dir()
         # The stable launcher runs the newly installed hook even while this conversation's bridge is still old.

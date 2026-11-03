@@ -1,6 +1,6 @@
 {
   "name": "chenjing-plugins",
-  "description": "chenjing의 Claude Code 플러그인 모음. CUA(화면 조작)는 플러그인이 아니라 CUA Bar 앱(https://cua.chenjing.org) 하나로 깐다.",
+  "description": "chenjing의 Claude Code 플러그인 모음. CUA(화면 조작)는 cuabar 플러그인으로 깐다. 메뉴 막대 앱 CUA Bar(https://cua.chenjing.org)도 같은 엔진이라, 한 Mac에는 둘 중 하나만 붙고 앱이 있으면 플러그인이 비켜 선다.",
   "owner": {
     "name": "chenjing"
   },
@@ -52,6 +52,14 @@
       "skills": [
         "./skills/pact",
         "./skills/recall"
+      ]
+    },
+    {
+      "name": "cuabar",
+      "description": "Mac에서 Claude Code가 Codex CUA로 앱·브라우저를 조작한다. Codex 래퍼·중계기 준비, 꺼진 Codex 뒤에서 켜기, 잠긴 Mac 자동 복구, 작업 끝 정리 훅을 플러그인이 한다. 상태·탭 정리는 cuabar 스킬. Codex 앱 필요, 비공식 실험판.",
+      "source": "./apps/cua-bar/engine",
+      "skills": [
+        "./skills/cuabar"
       ]
     }
   ]

@@ -34,7 +34,7 @@ class LauncherTests(unittest.TestCase):
         self.python.chmod(0o700)
         self.plugin = self.home/'plugin'
         (self.plugin/'.claude-plugin').mkdir(parents=True)
-        (self.plugin/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': '0.7.0'}))
+        (self.plugin/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cuabar', 'version': '0.7.0'}))
         for name in ('setup.py', 'runtime_paths.py', 'start-mcp.sh'):
             (self.plugin/name).write_text('fixture')
         self.environment = {'CODEX_CUA_APP_PATH': str(self.app)}

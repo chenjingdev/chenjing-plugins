@@ -43,7 +43,7 @@ class FastClock:
 def copy_engine(destination, version):
     """The engine as a bundle (or a folder of another version) holds it, with `version` in its manifest."""
     shutil.copytree(ENGINE, destination, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.DS_Store'))
-    (destination/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': version}))
+    (destination/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cuabar', 'version': version}))
     return destination
 
 
@@ -205,7 +205,7 @@ class SameVersionTests(InstallCase):
                    'others can read it': lambda: self.copy.chmod(0o755),
                    'others can write a file': lambda: (self.copy/'setup.py').chmod(0o666),
                    'the manifest is another version': lambda: (self.copy/'.claude-plugin/plugin.json').write_text(
-                       json.dumps({'name': 'cua', 'version': '0.7.0'}))}
+                       json.dumps({'name': 'cuabar', 'version': '0.7.0'}))}
         for label, damage in damages.items():
             with self.subTest(label):
                 self.installed()
@@ -372,7 +372,7 @@ class FailureTests(InstallCase):
     def test_a_root_that_is_no_engine_fails_before_anything_is_written(self):
         (self.bundle/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'other', 'version': '0.8.0'}))
         self.fails()
-        (self.bundle/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': '0.8.0'}))
+        (self.bundle/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cuabar', 'version': '0.8.0'}))
         (self.bundle/'runtime_paths.py').unlink()
         self.fails()
         self.assertFalse(self.support.exists())
@@ -380,7 +380,7 @@ class FailureTests(InstallCase):
     def test_a_version_that_cannot_name_a_folder_fails_before_anything_is_written(self):
         for version in ('../../x', '', '.hidden', '0.8.0/../..', 'v 1', 7, None):
             with self.subTest(version=version):
-                (self.bundle/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': version}))
+                (self.bundle/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cuabar', 'version': version}))
                 self.fails()
                 self.assertFalse(self.support.exists())
 

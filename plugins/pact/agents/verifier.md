@@ -42,7 +42,7 @@ run-dir 맨 위의 파일 가운데 `results.json`만 당신이 쓴다. 다른 �
 
 메인 세션이 "화면 도구 없음"을 넘겼으면 이 도구를 부르지 않고 바로 화면 없이 검수한다. 받은 오류를 첫 시나리오의 `note`에 적는다.
 
-이 도구는 처음에 이름만 보이는 지연 도구일 수 있다. 이름은 호스트마다 다르다: CUA Bar가 까는 `mcp__cua__js`, Codex 쪽의 `mcp__cua_repl.js`, 옛 플러그인의 `mcp__plugin_cua_cua__js`. `ToolSearch`로 CUA·JavaScript를 검색해 실제 이름을 찾고, 검색 도구가 없으면 도구 목록에서 찾는다. 어디에도 없을 때만 도구가 없는 것으로 본다. 브라우저 이름은 `getState()`가 돌려주는 `browsers`에서 고른다.
+이 도구는 처음에 이름만 보이는 지연 도구일 수 있다. 이름은 호스트마다 다르다: cuabar 플러그인의 `mcp__plugin_cuabar_cuabar__js`, CUA Bar 앱이 까는 `mcp__cuabar__js`, Codex 쪽의 `mcp__cua_repl.js`. `ToolSearch`로 CUA·JavaScript를 검색해 실제 이름을 찾고, 검색 도구가 없으면 도구 목록에서 찾는다. 어디에도 없을 때만 도구가 없는 것으로 본다. 브라우저 이름은 `getState()`가 돌려주는 `browsers`에서 고른다.
 
 `js` 도구는 호출 사이에 상태가 이어지는 JavaScript 런타임이다. 처음 호출에는 탭 하나만 연다. 결과에 API 설명과 첫 화면 상태가 같이 온다. 그 설명을 읽고 쓴다.
 

@@ -31,8 +31,9 @@ class HealthCase(unittest.TestCase):
             parent.chmod(0o700)
         manifest = self.engine/'.claude-plugin'
         manifest.mkdir(mode=0o700)
-        (manifest/'plugin.json').write_text('{"name":"cua","version":"0.8.17"}\n')
-        for name in ('mcp_health.py', 'runtime_identity.py', 'claude_hook_setup.py', 'claude_hook_profiles.py'):
+        (manifest/'plugin.json').write_text('{"name":"cuabar","version":"0.8.17"}\n')
+        for name in ('mcp_health.py', 'runtime_identity.py', 'claude_hook_setup.py', 'claude_hook_profiles.py',
+                     'cuabar_host.py'):
             shutil.copyfile(SOURCE/name, self.engine/name)
         for name in ('host_mcp.py', 'mcp_stdio.py'):
             (self.engine/name).write_text('# fixture engine component\n')

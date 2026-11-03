@@ -330,7 +330,7 @@ class StartedBeforeSetupTests(StatusCase):
         # Versions of one line (0.8.x) differ in what the launcher does, so the version is compared as a whole.
         engine = self.root/'engine-0.8.1'
         (engine/'.claude-plugin').mkdir(parents=True)
-        (engine/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': '0.8.1'}))
+        (engine/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cuabar', 'version': '0.8.1'}))
         self.machine.add(5, 1, '/bin/x')
         self.start_world()
         for version, expected in (('0.8.0', True), ('0.8.1', False), ('0.8.10', True), ('0.8.1-beta', True),
@@ -658,7 +658,7 @@ class AttributionTests(StatusCase):
     def test_the_engine_says_which_folder_it_runs_from(self):
         root = self.home/'.local/share/codex-cua/engine/0.8.0'
         (root/'.claude-plugin').mkdir(parents=True)
-        (root/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cua', 'version': '0.8.0'}))
+        (root/'.claude-plugin/plugin.json').write_text(json.dumps({'name': 'cuabar', 'version': '0.8.0'}))
         self.machine.add(5, 1, '/bin/x')
         status = self.status(plugin_root=root)
         launcher = str(self.home/'.local/share/codex-cua/engine/current/start-mcp.sh')

@@ -238,8 +238,9 @@ def prune(ctx, engines, current, previous=None):
     return removed
 
 
-def install_engine(ctx, source_root):
-    """Unpack, set up, point `current` at the copy and clean. Returns the result the command prints."""
+def install_engine(ctx, source_root, claude_hooks=True):
+    """Unpack, set up, point `current` at the copy and clean. Returns the result the command prints. The cuabar plugin
+    passes claude_hooks=False: it brings its own hooks, so CUA Bar's managed ones are not added to the settings."""
     setup = ctx.setup
     source = setup.validated_plugin_root(source_root)
     version = manifest_version(source)
@@ -252,7 +253,7 @@ def install_engine(ctx, source_root):
         folder = place(setup, engines, source, items, version, ctx.uid)
         setup.private_directory(folder)
         root = setup.validated_plugin_root(folder, version)
-        _, login, relay, (shell, shell_file) = setup.run_setup(root, ctx.home, ctx.environment)
+        _, login, relay, (shell, shell_file) = setup.run_setup(root, ctx.home, ctx.environment, claude_hooks)
         from claude_hook_setup import lifecycle_hooks_state
         previous = linked_version(engines)
         point_current(engines, version)

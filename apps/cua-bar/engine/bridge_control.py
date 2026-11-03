@@ -21,14 +21,19 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import tempfile
 
 import bridge_records as records
+import cuabar_host
 from runtime_identity import RUNNING_IDENTITY
 
 
 class BridgeControl:
     IN_FLIGHT_WAIT = 2.5
+    # F8 without the app: after an unlock failure the plugin's bridge asks the engine's unlock-reset itself, a moment
+    # later so that a relay's line for the same failure is in the activity log the engine counts from.
+    UNLOCK_RESET_DELAY = 2.0
     READ_TIMEOUT = 2.0
     MAX_REQUEST = 1024
 
@@ -108,6 +113,8 @@ class BridgeControl:
 
         The line of a failed call also says why, in one of the words of records.FAILURES, and keeps what its answer
         said (`texts`, clipped to one line) while the person asked for it."""
+        if error == 'unlock_failed' and not self.finished and cuabar_host.plugin():
+            self.ask_unlock_reset()
         if relay or self.finished:
             return
         entry = {'at': records.utc_now(), 'writer': self.writer_id, 'session_id': session_id, 'tool': tool,
@@ -121,6 +128,22 @@ class BridgeControl:
             records.append_activity(self.state, entry)
         except Exception:
             pass
+
+    def ask_unlock_reset(self):
+        """Run `codex-cua unlock-reset` of this engine on its own, as CUA Bar does after each new unlock failure. The
+        engine decides everything (still locked, a failure since its last restart, no call running, five restarts in
+        one lock); its answer goes nowhere, its restart is a line in the activity log."""
+        def run():
+            try:
+                subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent/'setup.py'), 'unlock-reset', '--json'],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
+            except Exception:
+                pass
+        try:
+            asyncio.get_running_loop().call_later(self.UNLOCK_RESET_DELAY, run)
+        except RuntimeError:
+            run()
 
     def record_browser_blocked(self, app_version):
         """Codex refused the browser to this bridge's conversation: the same note a release by id leaves when Codex

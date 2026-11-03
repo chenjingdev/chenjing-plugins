@@ -17,6 +17,7 @@ import stat
 import sys
 import time
 import uuid
+import cuabar_host
 from runtime_identity import RUNNING_IDENTITY, installed_identity, runtime_status
 
 try:
@@ -25,7 +26,7 @@ except ImportError:
     unix_connect = None
 
 NATIVE_PLUGIN_ID = 'unified-computer-use@openai-bundled'
-VERSION = '0.8.18'
+VERSION = '0.9.0'
 # A plugin or server name that can stand in a dotted configuration key as itself.
 CONFIG_NAME = re.compile(r'^[A-Za-z0-9_@-]{1,128}$')
 EXIT_RELEASE_SECONDS = 3.0
@@ -93,6 +94,33 @@ HOST_NOTE = ('CUA Bar note: run `~/.local/bin/codex-cua doctor --probe --json` (
              '(CUA Bar\'s 다시 켜기, or \u2318Q and reopen once the Codex work is done); never quit Codex yourself, and do '
              'not replace it with a separately launched CUA engine, model proxy, changed permissions or automatic '
              'approval. Retry discovery after reconnecting; do not replay uncertain clicks or submits.')
+# The cuabar plugin (0.9.0) has no menu bar app to point at and brings its own hooks: what changes in its wording.
+PLUGIN_WORDING = (
+    ('Use CUA Bar\'s local `status` tool to check the loaded code, installed update and Claude hooks. '
+     'Transport Connected alone does not mean an update is loaded. The local `repair` tool can restore CUA Bar\'s '
+     'own lifecycle hooks while preserving disabled hooks and other settings. It does not reload this MCP process; ',
+     'Use the local `status` tool to check the loaded code, installed update and Claude hooks; the cuabar plugin '
+     'brings its hooks itself. Transport Connected alone does not mean an update is loaded. '),
+    ('/mcp reconnect cuabar', '/mcp reconnect ' + cuabar_host.PLUGIN_SERVER),
+    ('the user does those through CUA Bar.', 'the user asks for those through the cuabar skill.'),
+    ('Broken setup is fixed with CUA Bar\'s 고치기 or `codex-cua setup`.',
+     'Broken setup is fixed by reconnecting this MCP with `/mcp reconnect ' + cuabar_host.PLUGIN_SERVER + '`, '
+     'which sets it up again.'),
+    ('(CUA Bar\'s 다시 켜기, or \u2318Q and reopen once the Codex work is done)',
+     '(\u2318Q and reopen once the Codex work is done)'),
+)
+
+
+def host_text(text, plugin=None):
+    """A fixed text as the app says it, or as the plugin says it when this bridge runs for the plugin."""
+    if not (cuabar_host.plugin() if plugin is None else plugin):
+        return text
+    for old, new in PLUGIN_WORDING:
+        text = text.replace(old, new)
+    return text
+
+
+INSTRUCTIONS, HOST_NOTE, UPDATE_CLOSING = (host_text(text) for text in (INSTRUCTIONS, HOST_NOTE, UPDATE_CLOSING))
 # Since Codex 26.1023 the browser service asks the desktop app before every browser call, and the app allows only the
 # conversations it started or resumed itself. A conversation of the bridge is neither, so its js call is refused with
 # this text (without the app to ask: "The browser access host is unavailable"). It is Codex's access control and no
