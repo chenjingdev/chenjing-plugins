@@ -638,10 +638,10 @@ test('the refusals the scripts and the hook print tell only the standard-input w
   assert.match(approval, /const HEREDOC_HOW = '다음 줄에 사용자 말을, 그다음 줄 맨 앞에 EOF를 적는다';/);
 });
 
-test('plugin.json is at 0.8.3', () => {
+test('plugin.json is at 0.8.4', () => {
   const manifest = JSON.parse(read('.claude-plugin/plugin.json'));
   assert.equal(manifest.name, 'pact');
-  assert.equal(manifest.version, '0.8.3');
+  assert.equal(manifest.version, '0.8.4');
 });
 
 test('the README lists what 0.6.0 changed in one short section, and says how the hook hands the worker worries to the reviewer, in the brief and in a message', () => {
@@ -878,4 +878,17 @@ test('0.8.0: the README shows recall in the flow, lists spec.html as a made-and-
   names.forEach((name, i) => assert.ok(bullets[i].startsWith(`- ${name}: `), `${i + 1}번째는 ${name}: ${bullets[i]}`));
   assert.ok(readme.indexOf('## 0.8.0에서 바뀐 것') < readme.indexOf('## 0.7.0에서 바뀐 것'));
   assert.ok(!/\/recall/.test(section), '사용자가 외울 새 슬래시 명령을 적지 않는다');
+});
+
+test('questions are for what only the person knows: such facts are asked without a recommendation, and a guessed value is shown first at approval', () => {
+  const skill = read('skills/pact/SKILL.md');
+  const probe = read('skills/pact/probe.md');
+  const checker = read('agents/spec-checker.md');
+  assert.match(skill, /질문은 사용자만 아는 것을 알아내는 데 쓴다/);
+  assert.match(skill, /사용자만 아는 사실은 추천 없이 사실만 묻는다/);
+  assert.match(skill, /틀린 줄 모르고 지나가기 쉬운 값/);
+  assert.match(probe, /추천 없이 사실만 묻는다/);
+  assert.match(probe, /묻지 않고 짐작으로 채웠으면 그 값을 맨 앞에 보인다/);
+  assert.match(probe, /추천으로 내밀지 않고/);
+  assert.match(checker, /기본안은 추천이 아니라 위임 때 쓰려는 짐작이다/);
 });
