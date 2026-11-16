@@ -9,7 +9,7 @@
    - SKILL.md의 방법으로 CUA 도구를 찾아 `await cua.getState()`를 한 번 부른다. 응답의 `browsers`에 쓸 브라우저가 있고 `errors`가 없으면 "화면 도구: CUA"다.
    - CUA가 없거나 오류가 있으면 `node <pact>/scripts/browser.mjs`를 쓴다("화면 도구: browser.mjs"). 설치할 것은 없다. 띄운 주소를 한 번 열어 스크린샷이 찍히는지 본다: `echo '{"url":"<URL>","steps":[{"do":"shot","file":"<run-dir>/scratch/hello.png"}]}' | node <pact>/scripts/browser.mjs -`.
    - 둘 다 안 되면 "화면 도구 없음"과 그 오류를 넘기고 사용자에게 한 줄 알린다. 이때 verifier는 명령과 HTTP 요청으로 볼 수 있는 것을 확인하고, 화면으로만 볼 수 있는 시나리오는 미검증으로 남긴다.
-3. 대상을 실행한다. 개발 서버라면 worktree에서 백그라운드로 띄우고 URL을 확인한다. 파일 하나로 여는 페이지도 `python3 -m http.server --bind 127.0.0.1 <포트>`로 띄워 http URL을 넘긴다. 화면이 없으면 실행 명령을 정한다.
+3. 대상을 실행한다. 개발 서버라면 worktree에서 백그라운드로 띄우고 URL을 확인한다. 답하는 서버가 지금 코드의 것인지 본다(앞서 띄운 서버가 그 포트에 남아 옛 코드로 답할 수 있다). 남은 서버를 끌 수 없으면 빈 포트에 띄워 검수를 이어 가고, 정해진 포트에서 확인하지 못했다는 것과 남은 서버를 끄는 명령을 보고에 적는다. 사용자가 서버를 꺼 줄 때까지 기다리면 검수가 통째로 멈춘다. 파일 하나로 여는 페이지도 `python3 -m http.server --bind 127.0.0.1 <포트>`로 띄워 http URL을 넘긴다. 화면이 없으면 실행 명령을 정한다.
 4. worktree에 커밋하지 않은 변경이 있으면 커밋한다. 그다음 `node <pact>/scripts/verification.mjs snapshot <명세> <run-dir>/wt <ui|command>`로 지금 검수하는 명세와 코드의 내용을 `<run-dir>/verification.json`에 기록한다. 이 파일은 snapshot만 쓰고, 손으로 고치면 훅이 막는다. 커밋된 파일만 기록에 든다. 웹 화면은 화면 도구가 무엇이든 `ui`다. 출력의 `verification.verification_id`와 `verification.surface`를 verifier에게 넘긴다. git이나 HEAD를 읽지 못해 snapshot이 실패하면 검수를 시작하지 않고 알린다.
 
 ## 2. 검수
