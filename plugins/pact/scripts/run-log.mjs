@@ -1,4 +1,4 @@
-// 하위 에이전트(spec-checker·reviewer·worker·verifier)가 멈출 때마다 마지막 답을 그 판의 실행 폴더 log/에 덧붙여 남기고,
+// 하위 에이전트(reviewer·worker·verifier)가 멈출 때마다 마지막 답을 그 판의 실행 폴더 log/에 덧붙여 남기고,
 // 뒤 검사가 그 기록을 읽는 도구. 쓰기는 훅(hooks/guard.mjs)이 하고 읽기는 훅과 스크립트가 한다. 이 폴더는 훅과 스크립트만 쓴다(명세 R14).
 //
 // 기록은 판마다 `<run-dir>/log/subagents.jsonl` 한 파일에 멈춤 하나당 한 줄이다.
@@ -12,7 +12,6 @@ import { findRunDir, taskNumber } from './run-dir.mjs';
 import { withoutConcerns } from './concerns.mjs';
 
 export const AGENT = {
-  specChecker: 'pact:spec-checker',
   reviewer: 'pact:reviewer',
   worker: 'pact:worker',
   verifier: 'pact:verifier',
@@ -169,8 +168,6 @@ export function latestRecord(runDir, agentType, { task } = {}) {
   return null;
 }
 
-// 가장 최근 spec-checker 답과 끝난 시각: { time, message, ... } | null
-export const latestSpecCheckerReply = (runDir) => latestRecord(runDir, AGENT.specChecker);
 // 작업 n의 가장 최근 worker 답: { time, message, task, ... } | null
 export const latestWorkerReply = (runDir, task) => latestRecord(runDir, AGENT.worker, { task });
 // 가장 최근 verifier가 끝날 때의 지문: { time, results_sha256, ... } | null. results_sha256이 null이면 그때 results.json이 없었다.

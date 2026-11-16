@@ -1,4 +1,4 @@
-// 승인·위임 기록 시험. 가짜 HOME에 손으로 만든 대화 기록(JSONL)을 두고, 실행 폴더 log/에 spec-checker 기록을 두고,
+// 승인·위임 기록 시험. 가짜 HOME에 손으로 만든 대화 기록(JSONL)을 두고,
 // spec.mjs를 자식 프로세스로 돌린다(HOME과 CLAUDE_CODE_SESSION_ID만 가짜). 스크립트에는 대화 기록 위치를 덮어쓰는 옵션이 없다.
 import { PACT_GITIGNORE } from '../scripts/paths.mjs';
 import { test } from 'node:test';
@@ -8,7 +8,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   tmp, T, typed, legacyUser, typedWithImage, answers, assistant, toolResult, taskNotification, compactSummary, commandMessage,
-  systemReminder, peerMessage, queuedCommand, queuedNotification, queuedPeer, makeWorld, writeTranscript, addCheckerRecord, cliEnv,
+  systemReminder, peerMessage, queuedCommand, queuedNotification, queuedPeer, makeWorld, writeTranscript, cliEnv,
   runSpec, specStatus, approvalEntries, assertRefused, grantApproval, specText, SESSION, SPEC_CLI,
   commandLine, builtinCommand, skillToolUse, skillBody,
 } from './approval-world.mjs';
@@ -19,11 +19,10 @@ const LONG = '이대로 만들어 주세요 지금 바로 시작합니다';
 
 // ---------- (a) approve ----------
 
-test('(a) approve: a person\'s "승인" after the spec-checker finished is recorded in the run folder and the status becomes approved', () => {
+test('(a) approve: a person\'s "승인" is recorded in the run folder and the status becomes approved', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   const said = typed('승인', T(10));
-  writeTranscript(w, [typed('출결 관리 만들어 줘', T(0)), assistant('명세를 검수했어요. 승인할까요?', T(8)), said]);
+  writeTranscript(w, [typed('출결 관리 만들어 줘', T(0)), assistant('명세를 보여 드렸어요. 승인할까요?', T(8)), said]);
   const r = runSpec(w, ['approve', w.spec, '승인']);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /승인을 기록했다: "승인"/);
@@ -43,7 +42,6 @@ test('(a) approve: a person\'s "승인" after the spec-checker finished is recor
   assert.equal(entry.transcript, w.transcript);
   assert.equal(entry.session_id, SESSION);
   assert.equal(entry.spec, w.spec);
-  assert.equal(entry.spec_checker_time, T(5));
   assert.match(entry.recorded_at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
   assert.ok(Math.abs(Date.now() - Date.parse(entry.recorded_at)) < 60_000);
   assert.equal(readFileSync(path.join(w.project, '.pact', '.gitignore'), 'utf8'), PACT_GITIGNORE, '기록할 때 .pact/.gitignore도 맞춘다');
@@ -53,7 +51,6 @@ test('(a) approve: a person\'s "승인" after the spec-checker finished is recor
 
 test('(a) a quote may be part of a long message, may come as several arguments, and ㄱㄱ-like short answers work when they are the whole message', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed(`네, ${LONG}. 그리고 하나 더 부탁해요`, T(10)), typed('ㄱㄱ', T(11))]);
   let r = runSpec(w, ['approve', w.spec, LONG]);
   assert.equal(r.status, 0, r.stderr);
@@ -61,19 +58,16 @@ test('(a) a quote may be part of a long message, may come as several arguments, 
   assert.equal(approvalEntries(w)[0].quote, LONG);
 
   const w2 = makeWorld();
-  addCheckerRecord(w2, T(5));
   writeTranscript(w2, [typed('좋아, 만들어', T(10))]);
   r = runSpec(w2, ['approve', w2.spec, '좋아,', '만들어']); // 따옴표 없이 넘겨도 한 줄로 이어 받는다
   assert.equal(r.status, 0, r.stderr);
   assert.equal(approvalEntries(w2)[0].quote, '좋아, 만들어');
 
   const w3 = makeWorld();
-  addCheckerRecord(w3, T(5));
   writeTranscript(w3, [typed('ㄱㄱ', T(10))]);
   assert.equal(runSpec(w3, ['approve', w3.spec, 'ㄱㄱ']).status, 0);
   // 문장부호·띄어쓰기는 맞춰 볼 때 뺀다
   const w4 = makeWorld();
-  addCheckerRecord(w4, T(5));
   writeTranscript(w4, [typed('좋아 , 만들어 !', T(10))]);
   assert.equal(runSpec(w4, ['approve', w4.spec, '좋아, 만들어']).status, 0);
 });
@@ -86,7 +80,6 @@ test('(a) a person\'s words with an image attached, and older records with no or
     (text) => typed(text, T(10), { promptSource: 'queued' }),
   ]) {
     const w = makeWorld();
-    addCheckerRecord(w, T(5));
     writeTranscript(w, [make(LONG)]);
     const r = runSpec(w, ['approve', w.spec, LONG]);
     assert.equal(r.status, 0, r.stderr);
@@ -95,9 +88,8 @@ test('(a) a person\'s words with an image attached, and older records with no or
 
 test('(a) a "승인" typed while the agent was still working is a person\'s word although the transcript keeps it only as a queued_command attachment line', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   const mid = queuedCommand('승인', T(10));
-  writeTranscript(w, [assistant('명세를 검수했어요. 승인할까요?', T(8)), mid]);
+  writeTranscript(w, [assistant('명세를 보여 드렸어요. 승인할까요?', T(8)), mid]);
   const r = runSpec(w, ['approve', w.spec, '승인']);
   assert.equal(r.status, 0, r.stderr);
   const [entry] = approvalEntries(w);
@@ -107,14 +99,8 @@ test('(a) a "승인" typed while the agent was still working is a person\'s word
   assert.equal(entry.message_time, T(10));
   assert.equal(entry.answer_question, null);
   assert.equal(specStatus(w), 'approved');
-  // 일하는 도중에 친 말도 검수가 끝나기 전의 말이면 승인이 아니다
-  const early = makeWorld();
-  addCheckerRecord(early, T(5));
-  writeTranscript(early, [queuedCommand('승인', T(3))]);
-  assertRefused(runSpec(early, ['approve', early.spec, '승인']), /spec-checker가 끝난 뒤/);
   // 짧은 말은 여기서도 메시지 전체와 같아야 한다
   const inside = makeWorld();
-  addCheckerRecord(inside, T(5));
   writeTranscript(inside, [queuedCommand('승인은 아직 아니야', T(10))]);
   assertRefused(runSpec(inside, ['approve', inside.spec, '승인']), /짧은 말이라/);
 });
@@ -142,7 +128,6 @@ test('(b) a quote that is not in a person\'s message is refused: never said, or 
   for (const quote of ['승인', LONG]) {
     for (const [label, make] of Object.entries(sources)) {
       const w = makeWorld();
-      addCheckerRecord(w, T(5));
       writeTranscript(w, make(quote));
       const before = readFileSync(w.spec, 'utf8');
       const line = assertRefused(runSpec(w, ['approve', w.spec, quote]), /사용자 메시지에 없/, `${label}(${quote})`);
@@ -156,7 +141,6 @@ test('(b) a quote that is not in a person\'s message is refused: never said, or 
 
 test('(b) a person\'s message that mixes in another kind of record is still found: a human line wins over noise around it', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [taskNotification('승인', T(6)), compactSummary('승인', T(7)), typed('승인', T(10)), toolResult('승인', T(11))]);
   assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
   assert.equal(approvalEntries(w)[0].message_time, T(10));
@@ -166,7 +150,6 @@ test('(b) a person\'s message that mixes in another kind of record is still foun
 
 test('(c) a short quote found only inside a longer message is refused, with a reason that says how to quote it', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('승인은 아직 아니야', T(10)), typed('네, 승인', T(11))]);
   const line = assertRefused(runSpec(w, ['approve', w.spec, '승인']), /짧은 말이라 사용자 메시지 전체와 같아야/, '승인');
   assert.match(line, /메시지 전체를 그대로 인용한다/);
@@ -180,7 +163,6 @@ test('(c) a short quote found only inside a longer message is refused, with a re
 test('(c) the short-quote limit is 10 characters once spaces and punctuation are dropped', () => {
   const ten = '가나다라마바사아자차';
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed(`${ten}를 하자`, T(10))]);
   assertRefused(runSpec(w, ['approve', w.spec, ten]), /짧은 말/);
   assertRefused(runSpec(w, ['approve', w.spec, ' 가나다 라마바 사아자 차! ']), /짧은 말/, '띄어쓰기를 넣어도 같다');
@@ -193,7 +175,6 @@ test('(c) the short-quote limit is 10 characters once spaces and punctuation are
 
 test('(d) the answer a person picked in an AskUserQuestion is a person\'s word, and the record says which question it answered', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   const asked = answers({ '이 명세대로 만들까요?': '승인', '어느 화면부터 볼까요?': '목록 (Recommended)' }, T(10));
   writeTranscript(w, [assistant('질문', T(9)), asked]);
   const r = runSpec(w, ['approve', w.spec, '승인']);
@@ -205,7 +186,6 @@ test('(d) the answer a person picked in an AskUserQuestion is a person\'s word, 
   assert.equal(specStatus(w), 'approved');
   // 고르지 않은 선택지는 답이 아니다
   const w2 = makeWorld();
-  addCheckerRecord(w2, T(5));
   writeTranscript(w2, [answers({ '이 명세대로 만들까요?': '조금 고칠게요' }, T(10))]);
   assertRefused(runSpec(w2, ['approve', w2.spec, '승인']), /사용자 메시지에 없/);
   // 질문 글 자체는 사람의 말이 아니다
@@ -214,52 +194,8 @@ test('(d) the answer a person picked in an AskUserQuestion is a person\'s word, 
 
 // ---------- (e) 시각 순서 ----------
 
-test('(e) a quote said before the spec-checker finished is refused, and so is one said at the same moment', () => {
-  const w = makeWorld();
-  addCheckerRecord(w, T(5));
-  writeTranscript(w, [typed('승인', T(3)), typed(LONG, T(5))]);
-  const line = assertRefused(runSpec(w, ['approve', w.spec, '승인']), /spec-checker가 끝난 뒤/, '검수 전');
-  assert.ok(line.includes(T(5)), '검수가 끝난 시각을 알린다');
-  assert.match(line, /승인을 다시 묻고, 그 답을 인용한다/);
-  assertRefused(runSpec(w, ['approve', w.spec, LONG]), /spec-checker가 끝난 뒤/, '같은 시각');
-  assert.equal(specStatus(w), 'draft');
-  assert.deepEqual(approvalEntries(w), []);
-  // 같은 말이 검수 전과 후에 둘 다 있으면 뒤의 것을 쓴다
-  writeTranscript(w, [typed('승인', T(3)), typed('승인', T(9))]);
-  assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
-  assert.equal(approvalEntries(w)[0].message_time, T(9));
-});
-
-test('(e) with no spec-checker record approve is refused, and an unreadable record refuses too', () => {
-  const w = makeWorld();
-  writeTranscript(w, [typed('승인', T(10))]);
-  const line = assertRefused(runSpec(w, ['approve', w.spec, '승인']), /spec-checker 기록이 없다/);
-  assert.match(line, /pact:spec-checker로 명세를 검수한 뒤/);
-  // 이미 검수했는데도 기록이 없으면 훅이 안 도는 것이다: 다시 불러도 같은 거절이 되풀이되니 까닭을 찾아 알리게 한다
-  assert.match(line, /이미 검수했는데도 기록이 없으면 훅이 돌지 않는 것이다/);
-  assert.match(line, /플러그인 데이터 폴더의 hook-error\.log를 보고 사용자에게 알린다\(log\/에 직접 쓰지 않는다\)/);
-  assert.equal(specStatus(w), 'draft');
-  assert.equal(existsSync(path.join(w.run, 'approvals.jsonl')), false, '거절하면 기록 파일도 만들지 않는다');
-  // 다른 에이전트의 기록만 있어도 spec-checker 기록이 아니다
-  mkdirSync(path.join(w.run, 'log'), { recursive: true });
-  writeFileSync(path.join(w.run, 'log', 'subagents.jsonl'), `${JSON.stringify({ time: T(1), agent_type: 'pact:worker', message: '끝' })}\n`);
-  assertRefused(runSpec(w, ['approve', w.spec, '승인']), /spec-checker 기록이 없다/);
-  // 시각을 못 읽는 spec-checker 기록은 확인하지 못한 것이다
-  writeFileSync(path.join(w.run, 'log', 'subagents.jsonl'), `${JSON.stringify({ time: '어제', agent_type: 'pact:spec-checker', message: '검수' })}\n`);
-  assertRefused(runSpec(w, ['approve', w.spec, '승인']), /시각을 읽지 못/);
-  // 기록 자리가 파일이 아닌 폴더이면 읽지 못한다: 거절한다
-  rmSync(path.join(w.run, 'log'), { recursive: true, force: true });
-  writeFileSync(path.join(w.run, 'log'), '폴더 자리에 파일');
-  const r = runSpec(w, ['approve', w.spec, '승인']);
-  assert.equal(r.status, 1);
-  assert.ok(r.stderr.trim(), '까닭이 나온다');
-  assert.equal(specStatus(w), 'draft');
-  assert.deepEqual(approvalEntries(w), []);
-});
-
 test('(e) approving again needs a message newer than every message already recorded; the same message is refused', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('승인', T(10))]);
   assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
 
@@ -268,7 +204,7 @@ test('(e) approving again needs a message newer than every message already recor
   assert.match(same, /사용자의 새 말을 인용한다/);
   assert.equal(approvalEntries(w).length, 1);
 
-  // 앞 기록보다 오래된 말(검수 뒤이긴 하다)
+  // 앞 기록보다 오래된 말
   writeTranscript(w, [typed('다시 승인해요 이대로 가요', T(7)), typed('승인', T(10))]);
   assertRefused(runSpec(w, ['approve', w.spec, '다시 승인해요 이대로 가요']), /앞 승인 기록에 쓴 메시지/, '더 오래된 말');
 
@@ -288,21 +224,9 @@ test('(e) approving again needs a message newer than every message already recor
   assert.equal(approvalEntries(w).length, 2);
 });
 
-test('(e) a spec-checker run after the last approval means the next approval must come after that run too', () => {
-  const w = makeWorld();
-  addCheckerRecord(w, T(5));
-  writeTranscript(w, [typed('승인', T(10)), typed('다시 해 주세요 이대로 승인합니다', T(20))]);
-  assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
-  addCheckerRecord(w, T(30)); // 고친 명세를 다시 검수했다
-  assertRefused(runSpec(w, ['approve', w.spec, '다시 해 주세요 이대로 승인합니다']), /spec-checker가 끝난 뒤/);
-  writeTranscript(w, [typed('승인', T(10)), typed('다시 해 주세요 이대로 승인합니다', T(20)), typed('이제 승인', T(40))]);
-  assert.equal(runSpec(w, ['approve', w.spec, '이제 승인']).status, 0);
-  assert.equal(approvalEntries(w).length, 2);
-});
-
 // ---------- (f) 위임 ----------
 
-test('(f) delegate: words that hand over the approval too are recorded, at any time, without a spec-checker record', () => {
+test('(f) delegate: words that hand over the approval too are recorded, at any time', () => {
   const w = makeWorld();
   writeTranscript(w, [typed('끝까지 알아서 해', T(0)), assistant('네', T(1))]); // 처음 부탁에 있는 말
   const r = runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']);
@@ -313,9 +237,7 @@ test('(f) delegate: words that hand over the approval too are recorded, at any t
   assert.equal(entry.kind, 'delegate');
   assert.equal(entry.quote, '끝까지 알아서 해');
   assert.equal(entry.message_time, T(0));
-  assert.equal(entry.spec_checker_time, null);
-  // 검수가 끝난 뒤의 말이어도 된다. 앞 기록이 있으면 더 새 말을 인용해야 한다(같은 말로 다시 위임을 적지 못한다 — 아래 (e)·F3 시험)
-  addCheckerRecord(w, T(5));
+  // 나중에 한 말이어도 된다. 앞 기록이 있으면 더 새 말을 인용해야 한다(같은 말로 다시 위임을 적지 못한다 — 아래 (e)·F3 시험)
   writeTranscript(w, [typed('끝까지 알아서 해', T(0)), typed('승인 없이 만들어', T(9))]);
   assert.equal(runSpec(w, ['delegate', w.spec, '승인 없이 만들어']).status, 0);
   assert.deepEqual(approvalEntries(w).map((e) => e.kind), ['delegate', 'delegate']);
@@ -335,7 +257,7 @@ test('(f) delegate with a [위험: …] mark on an F or R line, a case of it or 
   const variants = {
     '지우기 표시': { id: 'F2', features: '- F2 지난 학기 자료 비우기 [위험: 지우기] [사용자]\n' },
     '공개 표시(규칙)': { id: 'R2', rules: '- R2 결과 페이지를 외부에 올린다 [위험: 공개] [AI 가정]\n' },
-    '비용 표시': { id: 'F2', features: '- F2 유료 요금제로 올리기 [위험: 비용] [사용자: 검수 1]\n' },
+    '비용 표시': { id: 'F2', features: '- F2 유료 요금제로 올리기 [위험: 비용] [사용자: 10/18]\n' },
     '케이스의 표시': { id: 'F2', features: '- F2 자료 정리 [사용자]\n  - 케이스: 오래된 자료 → 비운다 [위험: 지우기]\n' },
     '접힌 칸의 표시': { id: 'R2', rules: '\n<details><summary>그 밖의 AI 가정 1개</summary>\n\n- R2 결제 내역 보기 [위험: 비용] [AI 가정]\n\n</details>\n\n' },
     '접힌 칸 케이스의 표시': { id: 'R2', rules: '\n<details><summary>그 밖의 AI 가정 1개</summary>\n\n- R2 결제 내역 보기 [AI 가정]\n  - 케이스: 실패 → 다시 [위험: 비용]\n\n</details>\n\n' },
@@ -371,7 +293,7 @@ test('(f) delegate with a [위험: …] mark on an F or R line, a case of it or 
   assert.equal(runSpec(word, ['delegate', word.spec, '끝까지 알아서 해']).status, 0);
 });
 
-test('(f) a risk word without a mark does not stop a delegation or the start: the code does not search words, the spec-checker reads the meaning', () => {
+test('(f) a risk word without a mark does not stop a delegation or the start: the code does not search words', () => {
   const w = makeWorld({
     features: '- F2 지난 학기 기록을 삭제한다 [사용자]\n  - 케이스: 외부에 공개하고 결제한다 → 비용 발생\n',
     rules: '- R2 오래된 파일은 제거하고 덮어쓰기 전에 묻는다. push는 하지 않는다 [AI 가정]\n\n<details><summary>그 밖의 AI 가정 1개</summary>\n\n- R3 유료 기능을 공유한다 [AI 가정]\n\n</details>\n\n',
@@ -394,7 +316,6 @@ test('(f) a risk word without a mark does not stop a delegation or the start: th
 
 test('(f) a risk item does not stop an approve: the person said it after seeing the spec', () => {
   const w = makeWorld({ features: '- F2 지난 학기 자료 비우기 [위험: 지우기] [사용자]\n' });
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('끝까지 알아서 해', T(0)), typed('승인', T(10))]);
   assert.equal(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']).status, 1);
   assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
@@ -405,7 +326,6 @@ test('(f) a risk item does not stop an approve: the person said it after seeing 
 
 test('approve and delegate refuse with one line when the quote is empty, the spec is missing, or the session cannot be found', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('승인', T(10))]);
   assertRefused(runSpec(w, ['approve', w.spec, '   ']), /인용한 사용자 말이 비어 있다/);
   assertRefused(runSpec(w, ['approve', w.spec]), /인용한 사용자 말이 비어 있다/);
@@ -427,7 +347,6 @@ test('approve and delegate refuse with one line when the quote is empty, the spe
 
 test('a spec whose status cannot be changed (no frontmatter) gets no record either', () => {
   const w = makeWorld({ specBody: '# 머리말이 없는 명세\n## 기능\n- F1 보기 [사용자]\n## 공통 규칙\n' });
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('승인', T(10))]);
   const r = runSpec(w, ['approve', w.spec, '승인']);
   assert.equal(r.status, 1);
@@ -437,7 +356,6 @@ test('a spec whose status cannot be changed (no frontmatter) gets no record eith
 
 test('the transcript is looked up under CLAUDE_CONFIG_DIR when it is set, and in any project folder under projects/', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   const config = tmp();
   const file = path.join(config, 'projects', '-somewhere-else-entirely', `${SESSION}.jsonl`);
   writeTranscript(w, [typed('승인', T(10))], file);
@@ -450,7 +368,6 @@ test('the transcript is looked up under CLAUDE_CONFIG_DIR when it is set, and in
 
 test('a session whose transcript is in two project folders is read from both, and the same line is counted once', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   const said = typed('승인', T(10));
   writeTranscript(w, [typed('앞 말', T(0))]);
   writeTranscript(w, [typed('앞 말', T(0)), said], path.join(w.home, '.claude', 'projects', '-moved-here', `${SESSION}.jsonl`));
@@ -561,7 +478,6 @@ test('(f) a delegate record is looked at again when building starts: a risk item
   assert.equal(runSpec(w, ['set-status', w.spec, 'approved']).status, 0);
 
   // 사용자가 보고 승인하면 이어 간다: 마지막 기록이 승인이면 위험 항목이 있어도 시작한다
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('끝까지 알아서 해', T(0)), typed('승인', T(10))]);
   assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
   assert.equal(runSpec(w, ['set-status', w.spec, 'building']).status, 0);
@@ -596,7 +512,6 @@ test('(f) a delegate record is matched against the recorded transcript again whe
 
 test('(f) recheckEntry finds an AskUserQuestion answer again by the uuid of its line and the question it answered', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   const asked = answers({ '이 명세대로 만들까요?': '승인' }, T(10));
   writeTranscript(w, [asked]);
   assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
@@ -643,7 +558,6 @@ test('approve and delegate move only a draft to approved; while building, verify
     for (const [status, after] of [['draft', 'approved'], ['approved', 'approved'], ['building', 'building'], ['verifying', 'verifying'], ['done', 'done']]) {
       const w = makeWorld({ status });
       const words = kind === 'approve' ? '승인' : '끝까지 알아서 해';
-      if (kind === 'approve') addCheckerRecord(w, T(5));
       writeTranscript(w, [typed(words, kind === 'approve' ? T(10) : T(1))]);
       const before = readFileSync(w.spec, 'utf8');
       const r = runSpec(w, [kind, w.spec, words]);
@@ -662,7 +576,6 @@ test('approve and delegate move only a draft to approved; while building, verify
   }
   // 만드는 중에 다시 승인해도 이어 간다: 기록이 새로 생겼으니 set-status는 기록 쪽을 본다
   const w = makeWorld({ status: 'building' });
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('승인', T(10))]);
   assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
   assert.equal(specStatus(w), 'building');
@@ -674,7 +587,6 @@ test('the quote may come from standard input (approve <명세> -) so that backti
   const multi = '첫 줄이에요\n그리고 둘째 줄: 이대로 만들어 주세요';
   for (const [kind, text] of [['approve', words], ['approve', multi], ['delegate', words]]) {
     const w = makeWorld();
-    if (kind === 'approve') addCheckerRecord(w, T(5));
     writeTranscript(w, [typed(text, kind === 'approve' ? T(10) : T(1))]);
     // 표준 입력으로 곧바로
     const direct = runSpec(w, [kind, w.spec, '-'], { input: `${text}\n` });
@@ -683,7 +595,6 @@ test('the quote may come from standard input (approve <명세> -) so that backti
     assert.equal(approvalEntries(w)[0].message, text);
     // 진짜 셸의 따옴표 붙인 heredoc: 백틱과 $가 풀리지 않는다
     const w2 = makeWorld();
-    if (kind === 'approve') addCheckerRecord(w2, T(5));
     writeTranscript(w2, [typed(text, kind === 'approve' ? T(10) : T(1))]);
     const sh = spawnSync('sh', ['-c', `node "${SPEC_CLI}" ${kind} "${w2.spec}" - <<'EOF'\n${text}\nEOF\n`], { encoding: 'utf8', env: cliEnv(w2), cwd: w2.root });
     assert.equal(sh.status, 0, `${kind} heredoc: ${sh.stderr}`);
@@ -692,7 +603,6 @@ test('the quote may come from standard input (approve <명세> -) so that backti
   }
   // 같은 말을 큰따옴표 인자로 셸에 넘기면 백틱과 $가 셸에서 풀려 다른 말이 된다: 사용자 메시지에 없다고 거절한다(그래서 문서는 heredoc을 권한다)
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed(words, T(10))]);
   const quoted = spawnSync('sh', ['-c', `node "${SPEC_CLI}" approve "${w.spec}" "${words.replaceAll('"', '\\"')}"`], { encoding: 'utf8', env: cliEnv(w), cwd: w.root });
   assert.equal(quoted.status, 1);
@@ -701,7 +611,6 @@ test('the quote may come from standard input (approve <명세> -) so that backti
 
 test('standard input with nothing in it is refused with one line that says how to pass the words', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('승인', T(10))]);
   for (const input of ['', '   \n\n', undefined]) {
     const line = assertRefused(runSpec(w, ['approve', w.spec, '-'], input === undefined ? {} : { input }), /표준 입력으로 받은 사용자 말이 비어 있다/);
@@ -740,9 +649,8 @@ test('readApprovals skips broken lines and lines that are not records, and retur
   assert.match(lines[0], /승인 기록\(approvals\.jsonl\)·log\/ 자리면 손대지 말고 사용자에게 알린다/);
 });
 
-test('a missing spec, or a log/ that is a file, is refused with the Node message plus a reason and what to do on one line', () => {
+test('a missing spec is refused with the Node message plus a reason and what to do on one line', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [typed('승인', T(10))]);
   const missing = runSpec(w, ['approve', path.join(w.project, '.pact', 'nope', 'spec.md'), '승인']);
   assert.equal(missing.status, 1);
@@ -750,15 +658,6 @@ test('a missing spec, or a log/ that is a file, is refused with the Node message
   assert.equal(missingLines.length, 1, missing.stderr);
   assert.match(missingLines[0], /^ENOENT: no such file or directory/);
   assert.match(missingLines[0], /파일이나 폴더가 없다\(.*nope\/spec\.md\)\. 경로를 확인한다/);
-  // log/ 자리에 파일이 있다(ENOTDIR)
-  rmSync(path.join(w.run, 'log'), { recursive: true, force: true });
-  writeFileSync(path.join(w.run, 'log'), '폴더 자리에 파일');
-  const blocked = runSpec(w, ['approve', w.spec, '승인']);
-  assert.equal(blocked.status, 1);
-  const blockedLines = blocked.stderr.split('\n').filter(Boolean);
-  assert.equal(blockedLines.length, 1, blocked.stderr);
-  assert.match(blockedLines[0], /^ENOTDIR/);
-  assert.match(blockedLines[0], /손대지 말고 사용자에게 알린다/);
   assert.equal(specStatus(w), 'draft');
   assert.deepEqual(approvalEntries(w), []);
 });
@@ -773,7 +672,7 @@ test('a file with only broken lines is no record: the gate refuses (new spec) or
 
 // ---------- (h) 위임은 사용자가 직접 쓴 말만 받는다: 질문 도구의 답은 그 질문만 맡긴 것이다 (R2) ----------
 
-test('(h) delegate refuses a quote that is only an AskUserQuestion answer, and says why and what to do; the same words answering the approval question are recorded by approve after the spec-checker finished', () => {
+test('(h) delegate refuses a quote that is only an AskUserQuestion answer, and says why and what to do; the same words answering the approval question are recorded by approve', () => {
   const w = makeWorld();
   const asked = answers({ '출력 파일 이름은 어떻게 할까요?': '알아서 해' }, T(10));
   writeTranscript(w, [typed('출결 관리 만들어 줘', T(0)), assistant('질문', T(9)), asked]);
@@ -796,10 +695,9 @@ test('(h) delegate refuses a quote that is only an AskUserQuestion answer, and s
   assertRefused(runSpec(w, ['delegate', w.spec, '이대로 만들어 주세요 지금 바로 시작합니다']), /질문 도구\(AskUserQuestion\)의 답이다/);
   assert.deepEqual(approvalEntries(w), []);
 
-  // 같은 말이 승인 질문("이 명세대로 만들까요?")에 대한 답이면 spec-checker가 끝난 뒤에 approve로 인용해 기록한다
+  // 같은 말이 승인 질문("이 명세대로 만들까요?")에 대한 답이면 approve로 인용해 기록한다
   const approvalAnswer = answers({ '이 명세대로 만들까요?': '알아서 해' }, T(10));
-  writeTranscript(w, [typed('출결 관리 만들어 줘', T(0)), assistant('명세를 검수했어요. 이 명세대로 만들까요?', T(9)), approvalAnswer]);
-  addCheckerRecord(w, T(5));
+  writeTranscript(w, [typed('출결 관리 만들어 줘', T(0)), assistant('명세를 보여 드렸어요. 이 명세대로 만들까요?', T(9)), approvalAnswer]);
   const ok = runSpec(w, ['approve', w.spec, '알아서 해']);
   assert.equal(ok.status, 0, ok.stderr);
   const [entry] = approvalEntries(w);
@@ -857,7 +755,7 @@ test('(h) a delegate record made from an AskUserQuestion answer before this rule
     // 규칙이 생기기 전에 남은 기록을 손으로 만든다(지금의 delegate는 이 기록을 만들지 못한다)
     const old = {
       version: 1, kind: 'delegate', quote: '끝까지 알아서 해', message: '끝까지 알아서 해', message_uuid: asked.uuid, message_time: T(2),
-      answer_question: '승인까지 맡기시겠어요?', transcript: w.transcript, session_id: SESSION, recorded_at: T(3), spec: w.spec, spec_checker_time: null,
+      answer_question: '승인까지 맡기시겠어요?', transcript: w.transcript, session_id: SESSION, recorded_at: T(3), spec: w.spec,
       user_lines: userLinesOf(specText()),
     };
     mkdirSync(w.run, { recursive: true });
@@ -884,7 +782,6 @@ test('(h) a delegate record made from an AskUserQuestion answer before this rule
   assert.equal(runSpec(w, ['set-status', w.spec, 'approved']).status, 0);
 
   // 사용자가 승인 질문에 새로 답하면 이어 간다
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [asked, typed('승인', T(10))]);
   assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
   assert.equal(runSpec(w, ['set-status', w.spec, 'building']).status, 0);
@@ -901,7 +798,6 @@ test('(h) a delegate record made from an AskUserQuestion answer before this rule
 
   // 질문 도구의 답으로 만든 승인 기록은 막지 않는다: 승인 질문의 답은 승인이다
   const approved = makeWorld();
-  addCheckerRecord(approved, T(5));
   writeTranscript(approved, [answers({ '이 명세대로 만들까요?': '승인' }, T(10))]);
   assert.equal(runSpec(approved, ['approve', approved.spec, '승인']).status, 0);
   assert.equal(runSpec(approved, ['set-status', approved.spec, 'building']).status, 0);
@@ -915,7 +811,7 @@ test('(h) the question of an old record can be an empty string: it is still an a
   mkdirSync(w.run, { recursive: true });
   writeFileSync(path.join(w.run, 'approvals.jsonl'), `${JSON.stringify({
     version: 1, kind: 'delegate', quote: '끝까지 알아서 해', message: '끝까지 알아서 해', message_uuid: asked.uuid, message_time: T(2), answer_question: '',
-    transcript: w.transcript, session_id: SESSION, recorded_at: T(3), spec: w.spec, spec_checker_time: null, user_lines: userLinesOf(specText()),
+    transcript: w.transcript, session_id: SESSION, recorded_at: T(3), spec: w.spec, user_lines: userLinesOf(specText()),
   })}\n`);
   const verdict = checkStart({ specFile: w.spec, purpose: 'building' });
   assert.equal(verdict.ok, false);
@@ -1003,23 +899,17 @@ test('(i) these lines are not a person\'s words even when they carry the same te
   assert.equal(approvalEntries(w)[0].message_uuid, real.uuid);
 });
 
-test('(i) the arguments of a command typed before the spec-checker finished can hand over a delegation (R9) but cannot approve, and one typed after it can', () => {
+test('(i) the arguments of a command the person typed can hand over a delegation (R9), and the arguments of a later command can approve', () => {
   const w = makeWorld();
-  addCheckerRecord(w, T(5));
   writeTranscript(w, [commandLine('pact:pact', ASK, T(0))]);
-  // 승인은 검수가 끝난 뒤의 말이어야 한다
-  const line = assertRefused(runSpec(w, ['approve', w.spec, ASK]), /spec-checker가 끝난 뒤/, '인자 전체로 승인');
-  assert.ok(line.includes(T(5)), '검수가 끝난 시각을 알린다');
-  assert.equal(specStatus(w), 'draft');
-  assert.deepEqual(approvalEntries(w), []);
   // 짧은 말은 승인도 위임도 인자 전체와 같아야 한다(R3). 문장 하나로는 맞춰 보지 않는다
   assertRefused(runSpec(w, ['approve', w.spec, '끝까지 알아서 해']), /짧은 말이라 사용자 메시지 전체와 같아야/);
   assertRefused(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']), /짧은 말이라 사용자 메시지 전체와 같아야/);
   assert.deepEqual(approvalEntries(w), []);
   // 위임은 처음 부탁에 있어도 된다: 인자 전체나 긴 부분을 인용한다
   assert.equal(runSpec(w, ['delegate', w.spec, MORE]).status, 0);
-  assert.deepEqual(approvalEntries(w).map((e) => [e.kind, e.message_time, e.spec_checker_time]), [['delegate', T(0), null]]);
-  // 검수가 끝난 뒤에 사람이 친 명령의 인자는 승인으로 쓸 수 있다(앞 기록보다 새 말이다)
+  assert.deepEqual(approvalEntries(w).map((e) => [e.kind, e.message_time]), [['delegate', T(0)]]);
+  // 뒤에 사람이 친 명령의 인자는 승인으로 쓸 수 있다(앞 기록보다 새 말이다)
   const later = commandLine('pact:pact', '승인', T(10));
   writeTranscript(w, [commandLine('pact:pact', ASK, T(0)), later]);
   const approve = runSpec(w, ['approve', w.spec, '승인']);

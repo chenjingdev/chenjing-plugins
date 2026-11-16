@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
-  AGENT, LOGGED_AGENTS, logFile, appendRecord, readRecords, latestRecord, latestSpecCheckerReply, latestWorkerReply,
+  AGENT, LOGGED_AGENTS, logFile, appendRecord, readRecords, latestRecord, latestWorkerReply,
   latestVerifierFingerprint, resultsSha256, firstUserPrompt, recordStop, findAgentRecord,
 } from '../scripts/run-log.mjs';
 import { withConcerns } from '../scripts/concerns.mjs';
@@ -20,8 +20,8 @@ const tmp = () => {
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const rec = (agent_type, extra = {}) => ({ time: '2026-10-29T00:00:00.000Z', agent_type, agent_id: 'a', task: null, message: '', ...extra });
 
-test('the four pact agents are logged, with the pact: prefix', () => {
-  assert.deepEqual(LOGGED_AGENTS, ['pact:spec-checker', 'pact:reviewer', 'pact:worker', 'pact:verifier']);
+test('the three pact agents are logged, with the pact: prefix', () => {
+  assert.deepEqual(LOGGED_AGENTS, ['pact:reviewer', 'pact:worker', 'pact:verifier']);
   assert.equal(AGENT.worker, 'pact:worker');
 });
 
@@ -40,27 +40,22 @@ test('appendRecord creates log/ and appends one line per stop without overwritin
 
 test('readRecords skips broken lines, so a line cut short does not hide the earlier records', () => {
   const run = tmp();
-  appendRecord(run, rec(AGENT.specChecker, { message: '앞' }));
+  appendRecord(run, rec(AGENT.worker, { message: '앞' }));
   appendFileSync(logFile(run), '{"time":"2026-10-29T00:00:01.000Z","agent_type":"pact:wor\n');
   appendFileSync(logFile(run), '\n\n[1,2]\n"문자열"\n');
-  appendRecord(run, rec(AGENT.specChecker, { message: '뒤' }));
+  appendRecord(run, rec(AGENT.worker, { message: '뒤' }));
   assert.deepEqual(readRecords(run).map((r) => r.message), ['앞', '뒤']);
 });
 
-test('the readers return the latest spec-checker reply, the latest reply of worker task n, and the latest verifier fingerprint', () => {
+test('the readers return the latest reply of worker task n and the latest verifier fingerprint', () => {
   const run = tmp();
-  appendRecord(run, rec(AGENT.specChecker, { time: '2026-10-29T01:00:00.000Z', message: '검수 1' }));
   appendRecord(run, rec(AGENT.worker, { task: 1, message: '작업 1 첫 답' }));
   appendRecord(run, rec(AGENT.worker, { task: 2, message: '작업 2 답' }));
   appendRecord(run, rec(AGENT.reviewer, { task: 1, message: '검토' }));
   appendRecord(run, rec(AGENT.worker, { task: 1, message: '작업 1 고친 답' }));
-  appendRecord(run, rec(AGENT.specChecker, { time: '2026-10-29T02:00:00.000Z', message: '검수 2' }));
   appendRecord(run, rec(AGENT.verifier, { message: '검수', results_sha256: 'a'.repeat(64) }));
   appendRecord(run, rec(AGENT.verifier, { time: '2026-10-29T03:00:00.000Z', message: '다시 검수', results_sha256: 'b'.repeat(64) }));
 
-  const checker = latestSpecCheckerReply(run);
-  assert.equal(checker.message, '검수 2');
-  assert.equal(checker.time, '2026-10-29T02:00:00.000Z');
   assert.equal(latestWorkerReply(run, 1).message, '작업 1 고친 답');
   assert.equal(latestWorkerReply(run, '2').message, '작업 2 답', '문자열 번호도 받는다');
   assert.equal(latestWorkerReply(run, 3), null);
@@ -70,7 +65,6 @@ test('the readers return the latest spec-checker reply, the latest reply of work
   assert.equal(fingerprint.time, '2026-10-29T03:00:00.000Z');
 
   const empty = tmp();
-  assert.equal(latestSpecCheckerReply(empty), null);
   assert.equal(latestWorkerReply(empty, 1), null);
   assert.equal(latestVerifierFingerprint(empty), null);
 });

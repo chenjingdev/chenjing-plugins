@@ -3,7 +3,6 @@
 // 근거(단계별 출력, 작업 기록, 통과한 시나리오, 결정 기록)는 접어 둔다.
 // 승인 기록(승인인지 위임인지, 인용한 말과 메시지, 승인 뒤 바뀐 [사용자] 줄과 다시 승인한 인용, 옛 판 표시)과 완료 검사의 참고 줄도 보인다(명세 R5, R8, R12).
 // 옛 판 표시는 맨 위 상자에도 늘 있다: summary.json의 headline과 상관없이 스크립트가 붙인다(R5).
-// 명세 `## 확인 필요`의 `- 검수 n: 안 물은 까닭`은 할 일 칸에 저절로 올라간다(R11).
 // 모든 시나리오는 단계마다 스크린샷(또는 명령 출력)을 남기므로, 빠진 스크린샷은 숨기지 않고 센다.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -12,7 +11,7 @@ import { effectiveResult } from './evidence.mjs';
 import { checkVerification } from './verification.mjs';
 import { isMainModule } from './paths.mjs';
 import { decisionOf, readSummary, reportFields } from './summary.mjs';
-import { approvalOverview, changeLabel, isLineKey, notAskedItems, plainLines } from './approval.mjs';
+import { approvalOverview, changeLabel, isLineKey, plainLines } from './approval.mjs';
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -171,12 +170,6 @@ export function renderReport(results, { runDir, notes = [] }) {
   const rulings = fromSpec.length ? fromSpec : Array.isArray(results?.rulings) ? results.rulings : [];
   const topic = spec === null ? null : parseSpec(spec).frontmatter.topic || null;
   const title = topic ? `${topic} 검수 보고서` : '검수 보고서';
-  // 할 일: 메인이 쓴 칸 뒤에 명세 `## 확인 필요`의 검수 항목(묻지 않고 정한 것)을 저절로 올린다. 메인이 이미 그 번호를 적었으면 되풀이하지 않는다.
-  const mainTodo = Array.isArray(fields.todo) ? fields.todo : null;
-  const asked = (spec === null ? [] : notAskedItems(spec, runDir))
-    .filter(({ n }) => !(mainTodo ?? []).some((line) => new RegExp(`검수\\s*${n}(?!\\d)`).test(String(line))))
-    .map(({ n, reason, question }) => `검수 ${n}: ${reason}${question ? ` (질문: ${question.length > 60 ? `${question.slice(0, 60)}…` : question})` : ''}`);
-  const todo = mainTodo === null && !asked.length ? undefined : [...(mainTodo ?? []), ...asked];
   const overview = approvalOverview(spec, runDir);
   // 옛 판이면 맨 위 상자에도 그렇다고 적는다(R5). 메인 세션이 summary.json에 무엇을 썼든 스크립트가 붙인다: 승인 기록 없이 시작한 판을 맨 위만 읽는 사람도 알게.
   const legacyNote = overview.state === 'legacy' ? LEGACY_LINE : '';
@@ -225,7 +218,7 @@ ${scenarios.length > 0 && !needsReceipt ? '<p class="missing">완료 검사를 �
 ${pendingNote}
 ${legacyNote}
 ${fields.headline ? `<p class="headline">${esc(fields.headline)}</p>` : ''}
-${Array.isArray(todo) ? `<h2>할 일</h2>${list(todo)}` : ''}
+${Array.isArray(fields.todo) ? `<h2>할 일</h2>${list(fields.todo)}` : ''}
 <p class="counts">시나리오 ${scenarios.length}개 · ${summary}</p>
 ${notes.map((note) => `<p class="meta">${esc(note)}</p>`).join('\n')}
 </section>

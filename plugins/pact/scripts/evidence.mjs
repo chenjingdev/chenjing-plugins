@@ -107,13 +107,17 @@ export function evidenceIssues(step, { runDir, surface } = {}) {
   const issues = [];
   if (typeof step.action !== 'string' || !step.action.trim()) issues.push('검수 단계의 동작 설명이 없습니다');
   const mode = surface ?? (step.shot ? 'ui' : 'command');
-  if (mode === 'ui') {
+  // 화면이 있는 결과물이어도 화면 없이 볼 수 있는 단계(서버에 보낸 요청, 운영 명령)는 명령 출력이 증거다. 스크린샷을 적은 단계는 그 파일을 본다.
+  const byCommand = typeof step.output === 'string' && Number.isInteger(step.exitCode);
+  if (mode === 'ui' && (step.shot || !byCommand)) {
     try {
       const issue = screenshotIssue(step.shot, runDir);
-      if (issue) issues.push(issue);
+      if (issue) issues.push(byCommand || step.shot ? issue : '스크린샷도 명령 출력도 없습니다');
     } catch (error) {
       issues.push(`스크린샷을 확인할 수 없습니다: ${error.message}`);
     }
+  } else if (mode === 'ui') {
+    // 명령 출력으로 확인한 단계
   } else if (mode === 'command') {
     if (typeof step.output !== 'string') issues.push('명령 출력이 없습니다');
     // 종료 코드의 값은 보지 않는다. 오류를 확인하는 케이스는 0이 아닌 코드가 정답이다. 통과·실패 판정은 verifier가 result에 적는다.

@@ -15,7 +15,7 @@
 //                  받는 쪽이 reviewer인지와 작업 번호는 log/의 reviewer 기록(agent_id, task)으로 안다. 붙일 것이 없으면 그냥 통과한다.
 //                  단 하나만 막는다: reviewer 지시에서 판은 찾았는데 작업 번호를 못 읽으면(통과시키면 걱정이 말없이 빠진다) 호출을 막고 `작업 번호 n`을 맨 앞에 적게 한다.
 //                  scripts/concerns.mjs가 글을 다룬다.
-//   SubagentStop — pact:spec-checker·reviewer·worker·verifier가 멈추면 마지막 답을 그 판의 <run-dir>/log/에 덧붙여 남기고,
+//   SubagentStop — pact:reviewer·worker·verifier가 멈추면 마지막 답을 그 판의 <run-dir>/log/에 덧붙여 남기고,
 //                  verifier는 그때의 results.json 지문(sha256)도 남긴다(F4, R14, R15). scripts/run-log.mjs가 한다.
 //
 // 훅이 고장나도 대화는 멈추지 않는다(R7): 어떤 오류도 잡아 ${CLAUDE_PLUGIN_DATA}/hook-error.log에 한 줄 남기고 종료 코드 0으로 끝난다.
@@ -28,8 +28,8 @@ import { fileURLToPath } from 'node:url';
 
 // scripts/run-log.mjs의 LOGGED_AGENTS와 같아야 한다(시험이 맞춰 본다). 여기서 따로 두는 것은 상관없는 호출이 모듈을 불러오지 않게 하려는 것이다.
 // `pact:` 앞머리까지 맞춘다. `tiers:worker`가 걸리면 안 된다.
-export const PACT_AGENTS = new Set(['pact:spec-checker', 'pact:reviewer', 'pact:worker', 'pact:verifier']);
-const PACT_TEXT = /\.pact\/|\bpact:(?:spec-checker|reviewer|worker|verifier)\b|\bscripts\/(?:spec|verification|report|checklist|gallery|git-state)\.mjs\b/i; // 대소문자를 가리지 않는다: 이 컴퓨터의 파일 시스템이 가리지 않아 `.PACT/`도 실제 `.pact/`다
+export const PACT_AGENTS = new Set(['pact:reviewer', 'pact:worker', 'pact:verifier']);
+const PACT_TEXT = /\.pact\/|\bpact:(?:reviewer|worker|verifier)\b|\bscripts\/(?:spec|verification|report|checklist|gallery|git-state)\.mjs\b/i; // 대소문자를 가리지 않는다: 이 컴퓨터의 파일 시스템이 가리지 않아 `.PACT/`도 실제 `.pact/`다
 const ERROR_LOG = 'hook-error.log';
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 // Bash의 cwd가 실행 폴더(<프로젝트>/.pact/<run-id>) 안이면 명령에 `.pact/`가 없어도 pact 호출이다: `echo x > results.json`

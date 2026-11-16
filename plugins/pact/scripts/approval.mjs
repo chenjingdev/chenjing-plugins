@@ -1,18 +1,17 @@
-// 사용자 승인과 위임을 코드로 기록하고, 기록이 없으면 만들기를 시작하지 못하게 하는 도구(명세 F2·F3·F5, R2·R3·R8·R9·R10·R11·R12·R19).
+// 사용자 승인과 위임을 코드로 기록하고, 기록이 없으면 만들기를 시작하지 못하게 하는 도구(명세 F2·F3, R2·R3·R8·R9·R10·R12·R19).
 // 이 파일이 하는 일: approve·delegate가 인용한 말을 이 대화 기록에서 찾아 맞춰 보고 기록을 남기는 것(recordApproval),
 // 만들기를 시작해도 되는지 보는 것(checkStart: set-status approved·building, pact:worker 부르기 훅, verification.mjs snapshot이 쓴다),
-// 완료 검사가 보는 것(completionChecks: 검수 번호의 짝, 승인 뒤 바뀐 [사용자] 줄), 보고서가 보이는 것(approvalOverview).
+// 완료 검사가 보는 것(completionChecks: 승인 기록이 있는지, 승인 뒤 바뀐 [사용자] 줄), 보고서가 보이는 것(approvalOverview).
 //
 // 승인 기록은 판마다 <run-dir>/approvals.jsonl 한 파일에 한 번 기록할 때 한 줄이다. 덧붙이기만 하므로 이력이 쌓인다.
 //   { version, kind: 'approve'|'delegate', quote, message, message_uuid, message_time, answer_question,
-//     transcript, session_id, recorded_at, spec, spec_checker_time, user_lines }
+//     transcript, session_id, recorded_at, spec, user_lines }
 //   quote            사용자 말로 넘긴 글(그대로)            message        대화 기록에서 찾은 메시지 전문
 //   message_uuid     그 메시지 줄의 uuid                   message_time   그 메시지의 timestamp
 //   answer_question  AskUserQuestion의 답이면 그 질문, 아니면 null. 승인(approve)에만 생긴다: 위임은 질문 도구의 답을 받지 않는다(R2).
 //                    이 규칙 전에 질문 도구의 답으로 만든 옛 위임 기록은 만들기를 시작할 때 거절한다(checkStart).
 //                    슬래시 명령의 인자 글(`/pact:pact 출결 앱 만들어 줘. 끝까지 알아서 해`의 뒤쪽)로 기록하면 message가 그 인자 글이다(R9).
 //   transcript       찾은 대화 기록 파일의 경로(만들기를 시작할 때 다시 맞춰 보려고)
-//   spec_checker_time  approve일 때 맞춰 본 spec-checker의 끝난 시각(위임은 null)
 //   user_lines       그때 명세의 [사용자] 줄들(spec.mjs userLinesOf). 머리 줄이 [사용자]인 항목은 { F2: [항목 줄, 케이스 줄, …] },
 //                    [AI 가정] 항목 밑의 [사용자] 케이스 줄은 그 줄 하나씩 { 'F3/1': [케이스 줄] }. 지문 대신 줄 글을 그대로 둔다:
 //                    뒤에 지금 명세와 견줘 바뀐 줄을 알리고(F3), 보고서가 앞뒤 글을 보이려고
@@ -21,9 +20,8 @@
 // 거절은 { ok: false, reason, instead }다(R6: 까닭과 대신 할 일). 확인을 못 하면 거절한다(R7).
 import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { SPEC_NAME, parseSpec, reviewMarks, riskUnits, setStatus, specLocation, userLinesOf } from './spec.mjs';
+import { SPEC_NAME, parseSpec, riskUnits, setStatus, specLocation, userLinesOf } from './spec.mjs';
 import { ensureRunDir } from './paths.mjs';
-import { latestSpecCheckerReply, logFile } from './run-log.mjs';
 import { SHORT_MAX, humanMessages, normalizeQuote, quoteMatches, transcriptFiles } from './transcript.mjs';
 
 export const APPROVALS_FILE = 'approvals.jsonl';
@@ -33,6 +31,10 @@ export const LEGACY_NOTE = '참고: 옛 판이라 승인 기록 없음';
 
 export const approvalsFile = (runDir) => path.join(runDir, APPROVALS_FILE);
 const oneLine = (text) => String(text ?? '').replace(/\s*\r?\n\s*/g, ' ').trim();
+const clip = (text, max) => {
+  const chars = Array.from(String(text ?? '').replace(/\s+/g, ' ').trim());
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : chars.join('');
+};
 
 // 기록을 쓴 순서대로. 기록이 없으면 []. 깨진 줄은 건너뛴다. 읽을 수 없으면 던진다.
 export function readApprovals(runDir) {
@@ -90,7 +92,7 @@ const readIfExists = (file) => {
 };
 
 // 지금 명세의 위험 항목: `[위험: …]` 표시가 있는 F·R 항목(케이스, 접힌 칸 포함). 위임으로는 시작하지 못한다(R10).
-// 표시가 빠졌는지는 낱말로 찾지 않는다. spec-checker가 뜻으로 보고 알린다(작업 4).
+// 표시가 빠졌는지는 낱말로 찾지 않는다.
 export const riskItems = (text) => riskUnits(text).filter((unit) => unit.marked);
 
 function describeRisk(units) {
@@ -105,87 +107,6 @@ const approveCmd = (verb = 'approve') => `spec.mjs ${verb} <명세> - <<'EOF'`;
 const ASK_APPROVAL = `명세를 보이고 사용자의 승인을 받아 ${approveCmd()}로 기록한다(${HEREDOC_HOW}).`;
 // 짧은 말이 더 긴 메시지의 일부로만 있을 때 대신 할 일(R3)
 const SHORT_HINT = `메시지 전체를 그대로 인용한다(정리해서 ${SHORT_MAX}자를 넘는 말이면 일부만 인용해도 된다).`;
-
-// ---------- 사용자만 답할 수 있음 항목의 짝 (명세 F5, R11) ----------
-
-// spec-checker 답의 '## 사용자만 답할 수 있음' 칸을 읽는다. 항목마다 `검수 n` 번호가 붙어 온다(agents/spec-checker.md).
-// 반환: { found, none, items: [{ n, text }] } — found는 칸이 있는지, none은 항목 대신 '없음'이라고 적었는지. 번호는 줄 맨 앞(목록 표시 뒤)에 있는 것만 읽는다.
-const REPLY_HEADING = /^\s*(?:#{1,6}\s*)?[*_]*\s*사용자만 답할 수 있음\s*[*_]*\s*[:：]?\s*(.*)$/u;
-const REPLY_END = /^\s*(?:#{1,6}\s+\S|[*_]*\s*(?:이미 답이 있음|사소함\s*[—–-]))/u;
-const REPLY_ITEM = /^\s*(?:[-*+•]\s*|\d+[.)]\s*)?[*_]*\s*(?:[\[(（【]\s*)?검수\s*(\d+)[*_]*/u;
-// '없음' 뒤는 줄 끝·문장부호·괄호일 때만 없음이다('없음에 가깝지만'은 아니다).
-const REPLY_NONE = /^\s*(?:[-*+•]\s*)?[*_]*\s*(?:해당\s*)?없(?:음|다|습니다)(?=\s*(?:$|[.,;:!?。…·~)\]）】*_]|[—–-]|[(（\[]))/u;
-
-// 한 칸을 읽는다: start 줄(칸 제목)과 그 줄에 이어 쓴 글(inline), 다음 칸 제목 앞까지의 줄들. { items, none }
-function readSection(lines, { start, inline }) {
-  const body = inline.trim() ? [inline] : [];
-  for (let i = start + 1; i < lines.length && !REPLY_END.test(lines[i]); i++) body.push(lines[i]);
-  const items = [];
-  const seen = new Set();
-  for (const line of body) {
-    const m = REPLY_ITEM.exec(line);
-    if (!m || seen.has(Number(m[1]))) continue;
-    seen.add(Number(m[1]));
-    items.push({ n: Number(m[1]), text: line.slice(m[0].length).replace(/^[\s:.)\]）】—–*_-]+/u, '').trim() });
-  }
-  const first = body.map((line) => line.trim()).find(Boolean) ?? '';
-  return { items, none: !items.length && REPLY_NONE.test(first) };
-}
-
-// 칸 제목 후보는 '사용자만 답할 수 있음'으로 시작하는 줄 모두다. 답 맨 위의 머리말("사용자만 답할 수 있음 2개를 찾았습니다.")도 후보라서
-// 첫 후보만 칸으로 잡으면 뒤의 진짜 칸을 못 읽는다. `#` 제목 줄을 먼저 보고 맨 줄 꼴은 그다음에 보며, 그 가운데 번호나 '없음'을 읽은 첫 후보를 칸으로 고른다.
-// 어느 후보에서도 못 읽으면 첫 후보(칸은 있는데 못 읽은 것)를 돌려준다. 보는 후보는 제목 후보가 있으면 제목 후보뿐이다.
-export function parseReviewReply(message) {
-  const lines = String(message ?? '').split(/\r?\n/);
-  const candidates = [];
-  lines.forEach((line, start) => {
-    const m = REPLY_HEADING.exec(line);
-    if (m) candidates.push({ start, inline: m[1], heading: /^\s*#/.test(line) });
-  });
-  if (!candidates.length) return { found: false, none: false, items: [] };
-  // 제목 후보가 하나라도 있으면 제목 후보만 본다. 맨 줄 후보는 제목이 없을 때만 본다(제목 칸을 못 읽었는데 맨 줄의 '없음'으로 통과하지 않게).
-  const headings = candidates.filter((c) => c.heading);
-  const ordered = headings.length ? headings : candidates;
-  for (const candidate of ordered) {
-    const read = readSection(lines, candidate);
-    if (read.items.length || read.none) return { found: true, ...read };
-  }
-  return { found: true, ...readSection(lines, ordered[0]) };
-}
-
-const clip = (text, max) => {
-  const chars = Array.from(String(text ?? '').replace(/\s+/g, ' ').trim());
-  return chars.length > max ? `${chars.slice(0, max).join('')}…` : chars.join('');
-};
-// 항목 글에서 질문만: `<질문> (기본안: …) — <달라지는 것>`의 앞부분
-export const questionOf = (text) => String(text ?? '').split(/\s*\(기본안/u)[0].trim();
-const FIX_REPLY = 'pact:spec-checker를 다시 불러 "## 사용자만 답할 수 있음" 칸에 항목마다 "검수 n" 번호를 붙여(없으면 "없음") 받는다.';
-
-// 가장 최근 spec-checker 답의 검수 번호마다 명세에 짝이 있는지 본다. 없으면 { reason, instead }, 모두 있으면(또는 '없음'이면) null.
-// 답에서 번호도 '없음'도 못 읽으면 확인하지 못한 것이라 거절한다(R7). afterwards는 그 경우 대신 할 일 뒤에 붙는 말이다(승인은 검수가 끝난 뒤에 다시 받는다 등).
-export function pairingProblem(specText, record, afterwards = '') {
-  const reply = parseReviewReply(record?.message);
-  const when = record?.time ? ` (${record.time})` : '';
-  const fix = afterwards ? `${FIX_REPLY} ${afterwards}` : FIX_REPLY;
-  if (!reply.found) return { reason: `spec-checker의 답${when}에 '사용자만 답할 수 있음' 칸이 없어 검수 번호를 읽지 못했다.`, instead: fix };
-  if (!reply.items.length && !reply.none) {
-    return { reason: `spec-checker의 답${when}의 '사용자만 답할 수 있음' 칸에서 검수 번호(검수 1, 검수 2 …)도 '없음'도 읽지 못했다.`, instead: fix };
-  }
-  const marks = reviewMarks(specText);
-  const gaps = reply.items.filter(({ n }) => !marks.answered.has(n) && !marks.delegated.has(n) && !marks.notAsked.has(n));
-  if (!gaps.length) return null;
-  const list = gaps.map(({ n, text }) => (questionOf(text) ? `검수 ${n}("${clip(questionOf(text), 30)}")` : `검수 ${n}`)).join(', ');
-  // 전각 콜론(：)으로 쓴 태그는 lint가 알 수 없는 태그로 알리는데 approve는 lint를 돌리지 않는다. 짝이 없다고만 하면 태그를 단 사람이 영문을 모르니 그렇다고 알린다.
-  const wide = gaps.filter(({ n }) => marks.fullwidth.has(n)).map(({ n }) => `검수 ${n}`);
-  const trailing = gaps.filter(({ n }) => marks.afterText.has(n)).map(({ n }) => `검수 ${n}`);
-  const hint = (wide.length ? `${wide.join(', ')}의 태그는 콜론이 전각(：)이라 읽히지 않는다. 반각 콜론(:)으로 고친다. ` : '')
-    + (trailing.length ? `${trailing.join(', ')}의 태그 뒤에 글자(마침표 등)가 있어 읽히지 않는다. 태그 뒤에 글자를 두지 않는다. ` : '');
-  return {
-    reason: `spec-checker가 '사용자만 답할 수 있음'으로 짚은 ${list}에 명세의 짝이 없다.`,
-    instead: `${hint}물어서 답을 받은 줄에는 [사용자: 검수 n], 사용자가 맡긴 줄에는 [AI 가정: 검수 n 맡김]을 기능·규칙 줄이나 그 케이스 줄의 끝에 달고(한 줄에 태그는 하나다. 번호가 여럿이면 \`[사용자: 검수 n, m]\`처럼 한 태그에 쓴다), 묻지 않은 것은 ## 확인 필요에 "- 검수 n: 안 물은 까닭"으로 적는다`
-      + "(위임 중이면 까닭은 '위임이라 기본안으로 정함'). 아직 안 물었고 물어야 하는 것이면 먼저 묻는다.",
-  };
-}
 
 // ---------- 승인 뒤 바뀐 [사용자] 줄 (명세 F3, R12) ----------
 
@@ -293,8 +214,7 @@ export function driftProblem(specText, entry) {
 // ---------- 기록하기 ----------
 
 // approve·delegate. quote는 사용자가 한 말이다. 맞으면 기록을 덧붙이고, status가 draft면 approved로 바꾼다(building·verifying이면 그대로 둔다).
-// 기록 전에 보는 것: 위임이면 위험 표시, 승인이면 spec-checker가 끝난 뒤의 말인지, 둘 다 가장 최근 spec-checker 답의 검수 번호에 명세의 짝이 있는지(F5),
-// 앞 기록이 있으면 인용한 말이 앞 기록들의 어떤 메시지보다 새것인지(승인도 위임도 — 위임 중에 [사용자] 줄을 바꾸고 옛 위임 말로 다시 기록해 F3를 비켜 가지 못하게).
+// 기록 전에 보는 것: 위임이면 위험 표시, 앞 기록이 있으면 인용한 말이 앞 기록들의 어떤 메시지보다 새것인지(승인도 위임도 — 위임 중에 [사용자] 줄을 바꾸고 옛 위임 말로 다시 기록해 F3를 비켜 가지 못하게).
 // 인용을 맞춰 보는 말: 승인은 사용자가 친 말, 일하는 도중에 친 말, 질문 도구의 답, 슬래시 명령의 인자 글이다.
 // 위임은 질문 도구의 답만 뺀 나머지다(R2: 질문의 답은 그 질문만 맡긴 것). 맞춰 보는 기준(R3)은 어느 말이든 같다: 짧은 말은 메시지(명령이면 인자 글) 전체와 같아야 한다.
 // 반환: { ok: true, entry, runDir, message } | { ok: false, reason, instead }. 읽지 못하면 던진다(부르는 쪽이 거절로 보인다).
@@ -312,24 +232,6 @@ export function recordApproval(specFile, quote, kind, { env = process.env, now =
     const risks = riskItems(text);
     if (risks.length) return refuse(`위험 항목이 있어 위임으로 기록하지 않는다: ${describeRisk(risks)}.`, ASK_APPROVAL);
   }
-
-  // 승인은 spec-checker가 끝난 뒤의 말이어야 한다(R9): 검수 전에 받은 '좋아'를 승인으로 쓰지 않게
-  const checker = latestSpecCheckerReply(runDir);
-  let checkerMs = null;
-  if (kind === 'approve') {
-    if (!checker) {
-      return refuse(
-        `이 명세의 spec-checker 기록이 없다 (${logFile(runDir)}).`,
-        'pact:spec-checker로 명세를 검수한 뒤, 결과를 반영한 명세로 사용자의 승인을 받아 다시 실행한다. '
-          + '이미 검수했는데도 기록이 없으면 훅이 돌지 않는 것이다. 플러그인 데이터 폴더의 hook-error.log를 보고 사용자에게 알린다(log/에 직접 쓰지 않는다).',
-      );
-    }
-    checkerMs = Date.parse(checker.time);
-    if (!Number.isFinite(checkerMs)) return refuse(`spec-checker 기록의 시각을 읽지 못했다 (${checker.time}).`, 'pact:spec-checker를 다시 불러 검수한 뒤 승인을 받는다.');
-  }
-  // spec-checker가 '사용자만 답할 수 있음'으로 짚은 검수 번호마다 명세에 짝이 있어야 한다(F5). 위임은 검수 기록이 아직 없을 수 있어 있을 때만 본다(완료 검사가 기록을 요구한다).
-  const gap = checker ? pairingProblem(text, checker, kind === 'approve' ? '승인은 그 검수가 끝난 뒤에 다시 받는다.' : '그다음 delegate를 다시 실행한다.') : null;
-  if (gap) return refuse(gap.reason, gap.instead);
 
   const found = transcriptFiles(env);
   if (found.error) return refuse(`${found.error}.`, '이 대화의 셸(CLAUDE_CODE_SESSION_ID가 있는 곳)에서 실행한다. 대화 기록을 확인하지 못하면 기록하지 않는다.');
@@ -371,10 +273,6 @@ export function recordApproval(specFile, quote, kind, { env = process.env, now =
   if ((kind === 'approve' || previous.length) && !candidates.some((message) => Number.isFinite(ms(message)))) {
     return refuse('인용한 메시지의 시각을 대화 기록에서 읽지 못했다.', '대화 기록에 시각이 있는 사용자 말을 인용한다.');
   }
-  if (kind === 'approve') {
-    candidates = candidates.filter((message) => Number.isFinite(ms(message)) && ms(message) > checkerMs);
-    if (!candidates.length) return refuse(`그 말은 spec-checker가 끝난 뒤(${checker.time})의 말이 아니다.`, '검수 결과를 반영한 명세로 승인을 다시 묻고, 그 답을 인용한다.');
-  }
   if (previous.length) {
     const latestUsed = Math.max(...previous);
     candidates = candidates.filter((message) => Number.isFinite(ms(message)) && ms(message) > latestUsed);
@@ -402,7 +300,6 @@ export function recordApproval(specFile, quote, kind, { env = process.env, now =
     session_id: found.sessionId,
     recorded_at: now.toISOString(),
     spec,
-    spec_checker_time: kind === 'approve' ? checker.time : null,
     user_lines: userLinesOf(current), // 이 승인이 덮는 [사용자] 줄들(F3): 뒤에 바뀌면 다시 승인을 받는다
   };
   // status는 draft(이미 approved면 그대로)일 때만 approved로 바꾼다. 만드는 중(building)·검수 중(verifying)에 다시 승인하거나 위임을 적어도
@@ -492,27 +389,16 @@ export function checkStart({ specFile, project, runId, purpose }) {
 
 // ---------- 완료 검사가 보는 것 ----------
 
-const SPEC_CHECKER_MISSING = 'pact:spec-checker로 명세를 검수하고 결과를 명세에 반영한다. 이미 검수했는데도 기록이 없으면 훅이 돌지 않는 것이니 플러그인 데이터 폴더의 hook-error.log를 보고 사용자에게 알린다(log/에 직접 쓰지 않는다).';
-
 // verification.mjs의 checkVerification(check·보고서·finish)이 부른다. 문제를 한 줄씩 돌려준다. []이면 통과.
 // 옛 판(승인 기록 없는 pact: 1 명세)은 건너뛴다(R5). 새 명세는 승인 기록이 있어야 하고(없으면 견줄 것이 없다),
-// spec-checker가 끝난 기록이 있어야 하며, 그 답의 검수 번호마다 명세에 짝이 있어야 하고(F5), 승인 뒤 [사용자] 줄이 바뀌지 않았어야 한다(F3).
+// 승인 뒤 [사용자] 줄이 바뀌지 않았어야 한다(F3).
 // 기록을 읽지 못하면 던진다(거절로 끝난다 — R7).
 export function completionChecks(specFile, text) {
-  const { runDir } = runDirOfSpec(specFile);
   const gate = checkStart({ specFile, purpose: 'finish' });
   if (!gate.ok) return [refusalLine(gate)];
   if (gate.mode === 'legacy') return [];
-  const issues = [];
-  const checker = latestSpecCheckerReply(runDir);
-  if (!checker) issues.push(refusalLine({ reason: `이 판에 spec-checker가 끝난 기록이 없다 (${logFile(runDir)}).`, instead: SPEC_CHECKER_MISSING }));
-  else {
-    const gap = pairingProblem(text, checker);
-    if (gap) issues.push(refusalLine(gap));
-  }
   const drift = driftProblem(text, gate.entry);
-  if (drift) issues.push(refusalLine(drift));
-  return issues;
+  return drift ? [refusalLine(drift)] : [];
 }
 
 // ---------- 보고서가 보이는 것 ----------
@@ -539,19 +425,6 @@ export function approvalOverview(specText, runDir) {
     changes: i === 0 ? [] : isLines(entries[i - 1].user_lines) && isLines(entry.user_lines) ? diffUserLines(entries[i - 1].user_lines, entry.user_lines) : null,
   }));
   return { state: 'recorded', rows, pending: specText === null ? null : userLineDrift(specText, entries[entries.length - 1]) };
-}
-
-// `## 확인 필요`의 `- 검수 n: 안 물은 까닭` 항목. 보고서의 할 일에 저절로 올라간다(명세 R11): 사용자가 묻지 않고 정한 것을 알아보게.
-// 반환: [{ n, reason, question }] — question은 spec-checker 답의 그 번호 질문(못 읽으면 null)
-export function notAskedItems(specText, runDir) {
-  const { notAsked } = reviewMarks(specText);
-  if (!notAsked.size) return [];
-  const questions = new Map();
-  try {
-    const checker = latestSpecCheckerReply(runDir);
-    if (checker) for (const item of parseReviewReply(checker.message).items) questions.set(item.n, questionOf(item.text));
-  } catch { /* 질문 글이 없어도 까닭은 보인다 */ }
-  return [...notAsked].sort((a, b) => a[0] - b[0]).map(([n, reason]) => ({ n, reason, question: questions.get(n) || null }));
 }
 
 // 거절을 한 줄로 (R6)

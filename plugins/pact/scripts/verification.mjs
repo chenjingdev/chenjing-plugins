@@ -307,7 +307,7 @@ export function checkVerification(specFile, targetDir) {
   const verdict = fingerprintVerdict(current.specPath, runDir);
   if (verdict.issue) issues.push(verdict.issue);
   if (verdict.note) notes.push(verdict.note);
-  // 승인 기록(F2·F3·F5): spec-checker가 '사용자만 답할 수 있음'으로 짚은 검수 번호마다 명세에 짝이 있는지, 승인 뒤 [사용자] 줄이 바뀌지 않았는지.
+  // 승인 기록(F2·F3): 승인·위임 기록이 있는지, 승인 뒤 [사용자] 줄이 바뀌지 않았는지.
   // 옛 판(승인 기록 없는 pact: 1 명세)은 건너뛴다(R5).
   issues.push(...completionChecks(current.specPath, current.text));
   return {

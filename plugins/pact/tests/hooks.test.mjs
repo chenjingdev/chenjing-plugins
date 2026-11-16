@@ -10,8 +10,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PACT_AGENTS, touchesPact, denyOutput, allowOutput } from '../hooks/guard.mjs';
-import { LOGGED_AGENTS, appendRecord, readRecords, latestSpecCheckerReply, latestWorkerReply, latestVerifierFingerprint } from '../scripts/run-log.mjs';
-import { grantApproval, specText, typed, writeTranscript, runSpec, assertRefused, checkerReply, T, SESSION } from './approval-world.mjs';
+import { LOGGED_AGENTS, appendRecord, readRecords, latestWorkerReply, latestVerifierFingerprint } from '../scripts/run-log.mjs';
+import { grantApproval, specText, typed, writeTranscript, runSpec, assertRefused, T, SESSION } from './approval-world.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOOK = path.join(ROOT, 'hooks', 'guard.mjs');
@@ -191,7 +191,6 @@ test('the agents the hook records are the agents the log module knows', () => {
 
 test('touchesPact: pact agents, .pact/ paths and pact scripts are pact calls; everything else is not, the old docs/pact/ place included', () => {
   const yes = [
-    { tool_name: 'Agent', tool_input: { subagent_type: 'pact:spec-checker' } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:reviewer' } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:verifier' } },
     { tool_name: 'Write', tool_input: { file_path: '/p/.pact/r/results.json', content: 'x' } },
@@ -296,7 +295,6 @@ test('PreToolUse calls that touch pact but are none of the gated ones still pass
     { tool_name: 'NotebookEdit', tool_input: { notebook_path: path.join(w.run, 'x.ipynb') } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:reviewer', prompt: `${w.run}/tasks/1-report.md` } },
     { tool_name: 'Agent', tool_input: { subagent_type: 'pact:verifier', prompt: `run-dir: ${w.run}` } },
-    { tool_name: 'Agent', tool_input: { subagent_type: 'pact:spec-checker', prompt: `명세 경로: ${w.spec}` } },
     { tool_name: 'Bash', tool_input: { command: `echo x > ${w.run}/report.html` } },
     { tool_name: 'Bash', tool_input: { command: `cat ${w.run}/results.json ${w.run}/log/subagents.jsonl | jq .` } },
     { tool_name: 'Bash', tool_input: { command: `node ${ROOT}/scripts/spec.mjs status ${w.spec}` } },
@@ -418,7 +416,7 @@ test('(i) a delegation is looked at again when the worker is called: a risk item
   // 콜론을 빠뜨린 표시도 표시다
   writeFileSync(w.spec, specText({ status: 'building', features: '- F2 자료 비우기 [위험 지우기] [사용자]\n' }));
   assert.match(denied(pre(w, workerCall(brief(w)))), /F2에 \[위험: …\] 표시가 있다/);
-  // 표시가 없으면 낱말이 있어도 막지 않는다(표시가 빠졌는지는 spec-checker가 뜻으로 본다)
+  // 표시가 없으면 낱말이 있어도 막지 않는다
   writeFileSync(w.spec, specText({ status: 'building', rules: '- R2 오래된 기록을 삭제한다 [AI 가정]\n' }));
   passed(pre(w, workerCall(brief(w))));
   // 위험이 없어지면 다시 통과한다
@@ -442,7 +440,7 @@ test('(i) a delegation is looked at again when the worker is called: a risk item
 test('(i) only the main session is held to this: a sub-agent calling pact:worker, and the other pact agents, are not asked for a record', () => {
   const w = approvalWorld(); // 승인 기록 없음
   passed(pre(w, workerCall(brief(w)), SUB), '하위 에이전트');
-  for (const subagent_type of ['pact:reviewer', 'pact:verifier', 'pact:spec-checker']) {
+  for (const subagent_type of ['pact:reviewer', 'pact:verifier']) {
     passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type, prompt: brief(w) } }), subagent_type);
   }
   passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'tiers:worker', prompt: brief(w) } }), '다른 플러그인의 worker');
@@ -459,7 +457,7 @@ const USER_BASE = specText({
 const USER_EDITS = {
   글: [(t) => t.replace('시작 10분 뒤에', '시작 15분 뒤에'), 'F2 바뀜'],
   태그: [(t) => t.replace('결석 사유는 선생님만 본다 [사용자]', '결석 사유는 선생님만 본다 [AI 가정]'), 'R2 태그가 바뀜'],
-  '번호 태그': [(t) => t.replace('선생님만 본다 [사용자]', '선생님만 본다 [사용자: 검수 1]'), 'R2 바뀜'],
+  '출처 태그': [(t) => t.replace('선생님만 본다 [사용자]', '선생님만 본다 [사용자: 10/18]'), 'R2 바뀜'],
   빼기: [(t) => t.replace('- R2 결석 사유는 선생님만 본다 [사용자]\n', ''), 'R2 빠짐'],
   더하기: [(t) => t.replace('## 공통 규칙\n', '## 공통 규칙\n- R9 새 규칙 [사용자]\n'), 'R9 더해짐'],
   '케이스 줄': [(t) => t.replace('10분이 지남 → 닫힘 표시', '10분이 지남 → 닫히고 알림'), 'F2 바뀜'],
@@ -494,7 +492,7 @@ test('(d) the call goes through again once the person is quoted in a newer messa
   assertRefused(runSpec(w, ['approve', w.spec, '승인']), /앞 승인 기록에 쓴 메시지/);
   assert.match(denied(pre(w, workerCall(brief(w)))), /F2 바뀜/, '거절했으니 그대로 막혀 있다');
   // 바꿔 달라고 한 새 말을 인용하면 통과한다
-  const r = grantApproval(w, { text: '출석 닫는 시간을 15분으로 바꿔 주세요', time: T(20), checker: false });
+  const r = grantApproval(w, { text: '출석 닫는 시간을 15분으로 바꿔 주세요', time: T(20) });
   assert.equal(r.length, 2, '이력이 쌓인다');
   passed(pre(w, workerCall(brief(w))));
   assert.deepEqual(errorLines(w), []);
@@ -504,32 +502,32 @@ test('(d) the call goes through again once the person is quoted in a newer messa
   assertRefused(runSpec(w, ['approve', w.spec, '출석 닫는 시간을 15분으로 바꿔 주세요']), /앞 승인 기록에 쓴 메시지/);
 });
 
-// [AI 가정] 항목 밑 케이스 줄에 사용자의 답([사용자: 검수 1])이 달린 명세: F5가 짝으로 세는 그 줄을 F3도 지킨다
+// [AI 가정] 항목 밑 케이스 줄에 사용자의 답([사용자: 10/18])이 달린 명세: 그 줄을 F3가 지킨다
 const AI_CASE_BASE = USER_BASE.replace(
   '- F3 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]\n',
-  '- F3 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]\n- F4 결석 사유 보기 — 기본은 선생님만 [AI 가정]\n  - 케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]\n  - 케이스: 교사가 봄 → 보임\n',
+  '- F3 화면 문구는 한국어 — 한국어 사용자라서 [AI 가정]\n- F4 결석 사유 보기 — 기본은 선생님만 [AI 가정]\n  - 케이스: 학생이 봄 → 안 보임 [사용자: 10/18]\n  - 케이스: 교사가 봄 → 보임\n',
 );
 
 test('(d) the case line of an [AI 가정] item that carries the person\'s answer is held like any [사용자] line: the hook denies pact:worker when it changes, while the AI head line and the AI case lines around it change freely', () => {
   assert.notEqual(AI_CASE_BASE, USER_BASE);
   for (const kind of ['approve', 'delegate']) {
     const w = approvalWorld({ spec: AI_CASE_BASE });
-    grantApproval(w, { kind, ...(kind === 'approve' ? { checkerMessage: checkerReply(['결석 사유를 학생도 볼 수 있나요?']) } : {}) }); // 검수 1의 짝은 케이스 줄의 태그다
+    grantApproval(w, { kind });
     passed(pre(w, workerCall(brief(w))), `${kind}: 그대로면 통과`);
     for (const [label, edit] of Object.entries({
       '머리 줄': (t) => t.replace('기본은 선생님만', '기본은 담임만'),
       '다른 AI 케이스 줄': (t) => t.replace('교사가 봄 → 보임', '교사가 봄 → 이름만 보임'),
       '앞에 AI 케이스 줄을 더함': (t) => t.replace('  - 케이스: 학생이 봄', '  - 케이스: 관리자가 봄 → 보임\n  - 케이스: 학생이 봄'),
-      '머리 줄에 번호 태그': (t) => t.replace('기본은 선생님만 [AI 가정]', '기본은 선생님만 [AI 가정: 검수 5 맡김]'),
+      '머리 줄에 출처 태그': (t) => t.replace('기본은 선생님만 [AI 가정]', '기본은 선생님만 [AI 가정: 기록 10/11]'),
     })) {
       writeFileSync(w.spec, edit(AI_CASE_BASE));
       passed(pre(w, workerCall(brief(w))), `${kind} / ${label}: AI가 고치는 줄이라 통과`);
     }
     for (const [label, edit, named] of [
-      ['글', (t) => t.replace('학생이 봄 → 안 보임', '학생이 봄 → 이름만 보임'), 'F4의 [사용자] 줄 바뀜("케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]" → "케이스: 학생이 봄 → 이름만 보임 [사용자: 검수 1]")'],
-      ['번호 태그', (t) => t.replace('안 보임 [사용자: 검수 1]', '안 보임 [사용자]'), 'F4의 [사용자] 줄 바뀜'],
-      ['줄 빼기', (t) => t.replace('  - 케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]\n', ''), 'F4의 [사용자] 줄 빠짐("케이스: 학생이 봄 → 안 보임 [사용자: 검수 1]")'],
-      ['[AI 가정]으로 바꾸기', (t) => t.replace('안 보임 [사용자: 검수 1]', '안 보임 [AI 가정]'), 'F4의 [사용자] 줄 빠짐'],
+      ['글', (t) => t.replace('학생이 봄 → 안 보임', '학생이 봄 → 이름만 보임'), 'F4의 [사용자] 줄 바뀜("케이스: 학생이 봄 → 안 보임 [사용자: 10/18]" → "케이스: 학생이 봄 → 이름만 보임 [사용자: 10/18]")'],
+      ['출처 태그', (t) => t.replace('안 보임 [사용자: 10/18]', '안 보임 [사용자]'), 'F4의 [사용자] 줄 바뀜'],
+      ['줄 빼기', (t) => t.replace('  - 케이스: 학생이 봄 → 안 보임 [사용자: 10/18]\n', ''), 'F4의 [사용자] 줄 빠짐("케이스: 학생이 봄 → 안 보임 [사용자: 10/18]")'],
+      ['[AI 가정]으로 바꾸기', (t) => t.replace('안 보임 [사용자: 10/18]', '안 보임 [AI 가정]'), 'F4의 [사용자] 줄 빠짐'],
       ['다른 케이스 줄에 [사용자]를 더함', (t) => t.replace('교사가 봄 → 보임\n', '교사가 봄 → 보임 [사용자]\n'), 'F4의 [사용자] 줄 더해짐("케이스: 교사가 봄 → 보임 [사용자]")'],
     ]) {
       writeFileSync(w.spec, edit(AI_CASE_BASE));
@@ -542,7 +540,7 @@ test('(d) the case line of an [AI 가정] item that carries the person\'s answer
     // 바꿔 달라고 한 새 말로 다시 기록하면 이어 간다
     writeFileSync(w.spec, AI_CASE_BASE.replace('학생이 봄 → 안 보임', '학생이 봄 → 이름만 보임'));
     denied(pre(w, workerCall(brief(w))), `${kind}: 바꾼 뒤 다시 기록하기 전`);
-    grantApproval(w, { kind, text: '학생에게는 이름만 보이게 바꿔 주세요', time: T(30), checker: false });
+    grantApproval(w, { kind, text: '학생에게는 이름만 보이게 바꿔 주세요', time: T(30) });
     passed(pre(w, workerCall(brief(w))), `${kind}: 다시 기록한 뒤`);
     assert.deepEqual(errorLines(w), []);
   }
@@ -555,34 +553,6 @@ test('(d) a delegation does not get around it: the old delegation words cannot b
   denied(pre(w, workerCall(brief(w))));
   assertRefused(runSpec(w, ['delegate', w.spec, '끝까지 알아서 해']), /앞 승인 기록에 쓴 메시지/);
   denied(pre(w, workerCall(brief(w))));
-});
-
-test('(a)(d) end to end: the answer the hook logged for the spec-checker is what approve reads, and the worker gate follows the approval that record let through', () => {
-  const w = approvalWorld({ spec: USER_BASE });
-  const reply = [
-    '## 이미 답이 있음', '- 없음', '', '## 사소함 — AI가 정함', '- 없음', '', '## 사용자만 답할 수 있음',
-    '검수 1. 출석을 몇 분 뒤에 닫을까요? (기본안: 10분) — 화면이 달라진다', '검수 2. 결석 사유를 학생도 볼 수 있나요? (기본안: 선생님만) — 화면이 달라진다',
-    '', '질문 라운드는 이것 한 번뿐입니다.',
-  ].join('\n');
-  stop(w, stopInput(w, 'pact:spec-checker', `명세 경로: ${w.spec}`, reply)); // 훅이 spec-checker의 마지막 답을 log/에 남긴다
-  const soon = new Date(Date.now() + 3_600_000).toISOString(); // 훅이 남긴 시각(지금)보다 뒤의 사용자 말
-  writeTranscript(w, [typed('승인', soon)]);
-  // 번호 둘에 짝이 없다
-  const refused = assertRefused(runSpec(w, ['approve', w.spec, '승인']), /검수 1\("출석을 몇 분 뒤에 닫을까요\?"\), 검수 2\("결석 사유를 학생도 볼 수 있나요\?"\)에 명세의 짝이 없다/);
-  assert.doesNotMatch(refused, /\n/);
-  denied(pre(w, workerCall(brief(w))), '기록이 없으니 worker도 막힌다');
-  // 짝을 달면 승인이 기록되고 worker를 부를 수 있다
-  const paired = USER_BASE.replace('- F2 출석은 시작 10분 뒤에 닫는다 [사용자]', '- F2 출석은 시작 10분 뒤에 닫는다 [사용자: 검수 1]').replace('## 확인 필요\n', '## 확인 필요\n- 검수 2: 사용자가 바빠서 묻지 못했다\n');
-  assert.notEqual(paired, USER_BASE);
-  writeFileSync(w.spec, paired);
-  assert.equal(runSpec(w, ['approve', w.spec, '승인']).status, 0);
-  passed(pre(w, workerCall(brief(w))));
-  // 승인 뒤 [사용자] 줄을 바꾸면 막힌다. [AI 가정] 줄과 확인 필요를 고치는 것은 막지 않는다
-  writeFileSync(w.spec, paired.replace('- 검수 2: 사용자가 바빠서 묻지 못했다', '- 검수 2: 묻지 못했다. 다음 판에 묻는다').replace('한국어 사용자라서', '한국어를 쓰는 사용자라서'));
-  passed(pre(w, workerCall(brief(w))));
-  writeFileSync(w.spec, paired.replace('시작 10분 뒤에 닫는다 [사용자: 검수 1]', '시작 15분 뒤에 닫는다 [사용자: 검수 1]'));
-  assert.match(denied(pre(w, workerCall(brief(w)))), /F2 바뀜\("출석은 시작 10분 뒤에 닫는다 \[사용자: 검수 1\]" → "출석은 시작 15분 뒤에 닫는다 \[사용자: 검수 1\]"\)/);
-  assert.deepEqual(errorLines(w), []);
 });
 
 test('(e) only [AI 가정] lines changed: the call goes through, and so do the other status and wording changes that are not [사용자] lines', () => {
@@ -771,7 +741,7 @@ test('lock (a) the main session is denied on results.json and results-round1.jso
   assert.equal(existsSync(w.data), false, '막는 것은 오류가 아니다: 오류 기록도 없다');
 });
 
-test('lock (b) the verifier may write results.json and results-round files and nothing else locked; a worker, a reviewer, a spec-checker and another plugin\'s agent may write none', () => {
+test('lock (b) the verifier may write results.json and results-round files and nothing else locked; a worker, a reviewer and another plugin\'s agent may write none', () => {
   const w = busyWorld();
   for (const name of ['results.json', 'results-round1.json']) {
     for (const tool of ['Write', 'Edit', 'MultiEdit']) passed(pre(w, fileCall(tool, path.join(w.run, name)), VERIFIER_CALLER), `verifier ${tool} ${name}`);
@@ -783,7 +753,7 @@ test('lock (b) the verifier may write results.json and results-round files and n
   }
   assert.match(denied(pre(w, fileCall('Write', path.join(w.run, 'verification.json')), VERIFIER_CALLER)), /검수 기록\(verification\.json\)은 verification\.mjs snapshot만 쓴다.*snapshot은 메인 세션이 돌린다/);
   assert.match(denied(pre(w, fileCall('Write', path.join(w.run, 'verification.json')))), /검수 기록\(verification\.json\)은 verification\.mjs snapshot만 쓴다.*snapshot을 다시 실행한다/);
-  for (const agent_type of ['pact:worker', 'pact:reviewer', 'pact:spec-checker', 'tiers:worker', 'Explore', 'pact:verifiers', 'pact:verifier-2', 'notpact:verifier', 'verifier']) {
+  for (const agent_type of ['pact:worker', 'pact:reviewer', 'tiers:worker', 'Explore', 'pact:verifiers', 'pact:verifier-2', 'notpact:verifier', 'verifier']) {
     const caller = { agent_id: 'agent-x', agent_type };
     for (const tool of ['Write', 'Edit']) assert.match(denied(pre(w, fileCall(tool, path.join(w.run, 'results.json')), caller), `${agent_type} ${tool}`), /verifier만 쓴다/);
     denied(pre(w, fileCall('Write', path.join(w.run, 'results-round2.json')), caller), `${agent_type} round`);
@@ -1087,7 +1057,7 @@ test('(a) only the main session is given the concerns: a sub-agent calling pact:
   const prompt = reviewerBrief(w, 2);
   passed(pre(w, reviewerCall(prompt), SUB), '하위 에이전트');
   passed(pre(w, reviewerCall(prompt), { agent_id: 'agent-9', agent_type: 'pact:reviewer' }), 'reviewer라는 하위 에이전트');
-  for (const subagent_type of ['pact:verifier', 'pact:spec-checker', 'tiers:worker', 'Explore', 'pact:reviewers', 'reviewer']) {
+  for (const subagent_type of ['pact:verifier', 'tiers:worker', 'Explore', 'pact:reviewers', 'reviewer']) {
     passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type, prompt } }), subagent_type);
   }
   passed(pre(w, { tool_name: 'Agent', tool_input: { prompt } }), 'subagent_type 없음');
@@ -1184,7 +1154,6 @@ test('(c) the order of the checks: an existing worry section and a run the promp
     // 하위 에이전트와 다른 종류의 Agent 호출은 번호를 묻지 않는다
     passed(pre(w, reviewerCall(prompt), SUB), `하위 에이전트: ${label}`);
     passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'pact:verifier', prompt } }), `verifier: ${label}`);
-    passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'pact:spec-checker', prompt } }), `spec-checker: ${label}`);
     passed(pre(w, { tool_name: 'Agent', tool_input: { subagent_type: 'tiers:worker', prompt } }), `다른 플러그인: ${label}`);
   }
   // 판을 글로 못 찾으면 번호가 없어도 통과한다(cwd로 짐작한 판은 믿지 않는다)
@@ -1262,9 +1231,9 @@ test('(f) a SendMessage that is not to a logged reviewer passes unchanged: an un
   workerStops(w, 2, ['- 걱정 하나'], { agent_id: 'agent-w2' });
   reviewerStops(w, 2, 'agent-r2');
   stop(w, stopInput(w, 'pact:reviewer', `run-dir: ${w.run}\n검토해 줘`, '## 판정: 통과', { agent_id: 'agent-rx' })); // 보고서 경로도 작업 번호도 없는 지시
-  stop(w, stopInput(w, 'pact:spec-checker', w.spec, '## 사용자만 답할 수 있음\n없음', { agent_id: 'agent-s1' }));
+  stop(w, stopInput(w, 'pact:verifier', `run-dir: ${w.run}`, '통과', { agent_id: 'agent-v1' }));
   const before = tree(w.root);
-  for (const to of ['agent-unknown', 'reviewer', 'main', 'worker [3fa9c1]', 'agent-w2', 'agent-rx', 'agent-s1', 'agent-r', 'AGENT-R2', 'agent-r2 ', ' agent-r2', '', '*']) {
+  for (const to of ['agent-unknown', 'reviewer', 'main', 'worker [3fa9c1]', 'agent-w2', 'agent-rx', 'agent-v1', 'agent-r', 'AGENT-R2', 'agent-r2 ', ' agent-r2', '', '*']) {
     passed(pre(w, messageCall(to, '다시 봐 주세요.')), JSON.stringify(to));
   }
   for (const to of [undefined, null, 7, ['agent-r2'], { id: 'agent-r2' }]) {
@@ -1428,23 +1397,21 @@ test('(b) the log/ folder is created when it does not exist yet, together with .
   assert.equal(readFileSync(path.join(w.project, '.pact', '.gitignore'), 'utf8'), PACT_GITIGNORE);
 });
 
-// ---------- (c) spec-checker, reviewer, verifier ----------
+// ---------- (c) reviewer, verifier ----------
 
-test('(c) spec-checker (spec path only), reviewer (tasks/<n>-report.md) and verifier (run-dir) all land in the log/ of the same run', () => {
+test('(c) reviewer (tasks/<n>-report.md) and verifier (run-dir) both land in the log/ of the same run', () => {
   const w = world();
   writeSpec(w.project, ID);
-  const checkerReply = '## 이미 답이 있음\n- …\n## 사용자만 답할 수 있음\n1. …\n\n질문 라운드는 이것 한 번뿐입니다.';
   const reviewerReply = '## 명세 대조\n- 빠진 것: 없음\n## 판정: 통과';
   const verifierReply = `통과 3 · 실패 0 · 의심 0 · 미검증 0\n${w.run}/results.json`;
-  // 실행 폴더가 아직 없다: spec-checker의 기록이 만든다
-  stop(w, stopInput(w, 'pact:spec-checker', `명세 경로: ${w.spec}\n사용자가 말한 요구 목록:\n1. … (사용자 원문)\n프로젝트: ${w.project}`, checkerReply));
+  // 실행 폴더가 아직 없다: 첫 기록이 만든다
   stop(w, stopInput(w, 'pact:reviewer', `worker 보고서: ${w.run}/tasks/2-report.md\nbase abc123 head def456\n관련 명세 항목: F4 [사용자]`, reviewerReply));
   stop(w, stopInput(w, 'pact:verifier', `명세 경로: ${w.spec}\nrun-dir: ${w.run}\n실행 방법: node x.mjs`, verifierReply));
 
   const records = readRecords(w.run);
-  assert.deepEqual(records.map((r) => r.agent_type), ['pact:spec-checker', 'pact:reviewer', 'pact:verifier']);
-  assert.deepEqual(records.map((r) => r.message), [checkerReply, reviewerReply, verifierReply]);
-  assert.deepEqual(records.map((r) => r.task), [null, 2, null]);
+  assert.deepEqual(records.map((r) => r.agent_type), ['pact:reviewer', 'pact:verifier']);
+  assert.deepEqual(records.map((r) => r.message), [reviewerReply, verifierReply]);
+  assert.deepEqual(records.map((r) => r.task), [2, null]);
   assert.deepEqual(errorLines(w), []);
   // 다른 판의 폴더는 생기지 않았다
   assert.deepEqual(readdirSync(path.join(w.project, '.pact')).sort(), ['.gitignore', ID]);
@@ -1480,7 +1447,6 @@ test('(d) a verifier stop records the sha256 of results.json as it is at that mo
   writeFileSync(results, first);
   stop(w, stopInput(w, 'pact:worker', `run-dir: ${w.run} , 작업 번호 1`, '끝'));
   stop(w, stopInput(w, 'pact:reviewer', `${w.run}/tasks/1-report.md`, '판정'));
-  stop(w, stopInput(w, 'pact:spec-checker', w.spec, '검수'));
   for (const record of readRecords(w.run).slice(3)) assert.equal('results_sha256' in record, false, record.agent_type);
   assert.deepEqual(errorLines(w), [], 'results.json이 없는 것은 오류가 아니다');
 });
@@ -1490,14 +1456,11 @@ test('a whole run, read back with the functions the later checks use', () => {
   writeSpec(w.project, ID);
   mkdirSync(w.run, { recursive: true });
   writeFileSync(path.join(w.run, 'results.json'), '{}\n');
-  stop(w, stopInput(w, 'pact:spec-checker', w.spec, '검수 답'));
   stop(w, stopInput(w, 'pact:worker', `run-dir: ${w.run} , 작업 번호 1`, `첫 답\n보고서: ${w.run}/tasks/1-report.md`));
   stop(w, stopInput(w, 'pact:worker', `run-dir: ${w.run} , 작업 번호 2`, `둘째 작업\n보고서: ${w.run}/tasks/2-report.md`));
   stop(w, stopInput(w, 'pact:reviewer', `${w.run}/tasks/1-report.md`, '고칠 것 있음'));
   stop(w, stopInput(w, 'pact:worker', `run-dir: ${w.run} , 작업 번호 1`, `고친 답\n보고서: ${w.run}/tasks/1-report.md`)); // SendMessage로 돌아온 같은 worker
   stop(w, stopInput(w, 'pact:verifier', `run-dir: ${w.run}`, '통과 1'));
-  assert.equal(latestSpecCheckerReply(w.run).message, '검수 답');
-  assert.ok(Date.parse(latestSpecCheckerReply(w.run).time) > 0);
   assert.match(latestWorkerReply(w.run, 1).message, /^고친 답/);
   assert.match(latestWorkerReply(w.run, 2).message, /^둘째 작업/);
   assert.equal(latestVerifierFingerprint(w.run).results_sha256, sha(Buffer.from('{}\n')));
@@ -1616,8 +1579,8 @@ test('(f) with no path in the first instruction, the run of the most recently ch
 
   // 더 최근에 바뀐 쪽이 이긴다
   utimesSync(path.join(w.project, '.pact', '2026-10-01-초안', 'spec.md'), 5000, 5000);
-  stop(w, stopInput(w, 'pact:spec-checker', '경로 없음', '검수'));
-  assert.deepEqual(readRecords(path.join(w.project, '.pact', '2026-10-01-초안')).map((r) => r.agent_type), ['pact:spec-checker']);
+  stop(w, stopInput(w, 'pact:verifier', '경로 없음', '통과'));
+  assert.deepEqual(readRecords(path.join(w.project, '.pact', '2026-10-01-초안')).map((r) => r.agent_type), ['pact:verifier']);
   assert.deepEqual(errorLines(w), []);
 });
 

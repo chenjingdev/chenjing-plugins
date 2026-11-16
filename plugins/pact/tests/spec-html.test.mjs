@@ -35,13 +35,13 @@ created: 2026-11-01
 - 출석 처리 자체 [사용자]
 ## 기능
 - F1 오늘 수업 보기 [사용자]
-  - 케이스: 수업 0건 → 빈 상태 [사용자: 검수 1]
+  - 케이스: 수업 0건 → 빈 상태 [사용자: 대표 요청]
 - F2 지난 학기 출석표 [사용자: 10/18 alibaba]
 - F3 엑셀 내려받기 [AI 가정: 기록 10/11]
 - F4 전체 삭제 [위험: 지우기] [AI 가정]
 - F5 작년 방식 [사용자: 2025/10/9]
 ## 공통 규칙
-- R1 확인 팝업 — 이유 [AI 가정: 검수 2 맡김]
+- R1 확인 팝업 — 이유 [AI 가정: 이전 합의]
 
 <details><summary>그 밖의 AI 가정</summary>
 
@@ -90,13 +90,13 @@ test('[AI 가정: 기록 10/11] gets the record chip only: no other-repo chip or
   assert.doesNotMatch(summaryBox, /F3/);
 });
 
-test('a year in the date is kept (YYYY/M/D), and the review pair [사용자: 검수 1] / [AI 가정: 검수 2 맡김] gets a small note chip and no record chip', () => {
+test('a year in the date is kept (YYYY/M/D), and a tag with a detail that is not a date, [사용자: 대표 요청] / [AI 가정: 이전 합의], gets a small note chip and no record chip', () => {
   assert.match(li('<strong>F5</strong>'), /<span class="chip rec">기록 2025\/10\/9<\/span>/);
   const kase = li('케이스: 수업 0건');
-  assert.match(kase, /<span class="chip user">사용자<\/span><span class="chip note">검수 1<\/span>/);
+  assert.match(kase, /<span class="chip user">사용자<\/span><span class="chip note">대표 요청<\/span>/);
   assert.doesNotMatch(kase, /chip rec|chip repo/);
   const r1 = li('<strong>R1</strong>');
-  assert.match(r1, /<span class="chip note">검수 2 맡김<\/span>/);
+  assert.match(r1, /<span class="chip note">이전 합의<\/span>/);
   assert.doesNotMatch(r1, /chip rec|chip repo/);
 });
 
@@ -126,7 +126,7 @@ test('the decision record is folded as a whole, with the Ruling count in the sum
   assert.match(html, /<details class="log"><summary>결정 기록 — Ruling 2개<\/summary>\n<ul><li>Ruling: 가 — 나 — 다<\/li><li>Ruling: 라 — 마 — 바<\/li><\/ul><\/details>/);
   assert.doesNotMatch(html, /<h2>결정 기록<\/h2>/);
   assert.match(html, /<h2>확인 필요<\/h2>\n<p class="none">없음<\/p>/);
-  assert.doesNotMatch(renderSpecHtml(SPEC.replace('## 확인 필요\n', '## 확인 필요\n- 검수 3: 안 물은 까닭\n')), /<p class="none">/);
+  assert.doesNotMatch(renderSpecHtml(SPEC.replace('## 확인 필요\n', '## 확인 필요\n- 아직 정하지 못한 것\n')), /<p class="none">/);
 });
 
 test('all text is escaped: the topic, item text, summary text and backtick code cannot inject markup, and the page has no script or external resource', () => {

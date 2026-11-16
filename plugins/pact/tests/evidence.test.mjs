@@ -10,14 +10,18 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR
 const tmp = () => { const p = mkdtempSync(path.join(tmpdir(), 'pact-evidence-')); made.push(p); return p; };
 after(() => made.forEach(p => rmSync(p, { recursive: true, force: true })));
 
-test('every UI step requires an existing image, even when HTTP output is present', () => {
+test('a UI step is proved by a screenshot or by command output; a step with neither, or with a missing screenshot, is not', () => {
   const runDir = tmp();
-  const step = { action: '저장 화면', shot: null, output: 'HTTP 200', exitCode: 0 };
-  assert.ok(evidenceIssues(step, { runDir, surface: 'ui' }).length);
+  const byCommand = { action: '서버가 남의 파일 지우기를 거절', shot: null, output: 'HTTP 403', exitCode: 0 };
+  assert.deepEqual(evidenceIssues(byCommand, { runDir, surface: 'ui' }), []);
   mkdirSync(path.join(runDir, 'shots'));
   writeFileSync(path.join(runDir, 'shots/a.jpg'), png);
-  assert.deepEqual(evidenceIssues({ ...step, shot: 'shots/a.jpg' }, { runDir, surface: 'ui' }), []);
-  assert.equal(effectiveResult({ result: 'pass', steps: [{ ...step, shot: 'shots/a.jpg' }, step] }, { runDir, surface: 'ui' }), 'unverified');
+  assert.deepEqual(evidenceIssues({ action: '저장 화면', shot: 'shots/a.jpg' }, { runDir, surface: 'ui' }), []);
+  assert.equal(effectiveResult({ result: 'pass', steps: [{ action: '저장 화면', shot: 'shots/a.jpg' }, byCommand] }, { runDir, surface: 'ui' }), 'pass');
+  assert.deepEqual(evidenceIssues({ action: '저장 화면' }, { runDir, surface: 'ui' }), ['스크린샷도 명령 출력도 없습니다']);
+  // 스크린샷을 적었으면 그 파일이 있어야 한다. 명령 출력이 같이 있어도 없는 스크린샷을 대신하지 않는다.
+  assert.ok(evidenceIssues({ ...byCommand, shot: 'shots/none.jpg' }, { runDir, surface: 'ui' }).length);
+  assert.equal(effectiveResult({ result: 'pass', steps: [{ action: '저장 화면' }] }, { runDir, surface: 'ui' }), 'unverified');
 });
 
 test('empty and non-image files do not prove a UI step', () => {

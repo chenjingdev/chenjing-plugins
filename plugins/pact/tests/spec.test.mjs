@@ -223,17 +223,17 @@ test('a risk mark before the tag is not read as the tag: [위험: 지우기] [�
   assert.equal(parseSpec(GOOD).items[0].risk, null);
 });
 
-test('tags that carry a source or a review number are accepted, with or without a risk mark', () => {
+test('tags that carry a source are accepted, with or without a risk mark', () => {
   for (const line of [
-    '- F1 오늘 수업 출석 현황 보기 [사용자: 검수 1]',
-    '- F1 오늘 수업 출석 현황 보기 [AI 가정: 검수 2 맡김]',
-    '- F1 오늘 수업 출석 현황 보기 [위험: 공개] [사용자: 검수 1]',
-    '- F1 오늘 수업 출석 현황 보기 — 이유 [위험: 비용] [AI 가정: 검수 2 맡김]',
+    '- F1 오늘 수업 출석 현황 보기 [사용자: 10/18]',
+    '- F1 오늘 수업 출석 현황 보기 [AI 가정: 기록 10/11]',
+    '- F1 오늘 수업 출석 현황 보기 [위험: 공개] [사용자: 10/18]',
+    '- F1 오늘 수업 출석 현황 보기 — 이유 [위험: 비용] [AI 가정: 기록 10/11]',
   ]) {
     assert.deepEqual(lintSpec(withF1(line)), [], line);
   }
-  assert.equal(parseSpec(withF1('- F1 보기 [사용자: 검수 1]')).items[0].tag, '사용자');
-  assert.equal(parseSpec(withF1('- F1 보기 [위험: 공개] [AI 가정: 검수 2 맡김]')).items[0].tag, 'AI 가정');
+  assert.equal(parseSpec(withF1('- F1 보기 [사용자: 10/18]')).items[0].tag, '사용자');
+  assert.equal(parseSpec(withF1('- F1 보기 [위험: 공개] [AI 가정: 기록 10/11]')).items[0].tag, 'AI 가정');
 });
 
 test('a risk mark alone is not a tag, a word that only starts like the mark is an unknown tag, and other brackets stay in the text', () => {
@@ -322,7 +322,7 @@ test('riskUnits reads F and R lines with their cases and the folded ones, and no
   assert.deepEqual(units.map((u) => Object.keys(u).sort().join()), units.map(() => 'id,lines,marked'), '낱말을 찾는 칸은 없다');
 });
 
-test('a risk word is not a risk: without a mark the item is not a risk item, whatever it says (the spec-checker reads the meaning)', () => {
+test('a risk word is not a risk: without a mark the item is not a risk item, whatever it says', () => {
   // 표시 없이 "기록을 삭제한다"가 든 명세는 위험 항목이 없다
   const spec = withF1('- F1 지난 기록을 삭제한다 [사용자]\n  - 케이스: 외부에 공개하고 결제한다 → 비용 발생');
   assert.deepEqual(riskUnits(spec).map((u) => u.marked), [false, false]);
